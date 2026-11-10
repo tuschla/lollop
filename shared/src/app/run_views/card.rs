@@ -1,4 +1,15 @@
-use super::*;
+use crate::app::format::{fmt_mss, is_ratio_base_km, round_tenths, whole_seconds};
+use crate::app::memo::{Memo, RUN_MEMO_CAP, VIEW_LIST_CACHE_CAP, memoized};
+use crate::app::model::LoggedRun;
+use crate::app::run_metrics::{QcTrack, RunFacts, run_started_at};
+use crate::app::view_types::{
+    EvidenceTagView, IntervalVerdictView, PaceVariability, RunResultView, RunSplitView,
+    SplitVerdict, SplitVerdictView, zone_label,
+};
+use crate::feedback::FeedbackCategory;
+use crate::gps::GpsPoint;
+use crate::schema::ThreeZone;
+use crate::{feedback, gps, load, running};
 
 /// Build the shell-facing per-unit split views for a QC-gated track (unit metres
 /// = [`running::KM_M`] or [`running::MILE_M`]). `distance_km` carries the
@@ -8,7 +19,7 @@ pub(in crate::app) fn run_split_views(
     unit_m: f64,
     segment_starts: &[u32],
 ) -> Vec<RunSplitView> {
-    running::track_splits(track, unit_m, segment_starts)
+    gps::track_splits(track, unit_m, segment_starts)
         .into_iter()
         .map(|s| {
             // Round to whole seconds ONCE (`whole_seconds`, the display rule) so
@@ -129,8 +140,8 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         return unmeasurable_gps_view(r, hr_pct_max);
     }
 
-    // GPS duration is MOVING time (File 07 auto-pause: <0.5 m/s intervals are
-    // excluded), so a paused run's pace reflects running, not standing.
+    // GPS duration is MOVING time (the `gps` auto-pause gate excludes stopped
+    // intervals), so a paused run's pace reflects running, not standing.
     let (distance_km, duration_min) = match qc {
         Some(q) => (q.distance_km, q.moving_min),
         None => (r.distance_km, r.duration_min),
@@ -142,7 +153,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     let pace = run_pace_label(distance_km, duration_min);
 
     let split_pct = if gps {
-        running::track_positive_split_pct(track, seg_starts)
+        gps::track_positive_split_pct(track, seg_starts)
     } else {
         None
     };
@@ -172,7 +183,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     // above a steady run of the *same average pace*. GPS-only, a hand-entered
     // run has no per-point speed series to compute it from.
     let variability_index = if gps {
-        running::track_variability_index(track, seg_starts)
+        gps::track_variability_index(track, seg_starts)
     } else {
         None
     };
@@ -271,35 +282,6 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         best_effort_labels: Vec::new(),
         started_at: run_started_at(r, None),
     }
-}
-
-/// [`RunResultView::started_at`]: a GPS run's first QC'd fix (its first raw
-/// fix when fewer than two survived QC, the card's unmeasurable case), a
-/// hand-entered run's stamp minus its duration. Never after `observed_at` (a
-/// corrupt fix time cannot date a run's start past its end); 0 stays 0
-/// (undated). The run's day everywhere a view groups runs by day for the shell
-/// (the card's title and date, the progress weeks), so they agree.
-pub(in crate::app) fn run_started_at(r: &LoggedRun, qc: Option<&QcTrack>) -> i64 {
-    if r.observed_at == 0 {
-        return 0;
-    }
-    let qc_track = qc.map_or(&[][..], |q| &q.track[..]);
-    let qc_track = if qc_track.len() >= 2 { qc_track } else { &[] };
-    let start = match qc_track.first().or(r.track.first()) {
-        Some(p) => p.observed_at,
-        None => {
-            let secs = r.duration_min * 60.0;
-            // A non-finite or negative duration (corrupt log) has no length;
-            // `as` saturates a huge one.
-            let secs = if secs.is_finite() && secs > 0.0 {
-                secs.round() as i64
-            } else {
-                0
-            };
-            r.observed_at.saturating_sub(secs)
-        }
-    };
-    start.min(r.observed_at)
 }
 
 /// The zone the card shows for the run's average %HRmax, if any.

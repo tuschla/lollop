@@ -5,7 +5,10 @@ use crate::schema::RunVolume;
 
 pub(super) fn anchored(name: &str, e1rm: f64) -> Anchors {
     Anchors {
-        lift_e1rm: vec![(name.to_string(), e1rm)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![(name.to_string(), e1rm)],
+            ..Default::default()
+        },
         ..Default::default()
     }
 }

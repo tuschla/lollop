@@ -2,13 +2,12 @@
 //! ready-upd-001..007, their threshold constants, the §5 safety ladder, and the
 //! illness / resting-HR / medical-referral predicates.
 
+use super::inputs::{latest, latest_input};
 use super::pain::{PainGate, active_pain_responses, pain_blocks_progression, pain_gate};
-use super::perf::{MovementPerf, perf_adjustments};
-use super::prescriptions::hrv_saturation_hold;
-use super::{latest, latest_input};
-use crate::evidence::{self, claims};
+use super::perf::{MovementPerf, e1rm_gate, perf_adjustments};
+use crate::evidence::claims;
 use crate::schema::{
-    Adjustment, Goal, IllnessSeverity, ReadinessInput, ReadinessSignal, Recommended, SafetyTier,
+    Adjustment, IllnessSeverity, ReadinessInput, ReadinessSignal, Recommended, SafetyTier,
 };
 use crate::strength::{self, LiftGoal};
 
@@ -44,16 +43,16 @@ const HEAD_COLD_VOLUME_CUT_PCT: f32 = 50.0;
 /// when no illness report is active.
 pub fn illness_plan_recs(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
     if illness_stop(inputs) {
-        vec![evidence::graded(Adjustment::Stop, claims::ILLNESS_NECK_001)]
+        vec![Recommended::new(Adjustment::Stop, claims::ILLNESS_NECK_001)]
     } else if illness_downgrade(inputs) {
         // The volume cut carries the full head-cold call ("short and easy only,
         // or rest"), so it leads: the headline takes the first of equals.
         vec![
-            evidence::graded(
+            Recommended::new(
                 Adjustment::ReduceVolumePct(HEAD_COLD_VOLUME_CUT_PCT),
                 claims::ILLNESS_NECK_001,
             ),
-            evidence::graded(Adjustment::DowngradeSession, claims::ILLNESS_NECK_001),
+            Recommended::new(Adjustment::DowngradeSession, claims::ILLNESS_NECK_001),
         ]
     } else {
         Vec::new()
@@ -156,7 +155,7 @@ fn bone_stress_defer(inputs: &[ReadinessInput]) -> bool {
 /// One constructor for the readiness signal and the weekly check-in answer, so
 /// both channels defer with the same copy.
 pub fn bone_stress_referral() -> Recommended<Adjustment> {
-    evidence::graded(
+    Recommended::new(
         Adjustment::Defer {
             reason: "Signs of a bone stress injury: training is paused. See a doctor as soon as you can, and don't run or jump until they clear you.".into(),
         },
@@ -168,7 +167,7 @@ pub fn bone_stress_referral() -> Recommended<Adjustment> {
 /// includes compulsive exercise): reduce stress and defer. Shared by the
 /// readiness signal and the weekly screen.
 pub fn reds_referral() -> Recommended<Adjustment> {
-    evidence::graded(
+    Recommended::new(
         Adjustment::Defer {
             reason: "Signs of under-eating (RED-S): training is paused. See a doctor, a registered dietitian or a mental-health professional.".into(),
         },
@@ -181,7 +180,7 @@ pub fn reds_referral() -> Recommended<Adjustment> {
 /// Returns the `Recommended<Adjustment::Defer>` cited to its safety claim.
 fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     if cardiac_defer(inputs) {
-        Some(evidence::graded(
+        Some(Recommended::new(
             Adjustment::Defer {
                 reason: "A heart warning sign. Stop and get a doctor's OK before you train again."
                     .into(),
@@ -207,16 +206,6 @@ pub(super) const RPE_DELTA_ABOVE: f64 = 1.0;
 pub(super) const RPE_DELTA_WELL_BELOW: f64 = -2.0;
 pub(super) const RPE_DELTA_BELOW: f64 = -1.0;
 
-/// e1RM ratio (today ÷ baseline) gates (autoreg-022/006/007).
-pub(super) const E1RM_DELOAD_RATIO: f64 = 0.90;
-pub(super) const E1RM_DELOAD_STREAK: u8 = 2;
-pub(super) const E1RM_REDUCE_RATIO: f64 = 0.95;
-pub(super) const E1RM_INCREASE_RATIO: f64 = 1.05;
-/// Top-set load cut below baseline − 5 % (autoreg-006 "reduce top-set load ~5%").
-pub(super) const E1RM_REDUCE_LOAD_PCT: f32 = 5.0;
-/// Load add above baseline + 5 % (autoreg-007 "+2.5–5%"; 3.5 % used).
-pub(super) const E1RM_INCREASE_LOAD_PCT: f32 = 3.5;
-
 /// Subjective-wellness composite z-score bands (autoreg-030). A single composite
 /// z ≤ [`WELLNESS_SINGLE_DAY_Z`] on ONE observation downgrades intensity one
 /// level. WELLNESS-001 (Saw 2016) also carries a multi-day early-warning arm:
@@ -226,31 +215,13 @@ pub(super) const E1RM_INCREASE_LOAD_PCT: f32 = 3.5;
 pub(super) const WELLNESS_SINGLE_DAY_Z: f64 = -1.5;
 pub(super) const WELLNESS_MULTIDAY_Z: f64 = -1.0;
 /// Consecutive suppressed days that arm the wellness multi-day intensity downgrade.
-pub(crate) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
+pub(super) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
 /// Consecutive suppressed days that raise the §5 tier-4 SubjectiveMultiDay tier.
-pub(crate) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
+pub(super) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
 
 /// HRV lnRMSSD z-score SWC band, ± around rolling baseline (autoreg-028/029).
 pub(super) const HRV_SWC_LOWER_Z: f64 = -0.5;
 pub(super) const HRV_SWC_UPPER_Z: f64 = 0.5;
-
-/// Width (local days) of the HRV rolling window: the `HrvLnRmssd` channel emits
-/// the mean of the trailing 7 days' z-scores (autoreg-028's 7-day rolling
-/// baseline) so one off morning cannot trip a gate a sustained shift should.
-pub(super) const HRV_ROLLING_DAYS: i64 = 7;
-
-/// Minimum lnRMSSD readings inside the trailing rolling window before the HRV
-/// channel emits a weekly baseline (autoreg-047: "need ≥4–5 readings/week for a
-/// valid weekly baseline"). Below this the window is too sparse to trust.
-pub(super) const HRV_MIN_WEEKLY_READINGS: usize = 4;
-
-/// Recency window (LOCAL days) for the derived RHR-delta and wellness-z channels:
-/// a check-in signal older than this many days no longer drives a verdict (the
-/// user has not checked in recently). HRV is not routed through this per-reading
-/// gate — it reads a trailing rolling window and carries its own recency bound
-/// (`HRV_RECENCY_DAYS`, against both today and the newest check-in). `1` = today
-/// or yesterday counts as current.
-pub(super) const CHECKIN_RECENCY_DAYS: i64 = 1;
 
 /// Resting-HR elevation bands, bpm above baseline (autoreg-040/041).
 pub(super) const RHR_STOP_BPM: f64 = 10.0;
@@ -281,7 +252,7 @@ fn rpe_delta_adjustment(delta: f64) -> Option<Adjustment> {
 /// target signal, session-wide. `value` is the signed RPE delta (actual − target).
 pub(super) fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let delta = latest(inputs, ReadinessSignal::Rpe)?;
-    rpe_delta_adjustment(delta).map(|a| evidence::graded(a, claims::AUTOREG_RIR_001))
+    rpe_delta_adjustment(delta).map(|a| Recommended::new(a, claims::AUTOREG_RIR_001))
 }
 
 /// The same autoreg-001/002/004/005 bands applied to ONE plan item from its
@@ -290,7 +261,7 @@ pub(super) fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<A
 /// `delta` = logged RPE − the item's target RPE. AUTOREG-RIR-001 (Strong).
 pub fn first_set_rpe_adjust(exercise: &str, delta: f64) -> Option<Recommended<Adjustment>> {
     rpe_delta_adjustment(delta).map(|a| {
-        evidence::graded(
+        Recommended::new(
             Adjustment::ForItem {
                 exercise: exercise.to_string(),
                 adjustment: Box::new(a),
@@ -304,7 +275,7 @@ pub fn first_set_rpe_adjust(exercise: &str, delta: f64) -> Option<Recommended<Ad
 /// that reached failure (no reps left, or missed reps) before the planned set
 /// count → stop or cut that item's remaining sets. AUTOREG-RIR-001.
 pub fn failed_set_stop(exercise: &str) -> Recommended<Adjustment> {
-    evidence::graded(
+    Recommended::new(
         Adjustment::ForItem {
             exercise: exercise.to_string(),
             adjustment: Box::new(Adjustment::DowngradeSession),
@@ -313,102 +284,14 @@ pub fn failed_set_stop(exercise: &str) -> Recommended<Adjustment> {
     )
 }
 
-/// e1RM-driven load gate (both directions).
-/// autoreg-022: e1RM at fixed RPE down >10% for **≥2 consecutive sessions** →
-/// deload (volume −40–50%, load −5–10%, 1 wk). `EstimatedOneRm` carries the
-/// ratio today ÷ baseline (< 0.90 = >10% drop) and `streak` the consecutive
-/// sessions the drop has held; a single-session drop never deloads: it falls
-/// through to the autoreg-006 session cap instead.
-/// autoreg-006 (both clauses, AUTOREG-E1RM-GATE-001, Strong, Helms 2018):
-/// e1RM < baseline − 5% (ratio < 0.95) → reduce top-set load ~5% AND cap the
-/// session at planned RPE − 1.
-/// autoreg-007: e1RM > baseline + 5% (ratio > 1.05) → add load ~2.5–5% (uses
-/// 3.5%). Same Helms 2018 e1RM-gate source as its mirror autoreg-006, so it
-/// cites AUTOREG-E1RM-GATE-001.
-pub(super) fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
-    let Some(input) = latest_input(inputs, ReadinessSignal::EstimatedOneRm) else {
-        return Vec::new();
-    };
-    match e1rm_ratio_outcome(input.value, input.streak) {
-        E1rmOutcome::Deload => vec![evidence::graded(
-            e1rm_decline_deload(),
-            claims::AUTOREG_DELOAD_001,
-        )],
-        outcome => e1rm_session_recs(outcome, |a| a),
-    }
-}
-
-/// Today's session adjustments for an e1RM outcome, each passed through `wrap`
-/// (AUTOREG-E1RM-GATE-001). Reduce (including a single-session >10% drop: File
-/// 06 §5 "trust performance → reduce load") cuts the top-set load ~5% and caps
-/// the session at planned RPE − 1 (autoreg-006); Increase adds load
-/// (autoreg-007). The multi-session Deload arm is the caller's.
-pub(super) fn e1rm_session_recs(
-    outcome: E1rmOutcome,
-    wrap: impl Fn(Adjustment) -> Adjustment,
-) -> Vec<Recommended<Adjustment>> {
-    let gate = |a| evidence::graded(wrap(a), claims::AUTOREG_E1RM_GATE_001);
-    match outcome {
-        E1rmOutcome::Reduce => vec![
-            gate(Adjustment::ReduceLoadPct(E1RM_REDUCE_LOAD_PCT)),
-            gate(Adjustment::CapRpe(1)),
-        ],
-        E1rmOutcome::Increase => vec![gate(Adjustment::IncreaseLoadPct(E1RM_INCREASE_LOAD_PCT))],
-        E1rmOutcome::Deload | E1rmOutcome::Stable => Vec::new(),
-    }
-}
-
-/// Which arm of the e1RM rule (autoreg-022/006/007) a ratio today ÷ baseline
-/// and its consecutive-decline streak select. The one classification the
-/// manual gate, the logged-set performance gate and the readiness row share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum E1rmOutcome {
-    /// Down >10 % for ≥2 consecutive sessions (autoreg-022).
-    Deload,
-    /// Below baseline − 5 % (autoreg-006), including a single >10 % drop.
-    Reduce,
-    /// Above baseline + 5 % (autoreg-007).
-    Increase,
-    Stable,
-}
-
-pub(super) fn e1rm_ratio_outcome(ratio: f64, streak: u8) -> E1rmOutcome {
-    if ratio < E1RM_DELOAD_RATIO && streak >= E1RM_DELOAD_STREAK {
-        E1rmOutcome::Deload
-    } else if ratio < E1RM_REDUCE_RATIO {
-        E1rmOutcome::Reduce
-    } else if ratio > E1RM_INCREASE_RATIO {
-        E1rmOutcome::Increase
-    } else {
-        E1rmOutcome::Stable
-    }
-}
-
-/// The autoreg-022 e1RM-decline deload: 1 week at the midpoints of its
-/// volume −40–50 % and load −5–10 % bands.
-pub(super) fn e1rm_decline_deload() -> Adjustment {
-    Adjustment::Deload {
-        volume_reduction_pct: 45.0,
-        load_reduction_pct: 7.5,
-        weeks: 1,
-    }
-}
-
-/// Goal-dependent velocity-loss termination threshold, as whole-percent. The
-/// goal→VL map lives in `strength::vl_termination_threshold` (a fraction; its
-/// doc reconciles autoreg-010 with strength-018); this maps the top-level `Goal`
-/// onto its `LiftGoal` and scales to percent. Each goal uses its band ceiling,
+/// Velocity-loss termination threshold, as whole-percent. The lifting-goal→VL
+/// map lives in `strength::vl_termination_threshold` (a fraction; its doc
+/// reconciles autoreg-010 with strength-018). Each goal uses its band ceiling,
 /// the maximum VL the plan would ever prescribe, so exceeding it is beyond-plan
-/// fatigue. A non-lifting or absent goal → the 20% max-strength default (the
-/// conservative fallback).
-pub(super) fn vl_threshold_pct(goal: Option<&Goal>) -> f64 {
-    let lift_goal = match goal {
-        Some(Goal::Power) => LiftGoal::Power,
-        Some(Goal::Hypertrophy) => LiftGoal::Hypertrophy,
-        // Strength and every non-lifting/absent goal fall back to max-strength.
-        _ => LiftGoal::MaxStrength,
-    };
-    strength::vl_termination_threshold(lift_goal).value * 100.0
+/// fatigue. No lifting goal → the 20% max-strength default (the conservative
+/// fallback).
+pub(super) fn vl_threshold_pct(lift_goal: Option<LiftGoal>) -> f64 {
+    strength::vl_termination_threshold(lift_goal.unwrap_or(LiftGoal::MaxStrength)).value * 100.0
 }
 
 /// Velocity-loss set-termination stop.
@@ -416,11 +299,11 @@ pub(super) fn vl_threshold_pct(goal: Option<&Goal>) -> f64 {
 /// `VelocityLoss` carries the % drop; the threshold is goal-dependent.
 pub(super) fn vl_stop(
     inputs: &[ReadinessInput],
-    goal: Option<&Goal>,
+    lift_goal: Option<LiftGoal>,
 ) -> Option<Recommended<Adjustment>> {
     let vl = latest(inputs, ReadinessSignal::VelocityLoss)?;
-    if vl >= vl_threshold_pct(goal) {
-        Some(evidence::graded(
+    if vl >= vl_threshold_pct(lift_goal) {
+        Some(Recommended::new(
             Adjustment::DowngradeSession,
             claims::AUTOREG_VL_001,
         ))
@@ -446,9 +329,9 @@ pub(super) fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adj
         return None;
     }
     Some(if i.streak >= HRV_ESCALATE_STREAK {
-        evidence::graded(Adjustment::DowngradeSession, claims::HRV_001)
+        Recommended::new(Adjustment::DowngradeSession, claims::HRV_001)
     } else {
-        evidence::graded(
+        Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::HrvLnRmssd,
             },
@@ -457,11 +340,24 @@ pub(super) fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adj
     })
 }
 
+/// autoreg-029: parasympathetic-saturation guard. `true` = do NOT auto-add
+/// load; hold and weigh with wellness. Fires when the 7-day rolling lnRMSSD
+/// z-score sits above the SWC upper limit (baseline + 0.5 SD) *during a
+/// high-load block*, unusually high HRV under heavy loading can be
+/// saturation, not readiness. AUTOREG-HRV-SAT-001 (Moderate, Plews).
+pub(super) fn hrv_saturation_hold(hrv_z: f64, high_load_block: bool) -> Recommended<bool> {
+    Recommended::new(
+        high_load_block && hrv_z > HRV_SWC_UPPER_Z,
+        claims::AUTOREG_HRV_SAT_001,
+    )
+}
+
 /// Whether a derived/entered reading is dated on the shell's local today (an
 /// undated legacy reading, or no clock, counts as today).
 pub(super) fn dated_today(i: &ReadinessInput, ctx: &RuleContext) -> bool {
     ctx.today_epoch_day.is_none_or(|t| {
-        crate::is_undated(i.observed_at) || crate::local_day(i.observed_at, ctx.utc_offset_sec) == t
+        crate::day::is_undated(i.observed_at)
+            || crate::day::local_day(i.observed_at, ctx.utc_offset_sec) == t
     })
 }
 
@@ -486,7 +382,7 @@ pub(super) enum WellnessVerdict {
 
 pub(super) fn wellness_verdict(input: &ReadinessInput, ctx: &RuleContext) -> WellnessVerdict {
     let v = input.value;
-    if v <= WELLNESS_MULTIDAY_Z && input.streak >= WELLNESS_MULTIDAY_STREAK {
+    if wellness_lower(input) {
         WellnessVerdict::Lower
     } else if (v <= WELLNESS_SINGLE_DAY_Z && dated_today(input, ctx))
         || (v <= WELLNESS_MULTIDAY_Z && input.streak >= WELLNESS_DOWNGRADE_STREAK)
@@ -507,11 +403,11 @@ pub(super) fn wellness_downgrade_in(
 ) -> Option<Recommended<Adjustment>> {
     let input = latest_input(inputs, ReadinessSignal::WellnessZ)?;
     match wellness_verdict(input, ctx) {
-        WellnessVerdict::Lower => Some(evidence::graded(
+        WellnessVerdict::Lower => Some(Recommended::new(
             Adjustment::DowngradeSession,
             claims::WELLNESS_001,
         )),
-        WellnessVerdict::Hold => Some(evidence::graded(
+        WellnessVerdict::Hold => Some(Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::WellnessZ,
             },
@@ -521,13 +417,17 @@ pub(super) fn wellness_downgrade_in(
     }
 }
 
-/// §5 tier-4 condition: wellness composite z ≤ −1 for ≥3 consecutive days.
-/// Only this raises `SafetyTier::SubjectiveMultiDay`; the ≥2-day intensity
-/// downgrade ([`wellness_downgrade_in`]) does not raise that tier. The verdict's
-/// Lower arm is clock-independent, so the default context is exact here.
+/// The verdict's clock-independent Lower arm: z ≤ −1 for
+/// ≥[`WELLNESS_MULTIDAY_STREAK`] consecutive days (§5 tier 4).
+fn wellness_lower(input: &ReadinessInput) -> bool {
+    input.value <= WELLNESS_MULTIDAY_Z && input.streak >= WELLNESS_MULTIDAY_STREAK
+}
+
+/// §5 tier-4 condition: only this raises `SafetyTier::SubjectiveMultiDay`; the
+/// ≥2-day intensity downgrade ([`wellness_downgrade_in`]) does not raise that
+/// tier.
 fn wellness_multiday(inputs: &[ReadinessInput]) -> bool {
-    latest_input(inputs, ReadinessSignal::WellnessZ)
-        .is_some_and(|i| wellness_verdict(i, &RuleContext::default()) == WellnessVerdict::Lower)
+    latest_input(inputs, ReadinessSignal::WellnessZ).is_some_and(wellness_lower)
 }
 
 /// Wellness soreness-item verdict (autoreg-030 second clause): a soreness item
@@ -538,7 +438,7 @@ fn wellness_multiday(inputs: &[ReadinessInput]) -> bool {
 pub(super) fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let v = latest(inputs, ReadinessSignal::Soreness)?;
     if v >= SORENESS_HIGH {
-        Some(evidence::graded(
+        Some(Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::Soreness,
             },
@@ -559,13 +459,13 @@ pub(super) fn rhr_downgrade_in(
     ctx: &RuleContext,
 ) -> Option<Recommended<Adjustment>> {
     match rhr_verdict(inputs, ctx) {
-        RhrVerdict::Hold => Some(evidence::graded(
+        RhrVerdict::Hold => Some(Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::RestingHr,
             },
             claims::AUTOREG_HRV_LIFT_001,
         )),
-        RhrVerdict::Spike => Some(evidence::graded(
+        RhrVerdict::Spike => Some(Recommended::new(
             Adjustment::DowngradeSession,
             claims::AUTOREG_RHR_NOISE_001,
         )),
@@ -620,7 +520,7 @@ pub(super) fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<Recommen
         return None;
     }
     if crate::load::decoupling_high(input.value) {
-        Some(evidence::graded(
+        Some(Recommended::new(
             Adjustment::DowngradeSession,
             claims::RUN_DECOUPLE_001,
         ))
@@ -629,15 +529,11 @@ pub(super) fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<Recommen
     }
 }
 
-/// Everything the rule layer reads beyond the readiness inputs themselves.
-/// `Default` = no goal, no block, no clock, fixed RHR bands, no logged-set
+/// The shared clock and derived inputs the rules read beyond the readiness
+/// inputs themselves. `Default` = no clock, fixed RHR bands, no logged-set
 /// performance.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuleContext<'a> {
-    /// Selects the goal-dependent velocity-loss threshold (autoreg-010).
-    pub goal: Option<&'a Goal>,
-    /// Arms the autoreg-029 parasympathetic-saturation guard.
-    pub high_load_block: bool,
     /// The shell's local today: only a check-in dated today drives the
     /// single-day wellness arm (WELLNESS-Z-001). `None` = no clock.
     pub today_epoch_day: Option<i64>,
@@ -647,10 +543,6 @@ pub struct RuleContext<'a> {
     /// Per-lift e1RM performance derived from logged sets
     /// ([`derive_performance`](super::derive_performance)).
     pub perf: &'a [MovementPerf],
-    /// The wellness composite is still collecting its baseline: a reading that
-    /// fires the rule is the absolute floor of a very low morning, not a drop
-    /// below a personal normal that doesn't exist yet.
-    pub wellness_collecting: bool,
 }
 
 /// Whether a set of recommendations signals an objective decline (a deload or
@@ -669,7 +561,12 @@ fn perf_decline(recs: &[Recommended<Adjustment>]) -> bool {
 ///
 /// Pain outranks Illness, which outranks all objective/subjective/HRV tiers.
 /// Returns `None` when no safety condition fires. autoreg-041/043/046.
-pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option<SafetyTier> {
+/// `lift_goal` selects the velocity-loss threshold (autoreg-010).
+pub fn resolve_safety_in(
+    inputs: &[ReadinessInput],
+    ctx: &RuleContext,
+    lift_goal: Option<LiftGoal>,
+) -> Option<SafetyTier> {
     // Tier 0, medical red flags: defer to a professional, overrides all
     // training adjustments including pain (File 08 §5 safety-040/043/049).
     if medical_referral(inputs).is_some() {
@@ -693,7 +590,7 @@ pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option
     // A load *increase* signals high readiness, never a safety concern, only
     // reductions/deloads raise the tier.
     if perf_decline(&e1rm_gate(inputs))
-        || vl_stop(inputs, ctx.goal).is_some()
+        || vl_stop(inputs, lift_goal).is_some()
         || perf_decline(&perf_adjustments(ctx.perf))
     {
         return Some(SafetyTier::ObjectivePerformance);
@@ -719,16 +616,23 @@ pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option
 /// illness), an objective performance decline (velocity-loss stop, e1RM drop,
 /// aerobic decoupling, a hard first set), or the high-load-block HRV
 /// saturation guard. The plan-side per-item first-set rule strips its
-/// increases on the same predicate.
-pub fn increase_hold(inputs: &[ReadinessInput], ctx: &RuleContext) -> bool {
+/// increases on the same predicate. `lift_goal` selects the velocity-loss
+/// threshold; `high_load_block` arms the saturation guard.
+pub fn increase_hold(
+    inputs: &[ReadinessInput],
+    ctx: &RuleContext,
+    lift_goal: Option<LiftGoal>,
+    high_load_block: bool,
+) -> bool {
     let suppressed = hrv_downgrade(inputs).is_some()
-        || latest(inputs, ReadinessSignal::WellnessZ).is_some_and(|z| z <= WELLNESS_MULTIDAY_Z)
+        || latest_input(inputs, ReadinessSignal::WellnessZ)
+            .is_some_and(|i| wellness_verdict(i, ctx) != WellnessVerdict::Normal)
         || soreness_downgrade(inputs).is_some()
         || rhr_verdict(inputs, ctx) != RhrVerdict::Normal
         || pain_blocks_progression(inputs)
         || illness_active(inputs);
     // An e1RM *increase* (ratio > 1.05) is not a decline and does not suppress.
-    let objective_perf_down = vl_stop(inputs, ctx.goal).is_some()
+    let objective_perf_down = vl_stop(inputs, lift_goal).is_some()
         || decoupling_downgrade(inputs).is_some()
         || perf_decline(&e1rm_gate(inputs))
         || rpe_load_adjust(inputs).is_some_and(|r| matches!(r.value, Adjustment::ReduceLoadPct(_)))
@@ -737,7 +641,7 @@ pub fn increase_hold(inputs: &[ReadinessInput], ctx: &RuleContext) -> bool {
     // ABOVE the SWC upper limit (z > +0.5) also blocks auto load-adds, hold
     // and weigh with wellness (AUTOREG-HRV-SAT-001, Moderate, Plews).
     let saturation_hold = latest(inputs, ReadinessSignal::HrvLnRmssd)
-        .is_some_and(|z| hrv_saturation_hold(z, ctx.high_load_block).value);
+        .is_some_and(|z| hrv_saturation_hold(z, high_load_block).value);
     suppressed || saturation_hold || objective_perf_down
 }
 
@@ -749,6 +653,8 @@ pub fn increase_hold(inputs: &[ReadinessInput], ctx: &RuleContext) -> bool {
 pub fn adjustments_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
+    lift_goal: Option<LiftGoal>,
+    high_load_block: bool,
 ) -> Vec<Recommended<Adjustment>> {
     // Medical referral (File 08) > pain (autoreg-043 / Table 4.1) >
     // illness/fever (autoreg-046) > corroborated RHR (ready-upd-002).
@@ -769,7 +675,7 @@ pub fn adjustments_in(
     }
     if rhr_verdict(inputs, ctx) == RhrVerdict::Rest {
         let mut out = pain_recs;
-        out.push(evidence::graded(
+        out.push(Recommended::new(
             Adjustment::RestDay,
             claims::AUTOREG_RHR_NOISE_001,
         ));
@@ -781,7 +687,7 @@ pub fn adjustments_in(
     out.extend(rpe_load_adjust(inputs));
     out.extend(e1rm_gate(inputs));
     out.extend(perf_adjustments(ctx.perf));
-    out.extend(vl_stop(inputs, ctx.goal));
+    out.extend(vl_stop(inputs, lift_goal));
     out.extend(hrv_downgrade(inputs));
     out.extend(wellness_downgrade_in(inputs, ctx));
     out.extend(soreness_downgrade(inputs));
@@ -793,7 +699,7 @@ pub fn adjustments_in(
     // Reconciliation pass (autoreg-044, safety-critical guardrail): never
     // auto-increase load into suppressed recovery or declining performance,
     // item-scoped increases included.
-    if increase_hold(inputs, ctx) {
+    if increase_hold(inputs, ctx, lift_goal, high_load_block) {
         out.retain(|r| !matches!(r.value.base(), Adjustment::IncreaseLoadPct(_)));
     }
     out

@@ -2,7 +2,7 @@
 //!
 //! - the FIT import (`fit::parse_fit` + `fit::import_gate`, the body of
 //!   `ffi::parse_fit_json`, serialized exactly as it does);
-//! - the GPX export (`export_run_gpx` → `running::export_gpx`, what
+//! - the GPX export (`export_run_gpx` → `crate::gps::export_gpx`, what
 //!   `Core.exportGpx` returns);
 //! - the track-figures preview (`Event` decode + `preview_track_figures`, the
 //!   body of `ffi::track_figures_json`);
@@ -1056,7 +1056,7 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
 
 #[test]
 fn gpx_export_track_name_with_xml_specials_stays_well_formed() {
-    let doc = crate::running::export_gpx(&walk(5, 1_750_000_000), "<\"a&b'> ]]> <!--", &[], None);
+    let doc = crate::gps::export_gpx(&walk(5, 1_750_000_000), "<\"a&b'> ]]> <!--", &[], None);
     xml_well_formed(&doc).unwrap();
     assert!(
         doc.contains("<name>&lt;&quot;a&amp;b&apos;&gt; ]]&gt; &lt;!--</name>"),

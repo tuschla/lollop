@@ -1,19 +1,22 @@
 //! Calisthenics day synthesis: leverage-ladder rung resolution and graded
 //! skill / pattern / power prescriptions (CAL-*).
 
-use crate::app::Profile;
+use crate::calisthenics::progression::CalisAnchor;
 use crate::calisthenics::{self, FailurePolicy, Kit};
 use crate::evidence;
 use crate::evidence::claims;
-use crate::individualization::{TrainingAge, training_age_from_cadence};
+use crate::individualization::TrainingAge;
+use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
     CalisthenicsPrescription, LadderId, LiftSessionType, Prescription, Recommended, Session,
     SessionType, TempoBridge,
 };
 use crate::strength::LiftGoal;
 
-use super::lift::sized_sets;
-use super::{Anchors, CalisAnchor, DayRegion};
+use super::anchors::Anchors;
+use super::day::LiftDay;
+use super::regions::DayRegion;
+use super::volume::sized_sets;
 
 /// The tempo bridge on the easier rung after a failed step up
 /// (CAL-PROG-TEMPO-001 / CAL-PROG-BRIDGE-001): 3 s lowering + 1 s pause, so a rep
@@ -28,26 +31,17 @@ const TEMPO_BRIDGE: TempoBridge = TempoBridge {
 /// it bypasses `sized_sets` (CAL-VOLCOUNT-SKILL-001).
 const SKILL_SETS: u8 = 4;
 
-/// The region of lift day `i` (`Full` past the end of `regions`).
-fn region_at(regions: &[DayRegion], i: usize) -> DayRegion {
-    regions.get(i).copied().unwrap_or(DayRegion::Full)
-}
-
-/// The lift days of the week before day `i`.
-fn days_before(regions: &[DayRegion], i: usize) -> &[DayRegion] {
-    &regions[..i.min(regions.len())]
-}
-
-/// Whether a lift day of this week trains core (CAL-FREQ-VOL-002: every pattern
-/// ≥2×/wk): every Lower day; on Full days every day when the week has ≤ 2
-/// exposures, otherwise alternate Full days, so a 3-day week keeps 6–7 items.
-fn core_on(regions: &[DayRegion], day_index: usize, n_exposures: usize) -> bool {
-    match region_at(regions, day_index) {
+/// Whether a lift day trains core (CAL-FREQ-VOL-002: every pattern ≥2×/wk):
+/// every Lower day; on Full days every day when the week has ≤ 2 exposures,
+/// otherwise alternate Full days, so a 3-day week keeps 6–7 items.
+fn core_on(day: &LiftDay) -> bool {
+    match day.region() {
         DayRegion::Lower => true,
         DayRegion::Upper => false,
         DayRegion::Full => {
-            n_exposures <= 2
-                || days_before(regions, day_index)
+            day.n_exposures <= 2
+                || day
+                    .days_before()
                     .iter()
                     .filter(|r| matches!(r, DayRegion::Full))
                     .count()
@@ -86,36 +80,27 @@ struct Ctx<'a> {
 ///    lower days carry squat, hinge and core (core alternates on Full-only weeks
 ///    of 3+ days).
 ///
-/// `day_index` is this day's 0-based slot among the week's lift days,
-/// `regions[day_index]` its region, `n_exposures` how often each pattern is
+/// `day.slot` is this day's 0-based slot among the week's lift days,
+/// `day.region()` its region, `day.n_exposures` how often each pattern is
 /// trained per week (the weekly-set split divisor). Equipment the athlete lacks
 /// re-allocates a slot to the other plane of the same family (CAL-EQUIP-001):
 /// no bar/rings → horizontal pull carries the vertical-pull volume; no dip
 /// bars/rings → vertical push takes every vertical-push-family slot.
-pub(super) fn calisthenics_session(
-    profile: &Profile,
-    anchors: &Anchors,
-    day_index: usize,
-    day: u16,
-    n_exposures: usize,
-    regions: &[DayRegion],
-) -> Session {
+pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &LiftDay) -> Session {
+    let profile = pp.profile();
     let goal = profile.lift_goal;
     let ctx = Ctx {
         profile,
         anchors,
         kit: Kit::from_profile(profile),
-        ta: training_age_from_cadence(profile.progression_cadence).value,
+        ta: pp.training_age(),
         template: calisthenics::session_template(goal).value,
     };
-    let region = region_at(regions, day_index);
+    let region = day.region();
     let upper = region.has_upper();
     let lower = region.has_lower();
-    let upper_ordinal = days_before(regions, day_index)
-        .iter()
-        .filter(|r| r.has_upper())
-        .count();
-    let n = n_exposures.max(1);
+    let upper_ordinal = day.days_before().iter().filter(|r| r.has_upper()).count();
+    let n = day.n_exposures.max(1);
     let weekly = profile.weekly_sets;
     let mut prescriptions: Vec<Recommended<Prescription>> = Vec::new();
 
@@ -174,9 +159,9 @@ pub(super) fn calisthenics_session(
     if lower {
         ids.push((LadderId::Squat, pattern(weekly, n)));
         ids.push((LadderId::Hinge, pattern(weekly, n)));
-        if core_on(regions, day_index, n_exposures) {
-            let core_sessions = (0..regions.len().max(day_index + 1))
-                .filter(|&i| core_on(regions, i, n_exposures))
+        if core_on(day) {
+            let core_sessions = (0..day.regions.as_slice().len().max(day.slot + 1))
+                .filter(|&slot| core_on(&LiftDay { slot, ..*day }))
                 .count()
                 .max(1);
             ids.push((LadderId::Core, pattern(weekly, core_sessions)));
@@ -192,7 +177,7 @@ pub(super) fn calisthenics_session(
     // Heavy/Power/Volume day.
     Session {
         session_type: SessionType::Lift(LiftSessionType::Calisthenics),
-        day,
+        day: day.day,
         prescriptions,
         dup_day: None,
     }
@@ -264,7 +249,7 @@ fn advance(ctx: &Ctx, id: LadderId, base: u8, added: f64, steps: u8) -> (u8, f64
         let added = if added > 0.0 && ctx.profile.weight_lb {
             // A converted-from-kg load lands back on the 2.5 lb grid (always
             // still above the old load: the step is at least one plate).
-            calisthenics::floor_to_load_grid(added + load_step(ctx, added), true)
+            crate::plates::floor_added_load_kg(added + load_step(ctx, added), true)
         } else if added > 0.0 {
             added + load_step(ctx, added)
         } else {
@@ -292,7 +277,7 @@ fn advance(ctx: &Ctx, id: LadderId, base: u8, added: f64, steps: u8) -> (u8, f64
 /// tempo bridge (CAL-PROG-TEMPO-001; KB §2.2 "step down one rung").
 fn regress(ctx: &Ctx, id: LadderId, base: u8, added: f64) -> (u8, f64, Option<TempoBridge>) {
     let lighter = if added > 0.0 {
-        calisthenics::floor_to_load_grid(
+        crate::plates::floor_added_load_kg(
             (added - load_step(ctx, added)).max(0.0),
             ctx.profile.weight_lb,
         )
@@ -499,7 +484,7 @@ fn ladder_prescription(ctx: &Ctx, id: LadderId, dose: Dose) -> Option<Recommende
         table_row,
         skip_reps,
     });
-    Some(evidence::graded(
+    Some(Recommended::new(
         pres,
         evidence_claim(tier, &res, ctx.profile.lift_goal, novice, table_row),
     ))

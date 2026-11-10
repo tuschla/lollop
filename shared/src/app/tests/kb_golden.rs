@@ -11,7 +11,7 @@
 use super::*;
 use crate::app::format::mon0_weekday;
 use crate::evidence::EvidenceEntry;
-use crate::plan::is_quality_run;
+use crate::running::is_quality_session;
 use crate::schema::{LiftSessionType, RunSessionType};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -228,7 +228,7 @@ fn simulate(a: Athlete) -> Life {
             last_kg.insert(it.exercise.clone(), kg);
             if a.warm_ups
                 && let Some(work) = it.load_kg
-                && crate::plan::is_barbell_lift(&it.exercise)
+                && crate::exercise::is_barbell_lift(&it.exercise)
             {
                 let steps = ramp(work);
                 warm_ups.insert(it.exercise.clone(), steps.len());
@@ -265,7 +265,7 @@ fn perf_cuts(m: &Model, d: i64) -> Vec<String> {
     let cx = ViewCtx::new(m);
     let mut cuts: Vec<String> = cx
         .lift_anchors_now()
-        .lift_derates
+        .derates
         .iter()
         .filter(|r| matches!(r.cause, crate::plan::DerateCause::E1rmDrop))
         .map(|r| format!("{} derated to {:.0}%", r.exercise, r.frac * 100.0))
@@ -549,7 +549,7 @@ fn run_week(rows: &[SessionPlanView]) -> RunWeek {
             w.total_km += main + wc;
             w.easy_km += wc;
             match kind {
-                k if is_quality_run(k) => {
+                k if is_quality_session(k) => {
                     w.quality_days.push((row.epoch_day, k));
                     match k {
                         RunSessionType::Tempo => w.tempo_km += main,
@@ -840,7 +840,7 @@ fn check_run_bands(name: &str, life: &Life) {
                         );
                     }
                 }
-                if is_quality_run(kind) && kind != RunSessionType::Interval {
+                if is_quality_session(kind) && kind != RunSessionType::Interval {
                     // RUN-WARMUP-001: 10 min easy before, ~10 min after
                     // (extracted/13-running-update.md:114).
                     let rs = it.run_structure.as_ref().expect("quality run structure");
@@ -1247,7 +1247,7 @@ const TABLE1_MAV_HIGH: &[(&str, u8)] = &[
 ];
 
 fn is_compound(it: &PrescriptionView) -> bool {
-    crate::plan::is_barbell_lift(&it.exercise)
+    crate::exercise::is_barbell_lift(&it.exercise)
 }
 
 /// A 4-day intermediate hypertrophy lifter: rep ranges by exercise type

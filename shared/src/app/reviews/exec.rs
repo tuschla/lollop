@@ -2,9 +2,18 @@
 //! runs against what was shown that day, the "session done" summary, and the
 //! single execution verdict the feedback card leads with.
 
-use super::*;
-use crate::feedback;
 use std::fmt::Write as _;
+
+use crate::app::format::{fmt_km_or_mi, round_tenths};
+use crate::app::model::{Decouple, IntervalExec};
+use crate::app::view_types::{
+    ItemSetView, ItemStatus, PlanIntensity, PrescriptionView, SessionDoneItemView, SessionDoneView,
+    SessionPlanView,
+};
+use crate::evidence::claims;
+use crate::feedback::FeedbackCategory;
+use crate::schema::Recommended;
+use crate::{feedback, strength};
 
 /// One prescribed exercise's outcome on a completed plan day, judged from the
 /// logged sets against the prescription as shown that day.
@@ -350,7 +359,7 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
             // completed session is itself a mastery experience (feedback-005),
             // praised with its numbers, never with an invented reserve.
             (true, ..) => (
-                graded(
+                Recommended::new(
                     FeedbackCategory::PositiveMastery,
                     claims::FB_MASTERY_ANCHOR_001,
                 ),
@@ -400,7 +409,7 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
     }
     if inp.run.is_some() {
         return plain(
-            graded(
+            Recommended::new(
                 FeedbackCategory::PositiveMastery,
                 claims::FB_MASTERY_ANCHOR_001,
             ),

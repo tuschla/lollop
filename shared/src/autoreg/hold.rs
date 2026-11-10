@@ -2,7 +2,7 @@
 
 use super::pain::pain_hold_active;
 use super::rules::{illness_downgrade, illness_stop};
-use crate::evidence::{self, claims};
+use crate::evidence::claims;
 use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended};
 
 /// Which hold just ended, deciding the first session back.
@@ -129,10 +129,10 @@ pub fn last_hold_resolution(timeline: &[TimedInput]) -> Option<(ReturnKind, i64)
 pub fn return_adjustment(kind: ReturnKind) -> Recommended<Adjustment> {
     match kind {
         ReturnKind::AfterFever => {
-            evidence::graded(Adjustment::ReturnCheck, claims::ILLNESS_RTT_001)
+            Recommended::new(Adjustment::ReturnCheck, claims::ILLNESS_RTT_001)
         }
         ReturnKind::AfterIllness | ReturnKind::AfterPain => {
-            evidence::graded(Adjustment::DowngradeSession, claims::RETURN_HOLD_001)
+            Recommended::new(Adjustment::DowngradeSession, claims::RETURN_HOLD_001)
         }
     }
 }

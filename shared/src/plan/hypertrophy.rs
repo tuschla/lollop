@@ -9,29 +9,37 @@
 //! from failure (HYP-RIR-DOSE-001, HYP-VL-001), a weak growth stimulus. So the
 //! week keeps one quality (1–3 RIR) and varies exercises, not intensities.
 //!
-//! Pure and deterministic: the whole week is allocated from the profile, the
-//! anchors and the block position each call, then the requested day's share is
-//! emitted, so every day of the week agrees with every other.
+//! Pure and deterministic: the whole week is allocated once from the profile,
+//! the anchors and the block position, then each day's share is emitted, so
+//! every day of the week agrees with every other.
 
-use crate::app::{Profile, ResistanceModality};
 use crate::evidence::claims;
-use crate::hypertrophy::{self, DoubleProgression, ExerciseClass, VolumeRole};
+use crate::exercise::{
+    ExerciseClass, classify, is_isolation_lift, movement_key, movement_pattern, same_movement,
+};
+use crate::hypertrophy::{self, DoubleProgression, VolumeRole};
 use crate::individualization::TrainingAge;
+use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
     LiftIntensity, LiftPrescription, LiftSessionType, Prescription, Recommended, Session,
     SessionType,
 };
 use crate::strength::{self, LiftGoal};
 
-use super::lift::{BlockCtx, is_isolation_lift, movement_key, same_movement};
-use super::{Anchors, DayRegion, movement_pattern};
+use super::anchors::LiftAnchors;
+use super::day::LiftDay;
+use super::regions::{DayRegion, WeekRegions};
 
 /// Whether a profile's lift days run this hypertrophy week with double
-/// progression: a Hypertrophy goal on external loads. (A calisthenics profile
-/// runs its leverage ladders instead.)
-pub(crate) fn uses_double_progression(profile: &Profile) -> bool {
-    profile.lift_goal == LiftGoal::Hypertrophy
-        && profile.resistance_modality == ResistanceModality::Weights
+/// progression: a Hypertrophy (stated) goal on external loads. (A calisthenics
+/// profile runs its leverage ladders instead.)
+pub(crate) fn uses_double_progression(pp: &PlanProfile) -> bool {
+    double_progression(pp.profile().lift_goal, pp.profile())
+}
+
+/// [`uses_double_progression`] for lift goal `goal`.
+pub(super) fn double_progression(goal: LiftGoal, profile: &Profile) -> bool {
+    goal == LiftGoal::Hypertrophy && !profile.uses_calisthenics()
 }
 
 /// Table 1 muscles in sizing order: the big compound-trained muscles first, so
@@ -110,6 +118,21 @@ pub(crate) struct MuscleWeekTarget {
 /// scaled. The plan and the program card both read this, so they agree; the
 /// volume planner reads the whole block ([`hypertrophy_block_targets`]).
 pub(crate) fn hypertrophy_week_targets(
+    pp: &PlanProfile,
+    week_in_block: u8,
+    block_weeks: u8,
+    lift_days: usize,
+) -> Vec<MuscleWeekTarget> {
+    week_targets(
+        pp.profile(),
+        pp.training_age(),
+        week_in_block,
+        block_weeks,
+        lift_days,
+    )
+}
+
+fn week_targets(
     profile: &Profile,
     ta: TrainingAge,
     week_in_block: u8,
@@ -118,77 +141,30 @@ pub(crate) fn hypertrophy_week_targets(
 ) -> Vec<MuscleWeekTarget> {
     let weeks = block_weeks.max(1);
     let idx = usize::from(week_in_block.clamp(1, weeks) - 1);
-    fitted_block_memo(profile, ta, weeks, lift_days)[idx].clone()
+    fitted_block(
+        profile.specialization_muscle.as_deref(),
+        profile.weekly_sets,
+        ta,
+        weeks,
+        lift_days.clamp(1, 7),
+    )
+    .swap_remove(idx)
 }
 
 /// [`hypertrophy_week_targets`] for every week of the block, in order.
 pub(crate) fn hypertrophy_block_targets(
-    profile: &Profile,
-    ta: TrainingAge,
+    pp: &PlanProfile,
     block_weeks: u8,
     lift_days: usize,
-) -> std::rc::Rc<[Vec<MuscleWeekTarget>]> {
-    fitted_block_memo(profile, ta, block_weeks.max(1), lift_days)
-}
-
-/// Everything [`fitted_block`] reads: the profile's stated weekly sets and
-/// specialization muscle, the training age, the block length and lift days.
-#[derive(PartialEq)]
-struct FitKey {
-    weekly_sets: u8,
-    specialization: Option<String>,
-    ta: TrainingAge,
-    weeks: u8,
-    days: usize,
-}
-
-/// Distinct fitted blocks kept per thread (a view needs one or two).
-const FIT_MEMO_CAP: usize = 8;
-
-/// One memoized fitted block: its key and the per-week muscle targets.
-type FitMemoEntry = (FitKey, std::rc::Rc<[Vec<MuscleWeekTarget>]>);
-
-thread_local! {
-    /// [`fitted_block`] is a pure function of its [`FitKey`] and packs the
-    /// whole block (one `allocate_week` per trim step per week), while the plan
-    /// asks for one week per synthesized day: fit each block once.
-    static FIT_MEMO: std::cell::RefCell<Vec<FitMemoEntry>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-fn fitted_block_memo(
-    profile: &Profile,
-    ta: TrainingAge,
-    weeks: u8,
-    lift_days: usize,
-) -> std::rc::Rc<[Vec<MuscleWeekTarget>]> {
-    let key = FitKey {
-        weekly_sets: profile.weekly_sets,
-        specialization: profile.specialization_muscle.clone(),
-        ta,
-        weeks,
-        days: lift_days.clamp(1, 7),
-    };
-    if let Some(hit) =
-        FIT_MEMO.with_borrow(|m| m.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
-    {
-        return hit;
-    }
-    let block: std::rc::Rc<[Vec<MuscleWeekTarget>]> = fitted_block(
-        key.specialization.as_deref(),
-        key.weekly_sets,
-        ta,
-        weeks,
-        key.days,
+) -> Vec<Vec<MuscleWeekTarget>> {
+    let profile = pp.profile();
+    fitted_block(
+        profile.specialization_muscle.as_deref(),
+        profile.weekly_sets,
+        pp.training_age(),
+        block_weeks.max(1),
+        lift_days.clamp(1, 7),
     )
-    .into();
-    FIT_MEMO.with_borrow_mut(|m| {
-        if m.len() >= FIT_MEMO_CAP {
-            m.clear();
-        }
-        m.push((key, block.clone()));
-    });
-    block
 }
 
 /// Every week of the block (0-based), each fitted to the
@@ -232,10 +208,11 @@ fn fitted_block(
     // in `allocate_week` still holds either way). Start from the share of the
     // budget the uncapped week overshoots by, then trim in small steps until
     // no day had to cut a muscle short.
-    let regions = super::WeekRegions::full(days);
+    let regions = WeekRegions::full(days);
     let cap = u32::from(hypertrophy::SESSION_WORKING_SET_CAP);
+    let options = WeekOptions::new(&LiftAnchors::default());
     let total = |targets: &[MuscleWeekTarget], day_cap: u32| -> u32 {
-        allocate_week(&Anchors::default(), regions.as_slice(), targets, day_cap)
+        allocate_week(&options, regions.as_slice(), targets, day_cap)
             .iter()
             .map(|it| u32::from(it.sets))
             .sum()
@@ -309,14 +286,14 @@ fn class_rank(class: ExerciseClass) -> u8 {
 /// The athlete's logged movements, most recent first, deduplicated by
 /// movement: last working sets first (they cover isolation and bodyweight
 /// lifts), then any e1RM anchor not already listed.
-fn logged_names(anchors: &Anchors) -> Vec<String> {
+fn logged_names(anchors: &LiftAnchors) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut keys: Vec<Vec<String>> = Vec::new();
     let names = anchors
         .last_working
         .iter()
         .map(|w| w.exercise.as_str())
-        .chain(anchors.lift_e1rm.iter().map(|(n, _)| n.as_str()));
+        .chain(anchors.e1rm.iter().map(|(n, _)| n.as_str()));
     for name in names {
         let key = movement_key(name);
         if !keys.contains(&key) {
@@ -360,6 +337,43 @@ fn options_for(muscle: &str, logged: &[(String, Option<&'static str>)]) -> Vec<S
     out
 }
 
+/// The exercise options a week allocates from, classified once: the
+/// athlete's logged lifts that train no Table 1 muscle directly (the most
+/// recent [`MAX_UNMAPPED_LOGGED`]), and each [`MUSCLE_ORDER`] muscle's
+/// [`options_for`], each name with its [`class_rank`].
+struct WeekOptions {
+    unmapped: Vec<(String, u8)>,
+    per_muscle: Vec<Vec<(String, u8)>>,
+}
+
+impl WeekOptions {
+    fn new(anchors: &LiftAnchors) -> Self {
+        let logged: Vec<(String, Option<&'static str>)> = logged_names(anchors)
+            .into_iter()
+            .map(|n| {
+                let p = hypertrophy::primary_muscle(&n);
+                (n, p)
+            })
+            .collect();
+        let ranked = |name: String| {
+            let rank = class_rank(classify(&name));
+            (name, rank)
+        };
+        WeekOptions {
+            unmapped: logged
+                .iter()
+                .filter(|(_, p)| p.is_none())
+                .take(MAX_UNMAPPED_LOGGED)
+                .map(|(n, _)| ranked(n.clone()))
+                .collect(),
+            per_muscle: MUSCLE_ORDER
+                .iter()
+                .map(|m| options_for(m, &logged).into_iter().map(ranked).collect())
+                .collect(),
+        }
+    }
+}
+
 /// Pick `f` distinct slots from `eligible`, each time the least-loaded one
 /// (fewest sets already placed), ties to the earlier day.
 fn pick_slots(eligible: &[usize], load: &[u32], f: usize) -> Vec<usize> {
@@ -377,22 +391,68 @@ fn pick_slots(eligible: &[usize], load: &[u32], f: usize) -> Vec<usize> {
     chosen
 }
 
-/// The week's allocation for the athlete's stated volume ([`allocate_week`]).
-fn plan_week(profile: &Profile, anchors: &Anchors, ta: TrainingAge, block: BlockCtx) -> Vec<Item> {
-    let regions = block.week_regions.as_slice();
-    let targets = hypertrophy_week_targets(
-        profile,
-        ta,
-        block.week_in_block,
-        block.block_weeks,
-        regions.len(),
-    );
-    allocate_week(
-        anchors,
-        regions,
-        &targets,
-        u32::from(hypertrophy::SESSION_WORKING_SET_CAP),
-    )
+/// One hypertrophy lift week, allocated once for the athlete's stated volume
+/// ([`allocate_week`]); each lift day reads its share.
+pub(super) struct HypertrophyWeek<'a> {
+    anchors: &'a LiftAnchors,
+    ta: TrainingAge,
+    week_in_block: u8,
+    block_weeks: u8,
+    items: Vec<Item>,
+}
+
+impl<'a> HypertrophyWeek<'a> {
+    /// Allocate week `week_in_block` of a `block_weeks` block over the lift
+    /// days `regions` (weekday order).
+    pub(super) fn new(
+        profile: &Profile,
+        anchors: &'a LiftAnchors,
+        ta: TrainingAge,
+        week_in_block: u8,
+        block_weeks: u8,
+        regions: &[DayRegion],
+    ) -> Self {
+        let targets = week_targets(profile, ta, week_in_block, block_weeks, regions.len());
+        let items = allocate_week(
+            &WeekOptions::new(anchors),
+            regions,
+            &targets,
+            u32::from(hypertrophy::SESSION_WORKING_SET_CAP),
+        );
+        Self {
+            anchors,
+            ta,
+            week_in_block,
+            block_weeks,
+            items,
+        }
+    }
+
+    /// One lift day of the week (`day.slot`). Every day is a muscle-building
+    /// (`Repetition`) day: no heavy-triple or speed day exists in this week, so
+    /// the title never promises one.
+    pub(super) fn session(&self, day: &LiftDay) -> Session {
+        let mut today: Vec<&Item> = self.items.iter().filter(|it| it.slot == day.slot).collect();
+        today.sort_by_key(|it| it.order);
+        Session {
+            session_type: SessionType::Lift(LiftSessionType::Repetition),
+            day: day.day,
+            prescriptions: today
+                .iter()
+                .map(|it| {
+                    prescribe(
+                        &it.name,
+                        it.sets,
+                        self.ta,
+                        self.anchors,
+                        self.week_in_block,
+                        self.block_weeks,
+                    )
+                })
+                .collect(),
+            dup_day: None,
+        }
+    }
 }
 
 /// Allocate the whole week: which exercise lands on which lift day (one per
@@ -415,7 +475,7 @@ fn plan_week(profile: &Profile, anchors: &Anchors, ta: TrainingAge, block: Block
 /// fill in muscle order, so a split whose days carry many muscles is then
 /// levelled up to each muscle's MEV floor ([`raise_to_mev`]).
 fn allocate_week(
-    anchors: &Anchors,
+    options: &WeekOptions,
     regions: &[DayRegion],
     targets: &[MuscleWeekTarget],
     day_cap: u32,
@@ -424,22 +484,11 @@ fn allocate_week(
     let mut load = vec![0u32; n];
     let mut credit = [0.0f32; MUSCLE_ORDER.len()];
     let mut items: Vec<Item> = Vec::new();
-    let logged: Vec<(String, Option<&'static str>)> = logged_names(anchors)
-        .into_iter()
-        .map(|n| {
-            let p = hypertrophy::primary_muscle(&n);
-            (n, p)
-        })
-        .collect();
 
     // 1. Logged lifts with no Table 1 primary muscle: kept, never dropped, at
     //    the hypertrophy loading band's set count, up to twice a week.
     let unmapped_sets = strength::loading_rx(LiftGoal::Hypertrophy).value.sets.0;
-    for (name, _) in logged
-        .iter()
-        .filter(|(_, p)| p.is_none())
-        .take(MAX_UNMAPPED_LOGGED)
-    {
+    for (name, rank) in &options.unmapped {
         let mut eligible: Vec<usize> = (0..n)
             .filter(|&s| regions[s].fits(movement_pattern(name)))
             .collect();
@@ -455,7 +504,7 @@ fn allocate_week(
                 slot,
                 name: name.clone(),
                 sets: unmapped_sets,
-                order: (class_rank(hypertrophy::classify(name)), MUSCLE_ORDER.len()),
+                order: (*rank, MUSCLE_ORDER.len()),
             });
         }
     }
@@ -470,7 +519,7 @@ fn allocate_week(
         if t.target == 0 {
             continue;
         }
-        let options = options_for(muscle, &logged);
+        let options = &options.per_muscle[mi];
         if options.is_empty() {
             continue;
         }
@@ -512,18 +561,18 @@ fn allocate_week(
             let sets = (base + u32::from((j as u32) < rem))
                 .min(day_cap.saturating_sub(load[slot]))
                 .min(u32::from(u8::MAX)) as u8;
-            let name = &options[j % options.len()];
+            let (name, rank) = &options[j % options.len()];
             load[slot] += u32::from(sets);
             add_credits(&mut credit, name, Some(*muscle), sets);
             items.push(Item {
                 slot,
                 name: name.clone(),
                 sets,
-                order: (class_rank(hypertrophy::classify(name)), mi),
+                order: (*rank, mi),
             });
         }
     }
-    raise_to_mev(&mut items, &mut load, regions, targets, &logged, day_cap);
+    raise_to_mev(&mut items, &mut load, regions, targets, options, day_cap);
     items
 }
 
@@ -542,7 +591,7 @@ fn raise_to_mev(
     load: &mut [u32],
     regions: &[DayRegion],
     targets: &[MuscleWeekTarget],
-    logged: &[(String, Option<&'static str>)],
+    options: &WeekOptions,
     day_cap: u32,
 ) {
     const N: usize = MUSCLE_ORDER.len();
@@ -562,19 +611,16 @@ fn raise_to_mev(
         }
         out
     };
-    let mut options: Vec<Vec<String>> = Vec::with_capacity(N);
     let mut floor = [0.0f32; N];
     for (mi, muscle) in MUSCLE_ORDER.iter().enumerate() {
-        let opts = options_for(muscle, logged);
         let target = targets
             .iter()
             .find(|t| t.muscle == *muscle)
             .map_or(0, |t| t.target);
         let mev = hypertrophy::landmarks_for(muscle).map_or(0, |l| l.mev);
-        if target > 0 && !opts.is_empty() {
+        if target > 0 && !options.per_muscle[mi].is_empty() {
             floor[mi] = f32::from(target.min(mev));
         }
-        options.push(opts);
     }
     let min_sets = hypertrophy::MIN_SETS_PER_EXERCISE;
     let ceiling = hypertrophy::PER_SESSION_SET_CEILING;
@@ -642,12 +688,13 @@ fn raise_to_mev(
                 Some(i) => items[i].sets += add,
                 None => {
                     let k = items.iter().filter(|it| it.order.1 == mi).count();
-                    let name = options[mi][k % options[mi].len()].clone();
-                    credits.push(credits_of(&name));
+                    let opts = &options.per_muscle[mi];
+                    let (name, rank) = &opts[k % opts.len()];
+                    credits.push(credits_of(name));
                     items.push(Item {
                         slot: s,
-                        order: (class_rank(hypertrophy::classify(&name)), mi),
-                        name,
+                        order: (*rank, mi),
+                        name: name.clone(),
                         sets: add,
                     });
                 }
@@ -688,32 +735,6 @@ fn add_credits(credit: &mut [f32], name: &str, own: Option<&str>, sets: u8) {
     }
 }
 
-/// Build one hypertrophy lift day (`block.slot` of the week). Every day is a
-/// muscle-building (`Repetition`) day: no heavy-triple or speed day exists in
-/// this week, so the title never promises one.
-pub(super) fn hypertrophy_session(
-    profile: &Profile,
-    anchors: &Anchors,
-    ta: TrainingAge,
-    day: u16,
-    block: BlockCtx,
-) -> Session {
-    let mut today: Vec<Item> = plan_week(profile, anchors, ta, block)
-        .into_iter()
-        .filter(|it| it.slot == block.slot)
-        .collect();
-    today.sort_by_key(|it| it.order);
-    Session {
-        session_type: SessionType::Lift(LiftSessionType::Repetition),
-        day,
-        prescriptions: today
-            .iter()
-            .map(|it| prescribe(&it.name, it.sets, ta, anchors, block))
-            .collect(),
-        dup_day: None,
-    }
-}
-
 /// One exercise's prescription: its class rep range (HYP-REPLOAD-001), this
 /// week's target reps in reserve (`hypertrophy::block_rir`), class rest
 /// (HYP-REST-002) and a load from, in order: double progression off the last
@@ -723,16 +744,13 @@ fn prescribe(
     name: &str,
     sets: u8,
     ta: TrainingAge,
-    anchors: &Anchors,
-    block: BlockCtx,
+    anchors: &LiftAnchors,
+    week_in_block: u8,
+    block_weeks: u8,
 ) -> Recommended<Prescription> {
-    let class = hypertrophy::classify(name);
+    let class = classify(name);
     let (bottom, top) = hypertrophy::rep_range_for(class).value;
-    let rir_rx = hypertrophy::block_rir(
-        block.week_in_block,
-        block.block_weeks,
-        ta == TrainingAge::Novice,
-    );
+    let rir_rx = hypertrophy::block_rir(week_in_block, block_weeks, ta == TrainingAge::Novice);
     let rir = rir_rx.value;
     let rest_sec = hypertrophy::rest_sec_for(class).value.0;
     let lift = |reps: u8, intensity: LiftIntensity, load_kg: Option<f32>| {
@@ -762,7 +780,7 @@ fn prescribe(
             let step = hypertrophy::double_progression((bottom, top), rir, &lw.sets);
             let load = |kg: f64| (kg > 0.0).then_some(kg as f32);
             return match step.value {
-                DoubleProgression::AddLoad if w > 0.0 => crate::evidence::graded(
+                DoubleProgression::AddLoad if w > 0.0 => Recommended::new(
                     lift(
                         bottom,
                         LiftIntensity::Rir(rir),
@@ -771,11 +789,11 @@ fn prescribe(
                     claims::HYP_DOUBLEPROG_001,
                 ),
                 // Bodyweight: no load to add, so hold the top of the range.
-                DoubleProgression::AddLoad => crate::evidence::graded(
+                DoubleProgression::AddLoad => Recommended::new(
                     lift(top, LiftIntensity::Rir(rir), None),
                     claims::HYP_DOUBLEPROG_001,
                 ),
-                DoubleProgression::Hold { target_reps } => crate::evidence::graded(
+                DoubleProgression::Hold { target_reps } => Recommended::new(
                     lift(target_reps, LiftIntensity::Rir(rir), load(w)),
                     claims::HYP_DOUBLEPROG_001,
                 ),

@@ -1,5 +1,5 @@
 use super::*;
-use crate::schema::EvidenceGrade;
+use crate::evidence::{ContestedId, EvidenceGrade};
 
 #[test]
 fn landmarks_lookup_is_case_insensitive_and_verbatim() {
@@ -217,7 +217,7 @@ fn load_is_interchangeable_30_to_85_pct() {
     assert_eq!(r.value.pct_1rm, (30, 85));
     assert_eq!(r.grade(), EvidenceGrade::Strong);
     assert!(r.contested().is_some());
-    assert_eq!(r.contested(), Some("CQ-F03-02"));
+    assert_eq!(r.contested(), Some(ContestedId::CQ_F03_02));
     assert!(load_below_effective_floor(29).value);
     assert!(!load_below_effective_floor(30).value);
 }
@@ -239,7 +239,7 @@ fn default_rir_is_one_to_three_and_contested() {
     assert_eq!(d.value, (1, 3));
     assert_eq!(d.grade(), EvidenceGrade::Moderate);
     assert!(d.contested().is_some());
-    assert_eq!(d.contested(), Some("CQ-02"));
+    assert_eq!(d.contested(), Some(ContestedId::CQ_02));
 }
 
 // -- hyp-020 --
@@ -250,23 +250,6 @@ fn rir_accuracy_degrades_far_from_failure() {
     assert_eq!(rir_reliability(6).value, RirReliability::ErrorOverTwoReps);
     assert_eq!(novice_start_rir().value, (3, 4));
     assert_eq!(novice_start_rir().grade(), EvidenceGrade::Moderate);
-}
-
-// -- hyp-027/028 + Table 4 --
-#[test]
-fn table_4_is_complete_and_verbatim() {
-    assert_eq!(EXERCISES.len(), 16);
-    let slc = exercise_entry("Seated leg curl").unwrap();
-    assert_eq!(slc.primary_muscles, &["hamstrings"]);
-    assert_eq!(slc.equipment, &[Machine]);
-    assert_eq!(slc.long_length, LongLengthBias::High);
-    let lr = exercise_entry("Lateral raise").unwrap();
-    assert_eq!(lr.long_length, LongLengthBias::Low);
-    assert_eq!(lr.long_length_note, "Low (cable better at bottom)");
-    assert_eq!(
-        exercise_entry("Hip thrust").unwrap().long_length,
-        LongLengthBias::LowToModerate
-    );
 }
 
 // -- hyp-031 --
@@ -427,8 +410,8 @@ fn one_exercise_key_one_isolation_class() {
             crate::names::exercise_key(turkish)
         );
         assert_eq!(
-            crate::plan::is_isolation_lift(ascii),
-            crate::plan::is_isolation_lift(turkish),
+            exercise::is_isolation_lift(ascii),
+            exercise::is_isolation_lift(turkish),
             "{ascii:?} vs {turkish:?}"
         );
         assert_eq!(
@@ -437,8 +420,8 @@ fn one_exercise_key_one_isolation_class() {
             "{ascii:?} vs {turkish:?}"
         );
         assert_eq!(
-            classify(ascii),
-            classify(turkish),
+            exercise::classify(ascii),
+            exercise::classify(turkish),
             "{ascii:?} vs {turkish:?}"
         );
     }

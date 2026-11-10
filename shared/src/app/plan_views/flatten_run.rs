@@ -1,6 +1,12 @@
 //! Flattening a `Prescription::Run` arm and its tracker structure.
 
-use super::*;
+use crate::app::evidence_views::why_from;
+use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths};
+use crate::app::view_types::{
+    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, RunStructureView, RunWalkStepView,
+};
+use crate::evidence::claims;
+use crate::schema::{Prescription, Recommended, RunIntensity, RunVolume, ThreeZone, VdotBand};
 
 /// Render a prescribed run distance: whole km as "8 km", a sub-km step as one
 /// decimal ("6.5 km", "4.3 km"), matching the plan's 0.5 km / 0.1 km
@@ -158,16 +164,17 @@ pub(super) fn flatten_run_prescription(
 /// claim statement, no invented numbers, only what the KB entries state.
 fn run_basis(r: &crate::schema::RunPrescription, rx: &Recommended<Prescription>) -> Option<String> {
     let spike_pct = crate::running::SPIKE_FRAC * 100.0;
+    let window_days = crate::running::SPIKE_WINDOW_DAYS;
     match rx.claim_id() {
         claims::RUN_SPIKE_001 => Some(format!(
             "Distance stays within {spike_pct:.0}% of your longest run in the last \
-             {LONGEST_RUN_WINDOW_DAYS} days. It can be a bigger share of your week than usual \
+             {window_days} days. It can be a bigger share of your week than usual \
              until your weekly distance catches up."
         )),
         claims::RUN_START_001 => Some(format!(
             "The distance stays within {spike_pct:.0}% of the longest run you entered for \
              the last month. Once a logged run goes further, or that answer is more than \
-             {LONGEST_RUN_WINDOW_DAYS} days old, the plan follows your logged runs."
+             {window_days} days old, the plan follows your logged runs."
         )),
         claims::RUN_LONGRUN_TARGET_001 => Some(format!(
             "The long run has reached the most your goal distance needs, or about {:.0} \

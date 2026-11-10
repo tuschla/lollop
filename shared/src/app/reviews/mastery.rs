@@ -1,6 +1,16 @@
 //! Mastery: the personal best or completed week worth naming on the card.
 
-use super::*;
+use crate::app::format::MIN_RATIO_BASE_KG;
+use crate::app::model::{LoggedSet, Model};
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::reviews::split::FEEDBACK_FRESH_DAYS;
+use crate::app::run_metrics::{RunFacts, spike_baseline_km};
+use crate::app::set_index::{NameFacts, SetIndex};
+use crate::app::view_types::{SessionPlanView, SessionStatus};
+use crate::autoreg::E1RM_NOISE_FRAC;
+use crate::day::{is_undated, local_day};
+use crate::profile::Profile;
+use crate::{running, strength};
 
 /// Look-back window for personal bests: a best counts against the prior 90
 /// days of logged history.
@@ -69,10 +79,8 @@ pub(in crate::app) fn detect_mastery(
     let offset = model.today_utc_offset_sec;
     let cutoff = end_of_local_today_sec(model);
     let today = model.today_epoch_day;
-    let dated = |t: i64| t > 0 && cutoff.is_none_or(|c| t <= c);
-    let calis = model
-        .profile()
-        .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
+    let dated = |t: i64| !is_undated(t) && cutoff.is_none_or(|c| t <= c);
+    let calis = model.profile().is_some_and(Profile::uses_calisthenics);
     // A run's day is the local day it STARTED (`RunFacts::started`), the day
     // plan completion credits and its card names.
     let run_day =

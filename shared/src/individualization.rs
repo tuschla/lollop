@@ -10,7 +10,6 @@
 //! re-entry brackets come from File 08 §2/§3.4 (scaling-028/029, Table 3.4b →
 //! REENTRY-001).
 
-use crate::evidence;
 use crate::evidence::{ClaimId, claims};
 use crate::schema::{Adjustment, HealthScreen, Recommended};
 
@@ -46,7 +45,32 @@ pub fn training_age_from_cadence(cadence: ProgressionCadence) -> Recommended<Tra
         ProgressionCadence::WeekToWeek => TrainingAge::Intermediate,
         ProgressionCadence::MonthToMonth => TrainingAge::Advanced,
     };
-    evidence::graded(age, claims::INDIV_TRAGE_001)
+    Recommended::new(age, claims::INDIV_TRAGE_001)
+}
+
+/// Training-age in years for the running weekly-increase cap. The KB gives no
+/// explicit years-per-band mapping, so a novice reads below the 1-year cutoff
+/// (larger +10% steps) and everyone else above it (+5%): an expert-opinion split
+/// flagged as RUN-PROGRESS-001's novice/other basis, mirroring the taper.
+pub fn training_age_years(ta: TrainingAge) -> f64 {
+    match ta {
+        TrainingAge::Novice => 0.5,
+        _ => 2.0,
+    }
+}
+
+/// KB masters threshold, years: the NSCA masters bracket begins at 65
+/// (`MASTERS-001`, Fragala et al. 2019; File 08 indiv-013/014 "masters (65+)").
+const MASTERS_AGE_YEARS: f64 = 65.0;
+
+/// Whether the conservative 2:1 running deload cadence applies
+/// (`RUN-DELOAD-001`: "2:1 for older / injury-prone / low training-age"):
+/// masters age ([`MASTERS_AGE_YEARS`]+, the "older" half of the basis) or a
+/// novice training age. Injury-prone is not modeled. No further age branch
+/// exists (HARD RULE 1, the KB states no other age-based load/intensity
+/// modification).
+pub fn conservative_deload(age_years: Option<f64>, training_age: TrainingAge) -> bool {
+    age_years.is_some_and(|a| a >= MASTERS_AGE_YEARS) || matches!(training_age, TrainingAge::Novice)
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +109,7 @@ pub fn strength_defaults(age: TrainingAge) -> Recommended<StrengthDefaults> {
             sets_per_muscle: 8,
         },
     };
-    evidence::graded(d, claims::STR_TRAGE_001)
+    Recommended::new(d, claims::STR_TRAGE_001)
 }
 
 /// How disproportionately added volume returns for this athlete along the
@@ -111,7 +135,7 @@ pub fn volume_sensitivity(age: TrainingAge) -> Recommended<VolumeSensitivity> {
         TrainingAge::Intermediate => VolumeSensitivity::Moderate,
         TrainingAge::Advanced => VolumeSensitivity::Low,
     };
-    evidence::graded(s, claims::STR_TRAGE_001)
+    Recommended::new(s, claims::STR_TRAGE_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +163,7 @@ pub enum ScaleLever {
 /// adaptations retained if intensity held while volume is cut). SCALE-DOWN-001
 /// (Strong).
 pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
-    evidence::graded(
+    Recommended::new(
         [
             ScaleLever::AccessoryVolume,
             ScaleLever::SetsTowardMev,
@@ -156,7 +180,7 @@ pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
 /// The inverse priority to scale-down. SCALE-UP-001 (ExpertOpinion ordering,
 /// unlike the Strong scale-down evidence).
 pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
-    evidence::graded(
+    Recommended::new(
         [
             ScaleLever::SetsTowardMev,
             ScaleLever::Frequency,
@@ -171,7 +195,7 @@ pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
 /// Minimum weekly exposures per muscle to preserve when consolidating frequency
 /// (File 08 scaling-028). SCALE-DOWN-001.
 pub fn min_muscle_exposures_per_week() -> Recommended<u8> {
-    evidence::graded(2, claims::SCALE_DOWN_001)
+    Recommended::new(2, claims::SCALE_DOWN_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +264,7 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
             run_volume_frac: 0.0,
         }
     };
-    evidence::graded(r, claims::REENTRY_001)
+    Recommended::new(r, claims::REENTRY_001)
 }
 
 /// REENTRY-RAMP-001 linear ramp: `f0` on day 0, climbing to 1.0 over
@@ -287,7 +311,7 @@ pub fn reentry_ramp(weeks_off: f64, days_since_return: i64) -> Recommended<Reent
     let ramp_days = re.ramp_weeks.1 as i64 * 7;
     let t = days_since_return.max(0);
     let active = ramp_days > 0 && t < ramp_days && re.load_frac.is_none_or(|f| f < 1.0);
-    evidence::graded(
+    Recommended::new(
         ReentryRamp {
             frac: re.load_frac.map(|f0| linear_ramp(f0, t, ramp_days)),
             ramp_days,
@@ -331,7 +355,7 @@ pub fn run_reentry(weeks_off: f64, days_since_return: i64) -> Recommended<RunReE
     let re = resistance_reentry(weeks_off).value;
     let ramp_days = re.ramp_weeks.1 as i64 * 7;
     let t = days_since_return.max(0);
-    evidence::graded(
+    Recommended::new(
         RunReEntry {
             volume_frac: linear_ramp(re.run_volume_frac, t, ramp_days),
             ramp_days,
@@ -360,7 +384,7 @@ pub struct LoadIncrement {
 /// Novice linear-progression load bump when the session was completed
 /// (File 08 indiv-008; DBLPROG-001).
 pub fn novice_load_increment() -> Recommended<LoadIncrement> {
-    evidence::graded(
+    Recommended::new(
         LoadIncrement {
             upper_kg: 2.5,
             lower_kg: 5.0,
@@ -379,7 +403,7 @@ pub struct ProteinTarget {
 /// Masters (65+) protein target: 1.2-1.6 g/kg/day for anabolic resistance
 /// (File 08 indiv-013; MASTERS-001).
 pub fn masters_protein_target() -> Recommended<ProteinTarget> {
-    evidence::graded(
+    Recommended::new(
         ProteinTarget {
             g_per_kg: (1.2, 1.6),
         },
@@ -397,9 +421,9 @@ pub fn masters_protein_target() -> Recommended<ProteinTarget> {
 /// cited to the RED-S deferral claim (SAFE-REDS-001, Strong, safety-critical).
 pub fn deficit_protein_target(reds_signal_present: bool) -> Recommended<Option<ProteinTarget>> {
     if reds_signal_present {
-        evidence::graded(None, claims::SAFE_REDS_001)
+        Recommended::new(None, claims::SAFE_REDS_001)
     } else {
-        evidence::graded(
+        Recommended::new(
             Some(ProteinTarget {
                 g_per_kg: (1.8, 2.7),
             }),
@@ -412,7 +436,7 @@ pub fn deficit_protein_target(reds_signal_present: bool) -> Recommended<Option<P
 /// resistance (File 08 indiv-013): ~0.4 g/kg per meal (vs the lower per-meal
 /// dose sufficient in younger adults). MASTERS-001.
 pub fn masters_protein_per_meal() -> Recommended<f64> {
-    evidence::graded(0.4, claims::MASTERS_001)
+    Recommended::new(0.4, claims::MASTERS_001)
 }
 
 /// The WHO 5-17 weekly activity reference (File 08 youth-pa-001): an average
@@ -433,7 +457,7 @@ pub struct YouthActivityTargets {
 /// activity card tracks logged activity against.
 pub fn youth_activity_targets() -> Recommended<YouthActivityTargets> {
     const DAILY_MINUTES: u32 = 60;
-    evidence::graded(
+    Recommended::new(
         YouthActivityTargets {
             daily_minutes: DAILY_MINUTES,
             weekly_minutes: DAILY_MINUTES * 7,
@@ -473,7 +497,7 @@ pub fn novice_stall_action(
     } else {
         None
     };
-    evidence::graded(outcome, claims::DBLPROG_001)
+    Recommended::new(outcome, claims::DBLPROG_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +508,7 @@ pub fn novice_stall_action(
 /// (File 08 indiv-026: ~1x/wk holds a muscle; protect frequency + intensity,
 /// cut accessory volume first). TIMECAP-001.
 pub fn maintenance_frequency_per_week() -> Recommended<u8> {
-    evidence::graded(1, claims::TIMECAP_001)
+    Recommended::new(1, claims::TIMECAP_001)
 }
 
 /// Substitution rule for limited equipment: substitute the movement pattern and
@@ -500,7 +524,7 @@ pub struct SubstitutionRule {
 /// Movement-pattern substitution default for home/minimal equipment
 /// (File 08 indiv-023; SUBST-001).
 pub fn substitution_rule() -> Recommended<SubstitutionRule> {
-    evidence::graded(
+    Recommended::new(
         SubstitutionRule {
             match_movement_pattern: true,
             compensate_with_reps_near_failure: true,
@@ -577,7 +601,7 @@ pub fn environment_modifier(env: Environment) -> Recommended<EnvironmentModifier
         },
         Environment::Neutral => none,
     };
-    evidence::graded(m, claims::ENV_001)
+    Recommended::new(m, claims::ENV_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +626,7 @@ pub struct PregnancyPrecautions {
 /// The pregnancy avoid-list (File 08 safety-047; ACOG 804). Surfaced whenever
 /// the profile reports pregnancy, alongside the safety-045 deferral.
 pub fn pregnancy_precautions() -> Recommended<PregnancyPrecautions> {
-    evidence::graded(
+    Recommended::new(
         PregnancyPrecautions {
             avoid_prolonged_supine: true,
             avoid_overheating: true,
@@ -686,7 +710,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         .into_iter()
         .filter(|(fires, ..)| *fires)
         .map(|(_, reason, claim)| {
-            evidence::graded(
+            Recommended::new(
                 Adjustment::Defer {
                     reason: reason.into(),
                 },

@@ -13,17 +13,90 @@
 //! citations only; full statistics + DOIs live in
 //! `knowledge-base/extracted/09-evidence-map.md`.
 
+/// The row identifier `$id` spelled with dashes (`RUN_SPIKE_001` →
+/// `"RUN-SPIKE-001"`), built at compile time so each id is written once.
+macro_rules! dashed_id {
+    ($id:ident) => {{
+        const BYTES: [u8; stringify!($id).len()] = $crate::evidence::dash_bytes(stringify!($id));
+        const ID: &str = match ::core::str::from_utf8(&BYTES) {
+            Ok(id) => id,
+            Err(_) => panic!("row identifiers are ASCII"),
+        };
+        ID
+    }};
+}
+
+/// Declares one discipline's rows: an enum with one variant per row, a
+/// [`ClaimId`] constant per row, and the rows in variant order, so
+/// `ROWS[row as usize]` is the row a variant names. A row's `claim_id` is its
+/// name spelled with dashes (`RUN_SPIKE_001` → `"RUN-SPIKE-001"`). A row
+/// prefixed `#[kb_only]` is recorded from the knowledge base but cited by no
+/// engine rule.
+macro_rules! claim_group {
+    (@surfaced) => {
+        true
+    };
+    (@surfaced kb_only) => {
+        false
+    };
+    ($group:ident => $variant:ident; $( $(#[$marker:ident])? $id:ident => $draft:expr ),* $(,)?) => {
+        /// One variant per registry row of this discipline group.
+        #[allow(non_camel_case_types)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum $group {
+            $($id),*
+        }
+
+        $(pub const $id: $crate::evidence::ClaimId = $crate::evidence::ClaimId::$variant($group::$id);)*
+
+        static ROWS: &[$crate::evidence::EvidenceEntry] = &[
+            $($crate::evidence::EvidenceEntry::from_draft(
+                $draft,
+                $id,
+                dashed_id!($id),
+                claim_group!(@surfaced $($marker)?),
+            )),*
+        ];
+
+        impl $group {
+            /// The registry row this variant names.
+            pub(crate) fn entry(self) -> &'static $crate::evidence::EvidenceEntry {
+                &ROWS[self as usize]
+            }
+
+            /// Every row of this group, in variant order.
+            pub(crate) fn rows() -> &'static [$crate::evidence::EvidenceEntry] {
+                ROWS
+            }
+        }
+    };
+}
+
 mod cite;
 pub mod claims;
 mod contested;
+mod draft;
+mod grade;
 #[cfg(test)]
 mod tests;
 
 use std::fmt;
 
-use crate::schema::{EvidenceGrade, Recommended};
+pub use contested::{CONTESTED_QUESTIONS, ContestedId, ContestedQuestion};
+use draft::ClaimDraft;
+pub use grade::EvidenceGrade;
 
-pub use contested::CONTESTED_QUESTIONS;
+/// `id` with every `_` replaced by `-`; `N` is `id.len()`.
+const fn dash_bytes<const N: usize>(id: &str) -> [u8; N] {
+    let bytes = id.as_bytes();
+    let mut out = [0; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = if bytes[i] == b'_' { b'-' } else { bytes[i] };
+        i += 1;
+    }
+    out
+}
 
 /// One graded claim in the registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,8 +111,8 @@ pub struct EvidenceEntry {
     pub contradicting: &'static [&'static str],
     /// Non-negotiable deferral / stop signal when true.
     pub safety_critical: bool,
-    /// Contested-question id (`"CQ-01"`) if the claim is under active debate.
-    pub contested: Option<&'static str>,
+    /// The contested question the claim is under active debate in.
+    pub contested: Option<ContestedId>,
     /// Re-grade cadence in months (12 by default; 6 for fast-moving topics).
     pub review_months: u8,
     /// `false` for a row marked `#[kb_only]`: recorded from the knowledge base
@@ -49,6 +122,27 @@ pub struct EvidenceEntry {
 }
 
 impl EvidenceEntry {
+    /// The finished row `id` names from its `draft`, keyed `claim_id`.
+    const fn from_draft(
+        draft: ClaimDraft,
+        id: ClaimId,
+        claim_id: &'static str,
+        surfaced: bool,
+    ) -> Self {
+        EvidenceEntry {
+            id,
+            claim_id,
+            statement: draft.statement,
+            grade: draft.grade,
+            primary_citations: draft.primary_citations,
+            contradicting: draft.contradicting,
+            safety_critical: draft.safety_critical,
+            contested: draft.contested,
+            review_months: draft.review_months,
+            surfaced,
+        }
+    }
+
     /// Default confidence from grade (File 09 mapping).
     pub const fn confidence_score(&self) -> f32 {
         self.grade.default_confidence()
@@ -72,99 +166,6 @@ impl EvidenceEntry {
 /// Citation line for a claim the KB records with no published source.
 pub const NO_PUBLISHED_SOURCE: &str =
     "A common coaching rule; no published study behind the exact numbers";
-
-/// Re-grade cadence in months of a row that names none (File 09 review
-/// schedule; fast-moving topics re-grade sooner).
-const DEFAULT_REVIEW_MONTHS: u8 = 12;
-
-/// A registry row before its discipline group assigns its [`ClaimId`]: built
-/// by [`claim`], then the modifiers for metadata that differs from the
-/// defaults.
-struct ClaimDraft {
-    claim_id: &'static str,
-    statement: &'static str,
-    grade: EvidenceGrade,
-    primary_citations: &'static [&'static str],
-    contradicting: &'static [&'static str],
-    safety_critical: bool,
-    contested: Option<&'static str>,
-    review_months: u8,
-}
-
-/// A registry row with the defaults: no contradicting evidence on record,
-/// not safety-critical, not contested, re-graded every
-/// [`DEFAULT_REVIEW_MONTHS`].
-const fn claim(
-    claim_id: &'static str,
-    statement: &'static str,
-    grade: EvidenceGrade,
-    primary_citations: &'static [&'static str],
-) -> ClaimDraft {
-    ClaimDraft {
-        claim_id,
-        statement,
-        grade,
-        primary_citations,
-        contradicting: &[],
-        safety_critical: false,
-        contested: None,
-        review_months: DEFAULT_REVIEW_MONTHS,
-    }
-}
-
-impl ClaimDraft {
-    /// The contradicting evidence on record.
-    const fn contradicting(mut self, notes: &'static [&'static str]) -> Self {
-        self.contradicting = notes;
-        self
-    }
-
-    /// Marks a non-negotiable deferral / stop signal.
-    const fn safety(mut self) -> Self {
-        self.safety_critical = true;
-        self
-    }
-
-    /// The contested question (`"CQ-01"`) the claim is debated under.
-    const fn contested(mut self, id: &'static str) -> Self {
-        self.contested = Some(id);
-        self
-    }
-
-    /// A re-grade cadence other than [`DEFAULT_REVIEW_MONTHS`].
-    const fn review(mut self, months: u8) -> Self {
-        self.review_months = months;
-        self
-    }
-
-    /// The finished row `id` names.
-    const fn row(self, id: ClaimId, surfaced: bool) -> EvidenceEntry {
-        EvidenceEntry {
-            id,
-            claim_id: self.claim_id,
-            statement: self.statement,
-            grade: self.grade,
-            primary_citations: self.primary_citations,
-            contradicting: self.contradicting,
-            safety_critical: self.safety_critical,
-            contested: self.contested,
-            review_months: self.review_months,
-            surfaced,
-        }
-    }
-}
-
-/// An open question where evidence conflicts; the engine holds a default lean.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ContestedQuestion {
-    pub id: &'static str,
-    pub question: &'static str,
-    /// Current engine default / lean while the question stays open.
-    pub engine_default: &'static str,
-    /// One attributable opposing view, shown as "one view: {other_side}";
-    /// `None` when the KB names none.
-    pub other_side: Option<&'static str>,
-}
 
 /// Declares [`ClaimId`] over the discipline groups in [`claims`] plus the
 /// lookups that dispatch on the group.
@@ -216,15 +217,4 @@ claim_groups! {
     Calisthenics(claims::CalisthenicsClaim),
     Individualization(claims::IndividualizationClaim),
     Myth(claims::MythClaim),
-}
-
-/// Wrap a raw value in a [`Recommended`] backed by registry claim `id`, the
-/// constructor every engine rule funnels through.
-pub(crate) fn graded<T>(value: T, id: ClaimId) -> Recommended<T> {
-    Recommended::new(value, id)
-}
-
-/// Look up a contested question by id.
-pub fn contested_question(id: &str) -> Option<&'static ContestedQuestion> {
-    CONTESTED_QUESTIONS.iter().find(|q| q.id == id)
 }

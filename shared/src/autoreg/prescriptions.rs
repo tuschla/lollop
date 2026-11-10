@@ -4,11 +4,8 @@
 //! overtraining-continuum deferrals (File 08 safety-041/042; autoreg-042). All
 //! pure and deterministic; thresholds verbatim from File 06.
 
-use super::rules::{
-    HRV_ESCALATE_STREAK, HRV_MIN_WEEKLY_READINGS, HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE,
-    RPE_DELTA_BELOW, WELLNESS_DOWNGRADE_STREAK, WELLNESS_MULTIDAY_STREAK,
-};
-use crate::evidence::{self, claims};
+use super::rules::HRV_ESCALATE_STREAK;
+use crate::evidence::claims;
 use crate::schema::{Adjustment, Recommended};
 
 /// Reliability band of a reference-load mean concentric velocity, m/s
@@ -23,6 +20,10 @@ pub(crate) const VBT_WEEKLY_DROP_DELOAD_M_S: f64 = 0.06;
 /// Load gap below plan, %, at which planned RPE counts as only hit at a lower
 /// load (autoreg-023, AUTOREG-DELOAD-001).
 pub(crate) const RPE_LOAD_GAP_DELOAD_PCT: f64 = 7.0;
+
+/// Sessions in a week with that load gap that deload (autoreg-023 "≥2
+/// sessions").
+pub(crate) const RPE_LOAD_GAP_DELOAD_SESSIONS: u8 = 2;
 
 /// Daily-1RM readiness verdict from mean concentric velocity at a reference
 /// load vs. baseline (File 06 autoreg-008/009; VBT), banded by
@@ -48,8 +49,16 @@ pub fn vbt_daily_readiness(mcv_delta_m_s: f64) -> Recommended<VbtReadiness> {
     } else {
         VbtReadiness::Hold
     };
-    evidence::graded(v, claims::AUTOREG_VBT_001)
+    Recommended::new(v, claims::AUTOREG_VBT_001)
 }
+
+/// First-set RPE delta at/below which a strong first set adds a set
+/// (autoreg-011: "RPE ≤ target−1").
+const ADD_SET_MAX_RPE_DELTA: f64 = -1.0;
+
+/// First-set RPE delta at/above which the last planned set drops
+/// (autoreg-012: "RPE ≥ target+1").
+const DROP_SET_MIN_RPE_DELTA: f64 = 1.0;
 
 /// Within-session set-volume decision (File 06 autoreg-011/012).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,14 +79,14 @@ pub fn set_volume_action(
     rpe_delta: f64,
     wellness_normal: bool,
 ) -> Recommended<SetVolumeAction> {
-    let a = if first_set_reps_met && rpe_delta <= RPE_DELTA_BELOW && wellness_normal {
+    let a = if first_set_reps_met && rpe_delta <= ADD_SET_MAX_RPE_DELTA && wellness_normal {
         SetVolumeAction::AddSet
-    } else if !first_set_reps_met || rpe_delta >= RPE_DELTA_ABOVE {
+    } else if !first_set_reps_met || rpe_delta >= DROP_SET_MIN_RPE_DELTA {
         SetVolumeAction::DropLastSet
     } else {
         SetVolumeAction::HoldPlanned
     };
-    evidence::graded(a, claims::AUTOREG_SETVOL_001)
+    Recommended::new(a, claims::AUTOREG_SETVOL_001)
 }
 
 /// RPE-stop: cut remaining sets once the target RPE is reached before the
@@ -100,9 +109,13 @@ fn standard_deload() -> Adjustment {
 /// below plan for ≥2 sessions (File 06 autoreg-023). `None` when the trigger
 /// has not fired.
 pub fn deload_from_rpe_load_gap(sessions_ge_7pct_below: u8) -> Option<Recommended<Adjustment>> {
-    (sessions_ge_7pct_below >= 2)
-        .then(|| evidence::graded(standard_deload(), claims::AUTOREG_DELOAD_001))
+    (sessions_ge_7pct_below >= RPE_LOAD_GAP_DELOAD_SESSIONS)
+        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_001))
 }
+
+/// Days of wellness z ≤ −1 that, with an RPE creep, deload (autoreg-024 "≥3
+/// days").
+pub(crate) const RPE_CREEP_WELLNESS_LOW_DAYS: u8 = 3;
 
 /// Deload when session RPE creeps +1 across the week at the same loads AND the
 /// wellness composite z ≤ −1 for ≥3 days (File 06 autoreg-024).
@@ -110,23 +123,26 @@ pub fn deload_from_rpe_creep_and_wellness(
     rpe_creep_plus_one: bool,
     wellness_z_le_neg1_days: u8,
 ) -> Option<Recommended<Adjustment>> {
-    (rpe_creep_plus_one && wellness_z_le_neg1_days >= WELLNESS_MULTIDAY_STREAK)
-        .then(|| evidence::graded(standard_deload(), claims::AUTOREG_DELOAD_001))
+    (rpe_creep_plus_one && wellness_z_le_neg1_days >= RPE_CREEP_WELLNESS_LOW_DAYS)
+        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_001))
 }
 
 /// Deload when reference-load velocity is down more than
 /// `VBT_WEEKLY_DROP_DELOAD_M_S` across the week (File 06 autoreg-026).
 pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended<Adjustment>> {
     (weekly_mcv_drop_m_s > VBT_WEEKLY_DROP_DELOAD_M_S)
-        .then(|| evidence::graded(standard_deload(), claims::AUTOREG_DELOAD_VBT_001))
+        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_VBT_001))
 }
+
+/// Failed key sessions in a week that cut weekly volume (autoreg-036).
+pub(crate) const FAILED_KEY_SESSIONS_DELOAD: u8 = 2;
 
 /// Reduce weekly volume 20–30% (defer hard work) after two failed key sessions
 /// in a week (File 06 autoreg-036). Encoded as a load-neutral volume deload
 /// (25% midpoint).
 pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommended<Adjustment>> {
-    (failed_key_sessions >= 2).then(|| {
-        evidence::graded(
+    (failed_key_sessions >= FAILED_KEY_SESSIONS_DELOAD).then(|| {
+        Recommended::new(
             Adjustment::Deload {
                 volume_reduction_pct: 25.0,
                 load_reduction_pct: 0.0,
@@ -137,19 +153,29 @@ pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommende
     })
 }
 
+/// Interval reps over target RPE / HR cap that slow the remaining reps
+/// (autoreg-031 "≥2 reps").
+pub(crate) const INTERVAL_REPS_OVER_TARGET_CUT: u8 = 2;
+
 /// Interval-pace autoregulation (File 06 autoreg-031): when ≥2 reps land at
 /// RPE ≥ target+1 or above the HR cap, cut the remaining-rep pace target ~2–4%
 /// (returns the fractional pace reduction to apply, else `None`).
 pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
-    (reps_over_target >= 2).then(|| evidence::graded(0.03, claims::AUTOREG_INTERVAL_PACE_001))
+    (reps_over_target >= INTERVAL_REPS_OVER_TARGET_CUT)
+        .then(|| Recommended::new(0.03, claims::AUTOREG_INTERVAL_PACE_001))
 }
 
 /// Easy-day pace is governed by the HR cap, not pace (File 06 autoreg-033):
 /// if the runner cannot hold the prescribed easy pace under the HR cap, slow
 /// the pace. `true` = slow the easy pace.
 pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<bool> {
-    evidence::graded(!can_hold_pace_under_cap, claims::AUTOREG_EASY_CAP_001)
+    Recommended::new(!can_hold_pace_under_cap, claims::AUTOREG_EASY_CAP_001)
 }
+
+/// Minimum lnRMSSD readings inside the trailing rolling window before the HRV
+/// channel emits a weekly baseline (autoreg-047: "need ≥4–5 readings/week for a
+/// valid weekly baseline"). Below this the window is too sparse to trust.
+pub(super) const HRV_MIN_WEEKLY_READINGS: usize = 4;
 
 /// Which signal source drives autoregulation given data availability
 /// (File 06 autoreg-047/048; graceful fallback).
@@ -181,11 +207,15 @@ pub fn autoreg_source(
     } else {
         AutoregSource::PerformanceOnlyHold
     };
-    evidence::graded(s, claims::AUTOREG_FALLBACK_001)
+    Recommended::new(s, claims::AUTOREG_FALLBACK_001)
 }
 
-/// Unreliable readings among the last 3 at which HRV gating is suspended
-/// (autoreg-050).
+/// Most recent readings autoreg-050 inspects before suspending HRV gating
+/// ("≥2 of the last 3 readings flagged").
+pub(crate) const HRV_QC_LOOKBACK: usize = 3;
+
+/// Unreliable readings among the last [`HRV_QC_LOOKBACK`] at which HRV gating
+/// is suspended (autoreg-050).
 pub(crate) const HRV_UNRELIABLE_SUSPEND: u8 = 2;
 
 /// Suspend HRV gating once ≥2 of the last 3 readings were flagged unreliable
@@ -199,11 +229,15 @@ pub fn suspend_hrv_gating(unreliable_in_last_three: u8) -> bool {
 /// below the SWC band) warrants inserting a recovery day / easy block, beyond the
 /// 7-day rolling verdict in `hrv_downgrade`. Fires at ≥3 days. HRV-001.
 pub fn hrv_suppressed_recovery_day(consecutive_suppressed_days: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         consecutive_suppressed_days >= HRV_ESCALATE_STREAK,
         claims::HRV_001,
     )
 }
+
+/// Days of suppressed wellness that, with a rising resting HR, call for easy
+/// days (autoreg-035 "≥2 days").
+pub(crate) const WELLNESS_RHR_EASY_DAYS: u8 = 2;
 
 /// autoreg-035: multi-day suppressed wellness combined with a rising resting HR
 /// trend calls for 1–3 easy days or cross-training. Fires when wellness has been
@@ -213,21 +247,9 @@ pub fn wellness_rhr_multiday_easy(
     wellness_suppressed_days: u8,
     rhr_rising: bool,
 ) -> Recommended<bool> {
-    evidence::graded(
-        wellness_suppressed_days >= WELLNESS_DOWNGRADE_STREAK && rhr_rising,
+    Recommended::new(
+        wellness_suppressed_days >= WELLNESS_RHR_EASY_DAYS && rhr_rising,
         claims::AUTOREG_WELLNESS_RHR_001,
-    )
-}
-
-/// autoreg-029: parasympathetic-saturation guard. `true` = do NOT auto-add
-/// load; hold and weigh with wellness. Fires when the 7-day rolling lnRMSSD
-/// z-score sits above the SWC upper limit (baseline + 0.5 SD) *during a
-/// high-load block*, unusually high HRV under heavy loading can be
-/// saturation, not readiness. AUTOREG-HRV-SAT-001 (Moderate, Plews).
-pub(super) fn hrv_saturation_hold(hrv_z: f64, high_load_block: bool) -> Recommended<bool> {
-    evidence::graded(
-        high_load_block && hrv_z > HRV_SWC_UPPER_Z,
-        claims::AUTOREG_HRV_SAT_001,
     )
 }
 
@@ -241,7 +263,7 @@ pub fn hrv_single_day_downgrade(
     downtrend_days: u8,
 ) -> Option<Recommended<Adjustment>> {
     (single_day_z < -1.0 && downtrend_days >= 2)
-        .then(|| evidence::graded(Adjustment::DowngradeSession, claims::HRV_001))
+        .then(|| Recommended::new(Adjustment::DowngradeSession, claims::HRV_001))
 }
 
 /// autoreg-025: the at/above-MRV sign cluster (joint aches, performance stall,
@@ -251,8 +273,12 @@ pub fn hrv_single_day_downgrade(
 /// magnitude per the rule's RP-framework mapping: volume −50%, load −10%,
 /// 1 week. AUTOREG-MRV-001 (ExpertOpinion, Israetel et al. 2021).
 pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<Recommended<Adjustment>> {
-    sign_cluster_present.then(|| evidence::graded(standard_deload(), claims::AUTOREG_MRV_001))
+    sign_cluster_present.then(|| Recommended::new(standard_deload(), claims::AUTOREG_MRV_001))
 }
+
+/// Weeks of improved pace at target HR that schedule a threshold re-test
+/// (autoreg-032's stated ≥2-week bound).
+pub(crate) const PACE_RETEST_WEEKS: u8 = 2;
 
 /// autoreg-032: pace at target HR improved by at least a smallest-worthwhile
 /// amount, sustained over 2–3 weeks → re-test / raise threshold pace. `true` =
@@ -260,8 +286,8 @@ pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<Recommended<Adjust
 /// the caller judges "improved ≥ SWC"; the ≥2-week duration bound is the
 /// stated number. AUTOREG-PACE-RETEST-001 (Moderate, File 06 §3B).
 pub fn threshold_retest_due(improved_ge_swc: bool, weeks_sustained: u8) -> Recommended<bool> {
-    evidence::graded(
-        improved_ge_swc && weeks_sustained >= 2,
+    Recommended::new(
+        improved_ge_swc && weeks_sustained >= PACE_RETEST_WEEKS,
         claims::AUTOREG_PACE_RETEST_001,
     )
 }
@@ -280,7 +306,7 @@ pub fn unexplained_decline_rest_defer(
     despite_deload: bool,
 ) -> Option<Recommended<Adjustment>> {
     (decline_weeks >= 2 && wellness_disturbed && despite_deload).then(|| {
-        evidence::graded(Adjustment::Defer {
+        Recommended::new(Adjustment::Defer {
             reason: "Performance down for 2+ weeks with no clear cause, plus tiredness, low mood or poor sleep, even after a lighter week. Rest, and see a doctor to rule out overtraining, under-eating (RED-S) or another medical cause."
                 .into(),
         },
@@ -298,7 +324,7 @@ pub fn nfor_cluster_defer(
     suppressed_wellness_domains: u8,
 ) -> Option<Recommended<Adjustment>> {
     (decrement_weeks >= 2 && suppressed_wellness_domains >= 2).then(|| {
-        evidence::graded(Adjustment::Defer {
+        Recommended::new(Adjustment::Defer {
             reason: "Possible overreaching: performance down for 2+ weeks with no clear cause, and 2+ check-in scores low. Take a recovery break; see a doctor if it doesn't improve."
                 .into(),
         },

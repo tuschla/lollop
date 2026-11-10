@@ -6,7 +6,7 @@
 use super::*;
 
 fn is_bench(name: &str) -> bool {
-    crate::plan::same_movement(name, "Bench press")
+    crate::exercise::same_movement(name, "Bench press")
 }
 
 /// Planned Bench press loads of the rendered week from local day `from`.
@@ -94,8 +94,7 @@ fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
     legs.extend(std::iter::repeat_n(1.0e-4 * (1.0 + 1.0e-5), 50));
     let start = 1_700_000_000;
     let points = north_track((50.0, start), &legs);
-    let raw =
-        crate::running::track_positive_split_pct(&points, &[]).expect("a 100-leg track splits");
+    let raw = crate::gps::track_positive_split_pct(&points, &[]).expect("a 100-leg track splits");
     assert_eq!(raw, 0.0, "the split rounds to zero: {raw}");
     assert!(!raw.is_sign_negative(), "positive split is -0.0");
 

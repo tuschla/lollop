@@ -1,15 +1,38 @@
 //! Run progress over time and the post-memo run-card annotation.
 
-use super::*;
+use crate::app::format::{
+    fmt_clock, monday_of, race_distance_label, race_distance_title, round_tenths, whole_seconds,
+};
+use crate::app::memo::{Memo, RUN_MEMO_CAP, memoized};
+use crate::app::model::{LoggedRun, Model};
+use crate::app::run_metrics::{QcTrack, RunFacts};
+use crate::app::view_types::{
+    BestEffortView, EvidenceTagView, RunProgressView, RunResultView, RunWeekView,
+};
+use crate::day::{is_undated, local_day};
+use crate::evidence::claims;
+use crate::running::GoalDistance;
+use crate::schema::Recommended;
+use crate::{gps, load, running};
 
-/// Standard best-effort distances: (search metres, wire metres). Labels come
-/// from `race_distance_title` / `race_distance_label`.
-const BEST_EFFORT_DISTANCES: [(f64, u32); 4] = [
-    (1000.0, 1000),
-    (5000.0, 5000),
-    (10_000.0, 10_000),
-    (21_097.5, 21_097),
+/// Standard best-effort distances, metres: one kilometre and the 5K, 10K and
+/// half-marathon race distances. The wire carries whole metres (21 097 for the
+/// half). Labels come from `race_distance_title` / `race_distance_label`.
+const BEST_EFFORT_DISTANCES: [f64; 4] = [
+    running::KM_M,
+    race_m(GoalDistance::FiveK),
+    race_m(GoalDistance::TenK),
+    race_m(GoalDistance::HalfMarathon),
 ];
+
+/// A race goal's distance in a const context (a goal without a race fails the
+/// build).
+const fn race_m(g: GoalDistance) -> f64 {
+    match g.metres() {
+        Some(m) => m,
+        None => panic!("not a race goal"),
+    }
+}
 
 /// A hand-logged run counts as a whole-distance effort when its distance is
 /// within this band of the standard distance (a 5.0–5.15 km run is a 5K); the
@@ -28,7 +51,7 @@ thread_local! {
 }
 
 /// Fastest time (seconds) to cover `target_m` over contiguous moving legs
-/// (`(seconds, metres)`, [`running::moving_legs`]). The window start is
+/// (`(seconds, metres)`, [`gps::moving_legs`]). The window start is
 /// interpolated inside its first leg (even pace within one leg), so the effort
 /// covers exactly `target_m`. `None` when the legs are shorter.
 pub(in crate::app) fn fastest_window_sec(legs: &[(f64, f64)], target_m: f64) -> Option<f64> {
@@ -79,7 +102,7 @@ fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
             None => {
                 let (km, min) = (r.distance_km, r.duration_min);
                 if km > 0.0 && min > 0.0 {
-                    for (slot, (m, _)) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
+                    for (slot, m) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
                         let d = km * 1000.0;
                         if d >= m * WHOLE_RUN_MATCH.0 && d <= m * WHOLE_RUN_MATCH.1 {
                             *slot = Some(min * 60.0 * m / d);
@@ -88,8 +111,8 @@ fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
                 }
             }
             Some(q) => {
-                let legs = running::moving_legs(&q.track, &q.seg_starts);
-                for (slot, (m, _)) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
+                let legs = gps::moving_legs(&q.track, &q.seg_starts);
+                for (slot, m) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
                     *slot = fastest_window_sec(&legs, m);
                 }
             }
@@ -182,9 +205,9 @@ pub(in crate::app) fn build_run_progress(
     let best_efforts = bests
         .iter()
         .zip(BEST_EFFORT_DISTANCES)
-        .filter_map(|(b, (m, wire_m))| {
+        .filter_map(|(b, m)| {
             b.map(|(t, entry_id, observed_at)| BestEffortView {
-                distance_m: wire_m,
+                distance_m: m as u32,
                 label: race_distance_title(m / 1000.0),
                 time_sec: whole_seconds(t).min(u64::from(u32::MAX)) as u32,
                 time_label: fmt_clock(t),
@@ -193,7 +216,7 @@ pub(in crate::app) fn build_run_progress(
             })
         })
         .collect();
-    let g = graded((), claims::ADH_SELFMON_001);
+    let g = Recommended::new((), claims::ADH_SELFMON_001);
     Some(RunProgressView {
         weekly,
         planned_weekly_km: planned_run_km,

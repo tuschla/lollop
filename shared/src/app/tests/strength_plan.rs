@@ -4,7 +4,8 @@
 //! velocity cue, prefill targets and honest calisthenics session titles.
 
 use super::*;
-use crate::plan::{Anchors, is_isolation_lift, movement_pattern, same_movement, synthesize};
+use crate::exercise::{is_isolation_lift, movement_pattern, same_movement};
+use crate::plan::{Anchors, synthesize};
 use crate::schema::Prescription;
 
 /// A dated bench set with no recorded RPE (so `effective_reps` == `reps`).
@@ -89,10 +90,14 @@ fn novice_anchored_hypertrophy_reps_stay_in_the_reliable_window() {
         ..strength_profile()
     };
     let anchors = Anchors {
-        lift_e1rm: vec![("Bench".to_string(), 116.7)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Bench".to_string(), 116.7)],
+            ..Default::default()
+        },
         ..Anchors::default()
     };
-    let prog = synthesize(&profile, &anchors, 0).expect("a strength profile plans");
+    let prog =
+        synthesize(&PlanProfile::new(&profile), &anchors, 0).expect("a strength profile plans");
     let bench = prog
         .mesocycle
         .sessions
@@ -170,10 +175,14 @@ fn a_lone_isolation_log_does_not_lead_the_dup_week() {
     // unconditional strong-needle gate, not just the pattern-None arm.
     for iso in ["Biceps curl", "Chest fly", "Pec deck"] {
         let anchors = Anchors {
-            lift_e1rm: vec![(iso.to_string(), 40.0)],
+            lift: crate::plan::LiftAnchors {
+                e1rm: vec![(iso.to_string(), 40.0)],
+                ..Default::default()
+            },
             ..Anchors::default()
         };
-        let prog = synthesize(&profile, &anchors, 0).expect("a strength profile plans");
+        let prog =
+            synthesize(&PlanProfile::new(&profile), &anchors, 0).expect("a strength profile plans");
         let primary = prog
             .mesocycle
             .sessions
@@ -273,10 +282,14 @@ fn power_day_prescriptions_carry_the_velocity_intent() {
         ..strength_profile()
     };
     let anchors = Anchors {
-        lift_e1rm: vec![("Bench".to_string(), 100.0)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Bench".to_string(), 100.0)],
+            ..Default::default()
+        },
         ..Anchors::default()
     };
-    let prog = synthesize(&profile, &anchors, 0).expect("a strength profile plans");
+    let prog =
+        synthesize(&PlanProfile::new(&profile), &anchors, 0).expect("a strength profile plans");
     let day_lift = |want: SessionType| {
         prog.mesocycle
             .sessions
@@ -309,8 +322,12 @@ fn power_day_prescriptions_carry_the_velocity_intent() {
 
 #[test]
 fn calisthenics_days_are_titled_honestly() {
-    let prog = synthesize(&calisthenics_profile(), &Anchors::default(), 0)
-        .expect("a calisthenics profile plans");
+    let prog = synthesize(
+        &PlanProfile::new(&calisthenics_profile()),
+        &Anchors::default(),
+        0,
+    )
+    .expect("a calisthenics profile plans");
     let lift = prog
         .mesocycle
         .sessions
@@ -322,7 +339,7 @@ fn calisthenics_days_are_titled_honestly() {
         SessionType::Lift(LiftSessionType::Calisthenics)
     );
     // Honest, user-facing title — not a borrowed barbell "Heavy day".
-    assert_eq!(session_title(lift.session_type), "Calisthenics");
+    assert_eq!(plan_session_title(lift), "Calisthenics");
     // The shell's discipline parsing still keys on the "Lift" prefix.
     assert!(lift.session_type.wire_name().starts_with("Lift"));
 }
@@ -615,9 +632,12 @@ fn a_sub_1_25kg_anchor_never_prescribes_at_0kg() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = graded(pres, claims::STR_INTENT_001);
+    let rx = Recommended::new(pres, claims::STR_INTENT_001);
     let tiny = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 1.0)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 1.0)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&rx, &tiny, None, false);
@@ -725,16 +745,21 @@ fn the_weights_plan_never_prescribes_failure_or_a_max_attempt() {
                     meet_epoch_day: meet,
                     ..base_profile()
                 };
-                let names: Vec<String> = synthesize(&profile, &Anchors::default(), 0)
-                    .map(|p| lifts(&p).into_iter().map(|l| l.exercise).collect())
-                    .unwrap_or_default();
+                let names: Vec<String> =
+                    synthesize(&PlanProfile::new(&profile), &Anchors::default(), 0)
+                        .map(|p| lifts(&p).into_iter().map(|l| l.exercise).collect())
+                        .unwrap_or_default();
                 let anchored = Anchors {
-                    lift_e1rm: names.iter().map(|n| (n.clone(), 120.0)).collect(),
+                    lift: crate::plan::LiftAnchors {
+                        e1rm: names.iter().map(|n| (n.clone(), 120.0)).collect(),
+                        ..Default::default()
+                    },
                     ..Anchors::default()
                 };
                 for anchors in [Anchors::default(), anchored] {
                     for week in 0..20 {
-                        let Some(p) = synthesize(&profile, &anchors, week) else {
+                        let Some(p) = synthesize(&PlanProfile::new(&profile), &anchors, week)
+                        else {
                             continue;
                         };
                         for l in lifts(&p) {
@@ -771,7 +796,7 @@ fn a_remade_plan_leaves_the_last_plans_deload_sets_out() {
     const DROP_CLAUSE: &str = "under your estimate";
     let mon = POS_MON;
     let (app, mut model) = planned_on(strength_profile(), [], mon);
-    assert!(crate::plan::lift_block_position(&strength_profile(), 5).recovery);
+    assert!(crate::plan::lift_block_position(&PlanProfile::new(&strength_profile()), 5).recovery);
     for w in 0..6 {
         let (kg, rpe) = if w == 5 { (70.0, 7.0) } else { (100.0, 8.0) };
         for d in [0, 2, 4] {

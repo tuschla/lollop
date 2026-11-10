@@ -90,6 +90,44 @@ fn android_wire_form_deserializes_with_optionals_omitted() {
     }
 }
 
+/// The review's safety screens are a flattened `SafetyScreen`: their keys stay
+/// top-level and first, in the order the shell and old logs carry them, and
+/// the required ones stay required.
+#[test]
+fn review_safety_screen_keeps_its_flat_wire_keys() {
+    let json = serde_json::to_string(&SessionReview::default()).unwrap();
+    assert!(
+        json.starts_with(
+            r#"{"bone_pain_red_flag":false,"compulsive_flag":false,"reds_signal_reported":false,"overtraining_signal_count":0,"overtraining_signal_weeks":null,"overtraining_signs":null,"single_session_spike_frac":null,"lift":null,"#
+        ),
+        "{json}"
+    );
+    let wire = r#"{"SubmitWeeklyCheckin":{"bone_pain_red_flag":true,"compulsive_flag":false,"reds_signal_reported":true,"overtraining_signal_count":3,"overtraining_signal_weeks":1.5,"overtraining_signs":{"low_mood":true},"bad_day":false}}"#;
+    let Event::SubmitWeeklyCheckin(r) = serde_json::from_str::<Event>(wire).unwrap() else {
+        panic!("expected SubmitWeeklyCheckin");
+    };
+    assert!(r.safety.bone_pain_red_flag && r.safety.reds_signal_reported);
+    assert_eq!(r.safety.overtraining_signal_weeks, Some(1.5));
+    assert_eq!(
+        r.safety.signal_count(),
+        1,
+        "ticked signs override the count"
+    );
+    let back = serde_json::to_string(&r).unwrap();
+    assert!(
+        back.starts_with(
+            r#"{"bone_pain_red_flag":true,"compulsive_flag":false,"reds_signal_reported":true,"overtraining_signal_count":3,"overtraining_signal_weeks":1.5,"overtraining_signs":{"worse_performance":false,"low_mood":true,"higher_resting_hr":false,"worse_sleep":false},"#
+        ),
+        "{back}"
+    );
+    let no_count =
+        r#"{"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"bad_day":false}}"#;
+    assert!(
+        serde_json::from_str::<Event>(no_count).is_err(),
+        "the count stays required"
+    );
+}
+
 /// The consolidated person fields (age, bodyweight, sex, resting
 /// HR, measured HRmax) round-trip through the `SetProfile` wire exactly as
 /// Core.kt's guided setup / profile editor emit them. All are optional, so the

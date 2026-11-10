@@ -3,7 +3,8 @@
 //! progression, rest and rep windows by exercise class.
 
 use super::*;
-use crate::hypertrophy::{self as hyp_kb, ExerciseClass};
+use crate::exercise::{EXERCISES, ExerciseClass, classify};
+use crate::hypertrophy as hyp_kb;
 use crate::plan::{BlockPosition, LastWorking, hypertrophy_week_targets, lift_block_position};
 use crate::schema::LiftSessionType;
 
@@ -41,7 +42,7 @@ fn worked(name: &str, kg: f64, sets: &[(u32, f64)]) -> LastWorking {
 /// Load weeks (not the lift recovery week) among the first `n` week indices.
 fn load_weeks(p: &Profile, n: u32) -> Vec<u32> {
     (0..n)
-        .filter(|&w| !lift_block_position(p, w).recovery)
+        .filter(|&w| !lift_block_position(&PlanProfile::new(p), w).recovery)
         .collect()
 }
 
@@ -54,7 +55,7 @@ fn hypertrophy_goal_never_schedules_power_day() {
             p.running_days_per_week = running_days;
             p.running_km_per_week = 30.0;
         }
-        let prog = synthesize(&p, &anchored("Back Squat", 140.0), 0).unwrap();
+        let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 140.0), 0).unwrap();
         let all = lifts(&prog);
         assert!(!all.is_empty());
         for (lt, l, _) in &all {
@@ -70,15 +71,18 @@ fn hypertrophy_goal_anchored_sets_within_1_to_3_rir() {
     // max reps at p% = 30·(100/p − 1); RIR = that − prescribed reps.
     let p = hyp_profile(12);
     let anchors = Anchors {
-        lift_e1rm: vec![
-            ("Bench press".into(), 100.0),
-            ("Romanian deadlift".into(), 140.0),
-        ],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![
+                ("Bench press".into(), 100.0),
+                ("Romanian deadlift".into(), 140.0),
+            ],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let mut saw_pct = false;
     for w in load_weeks(&p, 8) {
-        let prog = synthesize(&p, &anchors, w).unwrap();
+        let prog = synthesize(&PlanProfile::new(&p), &anchors, w).unwrap();
         for (_, l, _) in lifts(&prog) {
             match l.intensity {
                 LiftIntensity::Rir(n) => assert!((1..=3).contains(&n), "week {w}: {l:?}"),
@@ -103,7 +107,7 @@ fn hypertrophy_goal_anchored_sets_within_1_to_3_rir() {
 fn novice_hypertrophy_anchored_rir_within_3_to_4_week1() {
     let mut p = hyp_profile(10);
     p.progression_cadence = ProgressionCadence::EverySession; // → Novice
-    let prog = synthesize(&p, &anchored("Bench press", 100.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Bench press", 100.0), 0).unwrap();
     for (_, l, _) in lifts(&prog) {
         let rir = match l.intensity {
             LiftIntensity::Rir(n) => n as f64,
@@ -122,10 +126,10 @@ fn novice_hypertrophy_anchored_rir_within_3_to_4_week1() {
 fn novice_hypertrophy_effort_ramps_across_block() {
     let mut p = hyp_profile(10);
     p.progression_cadence = ProgressionCadence::EverySession;
-    let block_weeks = lift_block_position(&p, 0).block_weeks;
+    let block_weeks = lift_block_position(&PlanProfile::new(&p), 0).block_weeks;
     let block: Vec<u8> = (0..u32::from(block_weeks))
         .map(|w| {
-            let prog = synthesize(&p, &Anchors::default(), w).unwrap();
+            let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), w).unwrap();
             match lifts(&prog)[0].1.intensity {
                 LiftIntensity::Rir(n) => n,
                 other => panic!("unanchored is RIR: {other:?}"),
@@ -144,7 +148,7 @@ fn novice_hypertrophy_effort_ramps_across_block() {
 
 #[test]
 fn hypertrophy_week_hits_every_table1_muscle_directly() {
-    let prog = synthesize(&hyp_profile(12), &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &Anchors::default(), 0).unwrap();
     let direct: Vec<&'static str> = lifts(&prog)
         .iter()
         .filter_map(|(_, l, _)| hyp_kb::primary_muscle(&l.exercise))
@@ -165,7 +169,7 @@ fn hypertrophy_week_hits_every_table1_muscle_directly() {
 
 #[test]
 fn hypertrophy_week_includes_long_length_isolation_work() {
-    let prog = synthesize(&hyp_profile(12), &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &Anchors::default(), 0).unwrap();
     let names: Vec<String> = lifts(&prog)
         .into_iter()
         .map(|(_, l, _)| l.exercise)
@@ -191,13 +195,16 @@ fn hypertrophy_week_includes_long_length_isolation_work() {
 #[test]
 fn logged_isolation_lift_is_scheduled_by_rir() {
     let anchors = Anchors {
-        last_working: vec![
-            worked("Lateral raise", 10.0, &[(15, 8.0), (15, 8.0), (14, 8.5)]),
-            worked("Hammer curl", 14.0, &[(12, 8.0), (12, 8.0)]),
-        ],
+        lift: crate::plan::LiftAnchors {
+            last_working: vec![
+                worked("Lateral raise", 10.0, &[(15, 8.0), (15, 8.0), (14, 8.5)]),
+                worked("Hammer curl", 14.0, &[(12, 8.0), (12, 8.0)]),
+            ],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&hyp_profile(12), &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &anchors, 0).unwrap();
     let all = lifts(&prog);
     let raise = all
         .iter()
@@ -221,10 +228,13 @@ fn logged_isolation_lift_is_scheduled_by_rir() {
 #[test]
 fn hypertrophy_delivered_volume_tracks_stated_target() {
     let anchored_mix = Anchors {
-        lift_e1rm: vec![
-            ("Barbell back squat".into(), 140.0),
-            ("Bench press".into(), 100.0),
-        ],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![
+                ("Barbell back squat".into(), 140.0),
+                ("Bench press".into(), 100.0),
+            ],
+            ..Default::default()
+        },
         ..Default::default()
     };
     for weekly in [8u8, 12, 16] {
@@ -232,7 +242,7 @@ fn hypertrophy_delivered_volume_tracks_stated_target() {
             for anchors in [Anchors::default(), anchored_mix.clone()] {
                 let mut p = hyp_profile(weekly);
                 p.lift_days_per_week = lift_days;
-                let prog = synthesize(&p, &anchors, 0).unwrap();
+                let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
                 let items: Vec<(String, u8)> = lifts(&prog)
                     .into_iter()
                     .map(|(_, l, _)| (l.exercise, l.sets))
@@ -240,15 +250,13 @@ fn hypertrophy_delivered_volume_tracks_stated_target() {
                 let delivered =
                     hyp_kb::delivered_weekly_sets(items.iter().map(|(n, s)| (n.as_str(), *s)))
                         .value;
+                let pp = PlanProfile::new(&p);
                 let BlockPosition {
                     week_in_block: wib,
                     block_weeks: bw,
                     ..
-                } = lift_block_position(&p, 0);
-                let ta = crate::individualization::training_age_from_cadence(p.progression_cadence)
-                    .value;
-                let days = crate::plan::week_shape(&p).lift_days;
-                for t in hypertrophy_week_targets(&p, ta, wib, bw, days) {
+                } = lift_block_position(&pp, 0);
+                for t in hypertrophy_week_targets(&pp, wib, bw, pp.shape().lift_days) {
                     // Rear delts have no Table 4 exercise; MEV-0 muscles have no
                     // direct target.
                     if t.target == 0 || t.muscle == "rear delts" {
@@ -286,14 +294,17 @@ fn hypertrophy_load_rises_after_top_of_range() {
     // "Lat pulldown" is a machine compound → 8–12 reps. Every set at the top
     // (12) within the target effort → +2.5 kg, back to the range bottom.
     let anchors = Anchors {
-        last_working: vec![worked(
-            "Lat pulldown",
-            60.0,
-            &[(12, 7.0), (12, 7.0), (12, 7.0)],
-        )],
+        lift: crate::plan::LiftAnchors {
+            last_working: vec![worked(
+                "Lat pulldown",
+                60.0,
+                &[(12, 7.0), (12, 7.0), (12, 7.0)],
+            )],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&hyp_profile(12), &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &anchors, 0).unwrap();
     let (_, l, claim) = lifts(&prog)
         .into_iter()
         .find(|(_, l, _)| l.exercise == "Lat pulldown")
@@ -306,14 +317,17 @@ fn hypertrophy_load_rises_after_top_of_range() {
 #[test]
 fn hypertrophy_load_holds_below_top() {
     let anchors = Anchors {
-        last_working: vec![worked(
-            "Lat pulldown",
-            60.0,
-            &[(10, 8.0), (10, 8.0), (10, 8.0)],
-        )],
+        lift: crate::plan::LiftAnchors {
+            last_working: vec![worked(
+                "Lat pulldown",
+                60.0,
+                &[(10, 8.0), (10, 8.0), (10, 8.0)],
+            )],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&hyp_profile(12), &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &anchors, 0).unwrap();
     let (_, l, _) = lifts(&prog)
         .into_iter()
         .find(|(_, l, _)| l.exercise == "Lat pulldown")
@@ -337,13 +351,13 @@ fn top_of_range_at_failure_holds_the_load() {
 
 #[test]
 fn hypertrophy_rest_never_below_90s() {
-    for e in hyp_kb::EXERCISES {
+    for e in EXERCISES {
         assert!(hyp_kb::rest_sec_for(e.class).value.0 >= 90, "{}", e.name);
     }
-    let prog = synthesize(&hyp_profile(12), &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &Anchors::default(), 0).unwrap();
     for (_, l, _) in lifts(&prog) {
         assert!(l.rest_sec >= 90, "{} rests {} s", l.exercise, l.rest_sec);
-        if hyp_kb::classify(&l.exercise) == ExerciseClass::HeavyCompound {
+        if classify(&l.exercise) == ExerciseClass::HeavyCompound {
             assert!(l.rest_sec >= 120, "{} rests {} s", l.exercise, l.rest_sec);
         }
     }
@@ -351,38 +365,30 @@ fn hypertrophy_rest_never_below_90s() {
 
 #[test]
 fn unknown_compound_rests_like_heavy_compound() {
-    assert_eq!(
-        hyp_kb::classify("Front squat"),
-        ExerciseClass::HeavyCompound
-    );
-    assert_eq!(
-        hyp_kb::rest_sec_for(hyp_kb::classify("Front squat"))
-            .value
-            .0,
-        120
-    );
-    assert_eq!(
-        hyp_kb::classify("Leg press"),
-        ExerciseClass::ModerateCompound
-    );
-    assert_eq!(hyp_kb::classify("Hammer curl"), ExerciseClass::Isolation);
+    assert_eq!(classify("Front squat"), ExerciseClass::HeavyCompound);
+    assert_eq!(hyp_kb::rest_sec_for(classify("Front squat")).value.0, 120);
+    assert_eq!(classify("Leg press"), ExerciseClass::ModerateCompound);
+    assert_eq!(classify("Hammer curl"), ExerciseClass::Isolation);
 }
 
 #[test]
 fn hypertrophy_heavy_compound_reps_within_5_to_10_and_isolation_off_the_edge() {
     let anchors = Anchors {
-        lift_e1rm: vec![
-            ("Barbell back squat".into(), 140.0),
-            ("Romanian deadlift".into(), 140.0),
-        ],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![
+                ("Barbell back squat".into(), 140.0),
+                ("Romanian deadlift".into(), 140.0),
+            ],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&hyp_profile(12), &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &anchors, 0).unwrap();
     let rxs = lifts(&prog);
     assert!(!rxs.is_empty(), "a hypertrophy week prescribes lifts");
     for (_, l, _) in rxs {
         let top = l.reps_max.unwrap_or(l.reps);
-        match hyp_kb::classify(&l.exercise) {
+        match classify(&l.exercise) {
             ExerciseClass::HeavyCompound => {
                 assert!((5..=10).contains(&l.reps) && top <= 10, "{l:?}")
             }
@@ -396,7 +402,7 @@ fn hypertrophy_heavy_compound_reps_within_5_to_10_and_isolation_off_the_edge() {
 
 #[test]
 fn session_title_matches_prescriptions() {
-    let prog = synthesize(&hyp_profile(12), &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&hyp_profile(12)), &Anchors::default(), 0).unwrap();
     let lift_titles: Vec<LiftSessionType> = prog
         .mesocycle
         .sessions
@@ -423,20 +429,23 @@ fn specialization_raises_priority_muscle_and_drops_others_to_mv() {
     let mut p = hyp_profile(12);
     p.progression_cadence = ProgressionCadence::MonthToMonth; // → Advanced
     p.specialization_muscle = Some("Side delts".into());
-    let ta = crate::individualization::training_age_from_cadence(p.progression_cadence).value;
-    assert_eq!(ta, crate::individualization::TrainingAge::Advanced);
+    let pp = PlanProfile::new(&p);
+    assert_eq!(
+        pp.training_age(),
+        crate::individualization::TrainingAge::Advanced
+    );
     let BlockPosition {
         week_in_block: wib,
         block_weeks: bw,
         ..
-    } = lift_block_position(&p, 0);
-    let t = hypertrophy_week_targets(&p, ta, wib, bw, 3);
+    } = lift_block_position(&pp, 0);
+    let t = hypertrophy_week_targets(&pp, wib, bw, 3);
     let get = |m: &str| t.iter().find(|x| x.muscle == m).unwrap().target;
     assert_eq!(get("side delts"), 16, "12 + one +4 step");
     assert_eq!(get("chest"), 8, "chest MV");
     assert_eq!(get("quads"), 6, "quads MV");
     // The plan delivers it: lateral raises carry the extra volume.
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let raises: u32 = lifts(&prog)
         .iter()
         .filter(|(_, l, _)| l.exercise == "Lateral raise")
@@ -447,8 +456,7 @@ fn specialization_raises_priority_muscle_and_drops_others_to_mv() {
     // Not advanced → no specialization: every muscle keeps the stated target
     // (on a 5-day week, where the whole-session cap does not bind).
     p.progression_cadence = ProgressionCadence::WeekToWeek;
-    let ta = crate::individualization::training_age_from_cadence(p.progression_cadence).value;
-    let t = hypertrophy_week_targets(&p, ta, wib, bw, 5);
+    let t = hypertrophy_week_targets(&PlanProfile::new(&p), wib, bw, 5);
     assert_eq!(
         t.iter().find(|x| x.muscle == "side delts").unwrap().target,
         12
@@ -462,9 +470,9 @@ fn default_ramp_tops_out_at_mav_high_and_days_respect_the_session_cap() {
     // to the top of its productive range (never its MRV) by week 5, and no day
     // carries more than the whole-session cap.
     let p = hyp_profile(10);
-    let ta = crate::individualization::training_age_from_cadence(p.progression_cadence).value;
+    let pp = PlanProfile::new(&p);
     let week5 = 4;
-    let pos = lift_block_position(&p, week5);
+    let pos = lift_block_position(&pp, week5);
     assert_eq!(
         pos,
         BlockPosition {
@@ -475,7 +483,7 @@ fn default_ramp_tops_out_at_mav_high_and_days_respect_the_session_cap() {
         "week 5 is the last load week"
     );
     let (wib, bw) = (pos.week_in_block, pos.block_weeks);
-    for t in hypertrophy_week_targets(&p, ta, wib, bw, 3) {
+    for t in hypertrophy_week_targets(&pp, wib, bw, 3) {
         let lm = hyp_kb::landmarks_for(t.muscle).unwrap();
         assert!(
             t.target <= lm.mav.1.max(lm.mev),
@@ -486,7 +494,7 @@ fn default_ramp_tops_out_at_mav_high_and_days_respect_the_session_cap() {
         );
     }
     let cap = u32::from(hyp_kb::SESSION_WORKING_SET_CAP);
-    let prog = synthesize(&p, &Anchors::default(), week5).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), week5).unwrap();
     let mut days = 0;
     let mut total = 0;
     for s in &prog.mesocycle.sessions {
@@ -508,8 +516,8 @@ fn default_ramp_tops_out_at_mav_high_and_days_respect_the_session_cap() {
     assert_eq!(days, 3);
     assert!(total <= cap * days, "{total} > {cap} × {days}");
     // Week 1 is still exactly the stated target for a big muscle.
-    let w1 = lift_block_position(&p, 0).week_in_block;
-    let t1 = hypertrophy_week_targets(&p, ta, w1, bw, 3);
+    let w1 = lift_block_position(&pp, 0).week_in_block;
+    let t1 = hypertrophy_week_targets(&pp, w1, bw, 3);
     assert_eq!(t1.iter().find(|t| t.muscle == "chest").unwrap().target, 10);
 }
 

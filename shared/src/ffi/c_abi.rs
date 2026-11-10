@@ -4,7 +4,7 @@
 //!
 //! The iOS app links the `staticlib` build of this crate (`libshared.a`,
 //! scripts/build-ios-core.sh) and calls it from Kotlin/Native through cinterop
-//! (`kmp/core-bridge`). Every function here is a thin wrapper: it turns C
+//! (`android/core-bridge`). Every function here is a thin wrapper: it turns C
 //! pointers into slices, calls the `ffi` function the Android JNI export
 //! calls, and hands the answer back as a core-owned byte buffer. The wire is
 //! the JNI one: UTF-8 JSON in, UTF-8 JSON out (GPX text for

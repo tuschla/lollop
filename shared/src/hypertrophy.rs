@@ -3,13 +3,13 @@
 //!
 //! Pure look-ups + arithmetic, numbers transcribed verbatim from File 03:
 //! per-muscle volume landmarks (Table 1), rep/load by exercise class (Table 2),
-//! volume→frequency (Table 3), the exercise catalog (Table 4), rest defaults
-//! (Table 5), the accumulation set ramp and RIR schedule, any-name class /
-//! muscle resolution, and double progression. Every prescriptive value is a
+//! volume→frequency (Table 3), rest defaults (Table 5), the accumulation set
+//! ramp and RIR schedule, any-name muscle resolution over the Table 4 catalog
+//! (`crate::exercise`), and double progression. Every prescriptive value is a
 //! [`Recommended`] carrying its registered claim.
 
-use crate::evidence;
 use crate::evidence::claims;
+use crate::exercise::{self, ExerciseClass, MovementPattern};
 use crate::individualization::TrainingAge;
 use crate::schema::Recommended;
 
@@ -146,7 +146,7 @@ fn landmark_key(muscle: &str) -> &str {
 /// primary "delts" has no Table 1 row, so it falls through to `None` rather
 /// than borrowing triceps).
 pub fn landmarks_for_exercise(exercise: &str) -> Option<&'static VolumeLandmarks> {
-    let entry = exercise_entry(exercise)?;
+    let entry = exercise::exercise_entry(exercise)?;
     let primary = entry.primary_muscles.first()?;
     landmarks_for(landmark_key(primary))
 }
@@ -154,17 +154,6 @@ pub fn landmarks_for_exercise(exercise: &str) -> Option<&'static VolumeLandmarks
 // ---------------------------------------------------------------------------
 // 2. Rep/load by exercise class (File 03 Table 2; HYP-REPLOAD-001)
 // ---------------------------------------------------------------------------
-
-/// Exercise class driving the rep/load window (File 03 Table 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExerciseClass {
-    /// Squat, deadlift, press, row, manages joint/systemic fatigue per rep.
-    HeavyCompound,
-    /// Machine / moderate compound, balances tension and volume.
-    ModerateCompound,
-    /// Curls, raises, extensions, lighter loads, higher reps.
-    Isolation,
-}
 
 /// Rep range + %1RM window for a hypertrophy set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +180,7 @@ pub fn rep_load(class: ExerciseClass) -> Recommended<RepLoad> {
             pct_1rm: (50, 70),
         },
     };
-    evidence::graded(rl, claims::HYP_REPLOAD_001)
+    Recommended::new(rl, claims::HYP_REPLOAD_001)
 }
 
 /// Between-set rest window in seconds for an exercise class (File 03 Table 5,
@@ -206,7 +195,7 @@ pub fn rest_sec_for(class: ExerciseClass) -> Recommended<(u16, u16)> {
         ExerciseClass::HeavyCompound => (120, 180),
         ExerciseClass::ModerateCompound | ExerciseClass::Isolation => (90, 120),
     };
-    evidence::graded(window, claims::HYP_REST_002)
+    Recommended::new(window, claims::HYP_REST_002)
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +234,7 @@ pub fn frequency_for_weekly_sets(weekly_sets: u8) -> Recommended<FrequencyRx> {
             per_session: (6, 9),
         }
     };
-    evidence::graded(rx, claims::HYP_FREQ_001)
+    Recommended::new(rx, claims::HYP_FREQ_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +275,7 @@ pub fn weekly_set_ramp(mev: u8, mrv: u8, weeks: u8) -> Recommended<Vec<u8>> {
             })
             .collect()
     };
-    evidence::graded(ramp, claims::HYP_SETRAMP_001)
+    Recommended::new(ramp, claims::HYP_SETRAMP_001)
 }
 
 /// hyp-011 no-abrupt-jump guard (HYP-VOLRAMP-SAFE-001, ExpertOpinion, SAFETY):
@@ -295,7 +284,7 @@ pub fn weekly_set_ramp(mev: u8, mrv: u8, weeks: u8) -> Recommended<Vec<u8>> {
 /// rejected. The KB states no numeric bound of its own; the +4 cap is
 /// hyp-001's upper increment.
 pub fn abrupt_volume_jump(prev_weekly_sets: u8, next_weekly_sets: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         next_weekly_sets.saturating_sub(prev_weekly_sets) > MAX_WEEKLY_SET_INCREMENT,
         claims::HYP_VOLRAMP_SAFE_001,
     )
@@ -318,7 +307,7 @@ pub fn rir_for_week(week: u8, block_weeks: u8) -> Option<Recommended<u8>> {
         return None;
     }
     let rir = (block_weeks - week + 1).min(MAX_SCHEDULED_RIR);
-    Some(evidence::graded(rir, claims::HYP_RIR_RAMP_001))
+    Some(Recommended::new(rir, claims::HYP_RIR_RAMP_001))
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +335,7 @@ const WEEKLY_SPLIT_THRESHOLD: u8 = 12;
 /// Clamp a proposed weekly growth-target set count to the ~31-set ceiling
 /// (File 03 hypertrophy-003).
 pub fn cap_weekly_growth_target(weekly_sets: u8) -> Recommended<u8> {
-    evidence::graded(
+    Recommended::new(
         weekly_sets.min(WEEKLY_FRACTIONAL_SET_CEILING),
         claims::HYP_VOL_001,
     )
@@ -361,7 +350,7 @@ pub fn mev_sets_by_training_age(age: TrainingAge) -> Recommended<(u8, u8)> {
         TrainingAge::Intermediate => (10, 18),
         TrainingAge::Advanced => (12, 20),
     };
-    evidence::graded(band, claims::HYP_MEV_AGE_001)
+    Recommended::new(band, claims::HYP_MEV_AGE_001)
 }
 
 /// Next-mesocycle weekly-set target given growth/recovery signals (File 03
@@ -381,7 +370,7 @@ pub fn next_meso_weekly_sets(
     } else {
         current_weekly_sets
     };
-    evidence::graded(next, claims::HYP_MESO_ADD_001)
+    Recommended::new(next, claims::HYP_MESO_ADD_001)
 }
 
 /// Generic per-muscle MRV anchor (~20 weekly sets, the RP framework's figure)
@@ -402,7 +391,7 @@ pub fn over_mrv_deload(
     joint_ache: bool,
 ) -> Recommended<bool> {
     let mrv = landmarks_for(landmark_key(muscle)).map_or(GENERIC_MRV_SETS, |l| l.mrv);
-    evidence::graded(
+    Recommended::new(
         weekly_sets > mrv && (performance_down || joint_ache),
         claims::HYP_MRV_DELOAD_001,
     )
@@ -430,7 +419,7 @@ pub fn recovery_adjusted_volume(
     } else {
         (b, b)
     };
-    evidence::graded(range, claims::HYP_RECOVOL_001)
+    Recommended::new(range, claims::HYP_RECOVOL_001)
 }
 
 /// Joint-pain rep shift (File 03 hypertrophy-016; HYP-PAIN-SHIFT-001, Strong,
@@ -438,7 +427,7 @@ pub fn recovery_adjusted_volume(
 /// 12–25 reps at lighter load (50–70% 1RM); hypertrophy is preserved via load
 /// interchangeability.
 pub fn joint_pain_rep_shift() -> Recommended<RepLoad> {
-    evidence::graded(
+    Recommended::new(
         RepLoad {
             reps: (12, 25),
             pct_1rm: (50, 70),
@@ -451,14 +440,14 @@ pub fn joint_pain_rep_shift() -> Recommended<RepLoad> {
 /// hypertrophy-025; HYP-SPLIT-001, ExpertOpinion: the lead source is a
 /// preprint): true once weekly sets exceed ~12/muscle.
 pub fn needs_session_split(weekly_sets: u8) -> Recommended<bool> {
-    evidence::graded(weekly_sets > WEEKLY_SPLIT_THRESHOLD, claims::HYP_SPLIT_001)
+    Recommended::new(weekly_sets > WEEKLY_SPLIT_THRESHOLD, claims::HYP_SPLIT_001)
 }
 
 /// Whether per-session volume exceeds the ~11-set cap and warrants adding a
 /// session rather than more sets (File 03 hypertrophy-004; HYP-SESSCAP-001,
 /// ExpertOpinion: the lead source is a preprint).
 pub fn per_session_over_cap(session_sets: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         session_sets > PER_SESSION_SET_CEILING,
         claims::HYP_SESSCAP_001,
     )
@@ -473,7 +462,7 @@ pub(crate) const DELOAD_TRIGGER_MIN: u8 = 2;
 /// persistent joint/tendon aches, disrupted sleep, elevated RHR, mood drop) -
 /// otherwise follow the preplanned 4–8 week schedule.
 pub fn deload_indicated(trigger_count: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         trigger_count >= DELOAD_TRIGGER_MIN,
         claims::HYP_DELOAD_TRIG_001,
     )
@@ -494,7 +483,7 @@ pub struct DeloadRx {
 /// ~60–70% of working weight, movement patterns kept (File 03 hypertrophy-036;
 /// HYP-DELOAD-RX-001, ExpertOpinion).
 pub fn deload_rx() -> Recommended<DeloadRx> {
-    evidence::graded(
+    Recommended::new(
         DeloadRx {
             sets_fraction: 0.50,
             rir: (2, 4),
@@ -512,7 +501,7 @@ pub(crate) const REP_DROP_REST_FRAC: f64 = 0.10;
 /// hypertrophy-039): the mechanism is preserving per-set volume, not rest
 /// duration itself. `true` = lengthen the rest interval.
 pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
-    evidence::graded(rep_drop_frac > REP_DROP_REST_FRAC, claims::HYP_REST_001)
+    Recommended::new(rep_drop_frac > REP_DROP_REST_FRAC, claims::HYP_REST_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -525,7 +514,7 @@ pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
 /// (~5–30+ reps) when sets are taken close to failure. The rep upper bound is
 /// the KB's "30+" lower bound; heavy loading still favors strength.
 pub fn interchangeable_load_range() -> Recommended<RepLoad> {
-    evidence::graded(
+    Recommended::new(
         RepLoad {
             reps: (5, 30),
             pct_1rm: (EFFECTIVE_LOAD_FLOOR_PCT, 85),
@@ -541,7 +530,7 @@ pub const EFFECTIVE_LOAD_FLOOR_PCT: u8 = 30;
 /// `true` when a load sits below [`EFFECTIVE_LOAD_FLOOR_PCT`], the floor under
 /// which hypertrophy underperforms (File 03 hypertrophy-012; HYP-LOADRANGE-001).
 pub fn load_below_effective_floor(pct_1rm: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         pct_1rm < EFFECTIVE_LOAD_FLOOR_PCT,
         claims::HYP_LOADRANGE_001,
     )
@@ -560,7 +549,7 @@ pub struct HighSkillGuard {
 /// High-skill exercise guard (File 03 hypertrophy-017; HYP-SKILL-RIR-001,
 /// ExpertOpinion, SAFETY): reps ≥5 and stop at ≥1–2 RIR to protect technique.
 pub fn high_skill_guard() -> Recommended<HighSkillGuard> {
-    evidence::graded(
+    Recommended::new(
         HighSkillGuard {
             min_reps: 5,
             min_rir: (1, 2),
@@ -574,7 +563,7 @@ pub fn high_skill_guard() -> Recommended<HighSkillGuard> {
 /// at 1–3 RIR; true failure neither required nor superior enough to justify
 /// its fatigue. Returns `(min, max)` RIR.
 pub fn default_rir_band() -> Recommended<(u8, u8)> {
-    evidence::graded((1, 3), claims::HYP_RIR_DEFAULT_001)
+    Recommended::new((1, 3), claims::HYP_RIR_DEFAULT_001)
 }
 
 /// How trustworthy a reported RIR is (File 03 hypertrophy-020).
@@ -599,314 +588,20 @@ pub fn rir_reliability(reported_rir: u8) -> Recommended<RirReliability> {
     } else {
         RirReliability::ErrorOverTwoReps
     };
-    evidence::graded(r, claims::HYP_RIR_ACC_001)
+    Recommended::new(r, claims::HYP_RIR_ACC_001)
 }
 
 /// Novice starting proximity (File 03 hypertrophy-020; HYP-RIR-ACC-001):
 /// start at 3–4 RIR and calibrate against actual failure. Returns `(min, max)`.
 pub fn novice_start_rir() -> Recommended<(u8, u8)> {
-    evidence::graded((3, 4), claims::HYP_RIR_ACC_001)
+    Recommended::new((3, 4), claims::HYP_RIR_ACC_001)
 }
 
 // ---------------------------------------------------------------------------
-// 7. Exercise catalog (File 03 Table 4)
-// ---------------------------------------------------------------------------
-
-/// Equipment category used by the Table 4 map.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Equipment {
-    Barbell,
-    Dumbbell,
-    Machine,
-    Cable,
-    Bodyweight,
-}
-
-/// Long-muscle-length bias tier from Table 4 (ordered: later = longer-length).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum LongLengthBias {
-    Low,
-    LowToModerate,
-    Moderate,
-    High,
-}
-
-/// One row of File 03 Table 4 (exercise → primary muscle → equipment →
-/// long-length bias), transcribed verbatim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ExerciseEntry {
-    pub name: &'static str,
-    /// Primary muscles, lowercase as in Table 4.
-    pub primary_muscles: &'static [&'static str],
-    pub equipment: &'static [Equipment],
-    /// Exercise class per Table 2's own examples (squat/deadlift/press/row =
-    /// heavy compound; machines = moderate; curls/raises/flys/extensions =
-    /// isolation).
-    pub class: ExerciseClass,
-    pub long_length: LongLengthBias,
-    /// Verbatim Table 4 qualifier (e.g. "High (deep)", "High at top").
-    pub long_length_note: &'static str,
-}
-
-use Equipment::{Barbell, Bodyweight, Cable, Dumbbell, Machine};
-
-/// File 03 Table 4, major exercise → primary muscle → equipment map,
-/// transcribed verbatim (16 rows). Each row carries ONE plain sentence-case
-/// display name; Table 4's own multi-option labels ("Hack squat / leg press")
-/// live in [`LEGACY_NAMES`], so a set logged under one still resolves to its
-/// row. Bias tiers: "High (deep)" / "High if seated upright" / "High at top" →
-/// High (note kept); "Low–moderate" → LowToModerate; "Low (cable better at
-/// bottom)" → Low.
-pub static EXERCISES: &[ExerciseEntry] = &[
-    ExerciseEntry {
-        name: "Back squat",
-        primary_muscles: &["quads", "glutes"],
-        equipment: &[Barbell],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::Moderate,
-        long_length_note: "Moderate",
-    },
-    ExerciseEntry {
-        name: "Hack squat",
-        primary_muscles: &["quads"],
-        equipment: &[Machine],
-        class: ExerciseClass::ModerateCompound,
-        long_length: LongLengthBias::High,
-        long_length_note: "High (deep)",
-    },
-    ExerciseEntry {
-        name: "Leg extension",
-        primary_muscles: &["quads"],
-        equipment: &[Machine],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High if seated upright",
-    },
-    ExerciseEntry {
-        name: "Romanian deadlift",
-        primary_muscles: &["hamstrings", "glutes"],
-        equipment: &[Barbell, Dumbbell],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-    ExerciseEntry {
-        name: "Seated leg curl",
-        primary_muscles: &["hamstrings"],
-        equipment: &[Machine],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-    ExerciseEntry {
-        name: "Hip thrust",
-        primary_muscles: &["glutes"],
-        equipment: &[Barbell, Machine],
-        class: ExerciseClass::ModerateCompound,
-        long_length: LongLengthBias::LowToModerate,
-        long_length_note: "Low–moderate",
-    },
-    ExerciseEntry {
-        name: "Bench press",
-        primary_muscles: &["chest", "triceps", "front delt"],
-        equipment: &[Barbell, Dumbbell],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::Moderate,
-        long_length_note: "Moderate",
-    },
-    ExerciseEntry {
-        name: "Incline press",
-        primary_muscles: &["upper chest"],
-        equipment: &[Barbell, Dumbbell, Machine],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::Moderate,
-        long_length_note: "Moderate",
-    },
-    ExerciseEntry {
-        name: "Chest fly",
-        primary_muscles: &["chest"],
-        equipment: &[Cable, Machine],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-    ExerciseEntry {
-        name: "Lat pulldown",
-        primary_muscles: &["lats"],
-        equipment: &[Bodyweight, Cable, Machine],
-        class: ExerciseClass::ModerateCompound,
-        long_length: LongLengthBias::High,
-        long_length_note: "High at top",
-    },
-    ExerciseEntry {
-        name: "Cable row",
-        primary_muscles: &["mid-back", "lats"],
-        equipment: &[Barbell, Dumbbell, Machine, Cable, Bodyweight],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::Moderate,
-        long_length_note: "Moderate",
-    },
-    ExerciseEntry {
-        name: "Overhead press",
-        primary_muscles: &["delts", "triceps"],
-        equipment: &[Barbell, Dumbbell, Machine],
-        class: ExerciseClass::HeavyCompound,
-        long_length: LongLengthBias::Moderate,
-        long_length_note: "Moderate",
-    },
-    ExerciseEntry {
-        name: "Lateral raise",
-        primary_muscles: &["side delts"],
-        equipment: &[Dumbbell, Cable, Machine],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::Low,
-        long_length_note: "Low (cable better at bottom)",
-    },
-    ExerciseEntry {
-        name: "Overhead triceps extension",
-        primary_muscles: &["triceps"],
-        equipment: &[Cable, Dumbbell],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-    ExerciseEntry {
-        name: "Incline dumbbell curl",
-        primary_muscles: &["biceps"],
-        equipment: &[Dumbbell],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-    ExerciseEntry {
-        name: "Standing calf raise",
-        primary_muscles: &["gastrocnemius"],
-        equipment: &[Machine, Bodyweight],
-        class: ExerciseClass::Isolation,
-        long_length: LongLengthBias::High,
-        long_length_note: "High",
-    },
-];
-
-/// The earlier labels each catalog row used to display (Table 4's verbatim
-/// labels and retired display names), paired with
-/// its current display name. Logged history keeps whatever name the set was
-/// logged under, so these keep resolving to the same row and the same movement
-/// ([`canonical_name`], `plan::movement_key`). Each pair keeps the keyword
-/// classes the old label had (movement pattern, isolation, barbell, and the
-/// pain-region sparing words), so no rule reads the new name differently.
-pub const LEGACY_NAMES: &[(&str, &str)] = &[
-    ("Barbell back squat", "Back squat"),
-    ("Hack squat / leg press", "Hack squat"),
-    ("Cable fly / pec deck", "Chest fly"),
-    ("Pull-up / lat pulldown", "Lat pulldown"),
-    ("Row (barbell/cable/machine)", "Cable row"),
-    (
-        "Overhead cable/DB triceps ext",
-        "Overhead triceps extension",
-    ),
-    ("Incline DB curl", "Incline dumbbell curl"),
-];
-
-/// The current display name for an earlier catalog label: a Table 4 row's
-/// legacy label ([`LEGACY_NAMES`]) or a calisthenics rung's KB table label
-/// ([`crate::calisthenics::LEGACY_NAMES`]), case- and whitespace-insensitive.
-/// `None` for any other name. Ingest stores a set logged under an old label
-/// under this name, so every view shows the current one.
-pub fn renamed(name: &str) -> Option<&'static str> {
-    let key = crate::names::FoldKey::new(name.trim());
-    LEGACY_NAMES
-        .iter()
-        .chain(crate::calisthenics::LEGACY_NAMES)
-        .find(|&&(old, _)| key.is(old))
-        .map(|&(_, new)| new)
-}
-
-/// The current catalog display name for an earlier label ([`renamed`]); any
-/// other name is returned unchanged.
-pub fn canonical_name(name: &str) -> &str {
-    renamed(name).unwrap_or(name)
-}
-
-/// Look up a Table 4 row by exercise name (case-insensitive; a legacy label
-/// resolves to its row).
-pub fn exercise_entry(name: &str) -> Option<&'static ExerciseEntry> {
-    let name = canonical_name(name);
-    EXERCISES
-        .iter()
-        .find(|e| crate::names::fold_eq(e.name, name))
-}
-
-/// A Table 4 row for any spelling of a catalog movement: exact (case-
-/// insensitive) name first, then the same movement after equipment/punctuation
-/// normalization (`plan::same_movement`), so "Barbell bench press" resolves to
-/// the "Bench press" row. Lookup plumbing, not a KB claim.
-fn catalog_entry(name: &str) -> Option<&'static ExerciseEntry> {
-    exercise_entry(name).or_else(|| {
-        let key = crate::plan::movement_key(name);
-        EXERCISES
-            .iter()
-            .zip(CATALOG_MOVEMENT_KEYS.iter())
-            .find(|(_, k)| **k == key)
-            .map(|(e, _)| e)
-    })
-}
-
-/// Each [`EXERCISES`] row's movement key, aligned by index, computed once.
-static CATALOG_MOVEMENT_KEYS: std::sync::LazyLock<Vec<Vec<String>>> =
-    std::sync::LazyLock::new(|| {
-        EXERCISES
-            .iter()
-            .map(|e| crate::plan::movement_key(e.name))
-            .collect()
-    });
-
-// ---------------------------------------------------------------------------
-// 7b. Any-name exercise class + muscle resolution, fractional volume
-//     accounting, block targets, specialization, double progression
+// 7. Any-name muscle resolution, fractional volume accounting, block
+//    targets, specialization, double progression
 //     (File 03 Tables 1–4, hyp-001/019/020/033/043/044; 13-hypertrophy-update)
 // ---------------------------------------------------------------------------
-
-/// Name fragments of machine- or cable-guided compounds. Table 2 files
-/// "moderate compounds / machines" together, so a compound carrying one of
-/// these reads as [`ExerciseClass::ModerateCompound`]. Classification plumbing
-/// (expert-opinion keyword taxonomy, like `plan::movement_pattern`).
-const MACHINE_NEEDLES: &[&str] = &[
-    "machine",
-    "leg press",
-    "hack",
-    "pulldown",
-    "pull-down",
-    "pull down",
-    "cable",
-    "smith",
-    "pec deck",
-    "sled",
-];
-
-/// Table 2 exercise class for ANY exercise name: the Table 4 row's own class
-/// when the name is in the catalog; otherwise an isolation name
-/// ([`crate::plan::is_isolation_lift`]) is [`ExerciseClass::Isolation`], a
-/// machine/cable compound is [`ExerciseClass::ModerateCompound`], and any other
-/// name with a core movement pattern ("Front squat", "Deadlift", "Dumbbell bench
-/// press") is a [`ExerciseClass::HeavyCompound`]. An unclassifiable name takes
-/// the moderate class (mid-window reps, ~90 s rest), never the heavy one.
-pub fn classify(name: &str) -> ExerciseClass {
-    if let Some(e) = catalog_entry(name) {
-        return e.class;
-    }
-    if crate::plan::is_isolation_lift(name) {
-        return ExerciseClass::Isolation;
-    }
-    let lower = crate::names::fold(name);
-    if crate::plan::movement_pattern(name).is_some()
-        && !MACHINE_NEEDLES.iter().any(|n| lower.contains(n))
-    {
-        ExerciseClass::HeavyCompound
-    } else {
-        ExerciseClass::ModerateCompound
-    }
-}
 
 /// Double-progression rep RANGE per exercise class: each
 /// sits inside its Table 2 window (HYP-REPLOAD-001: heavy 5–10, moderate 8–15,
@@ -920,50 +615,7 @@ pub fn rep_range_for(class: ExerciseClass) -> Recommended<(u8, u8)> {
         ExerciseClass::ModerateCompound => (8, 12),
         ExerciseClass::Isolation => (12, 20),
     };
-    evidence::graded(range, claims::HYP_REPLOAD_001)
-}
-
-/// Isolation / single-muscle name fragments → the Table 1 muscle they train
-/// directly. Ordered: the first match wins, so "leg curl" (hamstrings) beats
-/// the generic "curl" (biceps) and "reverse fly" (rear delts) beats "fly"
-/// (chest). Mirrors Table 4's own muscle assignments for its isolation rows;
-/// expert-opinion lookup plumbing for names outside the 16-row catalog.
-const ISOLATION_MUSCLE_NEEDLES: &[(&str, &str)] = &[
-    ("leg curl", "hamstrings"),
-    ("hamstring curl", "hamstrings"),
-    ("nordic", "hamstrings"),
-    ("leg extension", "quads"),
-    ("calf", "calves"),
-    ("calves", "calves"),
-    ("rear delt", "rear delts"),
-    ("reverse fly", "rear delts"),
-    ("face pull", "rear delts"),
-    ("lateral raise", "side delts"),
-    ("side raise", "side delts"),
-    ("tricep", "triceps"),
-    ("pushdown", "triceps"),
-    ("pressdown", "triceps"),
-    ("skull", "triceps"),
-    ("kickback", "triceps"),
-    ("curl", "biceps"),
-    ("pec deck", "chest"),
-    ("fly", "chest"),
-    ("flies", "chest"),
-    ("hip thrust", "glutes"),
-    ("glute", "glutes"),
-    ("crunch", "abs"),
-    ("sit-up", "abs"),
-    ("leg raise", "abs"),
-];
-
-/// The Table 1 muscle an isolation-named exercise trains directly: the first
-/// [`ISOLATION_MUSCLE_NEEDLES`] fragment the name contains.
-pub(crate) fn isolation_muscle(name: &str) -> Option<&'static str> {
-    let lower = crate::names::fold(name);
-    ISOLATION_MUSCLE_NEEDLES
-        .iter()
-        .find(|(needle, _)| lower.contains(needle))
-        .map(|&(_, muscle)| muscle)
+    Recommended::new(range, claims::HYP_REPLOAD_001)
 }
 
 /// Name fragments of a VERTICAL press: Table 4's "Overhead press" trains the
@@ -985,18 +637,17 @@ const VERTICAL_PRESS_NEEDLES: &[&str] = &["overhead", "shoulder", "military", "o
 /// unresolvable name trains no Table 1 muscle (empty), never a guess.
 pub fn muscle_credits(name: &str) -> Vec<(&'static str, f32)> {
     let mut out: Vec<(&'static str, f32)> = Vec::new();
-    if let Some(e) = catalog_entry(name) {
+    if let Some(e) = exercise::catalog_entry(name) {
         for (i, m) in e.primary_muscles.iter().enumerate() {
             add_credit(&mut out, m, if i == 0 { 1.0 } else { 0.5 });
         }
         return out;
     }
-    if let Some(m) = isolation_muscle(name) {
+    if let Some(m) = exercise::isolation_muscle(name) {
         add_credit(&mut out, m, 1.0);
         return out;
     }
-    use crate::plan::MovementPattern;
-    match crate::plan::movement_pattern(name) {
+    match exercise::movement_pattern(name) {
         Some(MovementPattern::Squat) => {
             add_credit(&mut out, "quads", 1.0);
             add_credit(&mut out, "glutes", 0.5);
@@ -1054,7 +705,7 @@ pub fn delivered_weekly_sets<'a>(
             }
         }
     }
-    evidence::graded(out, claims::HYP_VOL_DOSE_001)
+    Recommended::new(out, claims::HYP_VOL_DOSE_001)
 }
 
 /// Resolve a user-entered muscle (e.g. `"Side delts"`, `"lats"`) onto its
@@ -1085,10 +736,10 @@ pub fn volume_role(
 ) -> Recommended<VolumeRole> {
     match specialization_target(specialization, ta) {
         Some(lm) if lm.muscle.eq_ignore_ascii_case(muscle) => {
-            evidence::graded(VolumeRole::Priority, claims::HYP_SPEC_BLOCK_001)
+            Recommended::new(VolumeRole::Priority, claims::HYP_SPEC_BLOCK_001)
         }
-        Some(_) => evidence::graded(VolumeRole::Maintenance, claims::HYP_SPEC_BLOCK_001),
-        None => evidence::graded(VolumeRole::Standard, claims::HYP_VOL_DOSE_001),
+        Some(_) => Recommended::new(VolumeRole::Maintenance, claims::HYP_SPEC_BLOCK_001),
+        None => Recommended::new(VolumeRole::Standard, claims::HYP_VOL_DOSE_001),
     }
 }
 
@@ -1146,21 +797,21 @@ pub fn weekly_targets(
     let top = ramp_ceiling(lm, role);
     match role {
         VolumeRole::Maintenance => {
-            evidence::graded(vec![lm.mv; weeks as usize], claims::HYP_SPEC_BLOCK_001)
+            Recommended::new(vec![lm.mv; weeks as usize], claims::HYP_SPEC_BLOCK_001)
         }
         VolumeRole::Priority => {
             let start = stated
                 .saturating_add(MAX_WEEKLY_SET_INCREMENT)
                 .clamp(lm.mev, lm.mrv);
-            evidence::graded(
+            Recommended::new(
                 weekly_set_ramp(start, top, weeks).value,
                 claims::HYP_SPEC_BLOCK_001,
             )
         }
         VolumeRole::Standard if lm.mev == 0 => {
-            evidence::graded(vec![0; weeks as usize], claims::HYP_LANDMARKS_001)
+            Recommended::new(vec![0; weeks as usize], claims::HYP_LANDMARKS_001)
         }
-        VolumeRole::Standard => evidence::graded(
+        VolumeRole::Standard => Recommended::new(
             weekly_set_ramp(stated.clamp(lm.mev, lm.mrv), top, weeks).value,
             claims::HYP_VOL_CAP_001,
         ),
@@ -1191,7 +842,7 @@ pub fn block_rir(week: u8, block_weeks: u8, novice: bool) -> Recommended<u8> {
         };
         let start = novice_start_rir().value.1;
         let rir = start.saturating_sub(week - 1).max(NOVICE_RIR_FLOOR);
-        return evidence::graded(rir, claims::HYP_RIR_ACC_001);
+        return Recommended::new(rir, claims::HYP_RIR_ACC_001);
     }
     let (lo, hi) = default_rir_band().value;
     let rir = raw.clamp(lo, hi);
@@ -1200,9 +851,9 @@ pub fn block_rir(week: u8, block_weeks: u8, novice: bool) -> Recommended<u8> {
         .unwrap_or(MAX_SCHEDULED_RIR)
         .clamp(lo, hi);
     if rir == week1 {
-        evidence::graded(rir, claims::HYP_RIR_DEFAULT_001)
+        Recommended::new(rir, claims::HYP_RIR_DEFAULT_001)
     } else {
-        evidence::graded(rir, claims::HYP_RIR_RAMP_001)
+        Recommended::new(rir, claims::HYP_RIR_RAMP_001)
     }
 }
 
@@ -1272,7 +923,7 @@ pub fn double_progression(
             }
         }
     };
-    evidence::graded(step, claims::HYP_DOUBLEPROG_001)
+    Recommended::new(step, claims::HYP_DOUBLEPROG_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -1295,7 +946,7 @@ pub struct MesoStructure {
 /// Moderate): 4–6 weeks accumulation + 1 deload week (3:1 to 6:1), deloading
 /// every 4–8 weeks.
 pub fn meso_structure() -> Recommended<MesoStructure> {
-    evidence::graded(
+    Recommended::new(
         MesoStructure {
             accumulation_weeks: (4, 6),
             deload_weeks: 1,
@@ -1324,7 +975,7 @@ pub struct TempoRx {
 /// controlled ~0.5–8 s/rep (1–2 s concentric, 2–3 s eccentric); tempo has
 /// minimal effect on hypertrophy within this window.
 pub fn tempo_rx() -> Recommended<TempoRx> {
-    evidence::graded(
+    Recommended::new(
         TempoRx {
             rep_duration_s: (0.5, 8.0),
             concentric_s: (1.0, 2.0),
@@ -1372,7 +1023,7 @@ pub struct DefaultProgramRx {
 /// tempo (see [`tempo_rx`]), 1–2 high-SFR long-length exercises per muscle,
 /// deload week 5–6.
 pub fn intermediate_default_program() -> Recommended<DefaultProgramRx> {
-    evidence::graded(
+    Recommended::new(
         DefaultProgramRx {
             frequency_per_week: 2,
             weekly_sets: (8, 10),

@@ -127,6 +127,13 @@ pub fn item_spared_by_pain(region: PainRegion, exercise: &str) -> bool {
         return region == PainRegion::UpperLimb;
     }
     let has = |kws: &[&str]| kws.iter().any(|k| n.contains(*k));
+    // `n` is folded (ASCII lower-cased), so an ASCII-case-insensitive window
+    // match of an ASCII label is `n.contains(label.to_lowercase())`.
+    let has_label = |label: &str| {
+        n.as_bytes()
+            .windows(label.len())
+            .any(|w| w.eq_ignore_ascii_case(label.as_bytes()))
+    };
     match region {
         // Leg work with nothing in the hands and no pad or bar on the shoulders.
         PainRegion::UpperLimb => {
@@ -160,8 +167,6 @@ pub fn item_spared_by_pain(region: PainRegion, exercise: &str) -> bool {
         PainRegion::LowerLimb => {
             (has(&[
                 "cable row",
-                // The legacy catalog label of the same Cable row.
-                "row (barbell/cable/machine)",
                 "seated row",
                 "machine row",
                 "bench",
@@ -179,7 +184,8 @@ pub fn item_spared_by_pain(region: PainRegion, exercise: &str) -> bool {
                 "chest press machine",
                 "curl",
                 "tricep",
-            ]) || (has(&["seated"]) && has(&["press"])))
+            ]) || has_label(crate::exercise::LEGACY_CABLE_ROW)
+                || (has(&["seated"]) && has(&["press"])))
                 && !has(&[
                     "leg",
                     "squat",
@@ -357,7 +363,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
             Some(d) => with_location(reason.into(), d),
             None => reason.into(),
         };
-        PainGate::Block(evidence::graded(Adjustment::Defer { reason }, claim))
+        PainGate::Block(Recommended::new(Adjustment::Defer { reason }, claim))
     };
     let location = || {
         input
@@ -369,19 +375,19 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
     };
     match classify_pain(input) {
         PainVerdict::BareStop | PainVerdict::OtherStop => {
-            PainGate::Block(evidence::graded(Adjustment::Stop, claims::SAFE_PAIN_001))
+            PainGate::Block(Recommended::new(Adjustment::Stop, claims::SAFE_PAIN_001))
         }
         PainVerdict::StructuralDefer => defer(
             "Sharp or joint pain that isn't going away: training is paused. See a doctor or physio.",
             claims::SAFE_PAIN_STRUCT_001,
         ),
-        PainVerdict::StructuralScoped => PainGate::Scoped(evidence::graded(
+        PainVerdict::StructuralScoped => PainGate::Scoped(Recommended::new(
             Adjustment::StopItems {
                 location: location(),
             },
             claims::SAFE_PAIN_STRUCT_001,
         )),
-        PainVerdict::StructuralStop => PainGate::Block(evidence::graded(
+        PainVerdict::StructuralStop => PainGate::Block(Recommended::new(
             Adjustment::Stop,
             claims::SAFE_PAIN_STRUCT_001,
         )),
@@ -391,12 +397,12 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
         ),
         // REDUCE load & compressive positions: an easier session, not a stop
         // (the KB states no reduction percentage).
-        PainVerdict::TendonReduce => PainGate::Adjust(evidence::graded(
+        PainVerdict::TendonReduce => PainGate::Adjust(Recommended::new(
             Adjustment::DowngradeSession,
             claims::SAFE_TENDON_001,
         )),
         // Tolerable band: modify/continue with monitoring; avoid complete rest.
-        PainVerdict::TendonModify => PainGate::Adjust(evidence::graded(
+        PainVerdict::TendonModify => PainGate::Adjust(Recommended::new(
             Adjustment::ModifyAndMonitor {
                 location: location(),
             },

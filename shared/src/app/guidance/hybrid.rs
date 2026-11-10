@@ -1,18 +1,24 @@
-use super::*;
+use crate::app::format::fmt_frac_pct_range;
+use crate::app::guidance::rows::{WeeklyBasis, push_guidance, push_guidance_mi, weekly_basis_text};
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
 use crate::hybrid;
+use crate::profile::{HybridLead, PlanProfile};
+use crate::schema::Recommended;
 
 /// Hybrid (concurrent lift + run) rows, gated on the athlete doing both. Every
 /// row is read off the athlete's OWN plan (scheduled run days, the hardest
 /// scheduled run, which side leads), never a self-reported intensity, and is a
 /// full sentence (no raw true/false).
 pub(super) fn build_hybrid_guidance(
-    p: &Profile,
+    pp: &PlanProfile,
     weekly_km: f64,
-    weekly_basis: super::profile::WeeklyBasis,
+    weekly_basis: WeeklyBasis,
     rows: &mut Vec<GuidanceView>,
 ) {
-    let lead = crate::plan::hybrid_lead(p);
-    let shape = crate::plan::week_shape(p);
+    let p = pp.profile();
+    let lead = pp.hybrid_lead();
+    let shape = pp.shape();
     let so = hybrid::same_session_order(p.concurrent_goal);
     // Full-sentence copy keyed on the ordering (the goal is implied by the
     // sentence), instead of leaking the raw Debug enum names.
@@ -30,9 +36,9 @@ pub(super) fn build_hybrid_guidance(
     push_guidance(rows, "Hybrid", so_text.to_string(), &so);
 
     // Which side leads, and how the other side is dosed.
-    let maint = graded((), claims::HYB_MAINT_002);
+    let maint = Recommended::new((), claims::HYB_MAINT_002);
     let (lead_text, building, holding) = match lead {
-        Some(crate::plan::HybridLead::Running) => (
+        Some(HybridLead::Running) => (
             "Running leads, so lifting drops to a maintenance dose: about a third of the usual sets, still heavy (80% of your max or more), none added through the block.",
             "running",
             "lifting",
@@ -45,7 +51,7 @@ pub(super) fn build_hybrid_guidance(
     };
     push_guidance(rows, "Hybrid", lead_text.to_string(), &maint);
     // hybrid-025: tendon-stiffness evidence gap → progress one side at a time.
-    let dual = graded((), claims::HYB_TENDON_001);
+    let dual = Recommended::new((), claims::HYB_TENDON_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -56,7 +62,7 @@ pub(super) fn build_hybrid_guidance(
     );
 
     // The ≤3-run-day default applies only while lifting leads (HYB-RUNCAP-001).
-    if lead == Some(crate::plan::HybridLead::Lifting) {
+    if lead == Some(HybridLead::Lifting) {
         let ef = hybrid::endurance_frequency_ok(p.running_days_per_week);
         let text = if ef.value {
             format!(
@@ -77,7 +83,7 @@ pub(super) fn build_hybrid_guidance(
         let llc_text = |mi: bool| {
             format!(
                 "With your running ({}), leg lifting is kept to {} days a week and leg sets are trimmed by about {:.0}% (guideline {}%).",
-                super::profile::weekly_basis_text(weekly_km, weekly_basis, mi),
+                weekly_basis_text(weekly_km, weekly_basis, mi),
                 llc.value.max_lower_sessions,
                 mid * 100.0,
                 fmt_frac_pct_range(
@@ -91,11 +97,7 @@ pub(super) fn build_hybrid_guidance(
 
     // Interference is judged from the plan's own run days and hardest
     // scheduled run (HYB-THRESH-001), not a self-reported %VO2max.
-    let anchors = crate::plan::Anchors {
-        recent_weekly_km: Some(weekly_km),
-        ..Default::default()
-    };
-    if let Some((days, peak)) = crate::plan::plan_run_intensity(p, &anchors) {
+    if let Some((days, peak)) = crate::plan::plan_run_intensity(pp, weekly_km) {
         let ie = hybrid::interference_expected(days, peak);
         let hardest = if peak >= 95.0 {
             "hard intervals"
@@ -116,7 +118,7 @@ pub(super) fn build_hybrid_guidance(
         push_guidance(rows, "Hybrid", text, &ie);
         // hybrid-004: name the strongest lever when interference is expected.
         if ie.value {
-            let im = graded((), claims::HYB_DURATION_001);
+            let im = Recommended::new((), claims::HYB_DURATION_001);
             push_guidance(
                 rows,
                 "Hybrid",

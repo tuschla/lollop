@@ -2,7 +2,13 @@
 //! records, the athlete `Profile`, post-session reviews, calculator queries,
 //! and the `Event` vocabulary the shells send.
 
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use crate::app::profile_age::aged_on;
+use crate::feedback::SafetyScreen;
+use crate::gps::GpsPoint;
+use crate::profile::Profile;
+use crate::schema::{CheckinInput, ReadinessInput, ReadinessSignal, WorkoutType};
 
 #[derive(Clone)]
 pub(super) struct LoggedSet {
@@ -38,6 +44,26 @@ impl LoggedSet {
             .then(self.rpe.total_cmp(&other.rpe))
             .then(self.hold_sec.cmp(&other.hold_sec))
     }
+}
+
+/// Cheap content fingerprint of the logged sets, every field a `LiftResultView`
+/// depends on. Integer/string hashing versus the sort + per-set e1RM math +
+/// string allocation the cached list avoids. Collision risk is negligible for a
+/// personal history; the fingerprint also keys the plan snapshots.
+pub(super) fn sets_fingerprint(sets: &[LoggedSet]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    sets.len().hash(&mut h);
+    for s in sets {
+        s.entry_id.hash(&mut h);
+        s.observed_at.hash(&mut h);
+        s.exercise.hash(&mut h);
+        s.weight_kg.to_bits().hash(&mut h);
+        s.reps.hash(&mut h);
+        s.rpe.to_bits().hash(&mut h);
+        s.hold_sec.hash(&mut h);
+    }
+    h.finish()
 }
 
 #[derive(Clone)]
@@ -132,17 +158,6 @@ pub(super) struct EndedMarker {
     pub(super) observed_at: i64,
 }
 
-/// A calisthenics rung placement (`Event::SetCalisthenicsRung`): the athlete
-/// chose this rung for a ladder — at setup (their starting rung) or via the
-/// plan item's Easier / Harder choice. Replayed with the logged sets, in time
-/// order, by `build_calisthenics_anchors`. Model-internal.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct CalisPlacement {
-    pub(super) ladder: crate::schema::LadderId,
-    pub(super) rung: u8,
-    pub(super) observed_at: i64,
-}
-
 /// A readiness input removed by a dated `RemoveReadiness`. Today's state and
 /// every future day ignore it exactly as if deleted; a past day whose local
 /// date precedes the removal's local date was shown with it in force, so the
@@ -152,195 +167,6 @@ pub(super) struct RetractedInput {
     pub(super) input: ReadinessInput,
     /// Unix seconds of the removal.
     pub(super) retracted_at: i64,
-}
-
-/// How the athlete trains resistance: external loads (barbell/dumbbell) or
-/// bodyweight leverage (calisthenics). A calisthenics user's plan is built from
-/// leverage ladders instead of %1RM; they may still log arbitrary barbell sets
-/// (those stay plain logged lifts). Default `Weights`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ResistanceModality {
-    #[default]
-    Weights,
-    Calisthenics,
-}
-
-/// The athlete's programming profile: drives the evidence-cited guidance
-/// section. Shell-supplied; no logged data required.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Profile {
-    /// Cadence at which load can still be added → training age.
-    pub progression_cadence: ProgressionCadence,
-    /// Target lifting quality for loading bands.
-    pub lift_goal: LiftGoal,
-    /// Target running goal distance.
-    pub goal_distance: GoalDistance,
-    /// Concurrent-training priority for same-session ordering.
-    pub concurrent_goal: ConcurrentGoal,
-    /// Planned weekly sets per muscle (frequency / cap logic).
-    pub weekly_sets: u8,
-    /// Running days per week (hybrid lower-lift cap trigger).
-    pub running_days_per_week: u8,
-    /// Running km per week (hybrid lower-lift cap trigger). Always 0 when
-    /// `running_km_per_week_set` is false.
-    pub running_km_per_week: f64,
-    /// Whether the athlete actually answered the weekly-distance question.
-    /// `false` = "not set": the core zeroes `running_km_per_week` and the plan
-    /// sizes from logged runs, else the KB session-duration floors, never from
-    /// an invented figure. Missing on the wire = `true`.
-    #[serde(default = "serde_true")]
-    pub running_km_per_week_set: bool,
-    /// Advanced marathoner → extended session range.
-    pub advanced: bool,
-    /// Female user: routes the feedback-035 menstrual/nutrition clinician
-    /// prompt on a bone-stress referral and the hybrid-024 energy-availability
-    /// risk cohort. `None` reads as not-female.
-    pub female: Option<bool>,
-    /// Currently inside a high-load/overload mesocycle: arms the autoreg-029
-    /// parasympathetic-saturation guard (HRV above the SWC upper band then
-    /// blocks auto load-adds).
-    #[serde(default)]
-    pub high_load_block: bool,
-    /// Stage-0 onboarding health screen (File 08 onboard-050). Every flag
-    /// defaults to `false` and gates nothing.
-    #[serde(default)]
-    pub health: HealthScreen,
-    /// Training-environment context (File 08 indiv-025 / safety-024): heat,
-    /// altitude, or cold arms the environment-modifier guidance. `None` states
-    /// nothing and gates nothing.
-    pub environment: Option<Environment>,
-    /// Typical session temperature, °C, running-041 pace-correction trigger
-    /// (heat correction above ~15 °C). `None` = unstated, no row.
-    pub env_temp_c: Option<f64>,
-    /// Typical session altitude, m, running-041 pace-correction trigger
-    /// (altitude correction above ~900 m). `None` = unstated, no row.
-    pub env_altitude_m: Option<f64>,
-    /// Weeks fully off training when returning from a layoff: arms the
-    /// REENTRY-001 resistance re-entry ramp and the hypertrophy-045 reduced
-    /// re-entry MEV note. `None` = not returning.
-    pub weeks_off: Option<f64>,
-    /// Bodyweight, kg (optional): arms the strength-plyo depth-jump
-    /// readiness gate (needs squat 1RM ≥ 1.5× bodyweight). `None` = no gate.
-    /// Also the consolidated person-data source the protein calculator prefills
-    /// from: person data is entered once, on the profile.
-    pub bodyweight_kg: Option<f64>,
-    /// Age in years (optional). Read by the under-18 gate (`ingest`), the
-    /// Tanaka HRmax behind run targets and logged-run %HRmax
-    /// (`run_targets::hr_max_anchor`) when no measured max is set, the HR-zone
-    /// calculator's age input, and the conservative deload cadence
-    /// (`plan::conservative_deload`). `None` = unstated: no Tanaka estimate,
-    /// adult rules. With a `birth_epoch_day` the core owns this value: it is
-    /// re-derived from the birthday and the model's today on every
-    /// `SetProfile` and `SetToday`; a profile with only an age keeps the
-    /// stated value.
-    pub age_years: Option<f64>,
-    /// Birthday, local epoch day (optional). Source of the derived
-    /// `age_years` and the under-18 gate. `None` = only a stated age, or no
-    /// age at all.
-    pub birth_epoch_day: Option<i64>,
-    /// Resting HR, bpm (optional). Sets the Karvonen ceiling of run heart-rate
-    /// targets (`run_targets::hr_rest_anchor`) and prefills the HR-zone
-    /// calculator's Karvonen input. `None` = unstated.
-    pub resting_hr_bpm: Option<f64>,
-    /// Measured maximum HR, bpm (optional). When plausible it replaces the
-    /// Tanaka age estimate in the HR-zone calculator, run targets and
-    /// logged-run %HRmax, and dates the HR-zone re-test reminder. `None` =
-    /// unstated.
-    pub measured_hr_max: Option<f64>,
-    /// Display weights in pounds instead of kilograms. DISPLAY-ONLY: every
-    /// NUMERIC wire/view field (`weight_kg`, `e1rm_kg`, `load_kg`, …) stays in
-    /// kg regardless; only the human-facing weight strings the shell renders
-    /// verbatim convert (kg × `LB_PER_KG`, "lb" suffix, via the `weight_num` /
-    /// `weight_suffix` / `fmt_weight` helpers).
-    #[serde(default)]
-    pub weight_lb: bool,
-    /// Resistance-training modality: `Weights` (default) or `Calisthenics`.
-    /// A calisthenics profile routes lift days through the leverage-ladder
-    /// synthesizer (`plan::calisthenics_session`).
-    #[serde(default)]
-    pub resistance_modality: ResistanceModality,
-    /// The local epoch-day this profile edit takes effect.
-    /// The core keeps a `profile_history`; a past/today plan day is prescribed
-    /// with the latest profile whose `effective_from_epoch_day <= that day`, so
-    /// editing a goal or weekly-set target never re-prescribes an already-shown
-    /// past day. `None` = effective from the beginning of time (−∞): a
-    /// None-dated edit replaces the whole history, but applies only from its
-    /// position in the log to logged runs (it pins the %HRmax of the runs
-    /// already logged, `LoggedRun::hr_pinned`). Production shells send the
-    /// core's today.
-    pub effective_from_epoch_day: Option<i64>,
-    /// When the edit was made, unix seconds (the shell's clock). On its
-    /// effective day the edit is in force only from this instant, so an
-    /// evening edit leaves a run logged that morning on the profile it was
-    /// logged under ([`profile_at`]); it also orders same-day edits in the
-    /// history. `None` = from the start of that day.
-    /// Ignored on an undated edit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edited_at: Option<i64>,
-    /// Lifting sessions per week the athlete commits to, 2..=5. `None` = the
-    /// fixed default lift layout.
-    pub lift_days_per_week: Option<u8>,
-    /// Days the athlete can train, as a bitmask: bit0 = Monday … bit6 =
-    /// Sunday. `None` = the engine's default weekday layout.
-    pub training_weekdays: Option<u8>,
-    /// Target race date, local epoch day. `None` = no race scheduled.
-    pub goal_race_epoch_day: Option<i64>,
-    /// A recent race result the athlete reports (distance, finish time,
-    /// optional date). `None` = none stated.
-    pub recent_race: Option<RecentRace>,
-    /// Athlete-stated longest run in the last 30 days, km. Logged runs
-    /// supersede it once present. `None` = unstated.
-    pub stated_longest_recent_km: Option<f64>,
-    /// Local epoch day training resumed after the `weeks_off` layoff. `None`
-    /// = unstated (re-entry is then dated from the profile edit).
-    pub layoff_returned_epoch_day: Option<i64>,
-    /// Strength test / meet date, local epoch day. `None` = no meet scheduled.
-    pub meet_epoch_day: Option<i64>,
-    /// Calisthenics equipment on hand. `None` = assume every piece is available.
-    pub calis_equipment: Option<CalisEquipment>,
-    /// Hypertrophy priority muscle key the athlete wants to specialize.
-    /// `None` = no specialization.
-    pub specialization_muscle: Option<String>,
-    /// A pure runner opted into supplemental strength sessions.
-    #[serde(default)]
-    pub runner_strength: bool,
-}
-
-impl Profile {
-    /// The declared layoff's return day: `None` without a layoff (`weeks_off`
-    /// unset or 0), `Some(None)` when it cannot be dated, else the local epoch
-    /// day training resumed (`layoff_returned_epoch_day`, else the day this
-    /// profile took effect).
-    pub fn declared_layoff_return(&self) -> Option<Option<i64>> {
-        self.weeks_off.is_some_and(|w| w > 0.0).then_some(
-            self.layoff_returned_epoch_day
-                .or(self.effective_from_epoch_day),
-        )
-    }
-}
-
-/// Serde default for flags that were implicitly on before they existed.
-fn serde_true() -> bool {
-    true
-}
-
-/// A race result the athlete reports on their profile.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct RecentRace {
-    /// Race distance, km.
-    pub distance_km: f64,
-    /// Finish time, seconds.
-    pub time_sec: u32,
-    /// Race date, local epoch day. `None` = undated.
-    pub epoch_day: Option<i64>,
-}
-
-/// Calisthenics equipment the athlete has access to.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CalisEquipment {
-    pub pull_up_bar: bool,
-    pub dip_bars: bool,
-    pub rings: bool,
 }
 
 /// Lifting-set execution context for post-session feedback.
@@ -367,35 +193,6 @@ pub struct IntervalExec {
     pub rpe_at_or_below_target: bool,
 }
 
-/// The four overtraining signs the weekly check-in asks about (feedback-036:
-/// performance decrement, mood disturbance, elevated resting HR / suppressed
-/// HRV, sleep deterioration). When a check-in carries this, the signal count
-/// IS the number of signs ticked (it overrides the bare
-/// `overtraining_signal_count`), so "a sign" always means one of these four.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct OvertrainingSigns {
-    pub worse_performance: bool,
-    pub low_mood: bool,
-    pub higher_resting_hr: bool,
-    pub worse_sleep: bool,
-}
-
-impl OvertrainingSigns {
-    /// How many of the four signs are ticked.
-    pub fn count(&self) -> u8 {
-        [
-            self.worse_performance,
-            self.low_mood,
-            self.higher_resting_hr,
-            self.worse_sleep,
-        ]
-        .iter()
-        .filter(|b| **b)
-        .count() as u8
-    }
-}
-
 /// One review payload, used by two events with separate lifecycles:
 /// `SubmitReview` (one session's execution: lift/run context, off day) and
 /// `SubmitWeeklyCheckin` (the week-level counts and the clinical screens).
@@ -404,23 +201,10 @@ impl OvertrainingSigns {
 /// review can never overwrite the weekly check-in's referral or deloads.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct SessionReview {
-    pub bone_pain_red_flag: bool,
-    pub compulsive_flag: bool,
-    /// Weekly RED-S screen positive (File 13 ready-upd-005, REDS-SCREEN-001):
-    /// missed or longer cycles over the last 3 months (not explained by
-    /// pregnancy or contraception), or noticeably lower sex drive / fewer
-    /// morning erections for several weeks. Routes to the RED-S referral
-    /// feedback and the deficit refusal, never a programming variable.
-    #[serde(default)]
-    pub reds_signal_reported: bool,
-    pub overtraining_signal_count: u8,
-    /// How long the overtraining/NFOR signals have co-occurred, in weeks
-    /// (feedback-036 duration condition: fire only over ≥1–2 wks, never on a
-    /// single noisy night). `None` = untracked → the count alone gates.
-    pub overtraining_signal_weeks: Option<f64>,
-    /// Which of the four listed overtraining signs were ticked (weekly
-    /// check-in). `Some` → the effective signal count is the ticked count.
-    pub overtraining_signs: Option<OvertrainingSigns>,
+    /// The weekly safety screens; flattened, so their wire fields sit at the
+    /// top level, first.
+    #[serde(flatten)]
+    pub safety: SafetyScreen,
     /// Single-session distance over the prior-30-day longest, as a fraction.
     pub single_session_spike_frac: Option<f64>,
     pub lift: Option<LiftExec>,
@@ -591,16 +375,16 @@ pub struct Model {
     /// The current per-session review (execution context only), if submitted.
     /// `ClearReview` empties it. Never carries weekly/clinical fields.
     pub(super) review: Option<SessionReview>,
-    /// The weekly check-in in force (week-level counts + clinical screens):
-    /// the latest `SubmitWeeklyCheckin`, or the weekly part of a legacy
-    /// `SubmitReview`. A red flag here stays until a LATER weekly check-in
-    /// answers "no" (or `ClearWeeklyCheckin`); session reviews never touch it.
-    pub(super) weekly_checkin: Option<SessionReview>,
-    /// Every weekly check-in ever submitted, in submission order.
-    /// `ClearWeeklyCheckin` empties only `weekly_checkin`: a past day keeps the
-    /// deload / downgrade windows the check-ins gave it, so a later check-in or
-    /// a clear never re-judges it.
+    /// Every weekly check-in ever submitted, in submission order: the latest
+    /// `SubmitWeeklyCheckin`, or the weekly part of a legacy `SubmitReview`,
+    /// is the check-in in force ([`Model::weekly_checkin`]). A red flag there
+    /// stays until a LATER weekly check-in answers "no" (or
+    /// `ClearWeeklyCheckin`); session reviews never touch it. A clear keeps the
+    /// history: a past day keeps the deload / downgrade windows the check-ins
+    /// gave it, so a later check-in or a clear never re-judges it.
     pub(super) weekly_history: Vec<SessionReview>,
+    /// `ClearWeeklyCheckin` since the last weekly check-in: none is in force.
+    pub(super) weekly_checkin_cleared: bool,
     /// The last race-time prediction query, if requested. Stored as the raw
     /// inputs so the two-method estimate is re-derived in `view` (like a logged
     /// run), keeping the core deterministic and the prediction reproducible.
@@ -622,7 +406,7 @@ pub struct Model {
     pub(super) plan_request: Option<PlanRequest>,
     /// Earlier plans as (start day, local day `ClearPlan` removed them), in
     /// removal order, so their planned deload weeks stay known after the plan
-    /// is removed and set up again (`consistency::lift_deload_days`).
+    /// is removed and set up again (`logged_days::lift_deload_days`).
     pub(super) past_plans: Vec<(i64, i64)>,
     /// The shell's clock, entering as event data: the current
     /// epoch-day, sent on foreground so `view()` can date the week and pick the
@@ -635,7 +419,7 @@ pub struct Model {
     pub(super) today_utc_offset_sec: i64,
     /// Calisthenics rung placements, in submission order (SETS family:
     /// `ClearSets` clears them with the sets they steer).
-    pub(super) calis_placements: Vec<CalisPlacement>,
+    pub(super) calis_placements: Vec<crate::calisthenics::progression::CalisPlacement>,
     /// Session moves within a plan week ("do this on another day",
     /// ADH-RESCHED-001), in submission order. Validated at `view()` time against
     /// the week's spacing rules; a move that breaks them is ignored and
@@ -647,6 +431,20 @@ impl Model {
     /// The athlete's current programming profile: the latest applied.
     pub(super) fn profile(&self) -> Option<&Profile> {
         self.profile_history.last()
+    }
+
+    /// The weekly check-in in force: the latest one, unless cleared since.
+    pub(super) fn weekly_checkin(&self) -> Option<&SessionReview> {
+        if self.weekly_checkin_cleared {
+            None
+        } else {
+            self.weekly_history.last()
+        }
+    }
+
+    /// `ClearWeeklyCheckin`: no check-in is in force until the next one.
+    pub(super) fn clear_weekly_checkin(&mut self) {
+        self.weekly_checkin_cleared = true;
     }
 }
 
@@ -677,6 +475,38 @@ pub(super) struct RaceQuery {
     /// How many weeks old the input race is (running-041 freshness window:
     /// ≤6 wk fresh, 7–8 marginal, >8 stale → re-test). `None` = untracked.
     pub(super) weeks_since_race: Option<u8>,
+}
+
+/// The heart-rate-zone query, stored on the model and echoed back so a shell
+/// rehydrates its form. Sibling to the `hr_zones` result rows.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct HrZoneInputView {
+    pub age_years: f64,
+    /// Resting HR, bpm: arms the running-005 %HRmax-vs-Karvonen method
+    /// preference and the Karvonen band targets. `None` = %HRmax only.
+    pub resting_hr_bpm: Option<f64>,
+}
+
+/// The absolute-protein-target query, stored on the model and echoed back so a
+/// shell rehydrates its form. Sibling to the `protein_targets` result rows.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct ProteinInputView {
+    pub bodyweight_kg: f64,
+    pub masters: bool,
+    pub deficit: bool,
+}
+
+/// The hypertrophy-plan query, stored on the model and echoed back so a shell
+/// rehydrates its form. Sibling to the `hypertrophy_plan` result rows.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct HypertrophyInputView {
+    pub muscle: String,
+    pub weeks: u8,
+    /// The muscle is not growing on the current volume (hypertrophy-008).
+    pub not_growing: bool,
+    /// Recovery from the current volume is easy (hypertrophy-008; with
+    /// `not_growing` → +2 sets next mesocycle).
+    pub recovering_easily: bool,
 }
 
 /// Which logged history family a [`Event::DeleteEntry`] targets. Selects the
@@ -714,6 +544,14 @@ pub(crate) const ACTIVITY_MAX_MINUTES: f64 = 600.0;
 /// becomes a row, so it carries no entry identity).
 pub(crate) fn activity_passes_gate(minutes: f64) -> bool {
     minutes.is_finite() && minutes > 0.0 && minutes <= ACTIVITY_MAX_MINUTES
+}
+
+/// `update`'s set-validity gate for `LogSet`/`AmendSet`: a non-negative (or NaN,
+/// sanitized to 0 on store) weight and either reps or a hold time. Shared with
+/// compaction, so compaction gives an invalid line no identity exactly when
+/// `update` drops it.
+pub(crate) fn set_passes_gate(weight_kg: f64, reps: u32, hold_sec: Option<u16>) -> bool {
+    (weight_kg >= 0.0 || weight_kg.is_nan()) && (reps > 0 || hold_sec.is_some())
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -1046,7 +884,7 @@ pub enum Event {
     /// on foreground so `view()` dates the week + picks the next session with no
     /// clock in-core. Last-write-wins singleton (compaction keeps one line).
     /// `utc_offset_sec` is the device's offset east of UTC (0 = UTC), which
-    /// buckets every UTC `observed_at` into a local day (`crate::local_day`).
+    /// buckets every UTC `observed_at` into a local day (`crate::day::local_day`).
     SetToday {
         epoch_day: i64,
         #[serde(default)]
@@ -1100,6 +938,14 @@ macro_rules! impl_entry {
 }
 impl_entry!(LoggedSet, LoggedRun, LoggedActivity);
 
+/// Clamp a wire entry id into the range a Kotlin `Long` (`i64`) can decode: a
+/// `u64` above `i64::MAX` round-trips out of range and breaks the shell. Every
+/// store and match key in `update` and every compaction identity in `log.rs`
+/// goes through this, so replay and compaction agree on which rows an id names.
+pub(crate) fn sanitize_entry_id(id: u64) -> u64 {
+    id.min(i64::MAX as u64)
+}
+
 /// Index of the NEWEST row an amend/`DeleteEntry` targets: the last
 /// (`rposition`) whose sanitized `entry_id` matches, or, for a legacy target
 /// (`id == 0`, no per-entry id), the last legacy row whose `observed_at`
@@ -1134,7 +980,7 @@ pub(super) fn history_key(p: &Profile) -> (i64, i64) {
 /// strictly after `day` (a plan day before the first edit), the earliest entry
 /// is used so the day still has a profile. A birthday-carrying profile is
 /// aged for `day` itself
-/// (`ingest::aged_on`), so a day the under-18 gate held keeps its gate after
+/// ([`aged_on`]), so a day the under-18 gate held keeps its gate after
 /// the 18th birthday.
 pub(super) fn profile_for_day(model: &Model, day: i64) -> Option<std::borrow::Cow<'_, Profile>> {
     in_force(model, day, |_| true)
@@ -1149,10 +995,10 @@ pub(super) fn profile_at(
     at: i64,
     utc_offset_sec: i64,
 ) -> Option<std::borrow::Cow<'_, Profile>> {
-    let day = crate::local_day(at, utc_offset_sec);
+    let day = crate::day::local_day(at, utc_offset_sec);
     in_force(model, day, |p| {
         !p.edited_at.is_some_and(|t| {
-            t > at && history_key(p).0 == day && crate::local_day(t, utc_offset_sec) == day
+            t > at && history_key(p).0 == day && crate::day::local_day(t, utc_offset_sec) == day
         })
     })
 }
@@ -1170,7 +1016,7 @@ fn in_force(
         .rev()
         .find(|p| history_key(p).0 <= day && admit(p))
         .or_else(|| model.profile_history.first())?;
-    Some(super::ingest::aged_on(p, day))
+    Some(aged_on(p, day))
 }
 
 /// The local day the profile `field` of `p` was first stated: the effective

@@ -235,7 +235,7 @@ impl LineFacts {
                 false,
                 Rule::Remove {
                     signal: *signal,
-                    dated: !crate::is_undated(*observed_at),
+                    dated: !crate::day::is_undated(*observed_at),
                 },
             ),
             Event::ResolveHold {
@@ -246,7 +246,7 @@ impl LineFacts {
                 false,
                 Rule::ResolveHold {
                     signal: *signal,
-                    dated: !crate::is_undated(*observed_at),
+                    dated: !crate::day::is_undated(*observed_at),
                 },
             ),
             Event::LogSet {
@@ -258,7 +258,7 @@ impl LineFacts {
                 ..
             } => entry(
                 EntryLine::Log,
-                set_passes_gate(*weight_kg, *reps, *hold_sec),
+                crate::app::set_passes_gate(*weight_kg, *reps, *hold_sec),
                 F::Sets,
                 *entry_id,
                 *observed_at,
@@ -274,7 +274,7 @@ impl LineFacts {
                 ..
             } => entry(
                 EntryLine::Amend,
-                set_passes_gate(*weight_kg, *reps, *hold_sec),
+                crate::app::set_passes_gate(*weight_kg, *reps, *hold_sec),
                 F::Sets,
                 *entry_id,
                 *observed_at,
@@ -471,18 +471,10 @@ impl LineFacts {
     }
 }
 
-/// `update`'s set-validity gate for `LogSet`/`AmendSet`: a non-negative (or NaN,
-/// sanitized to 0 on store) weight and either reps or a hold time. Shared with
-/// `update`, so compaction gives an invalid line no identity exactly when
-/// `update` drops it.
-pub(crate) fn set_passes_gate(weight_kg: f64, reps: u32, hold_sec: Option<u16>) -> bool {
-    (weight_kg >= 0.0 || weight_kg.is_nan()) && (reps > 0 || hold_sec.is_some())
-}
-
 /// A SetProfile's `profile_history` key, as `update` orders it
 /// (`app::history_key`): (effective day, then `edited_at`), `None` = -inf, and
 /// an undated edit is (-inf, -inf).
-fn profile_key(p: &crate::app::Profile) -> (i64, i64) {
+fn profile_key(p: &crate::profile::Profile) -> (i64, i64) {
     match p.effective_from_epoch_day {
         Some(day) => (day, p.edited_at.unwrap_or(i64::MIN)),
         None => (i64::MIN, i64::MIN),
@@ -823,7 +815,7 @@ fn rule2_profile_history(lines: &[LineFacts], remove: &mut [bool]) {
 
 /// Rule 2 (`SetExerciseEnded`): last write wins per EXACT key
 /// `(names::exercise_key(exercise), epoch_day)`. `update` keys end-markers by a
-/// looser movement-normalized name (`plan::same_movement`, whose tokens compare
+/// looser movement-normalized name (`exercise::same_movement`, whose tokens compare
 /// with the same fold), so the exact-key subset is always safe (lines differing
 /// only in equipment words are conservatively kept).
 fn rule2_exercise_ended(lines: &[LineFacts], remove: &mut [bool]) {

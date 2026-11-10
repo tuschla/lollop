@@ -56,7 +56,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         run_vdot: Some(vdot),
         ..Default::default()
     };
-    let rx = graded(
+    let rx = Recommended::new(
         Prescription::Run(crate::schema::RunPrescription::new(
             crate::schema::RunVolume::DistanceKm(5.0),
             crate::schema::RunIntensity::HrPercentMax {
@@ -98,7 +98,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
     );
     assert_eq!(
         t.evidence.citation,
-        graded((), claims::RUN_VDOT_001).reference()
+        Recommended::new((), claims::RUN_VDOT_001).reference()
     );
     // A stale race (>8 weeks) is not an anchor.
     let mut stale = racer_profile(today);
@@ -142,7 +142,7 @@ fn easy_run_without_anchors_shows_the_talk_test_cue() {
     );
     assert_eq!(
         t.evidence.citation,
-        graded((), claims::RUN_TALKTEST_001).reference()
+        Recommended::new((), claims::RUN_TALKTEST_001).reference()
     );
 }
 
@@ -623,7 +623,7 @@ fn same_day_7h_gap_gets_spacing_note_not_cap3_warning() {
         .unwrap_or_else(|| panic!("same-day spacing note expected: {report:#?}"));
     assert_eq!(
         note.evidence.citation,
-        graded((), claims::CONC_SEP_001).reference()
+        Recommended::new((), claims::CONC_SEP_001).reference()
     );
 }
 
@@ -858,10 +858,12 @@ fn hybrid_and_running_ramp_rows_agree_on_the_rebound_after_a_recovery_week() {
     assert!(profile.weekly_sets > 0, "a lifting (hybrid) profile");
     let monday = |w: i64| 704 + w * 7;
     let rec = (2_i64..20)
-        .find(|&w| crate::plan::planned_recovery_week(&profile, w as u32, monday(w)))
+        .find(|&w| {
+            crate::plan::planned_recovery_week(&PlanProfile::new(&profile), w as u32, monday(w))
+        })
         .expect("the plan has a recovery week");
     assert!(!crate::plan::planned_recovery_week(
-        &profile,
+        &PlanProfile::new(&profile),
         (rec + 1) as u32,
         monday(rec + 1)
     ));
@@ -1220,7 +1222,7 @@ fn gps_qc_drops_teleport_and_stuck_time_fixes() {
         gps(0.003, 60),
     ];
     assert_eq!(
-        pts.len() - qc_track(&pts, &[]).track.len(),
+        pts.len() - crate::gps::qc_track(&pts, &[]).track.len(),
         2,
         "teleport + stuck-time fixes dropped"
     );
@@ -1242,13 +1244,13 @@ fn gps_timestamp_arithmetic_saturates_without_panicking() {
     // the dt subtraction (a debug panic) nor corrupt distance. The saturated
     // dt is then discarded/handled by the existing dt gates.
     let pts = vec![gps(0.000, i64::MIN), gps(0.001, i64::MAX), gps(0.002, 10)];
-    let qc = qc_track(&pts, &[]);
-    let dist = running::track_distance_km(&qc.track, &qc.seg_starts);
+    let qc = crate::gps::qc_track(&pts, &[]);
+    let dist = crate::gps::track_distance_km(&qc.track, &qc.seg_starts);
     assert!(
         dist.is_finite() && dist >= 0.0,
         "distance stays finite: {dist}"
     );
-    let moving = moving_duration_min(&qc);
+    let moving = crate::gps::moving_duration_min(&qc);
     assert!(
         moving.is_finite() && moving >= 0.0,
         "moving time stays finite: {moving}"
@@ -1261,7 +1263,7 @@ fn a_short_stop_swallowed_by_the_jitter_gate_is_not_moving_time() {
     // dropped by the <2.5 m gate), then running on. The merged leg spans 7 s
     // for ~3.5 m (0.5 m/s, just over the auto-pause floor), so the stand was
     // counted as running; only the 1 s after the last standing fix moves.
-    let m_per_deg = running::haversine_m(gps(0.0, 0), gps(1.0, 0));
+    let m_per_deg = crate::gps::haversine_m(gps(0.0, 0), gps(1.0, 0));
     let at = |m: f64, t: i64| gps(m / m_per_deg, t);
     let mut pts: Vec<GpsPoint> = (0..=20).map(|s| at(3.0 * s as f64, s)).collect();
     let stop = 60.0;
@@ -1271,13 +1273,13 @@ fn a_short_stop_swallowed_by_the_jitter_gate_is_not_moving_time() {
     for s in 1..=20 {
         pts.push(at(stop + 3.5 + 3.0 * (s - 1) as f64, 26 + s));
     }
-    let qc = qc_track(&pts, &[]);
+    let qc = crate::gps::qc_track(&pts, &[]);
     assert_eq!(
         pts.len() - qc.track.len(),
         5,
         "the standing fixes are jitter-dropped, but the last, where the runner stood until, is kept"
     );
-    let moving_sec = moving_duration_min(&qc) * 60.0;
+    let moving_sec = crate::gps::moving_duration_min(&qc) * 60.0;
     assert!(
         (moving_sec - 40.0).abs() < 1e-9,
         "20 s + 20 s of running, not the 6 s stand: {moving_sec}"

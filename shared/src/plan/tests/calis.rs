@@ -1,7 +1,8 @@
 //! Calisthenics ladder-day synthesis tests.
 
 use super::*;
-use crate::app::{CalisEquipment, ResistanceModality};
+use crate::calisthenics::progression::CalisAnchor;
+use crate::profile::{CalisEquipment, ResistanceModality};
 use crate::schema::{CalisthenicsPrescription, LiftSessionType, TierTarget};
 
 fn calis_profile() -> Profile {
@@ -63,7 +64,8 @@ fn item(prog: &Program, ladder: LadderId) -> Option<&Recommended<Prescription>> 
 
 #[test]
 fn calisthenics_profile_synthesizes_pattern_balanced_ladder_days() {
-    let prog = synthesize(&calis_profile(), &Anchors::default(), 0).expect("a plan is synthesized");
+    let prog = synthesize(&PlanProfile::new(&calis_profile()), &Anchors::default(), 0)
+        .expect("a plan is synthesized");
     let days = lift_days(&prog);
     assert_eq!(days.len(), 3, "pure calisthenics = 3 full-body lift days");
     for s in &days {
@@ -127,7 +129,7 @@ fn calisthenics_every_pattern_at_least_twice_weekly() {
         ..calis_profile()
     };
     for p in [calis_profile(), hybrid] {
-        let prog = synthesize(&p, &Anchors::default(), 0).expect("plan");
+        let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).expect("plan");
         let counts = family_counts(&prog);
         assert!(
             counts.iter().all(|&c| c >= 2),
@@ -143,7 +145,7 @@ fn hybrid_calisthenics_includes_vertical_push() {
         running_km_per_week: 20.0,
         ..calis_profile()
     };
-    let prog = synthesize(&hybrid, &Anchors::default(), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&hybrid), &Anchors::default(), 0).expect("plan");
     assert!(
         item(&prog, LadderId::VerticalPush).is_some(),
         "vertical push on a 2-day plan"
@@ -167,7 +169,7 @@ fn no_pull_bar_profile_never_prescribes_vertical_pull() {
         anchor(LadderId::HorizontalPull, 3),
         anchor(LadderId::Dip, 3),
     ]);
-    let prog = synthesize(&none, &anchors, 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&none), &anchors, 0).expect("plan");
     for s in lift_days(&prog) {
         for p in &s.prescriptions {
             let c = calis(p);
@@ -193,14 +195,14 @@ fn no_pull_bar_profile_never_prescribes_vertical_pull() {
         "vertical push takes the dip slot"
     );
     // The row carries the vertical-pull volume (CAL-EQUIP-001).
-    let full = synthesize(&calis_profile(), &anchors, 0).expect("plan");
+    let full = synthesize(&PlanProfile::new(&calis_profile()), &anchors, 0).expect("plan");
     let rows = calis(item(&prog, LadderId::HorizontalPull).unwrap()).sets;
     let rows_full = calis(item(&full, LadderId::HorizontalPull).unwrap()).sets;
     assert!(rows >= rows_full, "rows {rows} ≥ {rows_full}");
     // Ring row (rung 4) needs rings: the advance stops at the feet-elevated row.
     let mut ready = anchor(LadderId::HorizontalPull, 3);
     ready.advance_ready = true;
-    let prog = synthesize(&none, &with(vec![ready]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&none), &with(vec![ready]), 0).expect("plan");
     assert_eq!(
         calis(item(&prog, LadderId::HorizontalPull).unwrap()).tier,
         3
@@ -214,7 +216,7 @@ fn hypertrophy_goal_gets_6_to_15_reps_at_0_to_1_rir() {
         ..calis_profile()
     };
     let anchors = with(vec![anchor(LadderId::HorizontalPush, 4)]);
-    let prog = synthesize(&hyp, &anchors, 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&hyp), &anchors, 0).expect("plan");
     let push = item(&prog, LadderId::HorizontalPush).unwrap();
     let c = calis(push);
     assert_eq!(c.exercise, "Full push-up");
@@ -238,7 +240,7 @@ fn hypertrophy_goal_gets_6_to_15_reps_at_0_to_1_rir() {
         }
     }
     // The strength goal keeps the table band and RIR 1–2.
-    let prog = synthesize(&calis_profile(), &anchors, 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&calis_profile()), &anchors, 0).expect("plan");
     let c = calis(item(&prog, LadderId::HorizontalPush).unwrap());
     assert_eq!(c.target, TierTarget::Reps { low: 5, high: 8 });
     assert_eq!(c.rir, (1, 2));
@@ -257,7 +259,7 @@ fn weighted_rung_first_prescription_suggests_smallest_plate() {
     // Ring dip qualified → the next rung IS the weighted dip: it starts loaded.
     let mut dip = anchor(LadderId::Dip, 4);
     dip.advance_ready = true;
-    let prog = synthesize(&p, &with(vec![pull, dip]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![pull, dip]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::VerticalPull).unwrap());
     assert_eq!(c.exercise, "Full pull-up");
     assert_eq!(c.added_kg, Some(2.5));
@@ -267,7 +269,12 @@ fn weighted_rung_first_prescription_suggests_smallest_plate() {
     assert_eq!(d.added_kg, Some(2.5));
     assert!(d.load_capable);
     // A bodyweight rung is not load-capable.
-    let prog = synthesize(&p, &with(vec![anchor(LadderId::HorizontalPush, 4)]), 0).unwrap();
+    let prog = synthesize(
+        &PlanProfile::new(&p),
+        &with(vec![anchor(LadderId::HorizontalPush, 4)]),
+        0,
+    )
+    .unwrap();
     let h = calis(item(&prog, LadderId::HorizontalPush).unwrap());
     assert!(!h.load_capable);
     assert_eq!(h.added_kg, None);
@@ -282,7 +289,7 @@ fn loaded_pullup_trigger_raises_added_kg_not_rung() {
     let mut pull = anchor(LadderId::VerticalPull, 4);
     pull.advance_ready = true;
     pull.last_added_kg = 20.0;
-    let prog = synthesize(&p, &with(vec![pull]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![pull]), 0).expect("plan");
     let rx = item(&prog, LadderId::VerticalPull).unwrap();
     let c = calis(rx);
     assert_eq!(
@@ -302,7 +309,7 @@ fn loaded_pullup_trigger_raises_added_kg_not_rung() {
     let mut heavy = anchor(LadderId::VerticalPull, 4);
     heavy.regress = true;
     heavy.last_added_kg = 20.0;
-    let prog = synthesize(&p, &with(vec![heavy]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![heavy]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::VerticalPull).unwrap());
     assert_eq!(c.tier, 4);
     assert_eq!(c.added_kg, Some(17.5));
@@ -312,7 +319,7 @@ fn loaded_pullup_trigger_raises_added_kg_not_rung() {
 fn failed_new_rung_prescribes_tempo_bridge_capped_at_8s() {
     let mut a = anchor(LadderId::HorizontalPush, 5);
     a.regress = true;
-    let prog = synthesize(&calis_profile(), &with(vec![a]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&calis_profile()), &with(vec![a]), 0).expect("plan");
     let rx = item(&prog, LadderId::HorizontalPush).unwrap();
     let c = calis(rx);
     assert_eq!(c.exercise, "Full push-up");
@@ -322,7 +329,7 @@ fn failed_new_rung_prescribes_tempo_bridge_capped_at_8s() {
     // The bridge persists while the rung was entered by a regress.
     let mut held = anchor(LadderId::HorizontalPush, 4);
     held.bridged = true;
-    let prog = synthesize(&calis_profile(), &with(vec![held]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&calis_profile()), &with(vec![held]), 0).expect("plan");
     assert!(
         calis(item(&prog, LadderId::HorizontalPush).unwrap())
             .tempo_bridge
@@ -331,7 +338,7 @@ fn failed_new_rung_prescribes_tempo_bridge_capped_at_8s() {
     // A leave-RIR eccentric rung is its own bridge: no tempo on it.
     let mut pull = anchor(LadderId::VerticalPull, 4);
     pull.regress = true;
-    let prog = synthesize(&calis_profile(), &with(vec![pull]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&calis_profile()), &with(vec![pull]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::VerticalPull).unwrap());
     assert_eq!(c.exercise, "Negative pull-up");
     assert!(c.tempo_bridge.is_none());
@@ -344,7 +351,12 @@ fn skip_and_reentry_shape_the_rung_and_its_evidence() {
     skip.advance_steps = crate::calisthenics::SKIP_STEPS;
     let mut back = anchor(LadderId::Squat, 4);
     back.reentry_steps = 1;
-    let prog = synthesize(&calis_profile(), &with(vec![skip, back]), 0).expect("plan");
+    let prog = synthesize(
+        &PlanProfile::new(&calis_profile()),
+        &with(vec![skip, back]),
+        0,
+    )
+    .expect("plan");
     let push = item(&prog, LadderId::HorizontalPush).unwrap();
     assert_eq!(calis(push).tier, 2, "a far-too-easy rung skips two steps");
     assert_eq!(push.claim_id(), claims::CAL_PLACE_001);
@@ -357,7 +369,7 @@ fn skip_and_reentry_shape_the_rung_and_its_evidence() {
 #[test]
 fn lever_prescription_prescribes_working_holds_with_a_separate_test() {
     let prog = synthesize(
-        &calis_profile(),
+        &PlanProfile::new(&calis_profile()),
         &with(vec![anchor(LadderId::FrontLever, 0)]),
         0,
     )
@@ -374,7 +386,7 @@ fn calisthenics_power_day_leads_with_ballistic_items_capped_contacts() {
         lift_goal: LiftGoal::Power,
         ..calis_profile()
     };
-    let prog = synthesize(&power, &Anchors::default(), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&power), &Anchors::default(), 0).expect("plan");
     for s in lift_days(&prog) {
         let first: Vec<LadderId> = s
             .prescriptions
@@ -405,8 +417,12 @@ fn calisthenics_power_title_is_power() {
         lift_goal: LiftGoal::Power,
         ..calis_profile()
     };
-    let prog = synthesize(&power, &Anchors::default(), 0).expect("plan");
-    assert_eq!(prog.name, "Calisthenics power");
+    let pp = PlanProfile::new(&power);
+    let prog = synthesize(&pp, &Anchors::default(), 0).expect("plan");
+    assert_eq!(
+        ProgramFocus::of(&pp),
+        ProgramFocus::Calisthenics(LiftGoal::Power)
+    );
     assert_eq!(prog.goal, Goal::Power);
 }
 
@@ -422,7 +438,7 @@ fn weighted_dip_regress_at_101_kg_lowers_the_load_by_stepping_down() {
     let mut dip = anchor(LadderId::Dip, 5);
     dip.regress = true;
     dip.last_added_kg = 2.5;
-    let prog = synthesize(&p, &with(vec![dip]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![dip]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::Dip).unwrap());
     assert_eq!(c.exercise, "Ring dip");
     assert_eq!(c.added_kg, None);
@@ -431,12 +447,12 @@ fn weighted_dip_regress_at_101_kg_lowers_the_load_by_stepping_down() {
         bodyweight_kg: Some(80.0),
         ..calis_profile()
     };
-    let prog = synthesize(&p80, &with(vec![dip]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p80), &with(vec![dip]), 0).expect("plan");
     assert_eq!(calis(item(&prog, LadderId::Dip).unwrap()).tier, 4);
     // A heavier belt sheds one step and stays on the rung.
     let mut heavy = dip;
     heavy.last_added_kg = 10.0;
-    let prog = synthesize(&p, &with(vec![heavy]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![heavy]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::Dip).unwrap());
     assert_eq!(c.exercise, "Weighted dip");
     assert_eq!(c.added_kg, Some(6.25));
@@ -444,7 +460,7 @@ fn weighted_dip_regress_at_101_kg_lowers_the_load_by_stepping_down() {
     let mut back = anchor(LadderId::Dip, 5);
     back.reentry_steps = 1;
     back.last_added_kg = 2.5;
-    let prog = synthesize(&p, &with(vec![back]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![back]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::Dip).unwrap());
     assert_eq!(c.tier, 4);
     assert_eq!(c.added_kg, None);
@@ -458,7 +474,7 @@ fn pull_up_leverage_branch_advances_by_rung_and_full_pull_up_by_load() {
     };
     let mut lsit = anchor(LadderId::VerticalPull, 5);
     lsit.advance_ready = true;
-    let prog = synthesize(&p, &with(vec![lsit]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![lsit]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::VerticalPull).unwrap());
     assert_eq!(c.exercise, "One-arm assisted pull-up");
     assert!(!c.load_capable);
@@ -466,7 +482,7 @@ fn pull_up_leverage_branch_advances_by_rung_and_full_pull_up_by_load() {
     // The one-arm top takes load again.
     let mut top = anchor(LadderId::VerticalPull, 7);
     top.advance_ready = true;
-    let prog = synthesize(&p, &with(vec![top]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![top]), 0).expect("plan");
     let c = calis(item(&prog, LadderId::VerticalPull).unwrap());
     assert_eq!(c.tier, 7);
     assert!(c.load_capable);
@@ -479,7 +495,12 @@ fn assisted_nordic_leaves_a_rep_and_is_safety_critical() {
         lift_goal: LiftGoal::Hypertrophy,
         ..calis_profile()
     };
-    let prog = synthesize(&hyp, &with(vec![anchor(LadderId::Hinge, 4)]), 0).expect("plan");
+    let prog = synthesize(
+        &PlanProfile::new(&hyp),
+        &with(vec![anchor(LadderId::Hinge, 4)]),
+        0,
+    )
+    .expect("plan");
     let rx = item(&prog, LadderId::Hinge).unwrap();
     let c = calis(rx);
     assert_eq!(c.exercise, "Assisted Nordic curl");
@@ -496,7 +517,12 @@ fn retest_prompt_only_where_a_max_reps_set_can_re_place() {
     let mut lever = anchor(LadderId::FrontLever, 3);
     lever.reentry_steps = 2;
     lever.retest = true;
-    let prog = synthesize(&calis_profile(), &with(vec![push, lever]), 0).expect("plan");
+    let prog = synthesize(
+        &PlanProfile::new(&calis_profile()),
+        &with(vec![push, lever]),
+        0,
+    )
+    .expect("plan");
     let c = calis(item(&prog, LadderId::HorizontalPush).unwrap());
     assert!(c.retest && c.skip_reps.is_some());
     let fl = calis(item(&prog, LadderId::FrontLever).unwrap());
@@ -513,7 +539,7 @@ fn pounds_profile_added_load_lands_on_the_lb_grid() {
     };
     let mut pull = anchor(LadderId::VerticalPull, 4);
     pull.advance_ready = true;
-    let prog = synthesize(&p, &with(vec![pull]), 0).expect("plan");
+    let prog = synthesize(&PlanProfile::new(&p), &with(vec![pull]), 0).expect("plan");
     let kg = calis(item(&prog, LadderId::VerticalPull).unwrap())
         .added_kg
         .unwrap();
@@ -529,14 +555,18 @@ fn novice_calisthenics_leaves_two_to_three_reps() {
             progression_cadence: crate::individualization::ProgressionCadence::EverySession,
             ..calis_profile()
         };
-        let prog =
-            synthesize(&novice, &with(vec![anchor(LadderId::HorizontalPush, 4)]), 0).expect("plan");
+        let prog = synthesize(
+            &PlanProfile::new(&novice),
+            &with(vec![anchor(LadderId::HorizontalPush, 4)]),
+            0,
+        )
+        .expect("plan");
         assert_eq!(
             calis(item(&prog, LadderId::HorizontalPush).unwrap()).rir,
             (2, 3)
         );
         // Day-0 easy rungs too: no near-failure set on day 1.
-        let prog = synthesize(&novice, &Anchors::default(), 0).expect("plan");
+        let prog = synthesize(&PlanProfile::new(&novice), &Anchors::default(), 0).expect("plan");
         for s in lift_days(&prog) {
             for p in &s.prescriptions {
                 let c = calis(p);

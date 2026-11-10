@@ -1,4 +1,11 @@
-use super::*;
+use crate::app::format::fmt_pct_range;
+use crate::app::guidance::{push_guidance, push_guidance_basis};
+use crate::app::model::{HrZoneInputView, Model};
+use crate::app::plan_views;
+use crate::app::view_types::{GuidanceView, HrMaxView, HrZoneBandView};
+use crate::evidence::claims;
+use crate::schema::{Recommended, VdotBand};
+use crate::{load, running};
 
 /// Build a graded heart-rate-zone table from age: the Tanaka HRmax estimate plus
 /// the five Daniels %HRmax training bands mapped to absolute bpm ranges
@@ -26,7 +33,7 @@ pub(in crate::app) fn build_hr_zones(
     // to emit a fabricated maximum outside that range. A measured max bypasses
     // the age requirement (it needs no age).
     if measured.is_none() && !running::tanaka_age_in_range(q.age_years) {
-        let note = graded((), claims::RUN_HRMAX_001);
+        let note = Recommended::new((), claims::RUN_HRMAX_001);
         push_guidance(
             &mut rows,
             "Heart-rate zones",
@@ -89,7 +96,7 @@ fn push_hr_max_row(
     measured: Option<f64>,
     hr_max: f64,
 ) {
-    let hr_max_row = graded((), claims::RUN_HRMAX_001);
+    let hr_max_row = Recommended::new((), claims::RUN_HRMAX_001);
     // Round half away from zero before `{:.0}` (which rounds half to even), so
     // the prose and the structured figure agree (Tanaka at age 25 = 190.5).
     let shown = hr_max.round();
@@ -174,7 +181,7 @@ fn push_band_rows(
         let hr_anchored = running::vdot_band_uses_hr(band);
         let bpm_lo = (hr_max * lo_pct / 100.0).round();
         let bpm_hi = (hr_max * hi_pct / 100.0).round();
-        let band_row = graded((), claims::RUN_VDOT_001);
+        let band_row = Recommended::new((), claims::RUN_VDOT_001);
         let range = if bpm_lo == bpm_hi {
             format!("{bpm_lo:.0} bpm")
         } else {

@@ -73,7 +73,7 @@ fn lift(exercise: &str, kg: f64, day: i64) -> LoggedSet {
 }
 
 /// Anchors prescribed from the history through local day `through`.
-fn anchors_through(sets: &[LoggedSet], ctx: AnchorCtx, through: i64) -> crate::plan::Anchors {
+fn anchors_through(sets: &[LoggedSet], ctx: AnchorCtx, through: i64) -> crate::plan::LiftAnchors {
     build_plan_anchors(
         SetIndex::new(sets)
             .with_facts(sets)
@@ -95,7 +95,7 @@ fn squat_block(days: i64) -> Vec<LoggedSet> {
 /// The share of the anchored load the next squat is prescribed at: the
 /// derate, 1.0 without one, 0.0 once the anchor is dropped (>8 wk: novice
 /// restart, no %1RM load at all).
-fn squat_frac(a: &crate::plan::Anchors) -> f64 {
+fn squat_frac(a: &crate::plan::LiftAnchors) -> f64 {
     if a.e1rm_for("Back Squat").is_none() {
         return 0.0;
     }
@@ -133,7 +133,7 @@ fn lifting_break_derate_is_monotone_in_days_off() {
 
 #[test]
 fn carried_isolation_load_derate_is_monotone_in_days_off() {
-    assert!(crate::plan::is_isolation_lift("Lateral raise"));
+    assert!(crate::exercise::is_isolation_lift("Lateral raise"));
     let sets: Vec<LoggedSet> = (0..42)
         .filter(|d| matches!(d % 7, 0 | 2 | 4))
         .map(|d| LoggedSet {
@@ -327,16 +327,19 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     assert_eq!(brk, None);
     // The same anchors with and without that break.
     let anchors = |run_break| crate::plan::Anchors {
-        recent_weekly_km: Some(24.0),
-        longest_recent_run_km: Some(8.0),
+        run: crate::plan::RunAnchors {
+            recent_weekly_km: Some(24.0),
+            longest_recent_run_km: Some(8.0),
+            ..Default::default()
+        },
         week_start_epoch_day: Some(t),
         plan_start_epoch_day: Some(MON),
         run_break,
         ..Default::default()
     };
     let p = runner(3, 30.0);
-    let without = crate::plan::synthesize(&p, &anchors(None), 0).unwrap();
-    let with = crate::plan::synthesize(&p, &anchors(brk), 0).unwrap();
+    let without = crate::plan::synthesize(&PlanProfile::new(&p), &anchors(None), 0).unwrap();
+    let with = crate::plan::synthesize(&PlanProfile::new(&p), &anchors(brk), 0).unwrap();
     assert_eq!(
         program_run_km(&with),
         program_run_km(&without),
@@ -476,7 +479,8 @@ fn assert_week_shrinks_only_at_the_known_steps(weekly_sets: u8) {
                         weekly_sets,
                         ..runner(days, km)
                     };
-                    let prog = crate::plan::synthesize(&p, &anchors, 0).expect("a run plan");
+                    let prog = crate::plan::synthesize(&PlanProfile::new(&p), &anchors, 0)
+                        .expect("a run plan");
                     let w = sweep_week(&prog, &anchors);
                     if let Some((pk, pw)) = &prev
                         && w.km < pw.km - 1e-9
@@ -535,7 +539,7 @@ fn more_stated_volume_shrinks_a_run_only_week_only_at_a_quality_join_or_the_64_k
 /// the E band with a pace anchor, else RUN-WARMUP-001's default).
 fn shown_rows_km(vm: &ViewModel, vdot: Option<f64>) -> f64 {
     let pace = vdot
-        .and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Easy))
+        .and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Easy))
         .map_or(
             crate::running::warmup_rx()
                 .value
@@ -805,11 +809,14 @@ fn four_to_eight_weeks_off_judges_single_runs_differently_from_two_to_four() {
     let p = runner(3, 30.0);
     let prog = |weeks_off: f64| {
         let a = crate::plan::Anchors {
-            // Measured since the return above both re-entry floors, so the
-            // volume is the same and only the bracket differs. The 14 km run
-            // is from before the break, the 6 km one since.
-            recent_weekly_km: Some(30.0),
-            longest_recent_run_km: Some(14.0),
+            run: crate::plan::RunAnchors {
+                longest_recent_run_km: Some(14.0),
+                // Measured since the return above both re-entry floors, so
+                // the volume is the same and only the bracket differs. The
+                // 14 km run is from before the break, the 6 km one since.
+                recent_weekly_km: Some(30.0),
+                ..Default::default()
+            },
             week_start_epoch_day: Some(MON + 100),
             plan_start_epoch_day: Some(MON),
             run_break: Some(crate::plan::RunBreak {
@@ -823,7 +830,7 @@ fn four_to_eight_weeks_off_judges_single_runs_differently_from_two_to_four() {
             }),
             ..Default::default()
         };
-        crate::plan::synthesize(&p, &a, 0).unwrap()
+        crate::plan::synthesize(&PlanProfile::new(&p), &a, 0).unwrap()
     };
     let run_kms = |prog: &crate::schema::Program| -> Vec<f64> {
         use crate::schema::{Prescription, RunVolume};

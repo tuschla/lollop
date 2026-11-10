@@ -7,8 +7,18 @@
 //! resolved here at render time from the anchors, so no prescription invents
 //! a pace without a race to derive it from (HARD RULE 1).
 
-use super::*;
 use std::fmt::Write as _;
+
+use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min, round_tenths};
+use crate::app::model::{Model, profile_for_day};
+use crate::app::view_types::{EvidenceTagView, PrescriptionView, RunTargetView};
+use crate::evidence::{ClaimId, claims};
+use crate::profile::Profile;
+use crate::schema::{
+    Prescription, Recommended, RunIntensity, RunSessionType, Session, SessionType, ThreeZone,
+    VdotBand,
+};
+use crate::{load, running};
 
 /// The pace-anchor VDOT the plan sizes and renders against on a day
 /// (`plan::Anchors::run_vdot`): the profile's recent race, when it is fresh
@@ -235,11 +245,11 @@ fn band_pace(band: TargetBand, vdot: f64) -> Option<(f64, f64)> {
         TargetBand::Recovery => recovery_pace_floor(vdot).map(|p| (0.0, p)),
         TargetBand::LongRun => running::mp_relative_pace_sec_per_km(vdot, RunSessionType::LongRun),
         TargetBand::Repetition | TargetBand::Strides => {
-            load::vdot_band_pace_sec_per_km(vdot, VdotBand::Repetition).map(|(f, _)| (f, 0.0))
+            running::vdot_band_pace_sec_per_km(vdot, VdotBand::Repetition).map(|(f, _)| (f, 0.0))
         }
         b => b
             .vdot_band()
-            .and_then(|vb| load::vdot_band_pace_sec_per_km(vdot, vb)),
+            .and_then(|vb| running::vdot_band_pace_sec_per_km(vdot, vb)),
     }
 }
 
@@ -323,7 +333,7 @@ pub(super) fn resolve_target(
         t.pace_slow_sec_per_km = slow.round() as u32;
         t.pace_label_km = pace_label(fast, slow, "km", 1.0);
         t.pace_label_mi = pace_label(fast, slow, "mi", running::MILE_M / 1000.0);
-        evidence = Some(graded((), claims::RUN_VDOT_001));
+        evidence = Some(Recommended::new((), claims::RUN_VDOT_001));
     }
 
     // Heart rate: %HRmax → bpm, the Karvonen %HRR ceiling when resting HR is
@@ -347,7 +357,7 @@ pub(super) fn resolve_target(
             (None, None) => String::new(),
         };
         if !t.hr_label.is_empty() && evidence.is_none() {
-            evidence = Some(graded((), claims::RUN_HRMAX_001));
+            evidence = Some(Recommended::new((), claims::RUN_HRMAX_001));
         }
     }
 
@@ -368,7 +378,7 @@ pub(super) fn resolve_target(
             format!("{detail}, easy enough to talk in full sentences")
         };
         if evidence.is_none() {
-            evidence = Some(graded((), claims::RUN_TALKTEST_001));
+            evidence = Some(Recommended::new((), claims::RUN_TALKTEST_001));
         }
     }
     t.effort_cue = if rpe.is_some() {

@@ -72,7 +72,10 @@ fn cap_rpe_notes_only_the_items_it_relabels() {
         items: vec![lift, run],
         ..Default::default()
     };
-    let recs = vec![graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)];
+    let recs = vec![Recommended::new(
+        Adjustment::CapRpe(1),
+        claims::AUTOREG_E1RM_GATE_001,
+    )];
     apply_adjustments_to_session(&mut ns, &recs, false);
 
     assert_eq!(
@@ -124,7 +127,7 @@ fn a_load_cut_rewrites_the_percent_e1rm_label() {
         items: vec![lift, rir_lift],
         ..Default::default()
     };
-    let recs = vec![graded(
+    let recs = vec![Recommended::new(
         Adjustment::Deload {
             volume_reduction_pct: 0.0,
             load_reduction_pct: 10.0,
@@ -357,7 +360,10 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
+        &[Recommended::new(
+            Adjustment::CapRpe(1),
+            claims::AUTOREG_E1RM_GATE_001,
+        )],
         false,
     );
     assert_eq!(
@@ -385,7 +391,10 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     };
     apply_adjustments_to_session(
         &mut ns2,
-        &[graded(Adjustment::DowngradeSession, claims::HRV_001)],
+        &[Recommended::new(
+            Adjustment::DowngradeSession,
+            claims::HRV_001,
+        )],
         false,
     );
     assert!(
@@ -407,13 +416,13 @@ fn tolerable_knee_tendon_pain_eases_only_the_lifts_that_load_the_knee() {
         bench,
         lift_item("Cable row", 60.0),
     ]);
-    let modify = graded(
+    let modify = Recommended::new(
         Adjustment::ModifyAndMonitor {
             location: "Right knee".into(),
         },
         claims::SAFE_TENDON_001,
     );
-    let hrv = graded(
+    let hrv = Recommended::new(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -453,7 +462,7 @@ fn an_unlocated_tendon_report_still_eases_every_lift() {
         lift_item("Back squat", 120.0),
         lift_item("Bench press", 85.0),
     ]);
-    let modify = graded(
+    let modify = Recommended::new(
         Adjustment::ModifyAndMonitor {
             location: String::new(),
         },

@@ -9,8 +9,7 @@
 //! ids come from the canonical registry in `crate::evidence`.
 
 use crate::evidence::claims;
-use crate::evidence::graded;
-use crate::schema::Recommended;
+use crate::schema::{DupDay, LiftIntensity, Recommended};
 
 // ---------------------------------------------------------------------------
 // 1. Estimated 1RM (File 02 strength-005)
@@ -231,7 +230,7 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> Recommended<bool> {
         Some(row) => total_reps >= row.total_range.0 && total_reps <= row.total_range.1,
         None => false,
     };
-    graded(ok, claims::STR_PRILEPIN_001)
+    Recommended::new(ok, claims::STR_PRILEPIN_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -284,11 +283,11 @@ pub struct LoadingRx {
 pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
     let rx = match goal {
         LiftGoal::MaxStrength => LoadingRx {
-            pct_1rm: (80, 100),
+            pct_1rm: (HEAVY_PCT_1RM, 100),
             reps: (1, 5),
             sets: (3, 6),
             rest_sec: (180, 300),
-            rir: Some((1, 3)),
+            rir: Some((MIN_STRENGTH_RIR, HEAVY_MAX_RIR)),
         },
         LiftGoal::Power => LoadingRx {
             pct_1rm: (0, 95),
@@ -309,7 +308,39 @@ pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
         LiftGoal::Power => claims::STR_PWR_001,
         LiftGoal::MaxStrength | LiftGoal::Hypertrophy => claims::STR_INTENT_001,
     };
-    graded(rx, claim_id)
+    Recommended::new(rx, claim_id)
+}
+
+/// Heavy lifting: the floor of the max-strength band (File 02 strength-001
+/// 80–100 %), the load a main lift needs in ≥2 sessions a week
+/// (STR-HEAVYFREQ-001). The CAP-3 heavy-leg spacing (HYB-CAP-001) and the
+/// meet taper's heavy-lift cut judge against it.
+pub const HEAVY_PCT_1RM: u8 = 80;
+
+/// Most reps in reserve of the max-strength band (1–3 RIR, STR-INTENT-001).
+const HEAVY_MAX_RIR: u8 = 3;
+
+/// A load at or above [`HEAVY_PCT_1RM`].
+pub fn is_heavy_pct(pct_1rm: f64) -> bool {
+    pct_1rm >= f64::from(HEAVY_PCT_1RM)
+}
+
+/// A prescribed set inside the max-strength band: at or above
+/// [`HEAVY_PCT_1RM`], or an effort target within the band's reps in reserve
+/// (≤3 RIR, RPE ≥7).
+pub fn is_heavy_intensity(intensity: LiftIntensity) -> bool {
+    match intensity {
+        LiftIntensity::PercentOneRm(p) => is_heavy_pct(f64::from(p)),
+        LiftIntensity::Rir(r) => r <= HEAVY_MAX_RIR,
+        LiftIntensity::Rpe(r) => f64::from(r) >= rir_to_rpe(f64::from(HEAVY_MAX_RIR)),
+        LiftIntensity::MaxIntent => false,
+    }
+}
+
+/// A DUP day whose band opens at or above [`HEAVY_PCT_1RM`] (Heavy,
+/// HeavyVolume).
+pub fn is_heavy_dup_day(day: DupDay) -> bool {
+    is_heavy_pct(f64::from(dup_day_rx(day).value.pct_1rm.0))
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +356,7 @@ pub fn weekly_pct_increment(upper_body: bool) -> Recommended<(f64, f64)> {
     } else {
         (0.025, 0.05)
     };
-    graded(inc, claims::STR_PCTPROG_001)
+    Recommended::new(inc, claims::STR_PCTPROG_001)
 }
 
 /// Largest single load increase STR-LOADPROG-001 sanctions, as a fraction of
@@ -364,7 +395,7 @@ pub fn periodization_model(
         TrainingAge::Intermediate => PeriodizationModel::Dup,
         TrainingAge::Advanced => PeriodizationModel::Block,
     };
-    graded(model, claims::STR_MODEL_001)
+    Recommended::new(model, claims::STR_MODEL_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +421,7 @@ pub const TAPER_VOLUME_CUT_FRAC: (f64, f64) = (0.41, 0.60);
 /// Best-evidenced peaking taper: cut volume 41-60% exponentially over ~2 weeks
 /// while holding intensity and frequency (File 02 strength-026; TAPER-001).
 pub fn taper_rx() -> Recommended<TaperRx> {
-    graded(
+    Recommended::new(
         TaperRx {
             volume_reduction_frac: TAPER_VOLUME_CUT_FRAC,
             duration_days: (8, 14),
@@ -416,14 +447,14 @@ pub fn plyo_foot_contact_cap(
         TrainingAge::Intermediate => (100, 120),
         TrainingAge::Advanced => (120, 140),
     };
-    graded(cap, claims::PLYO_001)
+    Recommended::new(cap, claims::PLYO_001)
 }
 
 /// The low-dose plyometric band the KB also rates effective (File 02
 /// strength-032 parameters: "low-dose 40–60" foot contacts per session), well
 /// inside every level's cap ([`plyo_foot_contact_cap`]). PLYO-001.
 pub fn plyo_low_dose_contacts() -> Recommended<(u16, u16)> {
-    graded((40, 60), claims::PLYO_001)
+    Recommended::new((40, 60), claims::PLYO_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +465,7 @@ pub fn plyo_low_dose_contacts() -> Recommended<(u16, u16)> {
 /// its high systemic fatigue cost (File 02 strength-029). Returns (min, max)
 /// days out. STR-DLPEAK-001 (safety-critical per the KB).
 pub fn deadlift_peak_days_out() -> Recommended<(u8, u8)> {
-    graded((10, 14), claims::STR_DLPEAK_001)
+    Recommended::new((10, 14), claims::STR_DLPEAK_001)
 }
 
 /// PAP/PAPE contrast rest window in minutes for a HEAVY conditioning activity
@@ -442,7 +473,7 @@ pub fn deadlift_peak_days_out() -> Recommended<(u8, u8)> {
 /// Stronger athletes potentiate more and earlier; abort if the explosive set
 /// is slower than baseline. STR-PAP-001 (Moderate; Seitz & Haff).
 pub fn pap_rest_window_min() -> Recommended<(u8, u8)> {
-    graded((5, 7), claims::STR_PAP_001)
+    Recommended::new((5, 7), claims::STR_PAP_001)
 }
 
 /// Olympic-lift pulling-derivative prescription (File 02 strength-031). Only
@@ -478,7 +509,7 @@ pub struct OlympicDerivativeRx {
 /// velocity-biased variants), placed early in the session. STR-OLY-001
 /// (Moderate; Suchomel).
 pub fn olympic_derivative_rx() -> Recommended<OlympicDerivativeRx> {
-    graded(
+    Recommended::new(
         OlympicDerivativeRx {
             pct_1rm: (85, 100),
             pct_top_open: true,
@@ -509,7 +540,7 @@ pub struct BackOffRx {
 /// Top set at RPE ~8, back-off sets dropped 10–15% of the top-set load (File 02
 /// strength-015). STR-BACKOFF-001 (Moderate).
 pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
-    graded(
+    Recommended::new(
         BackOffRx {
             top_set_rpe: 8,
             drop_frac: (0.10, 0.15),
@@ -526,14 +557,14 @@ pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
 /// 02 strength-018; AUTOREG-VL-001): 10 % power, 20 % max strength, 40 %
 /// hypertrophy. strength-018 groups power with max strength at 20 %; autoreg-010
 /// and the VBT literature end power work at ~10 %, so Power is 0.10. The one
-/// goal→VL map; `autoreg::vl_threshold_pct` delegates to it.
+/// goal→VL map.
 pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
     let vl = match goal {
         LiftGoal::Power => 0.10,
         LiftGoal::MaxStrength => 0.20,
         LiftGoal::Hypertrophy => 0.40,
     };
-    graded(vl, claims::AUTOREG_VL_001)
+    Recommended::new(vl, claims::AUTOREG_VL_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -605,7 +636,7 @@ pub fn linear_phase_rx(phase: LinearPhase) -> Recommended<PhaseRx> {
             weeks: (12, 12),
         },
     };
-    graded(rx, claims::STR_LINEAR_001)
+    Recommended::new(rx, claims::STR_LINEAR_001)
 }
 
 /// Block periodization phase (File 02 strength-022 verbatim bands).
@@ -648,7 +679,7 @@ pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
             weeks: (2, 4),
         },
     };
-    graded(rx, claims::STR_BLOCK_001)
+    Recommended::new(rx, claims::STR_BLOCK_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -667,7 +698,7 @@ pub const DEPTH_JUMP_SQUAT_BW_RATIO: f64 = 1.5;
 /// this numeric gate does not capture; callers must verify it separately.
 pub fn depth_jump_ready(squat_1rm: f64, bodyweight: f64) -> Recommended<bool> {
     let ready = bodyweight > 0.0 && squat_1rm >= DEPTH_JUMP_SQUAT_BW_RATIO * bodyweight;
-    graded(ready, claims::PLYO_PREREQ_001)
+    Recommended::new(ready, claims::PLYO_PREREQ_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -681,7 +712,7 @@ pub const E1RM_RELIABLE_REP_CAP: u32 = 10;
 /// unreliable above 10 reps or on isolation lifts. STR-E1RM-CHECK-001
 /// (Moderate; DiStasio 2014).
 pub fn e1rm_reliable(reps: u32, isolation_lift: bool) -> Recommended<bool> {
-    graded(
+    Recommended::new(
         (1..=E1RM_RELIABLE_REP_CAP).contains(&reps) && !isolation_lift,
         claims::STR_E1RM_CHECK_001,
     )
@@ -734,37 +765,18 @@ pub fn e1rm_cross_check(
     } else {
         None
     };
-    graded(check, claims::STR_E1RM_CHECK_001)
+    Recommended::new(check, claims::STR_E1RM_CHECK_001)
 }
 
 /// Preferred test-set rep range when e1RM is unreliable (File 02 strength-006:
 /// "prefer 3-6 rep test sets"). STR-E1RM-CHECK-001.
 pub fn e1rm_test_set_reps() -> Recommended<(u8, u8)> {
-    graded((3, 6), claims::STR_E1RM_CHECK_001)
+    Recommended::new((3, 6), claims::STR_E1RM_CHECK_001)
 }
 
 // ---------------------------------------------------------------------------
 // 14. DUP day parameters (File 02 strength-023; contested CQ-03)
 // ---------------------------------------------------------------------------
-
-/// A DUP training day's focus (File 02 strength-023 example week).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DupDay {
-    /// Heavy: 3-5×3-5 @85-90%.
-    Heavy,
-    /// Power/speed: 3-6×3-5 @50-70%, fast (max concentric intent).
-    Power,
-    /// Hypertrophy: 3-4×8-12 @70-75%.
-    Hypertrophy,
-    /// Second heavy exposure of a max-strength (or strength-base power) week:
-    /// the block Transmutation band's low end, 80 % ramping inside 80–90 %,
-    /// 3–6 sets × 5–6 reps (File 02 strength-022, STR-BLOCK-001). 80 %×5 sits at
-    /// ~2.5 reps in reserve; the ramp stops at 83 %, where 5 reps still leave 1
-    /// (the 1–3 RIR strength band, STR-INTENT-001; [`pct_for_week`]).
-    /// It exists so a strength goal gets ≥80 % 1RM on each main lift in ≥2
-    /// sessions a week (STR-HEAVYFREQ-001).
-    HeavyVolume,
-}
 
 /// One DUP day's loading parameters (File 02 strength-023, verbatim example
 /// week).
@@ -817,7 +829,7 @@ pub fn dup_day_rx(day: DupDay) -> Recommended<DupDayRx> {
         DupDay::HeavyVolume => claims::STR_BLOCK_001,
         DupDay::Heavy | DupDay::Power | DupDay::Hypertrophy => claims::STR_DUP_001,
     };
-    graded(rx, claim_id)
+    Recommended::new(rx, claim_id)
 }
 
 /// Fewest reps in reserve a %1RM strength prescription may imply: the floor of
@@ -857,7 +869,7 @@ pub fn pct_for_week(
     let pct = (band.0 as f64 * (1.0 + inc).powi(steps))
         .round()
         .clamp(band.0 as f64, band.1 as f64) as u8;
-    graded(
+    Recommended::new(
         pct.min(pct_1rm_leaving_rir(reps, MIN_STRENGTH_RIR).floor() as u8),
         claims::STR_PCTPROG_001,
     )
@@ -876,10 +888,10 @@ pub(crate) const FULL_CREDIT_DAYS: i64 = 30;
 /// zero (DETRAIN-STR-001, Bosquet 2013), which is why this never tapers to 0.
 pub fn lift_detrain_credit(days_since_trained: i64) -> Recommended<Option<f64>> {
     if days_since_trained <= FULL_CREDIT_DAYS {
-        return graded(Some(1.0), claims::DETRAIN_STR_001);
+        return Recommended::new(Some(1.0), claims::DETRAIN_STR_001);
     }
     let re = crate::individualization::resistance_reentry(days_since_trained as f64 / 7.0).value;
-    graded(re.load_frac, claims::DETRAIN_STR_001)
+    Recommended::new(re.load_frac, claims::DETRAIN_STR_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -895,7 +907,7 @@ pub fn novice_load_jump_cap_frac(upper_body: bool) -> Recommended<(f64, f64)> {
     } else {
         (0.05, 0.10)
     };
-    graded(cap, claims::STR_1RMTEST_001)
+    Recommended::new(cap, claims::STR_1RMTEST_001)
 }
 
 #[cfg(test)]

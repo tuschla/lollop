@@ -818,8 +818,11 @@ fn overlays(end: i64) -> Vec<(&'static str, Vec<Event>)> {
                     ..SessionReview::default()
                 }),
                 Event::SubmitWeeklyCheckin(SessionReview {
-                    overtraining_signal_count: 3,
-                    overtraining_signal_weeks: Some(2.0),
+                    safety: crate::feedback::SafetyScreen {
+                        overtraining_signal_count: 3,
+                        overtraining_signal_weeks: Some(2.0),
+                        ..Default::default()
+                    },
                     decline_weeks: Some(2),
                     observed_at: d * DAY_SEC + 20 * HOUR,
                     ..SessionReview::default()

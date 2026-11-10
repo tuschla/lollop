@@ -2,12 +2,14 @@
 //! lift, run and calisthenics builders are covered in their own submodules.
 
 use super::*;
-use crate::app::tests::base_profile;
+use crate::exercise::{MovementPattern, is_isolation_lift, movement_key, movement_pattern};
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::ProgressionCadence;
+use crate::profile::Profile;
+use crate::profile::test_support::base_profile;
 use crate::schema::{
-    Goal, LiftIntensity, LiftPrescription, LiftSessionType, Prescription, RunSessionType,
-    RunVolume, SessionType,
+    DupDay, Goal, LadderId, LiftIntensity, LiftPrescription, LiftSessionType, Prescription,
+    RunSessionType, RunVolume, SessionType,
 };
 use std::collections::BTreeSet;
 
@@ -23,14 +25,17 @@ mod run;
 fn deterministic_same_inputs_same_program() {
     let p = base_profile();
     let a = anchored("Back Squat", 120.0);
-    assert_eq!(synthesize(&p, &a, 0), synthesize(&p, &a, 0));
+    assert_eq!(
+        synthesize(&PlanProfile::new(&p), &a, 0),
+        synthesize(&PlanProfile::new(&p), &a, 0)
+    );
 }
 
 #[test]
 fn a_gate_blocks_synthesis() {
     let mut p = base_profile();
     p.health.reds_signal = true;
-    assert!(synthesize(&p, &Anchors::default(), 0).is_none());
+    assert!(synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).is_none());
 }
 
 #[test]
@@ -42,7 +47,8 @@ fn every_prescription_carries_evidence_for_each_goal() {
     ] {
         let mut p = base_profile();
         p.lift_goal = goal;
-        let prog = synthesize(&p, &anchored("Back Squat", 100.0), 0).expect("program");
+        let prog =
+            synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 100.0), 0).expect("program");
         let mut count = 0;
         for s in &prog.mesocycle.sessions {
             for rx in &s.prescriptions {
@@ -62,7 +68,7 @@ fn hybrid_profile_has_both_lift_and_run_days() {
     let mut p = base_profile();
     p.goal_distance = GoalDistance::HalfMarathon;
     p.running_days_per_week = 3;
-    let prog = synthesize(&p, &anchored("Back Squat", 130.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 130.0), 0).unwrap();
     assert_eq!(prog.goal, Goal::Hybrid);
     let sessions = &prog.mesocycle.sessions;
     assert!(
@@ -131,10 +137,10 @@ fn run_recovery_week_keeps_lift_volume() {
     p.running_km_per_week = 40.0;
     let a = anchored("Barbell back squat", 100.0);
     let rec_week = (1..5u32)
-        .find(|&w| planned_recovery_week(&p, w, 0))
+        .find(|&w| planned_recovery_week(&PlanProfile::new(&p), w, 0))
         .expect("a running recovery week inside the first lift block");
-    let before = synthesize(&p, &a, rec_week - 1).unwrap();
-    let rec = synthesize(&p, &a, rec_week).unwrap();
+    let before = synthesize(&PlanProfile::new(&p), &a, rec_week - 1).unwrap();
+    let rec = synthesize(&PlanProfile::new(&p), &a, rec_week).unwrap();
     let sets_before = weekly_sets_by_movement(&before);
     for (_, l, claim) in lifts_with_claims(&rec) {
         assert_ne!(claim, claims::STR_DELOAD_VOL_001, "{l:?}");
@@ -156,11 +162,11 @@ fn run_recovery_week_keeps_lift_volume() {
 fn strength_deload_holds_intensity_halves_sets() {
     let p = base_profile(); // MaxStrength, intermediate, 3 lift days
     let a = anchored("Back Squat", 140.0);
-    let pos = lift_block_position(&p, 5);
+    let pos = lift_block_position(&PlanProfile::new(&p), 5);
     assert!(pos.recovery, "week 6 (index 5) is the lift deload week");
     assert_eq!((pos.week_in_block, pos.block_weeks), (5, 5));
-    let last_load = synthesize(&p, &a, 4).unwrap();
-    let deload = synthesize(&p, &a, 5).unwrap();
+    let last_load = synthesize(&PlanProfile::new(&p), &a, 4).unwrap();
+    let deload = synthesize(&PlanProfile::new(&p), &a, 5).unwrap();
     assert_eq!(deload.mesocycle.phase, MesoPhase::Deload);
     let load_rows = lifts_with_claims(&last_load);
     let mut checked = 0;
@@ -198,7 +204,7 @@ fn hybrid_hypertrophy_lift_deload_not_more_often_than_every_6th_week() {
     let a = anchored("Back Squat", 120.0);
     let deload_weeks: Vec<u32> = (0..12u32)
         .filter(|&w| {
-            lifts_with_claims(&synthesize(&p, &a, w).unwrap())
+            lifts_with_claims(&synthesize(&PlanProfile::new(&p), &a, w).unwrap())
                 .iter()
                 .any(|(_, _, c)| *c == claims::HYP_DELOAD_RX_001)
         })
@@ -211,7 +217,10 @@ fn novice_lifting_block_has_no_calendar_deload() {
     let mut p = base_profile();
     p.progression_cadence = ProgressionCadence::EverySession; // → Novice
     for w in 0..12 {
-        assert!(!lift_block_position(&p, w).recovery, "week {w}");
+        assert!(
+            !lift_block_position(&PlanProfile::new(&p), w).recovery,
+            "week {w}"
+        );
     }
 }
 
@@ -224,7 +233,7 @@ fn novice_percent_ramp_never_restarts() {
     p.progression_cadence = ProgressionCadence::EverySession; // → Novice
     let a = anchored("Back Squat", 120.0);
     let pct = |w: u32| -> f32 {
-        lifts_with_claims(&synthesize(&p, &a, w).unwrap())
+        lifts_with_claims(&synthesize(&PlanProfile::new(&p), &a, w).unwrap())
             .iter()
             .find_map(|(_, l, _)| match l.intensity {
                 LiftIntensity::PercentOneRm(x) if l.exercise == "Back Squat" => Some(x),
@@ -237,7 +246,10 @@ fn novice_percent_ramp_never_restarts() {
         weeks.windows(2).all(|w| w[1] >= w[0]),
         "novice %1RM by week: {weeks:?}"
     );
-    assert_eq!(lift_block_position(&p, 7).week_in_block, 8);
+    assert_eq!(
+        lift_block_position(&PlanProfile::new(&p), 7).week_in_block,
+        8
+    );
 }
 
 #[test]
@@ -252,8 +264,8 @@ fn a_full_cycle_repeats_the_first_week() {
     // not the steady state: strides join the easy runs from the third base
     // week on (running-020), so compare two later aligned weeks.
     assert_eq!(
-        synthesize(&p, &a, 48).unwrap(),
-        synthesize(&p, &a, 24).unwrap(),
+        synthesize(&PlanProfile::new(&p), &a, 48).unwrap(),
+        synthesize(&PlanProfile::new(&p), &a, 24).unwrap(),
         "the combined block repeats identically"
     );
 }
@@ -263,10 +275,10 @@ fn a_full_cycle_repeats_the_first_week() {
 #[test]
 fn two_lift_days_keep_weekly_sets_per_muscle_of_three() {
     let a = anchored("Back Squat", 140.0);
-    let three = synthesize(&base_profile(), &a, 0).unwrap();
+    let three = synthesize(&PlanProfile::new(&base_profile()), &a, 0).unwrap();
     let mut p2 = base_profile();
     p2.lift_days_per_week = Some(2);
-    let two = synthesize(&p2, &a, 0).unwrap();
+    let two = synthesize(&PlanProfile::new(&p2), &a, 0).unwrap();
     assert_eq!(lift_days(&three).len(), 3);
     assert_eq!(lift_days(&two).len(), 2);
     let w3 = weekly_sets_by_movement(&three);
@@ -286,7 +298,7 @@ fn two_lift_days_keep_weekly_sets_per_muscle_of_three() {
 fn four_lift_days_split_upper_lower_with_48h_between_same_region() {
     let mut p = base_profile();
     p.lift_days_per_week = Some(4);
-    let prog = synthesize(&p, &anchored("Back Squat", 140.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 140.0), 0).unwrap();
     let mut regions: Vec<(u16, DayRegion)> = Vec::new();
     for s in &prog.mesocycle.sessions {
         if matches!(s.session_type, SessionType::Lift(_)) {
@@ -318,7 +330,7 @@ fn four_lift_days_split_upper_lower_with_48h_between_same_region() {
 fn weekend_only_mask_places_sessions_on_days_5_and_6() {
     let mut p = base_profile();
     p.training_weekdays = Some(0b0110_0000);
-    let prog = synthesize(&p, &anchored("Back Squat", 140.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 140.0), 0).unwrap();
     let used: BTreeSet<u16> = prog
         .mesocycle
         .sessions
@@ -331,7 +343,7 @@ fn weekend_only_mask_places_sessions_on_days_5_and_6() {
     p.goal_distance = GoalDistance::TenK;
     p.running_days_per_week = 3;
     p.running_km_per_week = 30.0;
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let busy: Vec<u16> = prog
         .mesocycle
         .sessions
@@ -362,7 +374,7 @@ fn hybrid_quality_run_never_within_24h_after_heavy_lift_day() {
                 p.concurrent_goal = lead;
                 let a = anchored("Back Squat", 140.0);
                 for w in 0..4 {
-                    let prog = synthesize(&p, &a, w).unwrap();
+                    let prog = synthesize(&PlanProfile::new(&p), &a, w).unwrap();
                     let sessions = &prog.mesocycle.sessions;
                     let loads: Vec<(u16, DayLoad)> =
                         sessions.iter().map(|s| (s.day, session_load(s))).collect();
@@ -414,9 +426,9 @@ fn endurance_priority_hybrid_lifts_at_maintenance_dose() {
     let a = anchored("Back Squat", 140.0);
     let mut run_lead = p.clone();
     run_lead.concurrent_goal = ConcurrentGoal::EndurancePriority;
-    let lift_led = synthesize(&p, &a, 0).unwrap();
-    let wk0 = synthesize(&run_lead, &a, 0).unwrap();
-    let wk2 = synthesize(&run_lead, &a, 2).unwrap();
+    let lift_led = synthesize(&PlanProfile::new(&p), &a, 0).unwrap();
+    let wk0 = synthesize(&PlanProfile::new(&run_lead), &a, 0).unwrap();
+    let wk2 = synthesize(&PlanProfile::new(&run_lead), &a, 2).unwrap();
     for s in &wk0.mesocycle.sessions {
         assert_ne!(
             s.session_type,
@@ -468,7 +480,7 @@ fn high_mileage_hybrid_caps_leg_days_and_trims_leg_sets() {
     p.running_days_per_week = 5;
     p.running_km_per_week = 50.0;
     p.lift_days_per_week = Some(3);
-    let prog = synthesize(&p, &anchored("Back Squat", 140.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 140.0), 0).unwrap();
     let leg_days = prog
         .mesocycle
         .sessions
@@ -499,7 +511,7 @@ fn hybrid_frequency_cap_scales_volume_not_session_length() {
         p.goal_distance = GoalDistance::TenK;
         p.running_days_per_week = days;
         p.running_km_per_week = km;
-        let prog = synthesize(&p, &anchored("Back Squat", 140.0), 0).unwrap();
+        let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 140.0), 0).unwrap();
         let mut total = 0.0;
         let mut long = 0.0_f64;
         let mut easy_max = 0.0_f64;
@@ -515,7 +527,7 @@ fn hybrid_frequency_cap_scales_volume_not_session_length() {
                     total += d;
                     if k == RunSessionType::LongRun {
                         long = long.max(d);
-                    } else if !super::run::is_quality(k) {
+                    } else if !crate::running::is_quality_session(k) {
                         easy_max = easy_max.max(d);
                     }
                 }
@@ -543,7 +555,7 @@ fn strength_priority_general_running_is_held_flat_across_block() {
     p.running_km_per_week = 30.0;
     let a = anchored("Back Squat", 140.0);
     let km = |w: u32| -> f64 {
-        synthesize(&p, &a, w)
+        synthesize(&PlanProfile::new(&p), &a, w)
             .unwrap()
             .mesocycle
             .sessions
@@ -560,12 +572,12 @@ fn strength_priority_general_running_is_held_flat_across_block() {
     };
     assert_eq!(km(0), km(2), "weekly distance held, not ramped");
     for w in 0..3 {
-        let prog = synthesize(&p, &a, w).unwrap();
+        let prog = synthesize(&PlanProfile::new(&p), &a, w).unwrap();
         let q = prog
             .mesocycle
             .sessions
             .iter()
-            .filter(|s| matches!(s.session_type, SessionType::Run(k) if super::run::is_quality(k)))
+            .filter(|s| matches!(s.session_type, SessionType::Run(k) if crate::running::is_quality_session(k)))
             .count();
         assert!(q <= 1, "week {w}: {q} quality runs");
     }
@@ -577,7 +589,7 @@ fn strength_priority_general_running_is_held_flat_across_block() {
 fn runner_strength_block_avoids_hard_run_neighbours() {
     let mut p = runner(GoalDistance::HalfMarathon, 4, 40.0);
     p.runner_strength = true;
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let sessions = &prog.mesocycle.sessions;
     let lifts: Vec<&Session> = sessions
         .iter()
@@ -604,17 +616,21 @@ fn runner_strength_block_avoids_hard_run_neighbours() {
     }
     // Off by default: a run-only profile has no lift days.
     p.runner_strength = false;
-    assert!(lift_days(&synthesize(&p, &Anchors::default(), 0).unwrap()).is_empty());
+    assert!(
+        lift_days(&synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap()).is_empty()
+    );
 }
 
 // ── age_years → conservative running deload cadence (masters) ──
 
 #[test]
 fn masters_runner_takes_the_conservative_two_week_load_cadence() {
-    // is_masters threshold (MASTERS-001, 65+).
-    assert!(!is_masters(None));
-    assert!(!is_masters(Some(64.0)));
-    assert!(is_masters(Some(65.0)));
+    // The masters threshold (MASTERS-001, 65+) alone, for a non-novice.
+    use crate::individualization::conservative_deload;
+    let masters_only = |age| conservative_deload(age, TrainingAge::Intermediate);
+    assert!(!masters_only(None));
+    assert!(!masters_only(Some(64.0)));
+    assert!(masters_only(Some(65.0)));
 
     // A masters (age 70) RUNNER shortens the accumulation block to the 2:1
     // running deload cadence (RUN-DELOAD-001 "2:1 for older"): 2 load weeks +
@@ -622,7 +638,7 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     let mut masters = half_marathoner();
     masters.age_years = Some(70.0);
     assert_eq!(
-        synthesize(&masters, &Anchors::default(), 0)
+        synthesize(&PlanProfile::new(&masters), &Anchors::default(), 0)
             .unwrap()
             .mesocycle
             .weeks,
@@ -633,7 +649,7 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     // runner keep 3 load weeks + 1 recovery = a 4-week cycle.
     let ageless = half_marathoner();
     assert_eq!(
-        synthesize(&ageless, &Anchors::default(), 0)
+        synthesize(&PlanProfile::new(&ageless), &Anchors::default(), 0)
             .unwrap()
             .mesocycle
             .weeks,
@@ -643,7 +659,7 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     let mut young = half_marathoner();
     young.age_years = Some(40.0);
     assert_eq!(
-        synthesize(&young, &Anchors::default(), 0)
+        synthesize(&PlanProfile::new(&young), &Anchors::default(), 0)
             .unwrap()
             .mesocycle
             .weeks,
@@ -653,10 +669,14 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     let mut masters_lifter = base_profile(); // weekly_sets=12, no running
     masters_lifter.age_years = Some(70.0);
     assert_eq!(
-        synthesize(&masters_lifter, &anchored("Back Squat", 100.0), 0)
-            .unwrap()
-            .mesocycle
-            .weeks,
+        synthesize(
+            &PlanProfile::new(&masters_lifter),
+            &anchored("Back Squat", 100.0),
+            0
+        )
+        .unwrap()
+        .mesocycle
+        .weeks,
         6,
         "a lifter runs the 5+1 lifting block (HYP-DELOAD-CADENCE-001) at any age"
     );
@@ -669,7 +689,7 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     novice_runner.age_years = Some(30.0);
     novice_runner.progression_cadence = ProgressionCadence::EverySession; // → Novice
     assert_eq!(
-        synthesize(&novice_runner, &Anchors::default(), 0)
+        synthesize(&PlanProfile::new(&novice_runner), &Anchors::default(), 0)
             .unwrap()
             .mesocycle
             .weeks,
@@ -682,7 +702,12 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
 
 #[test]
 fn a_week_is_exactly_seven_days() {
-    let prog = synthesize(&base_profile(), &anchored("Back Squat", 100.0), 0).unwrap();
+    let prog = synthesize(
+        &PlanProfile::new(&base_profile()),
+        &anchored("Back Squat", 100.0),
+        0,
+    )
+    .unwrap();
     let days: BTreeSet<u16> = prog.mesocycle.sessions.iter().map(|s| s.day).collect();
     assert_eq!(days, (0u16..7).collect::<BTreeSet<u16>>());
 }

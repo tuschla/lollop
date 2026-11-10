@@ -121,8 +121,11 @@ fn unscheduled_deload_row_rides_on_sustained_overtraining_signals() {
     let mut model = Model::default();
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 2,
-            overtraining_signal_weeks: Some(1.0),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_count: 2,
+                overtraining_signal_weeks: Some(1.0),
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,

@@ -3,11 +3,16 @@
 //! for the one run the shell inspects, so it never rides the `ViewModel`.
 //! Compiled only where the bridge exists (Android, or the `ffi` feature).
 
-use super::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::app::format::fmt_km_or_mi;
+use crate::app::model::LoggedRun;
+use crate::app::run_metrics::RunFacts;
+use crate::gps;
+use crate::gps::GpsPoint;
+
 /// One GPS run's export source: the QC'd track + segment boundaries + the
-/// track-name label, everything [`running::export_gpx`] needs besides the
+/// track-name label, everything [`gps::export_gpx`] needs besides the
 /// run's logged-at stamp (its registry key).
 #[derive(Clone)]
 struct GpxSource {
@@ -95,7 +100,7 @@ pub(in crate::app) fn refresh_gpx_registry(runs: &[LoggedRun], facts: &RunFacts)
 /// re-importing it is recognised as this run.
 pub(crate) fn export_run_gpx(entry_id: u64, observed_at: i64) -> String {
     match with_registry(|reg| reg.get(&(entry_id, observed_at)).cloned()) {
-        Some(s) => running::export_gpx(&s.track, &s.label, &s.seg_starts, Some(observed_at)),
+        Some(s) => gps::export_gpx(&s.track, &s.label, &s.seg_starts, Some(observed_at)),
         None => String::new(),
     }
 }

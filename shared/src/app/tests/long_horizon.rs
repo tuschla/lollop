@@ -792,7 +792,10 @@ impl Sim {
                 ..input(ReadinessSignal::Illness, 2.0)
             })),
             Hold::Reds => self.send(Event::SubmitWeeklyCheckin(SessionReview {
-                reds_signal_reported: true,
+                safety: crate::feedback::SafetyScreen {
+                    reds_signal_reported: true,
+                    ..Default::default()
+                },
                 ..SessionReview::default()
             })),
             Hold::Pregnancy => self.edit_profile(|p| p.health.pregnant = true),
@@ -2572,7 +2575,7 @@ fn hypertrophy_lifter_restarts_carried_loads_lighter_after_three_weeks_off() {
 /// classification in every builder (~70 µs per set before `SetIndex`), so
 /// the test counts that work per view instead of timing it:
 /// - each distinct name is classified once per set-log change (`SetIndex`),
-///   so a view's classifier calls ([`crate::plan::NAME_CLASSIFICATIONS`],
+///   so a view's classifier calls ([`crate::exercise::NAME_CLASSIFICATIONS`],
 ///   ~3 000, set by the plan's items) do not grow with the set count: on
 ///   the ≈15 000-set third year every view makes fewer than one call per two
 ///   sets (classifying each set even once would not);
@@ -2584,8 +2587,8 @@ fn hypertrophy_lifter_restarts_carried_loads_lighter_after_three_weeks_off() {
 /// owner's bound: a loaded debug box measured up to ~380 ms).
 #[test]
 fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
-    use crate::app::view_ctx::SET_INDEX_BUILDS;
-    use crate::plan::NAME_CLASSIFICATIONS;
+    use crate::app::set_index::SET_INDEX_BUILDS;
+    use crate::exercise::NAME_CLASSIFICATIONS;
     let app = Engine;
     let mut m = Model::default();
     let names = [

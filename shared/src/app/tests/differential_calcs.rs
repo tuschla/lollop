@@ -717,7 +717,8 @@ fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
         let vdot = 20.0 + 0.1 * f64::from(k);
         let mp = oracle::daniels_time(vdot, 42_195.0) / 42.195;
         for band in BANDS {
-            let (fast, slow) = load::vdot_band_pace_sec_per_km(vdot, band).expect("positive VDOT");
+            let (fast, slow) =
+                running::vdot_band_pace_sec_per_km(vdot, band).expect("positive VDOT");
             let (want_fast, want_slow) = match band {
                 VdotBand::Easy => (mp * 1.15, mp * 1.25),
                 b => {
@@ -755,7 +756,7 @@ fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
         // Consistency: Daniels' own marathon pace sits inside the M band
         // (80–84 % VO2max) for VDOT 30–80.
         if (30.0..=80.0).contains(&vdot) {
-            let (mf, ms) = load::vdot_band_pace_sec_per_km(vdot, VdotBand::Marathon).unwrap();
+            let (mf, ms) = running::vdot_band_pace_sec_per_km(vdot, VdotBand::Marathon).unwrap();
             assert!(
                 mf <= mp && mp <= ms,
                 "VDOT {vdot}: MP {mp} outside M {mf}–{ms}"
@@ -786,7 +787,7 @@ fn faster_race_gives_faster_paces_in_every_band_and_bands_stay_ordered() {
         let vdot = load::vdot(5000.0, f64::from(t));
         let paces: Vec<(f64, f64)> = BANDS
             .iter()
-            .map(|&b| load::vdot_band_pace_sec_per_km(vdot, b).unwrap())
+            .map(|&b| running::vdot_band_pace_sec_per_km(vdot, b).unwrap())
             .collect();
         for b in &paces {
             assert!(b.0 <= b.1);
@@ -827,7 +828,7 @@ fn run_target_labels_match_the_clock_oracle_in_km_and_miles() {
                 Some(vdot),
                 Default::default(),
             );
-            let (fast, slow) = load::vdot_band_pace_sec_per_km(vdot, band).unwrap();
+            let (fast, slow) = running::vdot_band_pace_sec_per_km(vdot, band).unwrap();
             assert_eq!(
                 f64::from(t.pace_fast_sec_per_km),
                 oracle::round_half_away(fast)
@@ -1213,7 +1214,7 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
     }
     // End to end through the plan-item flattener: a 300 lb Back Squat e1RM
     // and an 80 %1RM prescription is a 240 lb load.
-    let rx = graded(
+    let rx = Recommended::new(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Back Squat".into(),
             sets: 3,
@@ -1227,7 +1228,10 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
         claims::STR_INTENT_001,
     );
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 300.0 / LB_PER_KG)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 300.0 / LB_PER_KG)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let item = flatten_prescription(&rx, &anchors, None, true);

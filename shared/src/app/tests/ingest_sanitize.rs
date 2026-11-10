@@ -221,7 +221,10 @@ fn submit_events_1e300_inputs_never_serialize_to_null() {
     .expect_only_render();
     app.update(
         Event::SubmitReview(SessionReview {
-            overtraining_signal_weeks: Some(1.0e300),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_weeks: Some(1.0e300),
+                ..Default::default()
+            },
             single_session_spike_frac: Some(1.0e300),
             easy_frac_time_above_vt1: Some(1.0e300),
             positive_split_pct: Some(1.0e300),
@@ -324,6 +327,6 @@ fn infinite_gps_accuracy_fails_the_accuracy_gate() {
         .expect_only_render();
     let stored: Vec<f32> = model.runs[0].track.iter().map(|p| p.accuracy_m).collect();
     assert_eq!(stored[0], 5.0);
-    assert!(stored[1] > crate::running::MAX_GPS_ACCURACY_M, "{stored:?}");
+    assert!(stored[1] > crate::gps::MAX_GPS_ACCURACY_M, "{stored:?}");
     assert_eq!(stored[2], 0.0, "NaN reads as no accuracy reported");
 }

@@ -1,8 +1,17 @@
 //! "Last time" on the next session: what the athlete did last on each lift and
 //! what changed today.
 
-use super::*;
 use std::fmt::Write as _;
+
+use crate::app::format::fmt_weight;
+use crate::app::model::Model;
+use crate::app::plan_views::last_top_set;
+use crate::app::reviews::mastery::pr_e1rm;
+use crate::app::reviews::session_feedback::with_reserve_from_rpe;
+use crate::app::set_index::SetIndex;
+use crate::app::view_types::SessionPlanView;
+use crate::autoreg;
+use crate::day::{is_undated, local_day};
 
 /// Append to each lift item's `why.basis` what the athlete did last time on
 /// that movement and what changed today, with the reason when the engine
@@ -11,7 +20,7 @@ pub(in crate::app) fn annotate_last_time(
     ns: &mut SessionPlanView,
     model: &Model,
     set_index: &SetIndex,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     weight_lb: bool,
 ) {
     let offset = model.today_utc_offset_sec;
@@ -29,7 +38,7 @@ pub(in crate::app) fn annotate_last_time(
             ns.epoch_day,
             |i| {
                 let at = model.sets[i].observed_at;
-                (at > 0).then(|| local_day(at, offset))
+                (!is_undated(at)).then(|| local_day(at, offset))
             },
         ) else {
             continue;
@@ -60,7 +69,7 @@ pub(in crate::app) fn annotate_last_time(
                 let reason = if diff < 0.0 && derated {
                     format!(
                         " because your last session's estimated max came in more than {:.0}% under your best.",
-                        crate::app::anchors::E1RM_DROP_PCT
+                        autoreg::E1RM_NOISE_FRAC * 100.0
                     )
                 } else if diff < 0.0 && !it.adjusted_note.is_empty() {
                     " because of today's adjustment.".to_string()

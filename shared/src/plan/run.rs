@@ -10,16 +10,16 @@
 
 use std::collections::BTreeSet;
 
-use crate::app::Profile;
 use crate::evidence::claims;
-use crate::individualization::training_age_from_cadence;
-use crate::running::{self, GoalDistance, RunWorkoutRx};
+use crate::individualization::training_age_years;
+use crate::profile::{PlanProfile, Profile};
+use crate::running::{self, GoalDistance, RunWorkoutRx, daily_avg_run_km};
 use crate::schema::{
-    MesoPhase, Prescription, RepRecovery, RunIntensity, RunPrescription, RunSessionType, RunVolume,
-    Session, SessionType, StridesAddOn, VdotBand,
+    MesoPhase, Prescription, Recommended, RepRecovery, RunIntensity, RunPrescription,
+    RunSessionType, RunVolume, Session, SessionType, StridesAddOn, VdotBand,
 };
 
-use super::Anchors;
+use super::anchors::{Anchors, RunBreak};
 
 /// Effective weekly running volume (km) for plan synthesis:
 /// `max(stated, measured 28-day average)`; the stated answer is a floor
@@ -41,9 +41,9 @@ pub(super) fn effective_weekly_km(profile: &Profile, anchors: &Anchors) -> f64 {
     let returning = declared.is_some() && newer_break.is_none();
     if let Some(b) = newer_break.filter(|b| b.reentry.active) {
         let floor = stated.max(b.prior_weekly_km.unwrap_or(0.0)) * b.reentry.volume_frac;
-        return anchors.recent_weekly_km.map_or(floor, |m| m.max(floor));
+        return anchors.run.recent_weekly_km.map_or(floor, |m| m.max(floor));
     }
-    match anchors.recent_weekly_km {
+    match anchors.run.recent_weekly_km {
         // Re-entry: measured mileage overrides a stale pre-layoff figure even
         // when it is LOWER (the profile stops being a floor after a break).
         Some(measured) if returning => measured,
@@ -51,56 +51,6 @@ pub(super) fn effective_weekly_km(profile: &Profile, anchors: &Anchors) -> f64 {
         Some(measured) if measured > stated => measured,
         _ => stated,
     }
-}
-
-/// The goal table's run days: the stated running-days answer bounded by the
-/// goal's session ceiling (`goal_week_plan`), at least 1.
-pub(super) fn goal_table_run_days(profile: &Profile) -> usize {
-    let gwp = running::goal_week_plan(profile.goal_distance, profile.advanced).value;
-    (profile.running_days_per_week as usize)
-        .min(gwp.sessions_per_week.1 as usize)
-        .max(1)
-}
-
-/// The number of run days the week schedules: [`goal_table_run_days`] and,
-/// only when lifting leads a hybrid, the ≤3 d/wk concurrency cap
-/// (HYB-RUNCAP-001), which protects lifting adaptations and so does not apply
-/// to an endurance-priority hybrid. Shared by the plan layout and the weekly
-/// report so the two agree on the run-day denominator.
-pub fn run_slot_count(profile: &Profile) -> usize {
-    let mut n = goal_table_run_days(profile);
-    // running-025 (safety-critical): Couch to 5K is three runs a week, and the
-    // third run of weeks 5–6 is the bridge to continuous running, so the
-    // programme never plans fewer.
-    if profile.goal_distance == GoalDistance::C25k {
-        n = n.max(running::c25k_plan().value.runs_per_week as usize);
-    }
-    if super::hybrid_lead(profile) == Some(super::HybridLead::Lifting) {
-        n = n.min(crate::hybrid::endurance_frequency_cap().value as usize);
-    }
-    n
-}
-
-/// A hard (quality) run day: threshold, VO2max intervals, repetitions,
-/// race-pace work or hill repeats. The long run is easy-paced (E→E+) and is
-/// not counted here; the scheduler spaces both.
-pub(crate) fn is_quality(kind: RunSessionType) -> bool {
-    matches!(
-        kind,
-        RunSessionType::Tempo
-            | RunSessionType::Interval
-            | RunSessionType::Repetition
-            | RunSessionType::RacePace
-            | RunSessionType::Hills
-    )
-}
-
-/// Average distance per RUN day — the KB reading of "daily average" for the
-/// long-run ≤2×-daily-average guardrail (running-016): weekly volume over the
-/// days actually run, not calendar days. The single source shared by the plan's
-/// long-run decision and the weekly report so the two never disagree.
-pub fn daily_avg_run_km(weekly_km: f64, n_run_days: usize) -> f64 {
-    weekly_km / n_run_days.max(1) as f64
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +104,16 @@ pub(super) fn cap_km_to_spike(km: f64, longest_recent_km: Option<f64>) -> Option
 // Quality-session sizing within the KB weekly caps
 // ---------------------------------------------------------------------------
 
+/// VO2max rep count bounds per session (RUN-INTERVAL-001): at least 3 reps,
+/// at most 8.
+const INTERVAL_REPS: (u8, u8) = (3, 8);
+
+/// VO2max rep distances, longest first (running-019: 800–1600 m, ≤5 min).
+const INTERVAL_REP_M: [u16; 2] = [1200, 800];
+
+/// The smallest VO2max set: the rep floor at the shortest rep distance.
+const SHORTEST_INTERVAL_SET: (u8, u16) = (INTERVAL_REPS.0, INTERVAL_REP_M[1]);
+
 /// Natural VO2max-interval rep count the weekly volume supports at a given rep
 /// DISTANCE before any rep-floor clamp: `floor(<=8% weekly cap ÷ rep_m)`
 /// (RUN-INTERVAL-001).
@@ -162,26 +122,27 @@ fn interval_reps_natural_at(weekly_km: f64, rep_m: u16) -> i64 {
     (s.weekly_cap_frac * weekly_km * 1000.0 / rep_m.max(1) as f64).floor() as i64
 }
 
-/// VO2max rep count at `rep_m`: the natural count clamped to 3–8. Shared by the
-/// weekly accounting and the prescription.
+/// VO2max rep count at `rep_m`: the natural count clamped to
+/// [`INTERVAL_REPS`]. Shared by the weekly accounting and the prescription.
 fn interval_reps(weekly_km: f64, rep_m: u16) -> u8 {
-    interval_reps_natural_at(weekly_km, rep_m).clamp(3, 8) as u8
+    interval_reps_natural_at(weekly_km, rep_m)
+        .clamp(i64::from(INTERVAL_REPS.0), i64::from(INTERVAL_REPS.1)) as u8
 }
 
 /// Seconds one VO2max rep of `rep_m` takes at mid I pace; `None` without a
 /// pace anchor.
 fn interval_rep_sec(rep_m: u16, vdot: Option<f64>) -> Option<f64> {
-    vdot.and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, VdotBand::Interval))
+    vdot.and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, VdotBand::Interval))
         .map(|(fast, slow)| (fast + slow) / 2.0 * f64::from(rep_m) / 1000.0)
 }
 
-/// The longest KB rep distance (running-019: 800–1600 m, ≤5 min), trying
-/// 1200 m before 800 m, whose 3-rep floor fits the ≤8 % weekly cap and, with a
-/// pace anchor, whose rep takes ≤5 min at mid I pace. `None` when neither fits.
+/// The longest [`INTERVAL_REP_M`] distance whose rep floor fits the ≤8 % weekly
+/// cap and, with a pace anchor, whose rep takes ≤5 min at mid I pace. `None`
+/// when none fits.
 fn supported_rep_distance_m(weekly_km: f64, vdot: Option<f64>) -> Option<u16> {
     let max_sec = f64::from(running::vo2max_interval_rx().value.rep_duration_min.1) * 60.0;
-    [1200u16, 800].into_iter().find(|&rep_m| {
-        interval_reps_natural_at(weekly_km, rep_m) >= 3
+    INTERVAL_REP_M.into_iter().find(|&rep_m| {
+        interval_reps_natural_at(weekly_km, rep_m) >= i64::from(INTERVAL_REPS.0)
             && interval_rep_sec(rep_m, vdot).is_none_or(|sec| sec <= max_sec)
     })
 }
@@ -201,7 +162,7 @@ fn tempo_floor_km(vdot: Option<f64>) -> f64 {
         .duration_min
         .0
         .unwrap_or(20) as f64;
-    vdot.and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, VdotBand::Threshold))
+    vdot.and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, VdotBand::Threshold))
         .map(|(fast, _)| floor_min * 60.0 / fast.max(1.0))
         .unwrap_or(TEMPO_FLOOR_FALLBACK_KM)
 }
@@ -229,17 +190,29 @@ fn repetition_plan(weekly_km: f64) -> Option<(u8, u16)> {
     })
 }
 
-/// Marathon-pace block size, km (running-017/053): the running-017 8 km
-/// minimum block, growing with volume at 15 % of the week, never above the
-/// 20 % weekly M-pace share, the 26 km band top, or Daniels' 110 min / 29 km
-/// cap. `None` when 8 km would exceed 20 % of the week (the volume can't carry
-/// a real M-pace block yet).
-fn race_pace_km(weekly_km: f64, vdot: Option<f64>) -> Option<f64> {
+/// The smallest repetition set: the minimum rep count at the shortest rep
+/// distance (4 × 200 m, RUN-REPETITION-002).
+fn shortest_repetition_set() -> (u8, u16) {
+    let r = running::repetition_rx().value;
+    (r.min_reps, r.rep_m[r.rep_m.len() - 1])
+}
+
+/// The marathon-pace block band, km (running-017: the 8 km minimum block up
+/// to the 26 km band top).
+fn race_pace_band_km() -> (f64, f64) {
     let band = running::workout_rx(RunSessionType::RacePace)
         .value
         .distance_km;
-    let lo = band.0.unwrap_or(8.0);
-    let hi = band.1.unwrap_or(26.0);
+    (band.0.unwrap_or(8.0), band.1.unwrap_or(26.0))
+}
+
+/// Marathon-pace block size, km (running-017/053): the [`race_pace_band_km`]
+/// minimum block, growing with volume at 15 % of the week, never above the
+/// 20 % weekly M-pace share, the band top, or Daniels' 110 min / 29 km cap.
+/// `None` when the minimum would exceed 20 % of the week (the volume can't
+/// carry a real M-pace block yet).
+fn race_pace_km(weekly_km: f64, vdot: Option<f64>) -> Option<f64> {
+    let (lo, hi) = race_pace_band_km();
     let mp = running::race_pace_rx().value;
     let share_cap = floor_km(mp.weekly_share_max * weekly_km);
     if share_cap < lo {
@@ -251,7 +224,7 @@ fn race_pace_km(weekly_km: f64, vdot: Option<f64>) -> Option<f64> {
         .min(hi);
     km = km.min(mp.max_km);
     if let Some(pace) =
-        vdot.and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, VdotBand::Marathon))
+        vdot.and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, VdotBand::Marathon))
     {
         // Slow end of the M band: the most time a block of `km` can take.
         let time_cap_km = floor_km(mp.max_min as f64 * 60.0 / pace.1.max(1.0));
@@ -446,11 +419,12 @@ fn goal_volume_plateau_km(goal: GoalDistance) -> Option<f64> {
 /// the run km prescribed in the week `k` weeks back, read only in taper week
 /// `k`: the last full load week, which the taper cuts from.
 pub(super) fn run_week_plan(
-    profile: &Profile,
+    pp: &PlanProfile,
     anchors: &Anchors,
     req: &RunWeekRequest,
     load_week_km: &dyn Fn(u32) -> f64,
 ) -> RunWeekPlan {
+    let profile = pp.profile();
     let goal = profile.goal_distance;
     let n_days = req.n_run_days.max(1);
     if goal == GoalDistance::C25k {
@@ -473,13 +447,12 @@ pub(super) fn run_week_plan(
         };
     }
 
-    let ta = training_age_from_cadence(profile.progression_cadence).value;
-    let load_weeks = super::run_load_weeks(profile);
+    let load_weeks = pp.run_load_weeks();
     let cycle_len = load_weeks + 1;
     let cy = cycle_pos(profile, anchors, req.week_index, load_weeks);
     let base = base_weekly_km(profile, anchors, req, &cy, cycle_len);
 
-    let cap = running::weekly_increase_cap_frac(super::training_age_years(ta)).value;
+    let cap = running::weekly_increase_cap_frac(training_age_years(pp.training_age())).value;
     let ramp = |p: u32| {
         if req.hold_volume {
             base
@@ -701,7 +674,7 @@ impl DayCtx {
     /// `(reps, rep_m)` of the VO2max set; in a taper at least 3 × 800 m
     /// (`quality_floor`: exactly that).
     fn interval_set(&self) -> Option<(u8, u16)> {
-        let floor = self.taper.then_some((3, 800));
+        let floor = self.taper.then_some(SHORTEST_INTERVAL_SET);
         if self.quality_floor {
             return floor;
         }
@@ -713,8 +686,7 @@ impl DayCtx {
     /// `(reps, rep_m)` of the repetition set; in a taper at least the 4 × 200 m
     /// minimum (`quality_floor`: exactly that).
     fn repetition(&self) -> Option<(u8, u16)> {
-        let r = running::repetition_rx().value;
-        let floor = self.taper.then_some((r.min_reps, r.rep_m[1]));
+        let floor = self.taper.then(shortest_repetition_set);
         if self.quality_floor {
             return floor;
         }
@@ -724,11 +696,7 @@ impl DayCtx {
     /// Marathon-pace block; in a taper at least the 8 km "MP touch" minimum
     /// (`quality_floor`: exactly that).
     fn race_pace_km(&self) -> Option<f64> {
-        let lo = running::workout_rx(RunSessionType::RacePace)
-            .value
-            .distance_km
-            .0
-            .unwrap_or(8.0);
+        let (lo, _) = race_pace_band_km();
         let floor = self.taper.then_some(lo);
         if self.quality_floor {
             return floor;
@@ -740,7 +708,7 @@ impl DayCtx {
 /// Easy pace (s/km) for weekly accounting: the middle of the athlete's VDOT
 /// E band when a race anchors it, else the RUN-WARMUP-001 accounting default.
 fn accounting_easy_pace(vdot: Option<f64>) -> f64 {
-    vdot.and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, VdotBand::Easy))
+    vdot.and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, VdotBand::Easy))
         .map(|(fast, slow)| (fast + slow) / 2.0)
         .unwrap_or(running::warmup_rx().value.accounting_easy_pace_sec_per_km)
 }
@@ -906,7 +874,7 @@ pub(super) fn prescribed_km(sessions: &[Session], anchors: &Anchors) -> f64 {
 fn mark_recovery_days(days: &mut [(u16, RunSessionType)]) {
     let hard: BTreeSet<u16> = days
         .iter()
-        .filter(|(_, k)| is_quality(*k) || *k == RunSessionType::LongRun)
+        .filter(|(_, k)| running::is_hard_or_long_session(*k))
         .map(|(d, _)| *d)
         .collect();
     for (d, k) in days.iter_mut() {
@@ -957,8 +925,11 @@ fn size_week(
 /// window (RUN-SPIKE-001, DETRAIN-001 taper) counts.
 fn day_ctx(plan: &RunWeekPlan, profile: &Profile, anchors: &Anchors, n_run_days: usize) -> DayCtx {
     let brk = anchors.run_break;
-    let all_runs = (anchors.longest_recent_run_km, anchors.longest_run_detrained);
-    let since_break = |b: crate::plan::RunBreak| (b.longest_since_km, b.longest_since_detrained);
+    let all_runs = (
+        anchors.run.longest_recent_run_km,
+        anchors.run.longest_run_detrained,
+    );
+    let since_break = |b: RunBreak| (b.longest_since_km, b.longest_since_detrained);
     let capacity_runs = brk
         .filter(|b| b.reentry.rebuild_long_run)
         .map_or(all_runs, since_break);
@@ -1026,7 +997,7 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
     let mut committed = ctx.long_km().unwrap_or(0.0);
     let wu = running::warmup_rx().value;
     for (_, k) in days {
-        if is_quality(*k) && !spike_degrades_quality(*k, ctx) {
+        if running::is_quality_session(*k) && !spike_degrades_quality(*k, ctx) {
             committed +=
                 quality_main_km(*k, ctx) + km_of_min((wu.warmup_min.0 + wu.cooldown_min) as f64);
         }
@@ -1069,13 +1040,12 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
     if let Some(c) = plan.race_week_easy_cap_km {
         easy_km = easy_km.min(c);
     }
-    // The weekly report judges every run against 2× the EXECUTED week's daily
-    // average (RUN-LONGRUN-001): e ≤ 2·fixed/(n − 2·n_easy) whenever easy days
-    // are fewer than half the run days.
-    let n = ctx.n_run_days;
-    if n > 2 * n_easy && n_easy > 0 {
-        let fixed = committed + rec_counted;
-        easy_km = easy_km.min(2.0 * fixed / (n - 2 * n_easy) as f64);
+    // The weekly report judges every run against the EXECUTED week's daily
+    // average (RUN-LONGRUN-001).
+    if let Some(cap) =
+        running::easy_run_cap_for_daily_avg(committed + rec_counted, n_easy, ctx.n_run_days)
+    {
+        easy_km = easy_km.min(cap);
     }
     let easy_ceiling = ceiling_km(RunSessionType::Easy);
     let held_easy_km = floor_km(easy_km.min(easy_ceiling));
@@ -1155,19 +1125,19 @@ fn run_session(kind: RunSessionType, day: u16, ctx: &DayCtx, soft_km: f64) -> Se
         run.long_run_avg_floor = average_run;
         let pres = Prescription::Run(run);
         if detrained {
-            crate::evidence::graded(pres, claims::DETRAIN_001)
+            Recommended::new(pres, claims::DETRAIN_001)
         } else if bind.cites_spike() && stated {
             // The ceiling rests on the athlete's stated longest run.
-            crate::evidence::graded(pres, claims::RUN_START_001)
+            Recommended::new(pres, claims::RUN_START_001)
         } else if bind.cites_spike() {
-            crate::evidence::graded(pres, claims::RUN_SPIKE_001)
+            Recommended::new(pres, claims::RUN_SPIKE_001)
         } else if bind == LongRunBind::Target {
-            crate::evidence::graded(pres, claims::RUN_LONGRUN_TARGET_001)
+            Recommended::new(pres, claims::RUN_LONGRUN_TARGET_001)
         } else if ctx.taper {
-            crate::evidence::graded(pres, claims::RUN_TAPER_001)
+            Recommended::new(pres, claims::RUN_TAPER_001)
         } else if average_run {
             // The low-mileage guardrail set it, not the 25–30 % share.
-            crate::evidence::graded(pres, claims::RUN_LONGRUN_001)
+            Recommended::new(pres, claims::RUN_LONGRUN_001)
         } else {
             rx.with_value(pres)
         }
@@ -1176,16 +1146,16 @@ fn run_session(kind: RunSessionType, day: u16, ctx: &DayCtx, soft_km: f64) -> Se
         if ctx.recovery {
             // Every run in a recovery week is a reduced-volume, reduced-intensity
             // session: cite the recovery-week depth rule.
-            crate::evidence::graded(pres, claims::RUN_DELOAD_DEPTH_001)
+            Recommended::new(pres, claims::RUN_DELOAD_DEPTH_001)
         } else if degraded {
             // A quality slot forced off distance by the spike ceiling is now an
             // easy run; RUN-SPIKE-001 governs the substitution.
-            crate::evidence::graded(pres, claims::RUN_SPIKE_001)
+            Recommended::new(pres, claims::RUN_SPIKE_001)
         } else if ctx.taper && matches!(kind, RunSessionType::Easy | RunSessionType::Recovery) {
             // Taper: the easy volume is what the taper cut (intensity held).
-            crate::evidence::graded(pres, claims::RUN_TAPER_001)
+            Recommended::new(pres, claims::RUN_TAPER_001)
         } else if kind == RunSessionType::Repetition {
-            crate::evidence::graded(pres, claims::RUN_REPETITION_002)
+            Recommended::new(pres, claims::RUN_REPETITION_002)
         } else {
             rx.with_value(pres)
         }
@@ -1300,11 +1270,13 @@ fn translate_run(
     }
 }
 
-/// Smallest KB VO2max rep distance (running-019: 800 m) and repetition rep
-/// (running-051: 200 m). Below the spike ceiling for even one rep, the slot has
-/// no honest distance.
-const SMALLEST_INTERVAL_REP_KM: f64 = 0.8;
-const SMALLEST_REPETITION_REP_KM: f64 = 0.2;
+/// The shortest VO2max rep (running-019: 800 m) and repetition rep
+/// (running-051: 200 m), km. Below the spike ceiling for even one rep, the
+/// slot has no honest distance.
+const SMALLEST_INTERVAL_REP_KM: f64 = SHORTEST_INTERVAL_SET.1 as f64 / 1000.0;
+fn smallest_repetition_rep_km() -> f64 {
+    f64::from(shortest_repetition_set().1) / 1000.0
+}
 
 /// Whether a quality slot must degrade to an easy run because the RUN-SPIKE-001
 /// ceiling over a positive sub-1 km baseline can't fit its minimum distance.
@@ -1317,7 +1289,7 @@ fn spike_degrades_quality(kind: RunSessionType, ctx: &DayCtx) -> bool {
             cap_km_to_spike(SMALLEST_INTERVAL_REP_KM, ctx.baseline).is_none()
         }
         RunSessionType::Repetition => {
-            cap_km_to_spike(SMALLEST_REPETITION_REP_KM, ctx.baseline).is_none()
+            cap_km_to_spike(smallest_repetition_rep_km(), ctx.baseline).is_none()
         }
         RunSessionType::RacePace => ctx
             .race_pace_km()
@@ -1426,7 +1398,7 @@ pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
         }
     }
     let daily_avg_cap = (ctx.n_run_days > 0 && w > 0.0)
-        .then(|| floor_km(2.0 * daily_avg_run_km(w, ctx.n_run_days)));
+        .then(|| floor_km(running::daily_avg_run_cap_km(w, ctx.n_run_days)));
     if let Some(cap) = daily_avg_cap
         && cap < target
     {
@@ -1455,7 +1427,7 @@ pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
     let goal_cap = running::goal_long_run_target_km(ctx.goal).map(|t| t.value.1);
     let time_cap = ctx
         .vdot
-        .and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, VdotBand::Easy))
+        .and_then(|v| crate::running::vdot_band_pace_sec_per_km(v, VdotBand::Easy))
         .map(|(_, slow)| floor_km(running::LONG_RUN_MAX_MIN * 60.0 / slow.max(1.0)));
     for cap in [goal_cap, time_cap].into_iter().flatten() {
         if cap < target {

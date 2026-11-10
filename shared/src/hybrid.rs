@@ -9,7 +9,6 @@
 //! is attenuated most, maximal lower-body strength lightly (in men, HYB-SEX-001),
 //! whole-muscle hypertrophy essentially spared.
 
-use crate::evidence;
 use crate::evidence::claims;
 use crate::schema::Recommended;
 
@@ -46,7 +45,7 @@ pub fn same_session_order(goal: ConcurrentGoal) -> Recommended<SessionOrder> {
         ConcurrentGoal::Strength | ConcurrentGoal::Hypertrophy => SessionOrder::LiftFirst,
         ConcurrentGoal::EndurancePriority => SessionOrder::RunFirst,
     };
-    evidence::graded(order, claims::CONC_ORDER_001)
+    Recommended::new(order, claims::CONC_ORDER_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +66,7 @@ pub struct SessionSpacing {
 /// Default acute spacing: 6–24 h ideal, ≥3 h fallback (File 10 hybrid-007;
 /// CONC-SEP-001).
 pub fn session_spacing() -> Recommended<SessionSpacing> {
-    evidence::graded(
+    Recommended::new(
         SessionSpacing {
             ideal_min_hours: 6,
             ideal_max_hours: 24,
@@ -84,7 +83,7 @@ pub const HEAVY_LEG_RUN_GAP_H: f64 = 24.0;
 /// True when a heavy leg day and a hard/long run are at least
 /// [`HEAVY_LEG_RUN_GAP_H`] apart (File 10 CAP-3 / hybrid-012).
 pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
-    evidence::graded(hours_between >= HEAVY_LEG_RUN_GAP_H, claims::HYB_CAP_001)
+    Recommended::new(hours_between >= HEAVY_LEG_RUN_GAP_H, claims::HYB_CAP_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -98,12 +97,12 @@ pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
 /// (HYB-RUNCAP-001, ExpertOpinion). The plan keeps per-run distance instead of
 /// lengthening the remaining runs when this trims days (hybrid-004).
 pub fn endurance_frequency_cap() -> Recommended<u8> {
-    evidence::graded(3, claims::HYB_RUNCAP_001)
+    Recommended::new(3, claims::HYB_RUNCAP_001)
 }
 
 /// True when weekly endurance days stay within the co-primary default (≤3 d/wk).
 pub fn endurance_frequency_ok(days_per_week: u8) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         days_per_week <= endurance_frequency_cap().value,
         claims::HYB_RUNCAP_001,
     )
@@ -126,7 +125,7 @@ pub fn lower_lift_cap(
     running_km_per_week: f64,
 ) -> Option<Recommended<LowerLiftCap>> {
     if running_days_per_week >= 4 || running_km_per_week >= 40.0 {
-        Some(evidence::graded(
+        Some(Recommended::new(
             LowerLiftCap {
                 max_lower_sessions: 2,
                 volume_reduction_frac: (0.20, 0.33),
@@ -155,7 +154,7 @@ pub fn capped_lower_weekly_sets(weekly_sets: u32, cap: &LowerLiftCap, min_sets: 
 /// hybrid-010; CONC-RE-001). Strength training improves running economy 2–8 %
 /// and does not harm VO2max, keep 2–3 sessions/week. Returns (min, max).
 pub fn maintenance_lift_sessions() -> Recommended<(u8, u8)> {
-    evidence::graded((2, 3), claims::CONC_RE_001)
+    Recommended::new((2, 3), claims::CONC_RE_001)
 }
 
 /// How likely concurrent running is to blunt lower-body maximal-strength gains
@@ -182,7 +181,7 @@ pub fn expect_lower_strength_interference(
     } else {
         LowerStrengthInterference::PossibleSmall
     };
-    evidence::graded(v, claims::HYB_SEX_001)
+    Recommended::new(v, claims::HYB_SEX_001)
 }
 
 /// Expect strength/hypertrophy attenuation when endurance dosing is high
@@ -199,7 +198,7 @@ pub fn interference_expected(
     peak_session_pct_vo2max: f64,
 ) -> Recommended<bool> {
     let hit = endurance_days_per_week > 3 || peak_session_pct_vo2max > 80.0;
-    evidence::graded(hit, claims::HYB_THRESH_001)
+    Recommended::new(hit, claims::HYB_THRESH_001)
 }
 
 /// Peak strength/power mesocycle running override (File 10 hybrid-016 / CAP-2).
@@ -215,7 +214,7 @@ pub struct PeakPhaseRunCap {
 /// remove hard intervals, and keep long runs ≥24 h from heavy-lower days
 /// (File 10 hybrid-016 / CAP-2; HYB-CAP-001).
 pub fn peak_phase_run_cap() -> Recommended<PeakPhaseRunCap> {
-    evidence::graded(
+    Recommended::new(
         PeakPhaseRunCap {
             max_easy_runs_per_week: (2, 3),
             long_run_min_gap_hours: HEAVY_LEG_RUN_GAP_H,
@@ -230,7 +229,7 @@ pub fn peak_phase_run_cap() -> Recommended<PeakPhaseRunCap> {
 /// priority. Returns the multiplier to apply to the improvement dose.
 /// HYB-MAINT-001 (ExpertOpinion, CAP-7 has no named primary source).
 pub fn maintenance_dose_fraction() -> Recommended<f64> {
-    evidence::graded(1.0 / 3.0, claims::HYB_MAINT_001)
+    Recommended::new(1.0 / 3.0, claims::HYB_MAINT_001)
 }
 
 /// Per-exercise working sets when lifting is the MAINTAINED side of a hybrid
@@ -240,7 +239,7 @@ pub fn maintenance_dose_fraction() -> Recommended<f64> {
 /// hybrid-017 / CAP-7). Intensity is held, only volume drops (HYB-MAINT-002).
 pub fn maintenance_sets_per_exercise(improvement_sets: u8) -> Recommended<u8> {
     let third = (improvement_sets as f64 * maintenance_dose_fraction().value).ceil() as u8;
-    evidence::graded(third.clamp(2, 4), claims::HYB_MAINT_001)
+    Recommended::new(third.clamp(2, 4), claims::HYB_MAINT_001)
 }
 
 /// Substitute a low-impact modality (cycling/rowing) for part of aerobic volume
@@ -250,7 +249,7 @@ pub fn substitute_modality(
     interference_symptoms: bool,
     running_optional: bool,
 ) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         interference_symptoms && running_optional,
         claims::HYB_CAP_001,
     )
@@ -267,7 +266,7 @@ pub const BSI_SURVEILLANCE_KM_PER_WEEK: f64 = 64.0;
 /// training is protective when energy availability is adequate. `true` =
 /// heighten monitoring.
 pub fn bsi_surveillance_flag(running_km_per_week: f64) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         running_km_per_week > BSI_SURVEILLANCE_KM_PER_WEEK,
         claims::HYB_BSI_001,
     )
@@ -291,12 +290,13 @@ pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommende
     // NOT-APPLICABLE (None), not a failure: a first week of running must not read
     // as a spike.
     let ok = crate::running::ratio_increase_within(current_km, next_km, COMBINED_RAMP_CAP_FRAC);
-    evidence::graded(ok, claims::HYB_PROG_001)
+    Recommended::new(ok, claims::HYB_PROG_001)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evidence::ContestedId;
 
     #[test]
     fn ordering_forbids_same_session_for_power() {
@@ -434,7 +434,10 @@ mod tests {
     #[test]
     fn reference_rule_claims_keep_their_grading() {
         // Interference onset threshold undefined (File 10 CQ-02 → global CQ-06).
-        assert_eq!(claims::HYB_DURATION_001.entry().contested, Some("CQ-06"));
+        assert_eq!(
+            claims::HYB_DURATION_001.entry().contested,
+            Some(ContestedId::CQ_06)
+        );
         // CAP-8 says Weak-Moderate; registered at the Weak floor.
         let cho = claims::HYB_CHO_001.entry();
         assert!((cho.confidence_score() - 0.40).abs() < f32::EPSILON);

@@ -8,40 +8,12 @@
 //! which forces an attached registry claim (grade, citation, confidence).
 //! Nothing that tells a user what to do may exist outside that wrapper.
 
-use crate::evidence::{ClaimId, EvidenceEntry};
+use crate::evidence::{ClaimId, ContestedId, EvidenceEntry, EvidenceGrade};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Evidence & confidence layer (knowledge-base File 09)
 // ---------------------------------------------------------------------------
-
-/// Canonical evidence grading scale (File 09).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum EvidenceGrade {
-    /// Contradicted or retracted claims; must be hard-blocked, never programmed.
-    MarketingMyth,
-    /// Practice heuristic with no direct trial evidence.
-    ExpertOpinion,
-    /// Mechanistic or observational evidence only.
-    Weak,
-    /// Mixed or limited RCTs; promising but unsettled.
-    Moderate,
-    /// Well-replicated meta-analyses / RCTs.
-    Strong,
-}
-
-impl EvidenceGrade {
-    /// Default confidence score per grade (File 09 mapping).
-    pub const fn default_confidence(self) -> f32 {
-        match self {
-            EvidenceGrade::Strong => 0.90,
-            EvidenceGrade::Moderate => 0.65,
-            EvidenceGrade::Weak => 0.40,
-            EvidenceGrade::ExpertOpinion => 0.30,
-            EvidenceGrade::MarketingMyth => 0.05,
-        }
-    }
-}
 
 /// Wrapper forcing evidence + confidence onto any recommendation-bearing value.
 ///
@@ -103,8 +75,8 @@ impl<T> Recommended<T> {
         self.evidence().safety_critical
     }
 
-    /// The contested-question id (e.g. `"CQ-01"`) when the claim is debated.
-    pub fn contested(&self) -> Option<&'static str> {
+    /// The contested question when the claim is debated.
+    pub fn contested(&self) -> Option<ContestedId> {
         self.evidence().contested
     }
 
@@ -146,7 +118,6 @@ pub enum Goal {
 /// A full training program: the plan week in force, as one mesocycle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    pub name: String,
     pub goal: Goal,
     pub mesocycle: Mesocycle,
 }
@@ -274,6 +245,25 @@ impl SessionType {
     }
 }
 
+/// A DUP training day's focus (File 02 strength-023 example week).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DupDay {
+    /// Heavy: 3-5×3-5 @85-90%.
+    Heavy,
+    /// Power/speed: 3-6×3-5 @50-70%, fast (max concentric intent).
+    Power,
+    /// Hypertrophy: 3-4×8-12 @70-75%.
+    Hypertrophy,
+    /// Second heavy exposure of a max-strength (or strength-base power) week:
+    /// the block Transmutation band's low end, 80 % ramping inside 80–90 %,
+    /// 3–6 sets × 5–6 reps (File 02 strength-022, STR-BLOCK-001). 80 %×5 sits at
+    /// ~2.5 reps in reserve; the ramp stops at 83 %, where 5 reps still leave 1
+    /// (the 1–3 RIR strength band, STR-INTENT-001; `strength::pct_for_week`).
+    /// It exists so a strength goal gets ≥80 % 1RM on each main lift in ≥2
+    /// sessions a week (STR-HEAVYFREQ-001).
+    HeavyVolume,
+}
+
 /// One planned training day/unit inside a mesocycle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
@@ -284,7 +274,7 @@ pub struct Session {
     pub prescriptions: Vec<Recommended<Prescription>>,
     /// The DUP day a lift session undulates to (File 02 strength-023), so two
     /// heavy days of one week read apart. `None` for any other session.
-    pub dup_day: Option<crate::strength::DupDay>,
+    pub dup_day: Option<DupDay>,
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +726,7 @@ pub struct PainDetail {
     /// the safety banner sub-line and pain history. For a non-persisting
     /// sharp/joint report it also scopes the stop: a location that maps to one
     /// body region stops only the movements that load it (File 08 safety-038
-    /// "STOP that exercise"; `autoreg::pain_region`); anything unmapped keeps the
+    /// "STOP that exercise"); anything unmapped keeps the
     /// whole-day stop. `None`, the wire default, keeps every existing log
     /// replaying unchanged (whole-day stop, no body part on the sub-line).
     #[serde(default)]
@@ -1088,5 +1078,23 @@ mod tests {
     fn grade_confidence_defaults_match_file_09() {
         assert_eq!(EvidenceGrade::MarketingMyth.default_confidence(), 0.05);
         assert_eq!(EvidenceGrade::Moderate.default_confidence(), 0.65);
+    }
+
+    #[test]
+    #[should_panic(expected = "must never back a recommendation")]
+    fn surfacing_a_myth_trips_the_choke_point_guard() {
+        // HARD RULE 2: grading a value with a myth claim panics. The guard is
+        // UNCONDITIONAL - this test is deliberately not gated on
+        // `debug_assertions` and must pass under `cargo test --release` too.
+        let _ = Recommended::new((), claims::LOAD_ACWR_001);
+    }
+
+    #[test]
+    fn recommended_reads_evidence_off_the_claim() {
+        let r = Recommended::new((), claims::RUN_DIST_001);
+        assert_eq!(r.claim_id(), claims::RUN_DIST_001);
+        assert_eq!(r.grade(), EvidenceGrade::Moderate);
+        assert_eq!(r.contested(), Some(ContestedId::CQ_07));
+        assert!((r.confidence() - 0.65).abs() < f32::EPSILON);
     }
 }

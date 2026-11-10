@@ -43,7 +43,10 @@ fn weekly_bone_pain_referral_survives_a_later_session_review() {
     set_today(&app, &mut model, POS_MON + 2);
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            bone_pain_red_flag: true,
+            safety: crate::feedback::SafetyScreen {
+                bone_pain_red_flag: true,
+                ..Default::default()
+            },
             observed_at: POS_MON * DAY_SEC,
             ..SessionReview::default()
         }),
@@ -81,7 +84,10 @@ fn weekly_bone_pain_referral_survives_a_later_session_review() {
     let mut legacy = Model::default();
     app.update(
         Event::SubmitReview(SessionReview {
-            bone_pain_red_flag: true,
+            safety: crate::feedback::SafetyScreen {
+                bone_pain_red_flag: true,
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut legacy,
@@ -133,7 +139,10 @@ fn compulsive_flag_cleared_only_by_a_later_weekly_no() {
     let mut model = Model::default();
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            compulsive_flag: true,
+            safety: crate::feedback::SafetyScreen {
+                compulsive_flag: true,
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,
@@ -246,12 +255,15 @@ fn overtraining_concern_folds_a_deload_into_the_next_session() {
     let full = hero_squat_load(&app, &model);
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signs: Some(OvertrainingSigns {
-                worse_performance: true,
-                worse_sleep: true,
-                ..OvertrainingSigns::default()
-            }),
-            overtraining_signal_weeks: Some(1.5),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signs: Some(crate::feedback::OvertrainingSigns {
+                    worse_performance: true,
+                    worse_sleep: true,
+                    ..crate::feedback::OvertrainingSigns::default()
+                }),
+                overtraining_signal_weeks: Some(1.5),
+                ..Default::default()
+            },
             observed_at: POS_MON * DAY_SEC,
             ..SessionReview::default()
         }),
@@ -277,8 +289,11 @@ fn single_week_two_signals_under_one_week_does_not_fire_concern() {
     let mut model = Model::default();
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 3,
-            overtraining_signal_weeks: Some(0.5),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_count: 3,
+                overtraining_signal_weeks: Some(0.5),
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,
@@ -291,12 +306,15 @@ fn single_week_two_signals_under_one_week_does_not_fire_concern() {
     // bare count says.
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 5,
-            overtraining_signs: Some(OvertrainingSigns {
-                low_mood: true,
-                ..OvertrainingSigns::default()
-            }),
-            overtraining_signal_weeks: Some(2.0),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_count: 5,
+                overtraining_signs: Some(crate::feedback::OvertrainingSigns {
+                    low_mood: true,
+                    ..crate::feedback::OvertrainingSigns::default()
+                }),
+                overtraining_signal_weeks: Some(2.0),
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,
@@ -321,8 +339,11 @@ fn concern_recovery_suppresses_duplicate_down_week_rows() {
     .expect_only_render();
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 2,
-            overtraining_signal_weeks: Some(1.0),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_count: 2,
+                overtraining_signal_weeks: Some(1.0),
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,
@@ -353,8 +374,11 @@ fn running_down_week_row_absent_for_a_pure_lifter() {
         .expect_only_render();
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 2,
-            overtraining_signal_weeks: Some(1.0),
+            safety: crate::feedback::SafetyScreen {
+                overtraining_signal_count: 2,
+                overtraining_signal_weeks: Some(1.0),
+                ..Default::default()
+            },
             ..SessionReview::default()
         }),
         &mut model,
@@ -553,7 +577,7 @@ fn e1rm_pr_beyond_5pct_emits_anchored_mastery() {
     assert!(fb.message.contains("110 kg × 5"), "{}", fb.message);
     assert_eq!(
         fb.evidence.citation,
-        crate::evidence::graded((), claims::FB_MASTERY_ANCHOR_001).reference()
+        Recommended::new((), claims::FB_MASTERY_ANCHOR_001).reference()
     );
 }
 

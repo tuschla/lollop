@@ -2,164 +2,19 @@
 //! review's execution, monitoring and volume rows, and the filters that drop
 //! a row today's session already settles.
 
-use super::*;
-use crate::feedback;
-use std::borrow::Cow;
-
-/// Claim behind the overtraining recovery week, so its row can be recognized.
-pub(in crate::app) const RECOVERY_WEEK_CLAIM: ClaimId = claims::HYB_DELOAD_001;
-
-/// Set cut of the overtraining recovery week, % (STR-DELOAD-VOL-001: about
-/// half the sets).
-const RECOVERY_WEEK_VOLUME_CUT_PCT: f32 = 50.0;
-
-/// Load cut of the overtraining recovery week, % (STR-DELOAD-VOL-001: loads up
-/// to 10 % lower). The lighter-week row quotes it.
-pub(super) const RECOVERY_WEEK_LOAD_CUT_PCT: f32 = 10.0;
-
-/// Week-level deload triggers carried by a weekly check-in. Distinct from the
-/// readiness adjustments (which react to a single session's markers), these
-/// fire off accumulated weekly fatigue counts. Each dormant autoreg fn returns
-/// `None` until its threshold is crossed, so an unset field or a sub-threshold
-/// count contributes nothing.
-pub(in crate::app) fn review_deloads(r: &SessionReview) -> Vec<Recommended<Adjustment>> {
-    review_deloads_with_reasons(r)
-        .into_iter()
-        .map(|(rec, _)| rec)
-        .collect()
-}
-
-/// [`review_deloads`] with, for each deload, the plain-language trigger that
-/// fired it, so the row says WHY (several triggers share one claim and one
-/// adjustment shape, so the reason cannot be recovered from the rec alone).
-/// `None` = the adjustment's own description already says it.
-fn review_deloads_with_reasons(
-    r: &SessionReview,
-) -> Vec<(Recommended<Adjustment>, Option<Cow<'static, str>>)> {
-    let mut out = Vec::new();
-    if let Some(n) = r.rpe_load_gap_sessions
-        && let Some(d) = autoreg::deload_from_rpe_load_gap(n)
-    {
-        out.push((
-            d,
-            Some(
-                format!(
-                    "because 2+ sessions this week needed weights {}% or more below plan to reach the planned effort",
-                    autoreg::RPE_LOAD_GAP_DELOAD_PCT
-                )
-                .into(),
-            ),
-        ));
-    }
-    if let Some(v) = r.weekly_velocity_drop_m_s
-        && let Some(d) = autoreg::deload_from_velocity_drop(v)
-    {
-        out.push((
-            d,
-            Some(
-                format!(
-                    "because your bar speed on the same weight dropped more than {} m/s this week",
-                    autoreg::VBT_WEEKLY_DROP_DELOAD_M_S
-                )
-                .into(),
-            ),
-        ));
-    }
-    if let Some(n) = r.failed_key_sessions
-        && let Some(d) = autoreg::deload_from_failed_sessions(n)
-    {
-        out.push((
-            d,
-            Some("because 2+ hard sessions weren't finished this week".into()),
-        ));
-    }
-    // autoreg-025: the at/above-MRV sign cluster (qualitative) → deload.
-    if let Some(d) = autoreg::mrv_signs_deload(r.mrv_sign_cluster) {
-        out.push((
-            d,
-            Some("because of signs you're doing more than you can recover from (aching joints, stalling, poor sleep, low motivation)".into()),
-        ));
-    }
-    // autoreg-024: RPE creep +1 at the same loads AND wellness z ≤ −1 for ≥3
-    // days → the standard 1-week deload.
-    if let Some(days) = r.wellness_z_low_days
-        && let Some(d) = autoreg::deload_from_rpe_creep_and_wellness(r.rpe_creep_plus_one, days)
-    {
-        out.push((
-            d,
-            Some(
-                format!(
-                    "because sessions felt harder at the same weights while your check-ins stayed low for {}+ days",
-                    autoreg::WELLNESS_MULTIDAY_STREAK
-                )
-                .into(),
-            ),
-        ));
-    }
-    // autoreg-028 second trigger: a single-day lnRMSSD z < −1 with a ≥2-day
-    // downtrend → downgrade the session even before the 7-day average clears
-    // the SWC band.
-    if let (Some(z), Some(days)) = (r.hrv_single_day_z, r.hrv_downtrend_days)
-        && let Some(d) = autoreg::hrv_single_day_downgrade(z, days)
-    {
-        out.push((d, None));
-    }
-    // ≥2 overtraining signs lasting a week or more → an easier week now
-    // (feedback-036 "consider an easy week"; HYB-DELOAD-001 / Meeusen 2013:
-    // deload when ≥2 overreaching red flags persist; running-034's
-    // unscheduled down week). The same predicate as the recovery-concern card,
-    // so the card and the lighter plan always appear together. Shape: the
-    // standard 1-week deload, about half the sets and loads up to 10 % lower
-    // (STR-DELOAD-VOL-001).
-    if feedback::overtraining_sustained(overtraining_count(r), r.overtraining_signal_weeks) {
-        out.push((
-            graded(
-                Adjustment::Deload {
-                    volume_reduction_pct: RECOVERY_WEEK_VOLUME_CUT_PCT,
-                    load_reduction_pct: RECOVERY_WEEK_LOAD_CUT_PCT,
-                    weeks: 1,
-                },
-                RECOVERY_WEEK_CLAIM,
-            ),
-            None,
-        ));
-    }
-    // Overtraining escalations (File 08 safety-042 > File 06 autoreg-042): a
-    // ≥2-week unexplained decline that survived a deload is the Strong
-    // rest-and-defer rule; otherwise the ≥2-domain NFOR cluster mandates a
-    // recovery block + professional referral. At most one fires: the
-    // stronger-graded rule wins when both conditions hold.
-    let decline_weeks = r.decline_weeks.unwrap_or(0);
-    let domains = r.suppressed_wellness_domains.unwrap_or(0);
-    if let Some(d) =
-        autoreg::unexplained_decline_rest_defer(decline_weeks, domains >= 1, r.despite_deload)
-    {
-        out.push((d, None));
-    } else if let Some(d) = autoreg::nfor_cluster_defer(decline_weeks, domains) {
-        out.push((d, None));
-    }
-    // Weekly red-flag answers defer exactly like the same signs entered as
-    // readiness signals: bone-stress signs stop impact loading with an urgent
-    // referral (safety-040); a positive RED-S screen or compulsive exercise
-    // (safety-049's signal list; ready-upd-005 "the existing RED-S referral
-    // route") reduces training stress and defers to a professional. Normal
-    // load progression never runs under either (HARD RULE 3).
-    if r.bone_pain_red_flag {
-        out.push((autoreg::bone_stress_referral(), None));
-    }
-    if weekly_reds_signal(r) {
-        out.push((autoreg::reds_referral(), None));
-    }
-    out
-}
-
-/// A weekly check-in carries a RED-S signal: a positive RED-S screen or
-/// compulsive exercise (safety-049's signal list). One test for the referral
-/// row above and the app's RED-S-dependent refusals (safety-022 deficit,
-/// calculators), so no channel can defer as RED-S without them.
-pub(in crate::app) fn weekly_reds_signal(r: &SessionReview) -> bool {
-    r.reds_signal_reported || r.compulsive_flag
-}
+use crate::app::evidence_views::{adjustment_tier, describe, to_view, to_view_with};
+use crate::app::model::SessionReview;
+use crate::app::readiness::suppression_active;
+use crate::app::review_deloads::{
+    RECOVERY_WEEK_CLAIM, RECOVERY_WEEK_LOAD_CUT_PCT, review_deloads_with_reasons,
+};
+use crate::app::reviews::split::FEEDBACK_FRESH_DAYS;
+use crate::app::view_types::{AdjustmentView, SessionPlanView};
+use crate::evidence::claims;
+use crate::profile::Profile;
+use crate::running::GoalDistance;
+use crate::schema::{Adjustment, Recommended};
+use crate::{autoreg, hybrid, hypertrophy, individualization, load, strength};
 
 /// Readiness/profile context a [`review_views`] pass needs alongside the review:
 /// the review's own deloads, the readiness adjustments in scope (for suppression),
@@ -240,7 +95,9 @@ fn week_trigger_rows(r: &SessionReview, ctx: &ReviewCtx) -> Vec<AdjustmentView> 
     // so two identical deloads from different triggers keep their own reason.
     let mut reasons = review_deloads_with_reasons(r);
     // No profile → unknown: say what the plan does to runs, conservatively.
-    let runs = ctx.profile.is_none_or(|p| p.running_days_per_week > 0);
+    let runs = ctx
+        .profile
+        .is_none_or(|p| crate::profile::PlanProfile::new(p).runs());
     let mut next = 0;
     let mut out: Vec<AdjustmentView> = ctx
         .recs
@@ -261,8 +118,10 @@ fn week_trigger_rows(r: &SessionReview, ctx: &ReviewCtx) -> Vec<AdjustmentView> 
         let retest = autoreg::threshold_retest_due(true, weeks);
         if retest.value {
             let mut row = to_view_with(
-                "Your pace at the same heart rate has improved for 2+ weeks. Re-test with a race or time trial to update your paces"
-                    .to_string(),
+                format!(
+                    "Your pace at the same heart rate has improved for {}+ weeks. Re-test with a race or time trial to update your paces",
+                    autoreg::PACE_RETEST_WEEKS
+                ),
                 &retest,
             );
             // A progression cue, not a prescription adjustment: never headline it.
@@ -357,7 +216,7 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
             let mut row = to_view_with(
                 "Target effort reached before the planned reps: stop here and tap End exercise"
                     .to_string(),
-                &graded((), claims::AUTOREG_SETVOL_001),
+                &Recommended::new((), claims::AUTOREG_SETVOL_001),
             );
             row.suggests_end_exercise = true;
             out.push(row);
@@ -369,7 +228,7 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
         out.push(to_view_with(
             "Sets cut in two sessions in a row on this lift: hold weekly volume, don't add sets"
                 .to_string(),
-            &graded((), claims::AUTOREG_SETVOL_001),
+            &Recommended::new((), claims::AUTOREG_SETVOL_001),
         ));
     }
 
@@ -380,7 +239,8 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
     {
         out.push(to_view_with(
             format!(
-                "2+ interval reps were harder than the target: slow the remaining reps ~{:.0}%",
+                "{}+ interval reps were harder than the target: slow the remaining reps ~{:.0}%",
+                autoreg::INTERVAL_REPS_OVER_TARGET_CUT,
                 cut.value * 100.0
             ),
             &cut,
@@ -409,10 +269,11 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
     {
         out.push(to_view_with(
             format!(
-                "{} of your last 3 HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform",
-                autoreg::HRV_UNRELIABLE_SUSPEND
+                "{} of your last {} HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform",
+                autoreg::HRV_UNRELIABLE_SUSPEND,
+                autoreg::HRV_QC_LOOKBACK
             ),
-            &graded((), claims::AUTOREG_FALLBACK_001),
+            &Recommended::new((), claims::AUTOREG_FALLBACK_001),
         ));
     }
 
@@ -441,7 +302,7 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
             out.push(to_view_with(
                 format!(
                     "You've felt run down for {}+ days and your resting heart rate is rising: take 1–3 easy days or cross-train",
-                    autoreg::WELLNESS_DOWNGRADE_STREAK
+                    autoreg::WELLNESS_RHR_EASY_DAYS
                 ),
                 &easy,
             ));
@@ -608,7 +469,7 @@ pub(in crate::app) fn next_time_add_superseded(
         && in_session.iter().any(|s| {
             matches!(&s.value, Adjustment::ForItem { exercise: e, adjustment: a }
                 if matches!(a.base(), Adjustment::IncreaseLoadPct(_))
-                    && crate::plan::same_movement(e, exercise))
+                    && crate::exercise::same_movement(e, exercise))
         })
 }
 
@@ -627,10 +488,9 @@ pub(in crate::app) fn remaining_sets_call_spent(
         return false;
     };
     !matches!(adjustment.base(), Adjustment::IncreaseLoadPct(_))
-        && today
-            .items
-            .iter()
-            .any(|it| it.done && !it.is_run() && crate::plan::same_movement(&it.exercise, exercise))
+        && today.items.iter().any(|it| {
+            it.done && !it.is_run() && crate::exercise::same_movement(&it.exercise, exercise)
+        })
 }
 
 #[cfg(test)]
@@ -653,7 +513,7 @@ mod tests {
         };
         let p = Profile {
             weekly_sets: 20,
-            ..crate::app::tests::base_profile()
+            ..crate::profile::test_support::base_profile()
         };
         let ctx = ReviewCtx {
             recs: &[],

@@ -173,7 +173,7 @@ impl TrackScan {
 /// cover under [`MIN_IMPORT_M`] or span under [`MIN_IMPORT_SEC`], each summed
 /// within segments (a pause between segments counts as neither).
 pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
-    let point = |f: &FitFix| crate::running::GpsPoint {
+    let point = |f: &FitFix| crate::gps::GpsPoint {
         lat: f.lat,
         lon: f.lon,
         observed_at: f.time_sec,
@@ -184,7 +184,7 @@ pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
     for seg in &track.segments {
         metres += seg
             .windows(2)
-            .map(|w| crate::running::haversine_m(point(&w[0]), point(&w[1])))
+            .map(|w| crate::gps::haversine_m(point(&w[0]), point(&w[1])))
             .filter(|d| d.is_finite())
             .sum::<f64>();
         if let (Some(first), Some(last)) = (seg.first(), seg.last()) {

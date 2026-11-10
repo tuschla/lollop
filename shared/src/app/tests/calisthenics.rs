@@ -171,13 +171,13 @@ fn placement_event_round_trips_and_compacts_with_the_sets_family() {
     let wire = r#"{"SetCalisthenicsRung":{"ladder":"VerticalPull","rung":4,"observed_at":100}}"#;
     let ev: Event = serde_json::from_str(wire).expect("placement decodes");
     assert_eq!(ev, place(Lad::VerticalPull, 4, 100));
-    let kept = crate::log::compact_event_log(vec![
+    let kept = crate::compact_event_log(vec![
         place(Lad::VerticalPull, 2, 50),
         place(Lad::VerticalPull, 4, 100),
     ]);
     assert_eq!(kept.len(), 2, "every placement is history");
     let cleared =
-        crate::log::compact_event_log(vec![place(Lad::VerticalPull, 4, 100), Event::ClearSets]);
+        crate::compact_event_log(vec![place(Lad::VerticalPull, 4, 100), Event::ClearSets]);
     assert!(
         !cleared
             .iter()

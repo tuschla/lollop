@@ -10,10 +10,9 @@
 //! Pure + deterministic: time enters only through each check-in's `observed_at`
 //! (day-bucketed); a bad or non-positive stamp is skipped, never a panic.
 
-use super::prescriptions::suspend_hrv_gating;
+use super::prescriptions::{HRV_MIN_WEEKLY_READINGS, HRV_QC_LOOKBACK, suspend_hrv_gating};
 use super::rules::{
-    CHECKIN_RECENCY_DAYS, HRV_MIN_WEEKLY_READINGS, HRV_ROLLING_DAYS, HRV_SWC_LOWER_Z, RhrNoise,
-    WELLNESS_MULTIDAY_Z, WELLNESS_SINGLE_DAY_Z, rhr_bands,
+    HRV_SWC_LOWER_Z, RhrNoise, WELLNESS_MULTIDAY_Z, WELLNESS_SINGLE_DAY_Z, rhr_bands,
 };
 use crate::schema::{CheckinInput, ReadinessInput, ReadinessSignal};
 
@@ -53,7 +52,7 @@ const BASELINE_WINDOW_DAYS: i64 = 14;
 /// inside it), and resting HR wants a wide, stable individual baseline so a
 /// chronic elevation cannot creep into its own reference. Same exclusive
 /// boundary as [`BASELINE_WINDOW_DAYS`]; this is the widest derivation reach.
-pub(crate) const LONG_BASELINE_WINDOW_DAYS: i64 = 30;
+const LONG_BASELINE_WINDOW_DAYS: i64 = 30;
 
 /// Recency window (LOCAL days) for the soreness endpoint bridge: the maxed-sore
 /// downgrade fires only when the newest soreness reading falls within this many
@@ -73,6 +72,19 @@ pub(super) const SORENESS_RECENCY_DAYS: i64 = 2;
 /// would keep driving the autoreg-028 gate off readings the user stopped taking
 /// weeks ago; a verdict must not outlive its data.
 pub(super) const HRV_RECENCY_DAYS: i64 = 7;
+
+/// Width (local days) of the HRV rolling window: the `HrvLnRmssd` channel emits
+/// the mean of the trailing 7 days' z-scores (autoreg-028's 7-day rolling
+/// baseline) so one off morning cannot trip a gate a sustained shift should.
+pub(crate) const HRV_ROLLING_DAYS: i64 = 7;
+
+/// Recency window (LOCAL days) for the derived RHR-delta and wellness-z channels:
+/// a check-in signal older than this many days no longer drives a verdict (the
+/// user has not checked in recently). HRV is not routed through this per-reading
+/// gate — it reads a trailing rolling window and carries its own recency bound
+/// (`HRV_RECENCY_DAYS`, against both today and the newest check-in). `1` = today
+/// or yesterday counts as current.
+pub(super) const CHECKIN_RECENCY_DAYS: i64 = 1;
 
 /// Absolute floor for the wellness composite (1–5, 5 = best): a morning at or
 /// below it downgrades intensity whatever the z-score, so a flat baseline
@@ -231,7 +243,7 @@ type DaySample = (i64, f64, i64);
 /// `newest − day < window_days`, so `window_days` inclusive days). Each tuple is
 /// `(day, raw_value, observed_at)`. Check-ins bucket by the device's LOCAL day
 /// (`utc_offset_sec`; 0 = UTC), so a late-evening + next-morning pair spans two
-/// days. Undated readings (`crate::is_undated`) are skipped; the newest check-in per
+/// days. Undated readings (`crate::day::is_undated`) are skipped; the newest check-in per
 /// local day wins, so a redone check-in overwrites, never double-counts.
 fn per_day_series(
     checkins: &[CheckinInput],
@@ -242,13 +254,13 @@ fn per_day_series(
     use std::collections::BTreeMap;
     let mut by_day: BTreeMap<i64, (i64, f64)> = BTreeMap::new();
     for c in checkins {
-        if crate::is_undated(c.observed_at) {
+        if crate::day::is_undated(c.observed_at) {
             continue;
         }
         let Some(v) = extract(c) else {
             continue;
         };
-        let day = crate::local_day(c.observed_at, utc_offset_sec);
+        let day = crate::day::local_day(c.observed_at, utc_offset_sec);
         let slot = by_day.entry(day).or_insert((i64::MIN, v));
         if c.observed_at >= slot.0 {
             *slot = (c.observed_at, v);
@@ -259,7 +271,7 @@ fn per_day_series(
     };
     by_day
         .into_iter()
-        .filter(|(day, _)| newest - day < window_days)
+        .filter(|(day, _)| in_window(newest, *day, window_days))
         .map(|(day, (at, v))| (day, v, at))
         .collect()
 }
@@ -502,8 +514,35 @@ fn trailing_sum(series: &[DaySample], day_values: &[f64], window: i64) -> (f64, 
     series
         .iter()
         .zip(day_values)
-        .filter(|((day, _, _), _)| newest - day < window)
+        .filter(|((day, _, _), _)| in_window(newest, *day, window))
         .fold((0.0, 0), |(sum, count), (_, v)| (sum + v, count + 1))
+}
+
+/// Whether local `day` sits inside the trailing `window_days` of `newest`
+/// (EXCLUSIVE: `newest − day < window_days`, so `window_days` inclusive days):
+/// the one window filter every baseline series and trailing mean shares.
+fn in_window(newest: i64, day: i64, window_days: i64) -> bool {
+    newest - day < window_days
+}
+
+/// Local days of the dated check-ins.
+fn checkin_days(checkins: &[CheckinInput], utc_offset_sec: i64) -> impl Iterator<Item = i64> {
+    checkins
+        .iter()
+        .filter(|c| !crate::day::is_undated(c.observed_at))
+        .map(move |c| crate::day::local_day(c.observed_at, utc_offset_sec))
+}
+
+/// Local days of the dated check-ins inside the derivation's widest reach
+/// ([`LONG_BASELINE_WINDOW_DAYS`] of the newest check-in): an older check-in
+/// never affects a derived baseline.
+pub(crate) fn checkin_days_in_reach(
+    checkins: &[CheckinInput],
+    utc_offset_sec: i64,
+) -> impl Iterator<Item = i64> {
+    let newest = checkin_days(checkins, utc_offset_sec).max();
+    checkin_days(checkins, utc_offset_sec)
+        .filter(move |&d| newest.is_some_and(|n| in_window(n, d, LONG_BASELINE_WINDOW_DAYS)))
 }
 
 /// A core-derived reading: no pain detail, no effort duration.
@@ -591,11 +630,7 @@ pub fn derive_readiness(
         checkins,
         utc_offset_sec,
         today_epoch_day,
-        global_newest_day: checkins
-            .iter()
-            .filter(|c| !crate::is_undated(c.observed_at))
-            .map(|c| crate::local_day(c.observed_at, utc_offset_sec))
-            .max(),
+        global_newest_day: checkin_days(checkins, utc_offset_sec).max(),
     };
     let mut out = DerivedReadiness::default();
     derive_wellness(&history, &mut out);
@@ -790,10 +825,6 @@ const HRV_OUTLIER_Z: f64 = 3.0;
 /// Prior clean readings needed before the outlier test runs: the
 /// [`MIN_BASELINE_CHECKINS`] week of readings a spread estimate needs.
 const HRV_QC_MIN_PRIOR: usize = MIN_BASELINE_CHECKINS;
-
-/// Most recent readings autoreg-050 inspects before suspending HRV gating
-/// ("≥2 of the last 3 readings flagged").
-const HRV_QC_LOOKBACK: usize = 3;
 
 /// Resolution of a hand-typed rMSSD reading (whole ms).
 const HRV_RESOLUTION_MS: f64 = 1.0;

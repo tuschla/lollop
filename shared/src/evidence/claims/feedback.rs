@@ -4,15 +4,15 @@
 use crate::evidence::cite::{
     CITE_BOSQUET_2013, CITE_GRGIC_2018, CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023, CITE_NHS_C25K,
 };
-use crate::evidence::claim;
-use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
+use crate::evidence::contested::ContestedId;
+use crate::evidence::draft::claim;
+use crate::evidence::grade::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
 
 claim_group! {
     FeedbackClaim => Feedback;
     // File 05 feedback-003: the rule behind the app's goal framing is graded
     // Moderate and contested in the KB, below File 09's GOAL-PROCESS-001.
     FB_PROCESS_GOAL_001 => claim(
-        "FB-PROCESS-GOAL-001",
         "Next steps are framed as things you control (pacing, effort, technique) rather than results; whether these beat specific result goals in sport is still debated.",
         Moderate,
         &[
@@ -23,9 +23,8 @@ claim_group! {
     .contradicting(&[
         "Kyllo & Landers 1995, J Sport Exerc Psychol: specific, moderately difficult goals improve sport performance",
     ])
-    .contested("CQ-F05-01"),
+    .contested(ContestedId::CQ_F05_01),
     FB_PACING_001 => claim(
-        "FB-PACING-001",
         "If the second half of an even-effort run is more than about 3% slower than the first, the tip is to start easier and aim for an even or faster second half.",
         Moderate,
         &[
@@ -35,7 +34,6 @@ claim_group! {
         ],
     ),
     FB_BADDAY_001 => claim(
-        "FB-BADDAY-001",
         "Missing a target pace at a very high effort is usually normal day-to-day variation, and the session still counted.",
         ExpertOpinion,
         &[
@@ -45,7 +43,6 @@ claim_group! {
     ),
     #[kb_only]
     FB_TONE_001 => claim(
-        "FB-TONE-001",
         "On planned-easy sessions reinforce restraint and praise not chasing pace as the win; on planned-hard praise completion/effort.",
         ExpertOpinion,
         &[
@@ -54,7 +51,6 @@ claim_group! {
         ],
     ),
     FB_TREND_001 => claim(
-        "FB-TREND-001",
         "When a trend improves, the feedback says so and names one next step. A plateau is normal; change one thing at a time. A drop explained by heavy training gets a recovery-first answer and a suggested lighter week.",
         ExpertOpinion,
         &[
@@ -63,7 +59,6 @@ claim_group! {
         ],
     ),
     FB_RECOVERY_001 => claim(
-        "FB-RECOVERY-001",
         "Two or three warning signs together for one to two weeks (worse performance, low mood, a higher resting heart rate or lower HRV, poor sleep) point to under-recovery; that calls for a recovery check, not praise.",
         Moderate,
         &[
@@ -73,7 +68,6 @@ claim_group! {
     )
     .safety(),
     FB_BEHAVIOR_001 => claim(
-        "FB-BEHAVIOR-001",
         "Training through pain, distress over missed sessions, or rapidly escalating volume can signal an unhealthy relationship with exercise. Rest counts as part of training, and streaks or sudden volume jumps are never rewarded.",
         ExpertOpinion,
         &[
@@ -83,7 +77,6 @@ claim_group! {
     )
     .safety(),
     FB_PROVISIONAL_001 => claim(
-        "FB-PROVISIONAL-001",
         "For about the first two weeks, the plan uses typical values for your profile answers, then shifts to your own logged numbers.",
         ExpertOpinion,
         &[
@@ -93,7 +86,6 @@ claim_group! {
     ),
     // File 05 feedback-019/020 (RIR-vs-target lifting feedback).
     FB_RIR_001 => claim(
-        "FB-RIR-001",
         "Each set is compared with its target. Hitting the reps with at least the planned reps left means you've mastered the weight, and the planned progression goes ahead. Hitting them only by going to failure, when 2–3 reps left were planned, means holding or slightly lowering the weight. Anything in between is on track.",
         Moderate,
         &[
@@ -103,7 +95,6 @@ claim_group! {
         ],
     ),
     FB_INTERVAL_MASTERY_001 => claim(
-        "FB-INTERVAL-MASTERY-001",
         "Hitting your interval or threshold paces at or below the target effort means the session did what it was meant to.",
         Moderate,
         &[
@@ -112,7 +103,6 @@ claim_group! {
         ],
     ),
     FB_MASTERY_ANCHOR_001 => claim(
-        "FB-MASTERY-ANCHOR-001",
         "Seeing what you've already done helps people keep training, so feedback names specific results: a new best, a finished session, a hard week done.",
         Strong,
         &[
@@ -121,7 +111,6 @@ claim_group! {
         ],
     ),
     FB_VERBOSITY_001 => claim(
-        "FB-VERBOSITY-001",
         "Feedback is sized to your experience: beginners get one takeaway in plain words, always with the reason; experienced users may see 2–3 numbers, still led by the one that matters most.",
         ExpertOpinion,
         &[
@@ -130,7 +119,6 @@ claim_group! {
         ],
     ),
     FB_BSI_FEMALE_001 => claim(
-        "FB-BSI-FEMALE-001",
         "If you're a woman with a possible bone stress injury, tell your doctor about your periods and how much you eat; missed periods and under-eating raise the risk. Don't try to diagnose it yourself.",
         ExpertOpinion,
         &[
@@ -140,7 +128,6 @@ claim_group! {
     )
     .safety(),
     ADH_MISSED_001 => claim(
-        "ADH-MISSED-001",
         "Missing one session is normal and barely affects progress or habit. Carry on with the plan, and don't double up to make it back.",
         Weak,
         &[
@@ -150,7 +137,6 @@ claim_group! {
         ],
     ),
     ADH_RESCHED_001 => claim(
-        "ADH-RESCHED-001",
         "A missed or clashing session can move to another free day that week if at least 48 hours remain before the next hard session, and long or hard runs stay at least 24 hours from heavy leg days. Otherwise skip it. Weekly volume drives strength gains, not the day, and beginners who picked their own session order gained at least as much.",
         Weak,
         &[
@@ -162,14 +148,12 @@ claim_group! {
         "The same-week and 48-hour limits are an app default; the flexible-order trial was small (16 beginners)",
     ]),
     ADH_PROGRESS_001 => claim(
-        "ADH-PROGRESS-001",
         "The plan moves forward by completed work, not the calendar: a week is repeated if fewer than about two-thirds of its sessions were done (Couch to 5K: fewer than 2 of 3 runs), with no penalty.",
         ExpertOpinion,
         &[CITE_NHS_C25K],
     )
     .contradicting(&["The two-thirds threshold is an app default"]),
     ADH_SELFMON_001 => claim(
-        "ADH-SELFMON-001",
         "Tracking what you do and comparing it with your plan (sessions done vs planned each week) is among the most effective ways to help people stay active.",
         Moderate,
         &[
@@ -178,7 +162,6 @@ claim_group! {
     ),
     #[kb_only]
     ADH_DAYS_001 => claim(
-        "ADH-DAYS-001",
         "Picking your own training days (and times) helps you follow through: concrete plans like \"if it's Tuesday at 7, I lift\" improve goal attainment.",
         Moderate,
         &[
@@ -187,7 +170,6 @@ claim_group! {
     ),
     #[kb_only]
     ADH_GAMIFY_001 => claim(
-        "ADH-GAMIFY-001",
         "Points, badges and challenges give a small-to-moderate short-term boost in activity that mostly fades afterwards, so neutral consistency stats are fine, but streak counters and pressure that punishes rest are not used.",
         Moderate,
         &[
@@ -196,7 +178,6 @@ claim_group! {
     ),
     #[kb_only]
     ADH_PRAISE_001 => claim(
-        "ADH-PRAISE-001",
         "Feedback after good performances, such as a personal best or a completed session, improves learning more than feedback after poor ones, through motivation and confidence.",
         Moderate,
         &[
@@ -206,7 +187,6 @@ claim_group! {
     ),
     #[kb_only]
     ADH_RATIONALE_001 => claim(
-        "ADH-RATIONALE-001",
         "Explaining the reason behind each change to a plan supports people's sense of choice and wellbeing; programs that give a meaningful rationale are associated with larger benefits.",
         Moderate,
         &[

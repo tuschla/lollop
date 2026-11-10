@@ -1,13 +1,55 @@
 //! App-level tests through `update` / `view`, one file per behaviour. This
-//! module holds the shared fixtures; `base_profile` is also the fixture for
-//! the `plan` and `log` tests.
+//! module holds the shared app fixtures.
 
 use super::*;
-use crate::DAY_SEC;
+use crate::app::anchors::{
+    AnchorCtx, Layoff, build_last_working, build_plan_anchors, build_run_anchors, build_run_break,
+    build_run_week_km,
+};
+use crate::app::calculators::build_hr_zones;
+use crate::app::calis_anchors::build_calisthenics_anchors;
+use crate::app::evidence_views::grade_note_str;
+use crate::app::format::{
+    fmt_clock, fmt_km_or_mi, fmt_mi_of_km, fmt_mss, fmt_u8_range, fmt_weight, fmt_weight_num,
+    mon0_weekday, race_distance_label, race_distance_title, weekday_name,
+};
+use crate::app::guidance::build_guidance;
+use crate::app::lift_audit::to_lift_view;
+use crate::app::logged_days::{DeloadDays, lift_deload_days};
+use crate::app::model::{LoggedRun, LoggedSet};
+use crate::app::plan_views::{
+    PLAN_SYNTH_BUILDS, apply_adjustments_to_session, apply_last_sets, flatten_prescription,
+    plan_session_title, program_name, refresh_item_statuses,
+};
+use crate::app::profile_age::whole_years_between;
+use crate::app::readiness::return_step_on;
+use crate::app::reviews::{MessageCtx, feedback_message, target_rir};
+use crate::app::run_metrics::{MAX_LOAD_DAYS, QC_TRACK_CACHE, RunFacts, run_content_key};
+use crate::app::run_views::{RUN_VIEW_BUILDS, RUN_VIEW_CACHE, split_verdict_view, to_run_view};
+use crate::app::set_index::{NameFacts, SetIndex};
+use crate::app::view_types::{
+    BasisRx, EvidenceTagView, HeadlineKind, ItemSetView, ItemStatus, PaceVariability,
+    PlanIntensity, ProteinTargetKind, RunAmount, RunTargetView, SplitVerdict,
+};
 use crate::autoreg::SignalGroup;
 use crate::autoreg::tests::input;
-use crate::feedback::{FeedbackCategory, TrendDirection};
-use crate::schema::{MesoPhase, ReadinessSignal, SafetyTier, SessionType, ThreeZone};
+use crate::day::DAY_SEC;
+use crate::evidence::{ClaimId, EvidenceGrade, claims};
+use crate::feedback::{self, FeedbackCategory, TrendDirection};
+use crate::gps::GpsPoint;
+use crate::hybrid::ConcurrentGoal;
+use crate::individualization::{Environment, ProgressionCadence};
+use crate::plates::{LB_PER_KG, plates_per_side, round_load_grid};
+use crate::profile::test_support::base_profile;
+use crate::profile::{CalisEquipment, Profile, RecentRace, ResistanceModality};
+use crate::running::{self, GoalDistance};
+use crate::schema::{
+    HealthScreen, LiftIntensity, LiftSessionType, MesoPhase, Prescription, ReadinessSignal,
+    RunIntensity, RunSessionType, RunVolume, SafetyTier, Session, SessionType, ThreeZone, VdotBand,
+    WorkoutType,
+};
+use crate::strength::{self, LiftGoal};
+use crate::{hypertrophy, load};
 
 mod activity_log;
 mod autoregulation;
@@ -169,7 +211,7 @@ fn gps(lon: f64, t: i64) -> GpsPoint {
 /// A straight eastward GPS track along the equator: `(metres, m/s)` legs
 /// sampled every `step_s` seconds, starting at `t0`.
 fn equator_track(t0: i64, legs: &[(f64, f64)], step_s: i64) -> Vec<GpsPoint> {
-    let m_per_deg = crate::running::haversine_m(gps(0.0, 0), gps(1.0, 0));
+    let m_per_deg = crate::gps::haversine_m(gps(0.0, 0), gps(1.0, 0));
     let mut pts = vec![gps(0.0, t0)];
     let (mut lon, mut t) = (0.0_f64, t0);
     for &(metres, speed) in legs {
@@ -264,49 +306,6 @@ fn with_run_meta(
 /// A 5 × `weight_kg` @ RPE 8 set carrying entry id `id`.
 fn log_set_id(exercise: &str, weight_kg: f64, id: u64, at: i64) -> Event {
     with_entry_id(log_set(exercise, weight_kg, 5, 8.0, at), id)
-}
-
-/// The one complete `Profile` literal: a neutral intermediate lifter with no
-/// running and every optional field unset. Every other profile fixture
-/// (here, `plan/tests` and the log tests) is `..base_profile()`.
-pub(crate) fn base_profile() -> Profile {
-    Profile {
-        resistance_modality: ResistanceModality::Weights,
-        progression_cadence: ProgressionCadence::WeekToWeek,
-        lift_goal: LiftGoal::MaxStrength,
-        goal_distance: GoalDistance::General,
-        concurrent_goal: ConcurrentGoal::Strength,
-        weekly_sets: 12,
-        running_days_per_week: 0,
-        running_km_per_week: 0.0,
-        running_km_per_week_set: true,
-        advanced: false,
-        female: Some(false),
-        high_load_block: false,
-        health: HealthScreen::default(),
-        environment: None,
-        env_temp_c: None,
-        env_altitude_m: None,
-        weeks_off: None,
-        bodyweight_kg: None,
-        age_years: None,
-        birth_epoch_day: None,
-        resting_hr_bpm: None,
-        measured_hr_max: None,
-        weight_lb: false,
-        effective_from_epoch_day: None,
-        edited_at: None,
-        lift_days_per_week: None,
-        training_weekdays: None,
-        goal_race_epoch_day: None,
-        recent_race: None,
-        stated_longest_recent_km: None,
-        layoff_returned_epoch_day: None,
-        meet_epoch_day: None,
-        calis_equipment: None,
-        specialization_muscle: None,
-        runner_strength: false,
-    }
 }
 
 /// An advanced marathon-priority hybrid athlete (5 run days, 50 km/wk).

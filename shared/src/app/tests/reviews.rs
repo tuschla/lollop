@@ -8,8 +8,10 @@ fn review_bone_pain_short_circuits_to_injury_concern() {
     let app = Engine;
     let mut model = Model::default();
     let review = SessionReview {
-        bone_pain_red_flag: true,
-        // Execution says "mastery", but safety must suppress it.
+        safety: crate::feedback::SafetyScreen {
+            bone_pain_red_flag: true,
+            ..Default::default()
+        }, // Execution says "mastery", but safety must suppress it.
         lift: Some(LiftExec {
             reps_met: true,
             rir_actual: 2,
@@ -401,15 +403,24 @@ fn weekly_red_flag_answers_defer_training_like_the_readiness_signals() {
     // exactly like the same signs entered as readiness signals.
     for review in [
         SessionReview {
-            bone_pain_red_flag: true,
+            safety: crate::feedback::SafetyScreen {
+                bone_pain_red_flag: true,
+                ..Default::default()
+            },
             ..SessionReview::default()
         },
         SessionReview {
-            reds_signal_reported: true,
+            safety: crate::feedback::SafetyScreen {
+                reds_signal_reported: true,
+                ..Default::default()
+            },
             ..SessionReview::default()
         },
         SessionReview {
-            compulsive_flag: true,
+            safety: crate::feedback::SafetyScreen {
+                compulsive_flag: true,
+                ..Default::default()
+            },
             ..SessionReview::default()
         },
     ] {
@@ -431,7 +442,7 @@ fn weekly_red_flag_answers_defer_training_like_the_readiness_signals() {
                 .all(|s| s.items.is_empty()),
             "no future session is programmed through a referral"
         );
-        let expected = if review.bone_pain_red_flag {
+        let expected = if review.safety.bone_pain_red_flag {
             HoldReason::MedicalSignal
         } else {
             HoldReason::Reds

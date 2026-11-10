@@ -14,13 +14,12 @@
 //! safety-024/indiv-025 → ENV-001.
 
 use crate::evidence::cite::{CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023, CITE_SCHWELLNUS_2022};
-use crate::evidence::claim;
-use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong};
+use crate::evidence::draft::claim;
+use crate::evidence::grade::EvidenceGrade::{ExpertOpinion, Moderate, Strong};
 
 claim_group! {
     SafetyClaim => Safety;
     SAFE_PAIN_001 => claim(
-        "SAFE-PAIN-001",
         "Sharp, pinpoint, joint or tendon pain during exercise is a reason to stop. Stop loading that area and check it before you carry on.",
         ExpertOpinion,
         &[
@@ -30,7 +29,6 @@ claim_group! {
     )
     .safety(),
     ILLNESS_NECK_001 => claim(
-        "ILLNESS-NECK-001",
         "An illness with a fever rules out hard exercise because of the risk of heart inflammation (myocarditis) and sudden cardiac death. Any fever, or symptoms below the neck such as chest congestion or body aches, means no training. Symptoms only above the neck, with no fever, allow lighter training.",
         ExpertOpinion,
         &[
@@ -40,7 +38,6 @@ claim_group! {
     )
     .safety(),
     ENV_001 => claim(
-        "ENV-001",
         "In heat, ease off your pace and effort, allow about 10–14 days to adapt, drink enough, and stop at once on signs of heat illness: confusion, dizziness or no longer sweating. Above about 2,500 m, ease off until you adapt. In cold, warm up longer.",
         ExpertOpinion,
         &[
@@ -53,7 +50,6 @@ claim_group! {
     // File 08 safety-038/039 (graded pain, Table 4.1): this row and
     // SAFE-TENDON-001.
     SAFE_PAIN_STRUCT_001 => claim(
-        "SAFE-PAIN-STRUCT-001",
         "Stop that exercise if the pain is sharp, in one spot or along the joint line, changes how you move, or comes with swelling. See a doctor or physio if it lasts; it may be an injury.",
         Moderate,
         &[
@@ -63,7 +59,6 @@ claim_group! {
     )
     .safety(),
     SAFE_TENDON_001 => claim(
-        "SAFE-TENDON-001",
         "If tendon pain stays at or below 3–5 out of 10, holds steady during training and for 24 hours after, and isn't getting worse week to week, keep training and keep an eye on it rather than resting completely. If it goes above 5 out of 10, is worse afterwards or rises week to week, train lighter, avoid positions that press on the tendon, and see a doctor or physio if it lasts.",
         Moderate,
         &[
@@ -73,7 +68,6 @@ claim_group! {
     )
     .safety(),
     SAFE_PEDS_001 => claim(
-        "SAFE-PEDS-001",
         "Children and teenagers should train under a qualified coach, with technique and skill ahead of added weight. lollop doesn't plan near-max weights or 1-rep-max tests for them. There is no agreed age cutoff for this.",
         Strong,
         &[
@@ -83,21 +77,18 @@ claim_group! {
     )
     .safety(),
     SAFE_PREG_WARN_001 => claim(
-        "SAFE-PREG-WARN-001",
         "During pregnancy, stop and contact your doctor or midwife if you notice vaginal bleeding, fluid leaking, regular painful contractions, breathlessness before exercise, dizziness or feeling faint, headache, chest pain, calf pain or swelling, muscle weakness affecting your balance, or the baby moving less. Conditions such as placenta previa after 26 weeks, pre-eclampsia or high blood pressure caused by pregnancy, a weak cervix or severe anemia need a plan from your doctor or midwife.",
         Strong,
         &["ACOG Committee Opinion 804, 2020"],
     )
     .safety(),
     SAFE_PREG_AVOID_001 => claim(
-        "SAFE-PREG-AVOID-001",
         "In pregnancy, avoid lying flat on your back for long, overheating, sports with contact or fall risk, scuba diving, exercise at altitudes above 2,500 m, and holding your breath while lifting.",
         Strong,
         &["ACOG Committee Opinion 804, 2020"],
     )
     .safety(),
     SAFE_INJURY_001 => claim(
-        "SAFE-INJURY-001",
         "lollop doesn't plan rehab. With a current injury under care, recent surgery or ongoing rehab, follow your doctor or physio, and go back to general training only once they clear you. No fixed wait after surgery is established.",
         // The LOWEST-graded of the File 08 safety rules, yet still
         // safety-critical, conservative by design (File 08 §5.4).
@@ -109,14 +100,12 @@ claim_group! {
     )
     .safety(),
     ILLNESS_RTT_001 => claim(
-        "ILLNESS-RTT-001",
         "After a cold or chest infection, return step by step and check your symptoms each day. Make the first session a 10–20 minute test at 60–70% of your normal effort, then recheck after 24 hours. Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, muscle or joint pain, or the work feels harder than usual. After a moderate or severe infection, let a doctor guide your return.",
         ExpertOpinion,
         &[CITE_SCHWELLNUS_2022],
     )
     .safety(),
     RETURN_HOLD_001 => claim(
-        "RETURN-HOLD-001",
         "After a pain or illness hold ends, return gradually: the first session back is easy (lifts with 3 or more reps left, runs at easy effort), then the plan resumes. Return after pain only once the movement is pain-free through its full range, and after illness only once symptoms are gone and there is no fever.",
         ExpertOpinion,
         &[
@@ -129,7 +118,6 @@ claim_group! {
     ])
     .safety(),
     ILLNESS_COLD_RUN_001 => claim(
-        "ILLNESS-COLD-RUN-001",
         "A head cold means a runny or blocked nose, sneezing or a sore throat, with no fever, chills, body aches, chest symptoms or unusual tiredness. With one, skip long runs and hard sessions. If you feel up to it, run at most 10–20 minutes at 60–70% of your normal effort; otherwise rest. Stop on any warning sign. Fever, chills, body aches or chest symptoms mean no training.",
         ExpertOpinion,
         &[
@@ -142,7 +130,6 @@ claim_group! {
     ])
     .safety(),
     REDS_SCREEN_001 => claim(
-        "REDS-SCREEN-001",
         "Check for signs of under-eating (RED-S) regularly, not just once. For women, missed or irregular periods are a main warning sign; for men, low sex drive or fewer morning erections. Any yes leads to the same advice as other signs of under-eating: see a doctor, a registered dietitian or a mental-health professional.",
         Strong,
         &[CITE_MOUNTJOY_2023],
@@ -150,7 +137,6 @@ claim_group! {
     .safety(),
     #[kb_only]
     SCREEN_PARQ_001 => claim(
-        "SCREEN-PARQ-001",
         "Ask the seven PAR-Q+ health questions one at a time: a heart condition or high blood pressure; chest pain; dizziness or fainting in the last year; another chronic condition; medication for a chronic condition; a bone, joint or soft-tissue problem that more activity could worsen; a doctor's advice to exercise only under supervision. All \"no\" clears you for activity; any \"yes\" needs follow-up or a doctor's clearance.",
         Strong,
         &[
@@ -159,7 +145,6 @@ claim_group! {
     )
     .safety(),
     SCREEN_ACSM_001 => claim(
-        "SCREEN-ACSM-001",
         "Whether you need a doctor's OK before exercising depends on whether you already exercise regularly, any signs or symptoms of heart, metabolic or kidney disease, and how hard you plan to train. Anyone with symptoms stops and gets a doctor's OK first, however active they are.",
         Strong,
         &[

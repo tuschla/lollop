@@ -4,7 +4,14 @@
 //! Tracking and information only; the youth plan hold is untouched. Counting
 //! rules: `extracted/08` youth-pa-001.
 
-use super::*;
+use crate::app::evidence_views::why_from;
+use crate::app::format::monday_of;
+use crate::app::model::{LoggedActivity, profile_for_day};
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{ActivityResultView, EvidenceTagView, YouthActivityView};
+use crate::day::{is_undated, local_day};
+use crate::individualization;
 
 /// Longest lift session span counted toward a day's minutes.
 const LIFT_SPAN_CAP_MIN: f64 = 180.0;

@@ -1,5 +1,9 @@
-use super::*;
-use crate::{hybrid, running, strength};
+use crate::app::format::{fmt_frac_pct_range, fmt_u8_range};
+use crate::app::guidance::rows::push_guidance;
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
+use crate::schema::Recommended;
+use crate::{hybrid, hypertrophy, individualization, running, strength};
 
 /// The refusal both the reference library and the protein calculator show in
 /// place of a weight-loss protein figure when the RED-S screen flag is set
@@ -80,7 +84,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-011: place the priority quality when freshest.
-    let sched = graded((), claims::HYB_SCHED_001);
+    let sched = Recommended::new((), claims::HYB_SCHED_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -89,7 +93,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-019 / CAP-8: double-day fueling.
-    let cho = graded((), claims::HYB_CHO_001);
+    let cho = Recommended::new((), claims::HYB_CHO_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -99,7 +103,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
 
     // hybrid-020: separate qualities in a general phase, combine them in a
     // specific/event phase.
-    let phase = graded((), claims::HYB_PHASE_001);
+    let phase = Recommended::new((), claims::HYB_PHASE_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -123,7 +127,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-025: tendon-stiffness evidence gap → conservative dual progression.
-    let dual = graded((), claims::HYB_TENDON_001);
+    let dual = Recommended::new((), claims::HYB_TENDON_001);
     push_guidance(
         rows,
         "Safety",
@@ -132,7 +136,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-024: energy-availability guard (higher-risk cohorts named).
-    let ea = graded((), claims::HYB_EA_001);
+    let ea = Recommended::new((), claims::HYB_EA_001);
     push_guidance(
         rows,
         "Safety",
@@ -223,7 +227,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
 
     // The plan's own step-up follows STR-LOADPROG-001 (`apply_last_sets`); the
     // stall check is `reviews/trend.rs`. These rows state the rules.
-    let two = graded((), claims::STR_2FOR2_001);
+    let two = Recommended::new((), claims::STR_2FOR2_001);
     push_guidance(
         rows,
         "Strength",
@@ -231,7 +235,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         &two,
     );
 
-    let stall = graded((), claims::STR_STALL_001);
+    let stall = Recommended::new((), claims::STR_STALL_001);
     push_guidance(
         rows,
         "Strength",
@@ -240,7 +244,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // load-031: add load once the top of the rep range is hit on every set.
-    let dbl = graded((), claims::DBLPROG_001);
+    let dbl = Recommended::new((), claims::DBLPROG_001);
     push_guidance(
         rows,
         "Strength",
@@ -428,7 +432,7 @@ fn push_coaching_reference(rows: &mut Vec<GuidanceView>) {
         &sub,
     );
 
-    let framing = graded((), claims::FB_PROCESS_GOAL_001);
+    let framing = Recommended::new((), claims::FB_PROCESS_GOAL_001);
     push_guidance(
         rows,
         "Coaching",

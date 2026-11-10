@@ -1,4 +1,12 @@
-use super::*;
+use crate::app::format::round_tenths;
+use crate::app::model::Model;
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
+use crate::app::view_types::{EvidenceTagView, RunProgressView, SrpeLoadView, TrainingLoadView};
+use crate::day::{is_undated, local_day};
+use crate::evidence::claims;
+use crate::schema::Recommended;
+use crate::{load, running};
 
 /// CTL/ATL/TSB bookkeeping over the logged run history (File 07
 /// impulse-response; LOAD-PMC-001). Daily load is a Lucia 3-zone TRIMP: each
@@ -78,7 +86,7 @@ pub(in crate::app) fn build_training_load(
     let span_days = end - start + 1;
     let tsb = round_tenths(load::tsb(ctl, atl));
     let (ctl, atl) = (round_tenths(ctl), round_tenths(atl));
-    let g = graded((), claims::LOAD_PMC_001);
+    let g = Recommended::new((), claims::LOAD_PMC_001);
     Some(TrainingLoadView {
         ctl,
         atl,
@@ -112,7 +120,7 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
         .and_then(|i| p.weekly.get(i))
         .map_or(0.0, |w| w.srpe_load_au);
     let unrated = cur.runs.saturating_sub(cur.rated_runs);
-    let g = graded((), claims::LOAD_SRPE_001);
+    let g = Recommended::new((), claims::LOAD_SRPE_001);
     Some(SrpeLoadView {
         method: "Effort load: minutes of running × your 0–10 rating of the whole run, given about 30 minutes afterwards. Kept separate from heart-rate load.".to_string(),
         summary: if cur.rated_runs == 0 {
@@ -139,36 +147,4 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
         },
         evidence: EvidenceTagView::of(&g),
     })
-}
-
-/// Flatten the autoreg per-signal states into wire rows, resolving each row's
-/// judging claim to its registry evidence (rows with no judging rule keep an
-/// empty tag, they state facts, not recommendations).
-pub(in crate::app) fn build_readiness_summary(
-    inputs: &[ReadinessInput],
-    ctx: &autoreg::RuleContext,
-    // Recency-expired readings routed to `stale`, forwarded so the derived
-    // RHR/wellness rows drop to an "out of date" state.
-    stale: &[ReadinessInput],
-) -> Vec<ReadinessSignalView> {
-    autoreg::signal_states_in(inputs, ctx, stale)
-        .into_iter()
-        .map(|s| {
-            let evidence = s
-                .claim
-                .map(|id| EvidenceTagView::of(&graded((), id)))
-                .unwrap_or_default();
-            ReadinessSignalView {
-                signal: s.signal,
-                group: autoreg::signal_group(s.signal),
-                value: s.value,
-                streak: s.streak,
-                state: s.state,
-                detail: s.detail,
-                evidence,
-                from_today: s.from_today,
-                stale: s.stale,
-            }
-        })
-        .collect()
 }

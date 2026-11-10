@@ -1,9 +1,17 @@
 //! Plan anchors derived from the logged history: per-lift e1RM loading
 //! anchors, last working sets, and the run-history anchors.
 
-use super::*;
-use crate::plan::{DerateCause, LiftDerate};
 use std::collections::HashMap;
+
+use crate::app::format::round_tenths;
+use crate::app::logged_days::{DeloadDays, LoggedDays, lift_deload_days};
+use crate::app::model::{LoggedRun, LoggedSet, Model};
+use crate::app::run_metrics::RunFacts;
+use crate::app::set_index::{NameFacts, SetIndex};
+use crate::day::{is_undated, local_day};
+use crate::plan::{DerateCause, LiftDerate};
+use crate::profile::Profile;
+use crate::{autoreg, individualization, strength};
 
 /// A declared layoff (profile `weeks_off`) and the local day training resumed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,8 +59,7 @@ impl<'a> AnchorCtx<'a> {
     ) -> Self {
         AnchorCtx {
             layoff: profile.and_then(Layoff::of),
-            calisthenics: profile
-                .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics),
+            calisthenics: profile.is_some_and(Profile::uses_calisthenics),
             off_day: off_day(model, offset),
             deloads,
         }
@@ -75,7 +82,7 @@ pub(super) fn lift_anchors_now(
     model: &Model,
     set_index: &SetIndex,
     days: &LoggedDays,
-) -> crate::plan::Anchors {
+) -> crate::plan::LiftAnchors {
     let offset = model.today_utc_offset_sec;
     let today = model.today_epoch_day.unwrap_or_else(|| {
         model
@@ -108,11 +115,6 @@ const WINDOW_HORIZON_DAYS: i64 = 56;
 /// An unrated set below this fraction of the current anchor is speed work: it
 /// neither creates nor raises an anchor (STRENGTH-3).
 const SPEED_SET_FRAC: f64 = 0.70;
-/// AUTOREG-E1RM-GATE-001: a session e1RM more than 5 % under baseline cuts the
-/// next working load by about 5 %.
-pub(super) const E1RM_DROP_GATE: f64 = 0.95;
-/// [`E1RM_DROP_GATE`] as the percentage drop the copy states.
-pub(super) const E1RM_DROP_PCT: f64 = (1.0 - E1RM_DROP_GATE) * 100.0;
 
 /// One anchor-eligible set of a movement.
 struct Obs {
@@ -291,7 +293,10 @@ fn score_sessions(
     let anchor = window_best(&list, latest)?;
     let dropped = match last {
         Some((day, r, Some(base))) => {
-            day != i64::MIN && r.is_finite() && r < E1RM_DROP_GATE * base && off_day != Some(day)
+            day != i64::MIN
+                && r.is_finite()
+                && r < autoreg::E1RM_REDUCE_RATIO * base
+                && off_day != Some(day)
         }
         _ => false,
     };
@@ -312,7 +317,7 @@ pub(super) fn build_plan_anchors<'a>(
     ctx: AnchorCtx,
     today_epoch_day: i64,
     offset: i64,
-) -> crate::plan::Anchors {
+) -> crate::plan::LiftAnchors {
     let sets: Vec<(&LoggedSet, NameFacts)> = sets.collect();
     let (lift_days, movements) = collect_movements(&sets, &ctx, today_epoch_day, offset);
     // Dated training days of each movement, and movement → (eligible sets,
@@ -323,7 +328,7 @@ pub(super) fn build_plan_anchors<'a>(
         let Some(any_name) = m.name else {
             continue;
         };
-        let key = crate::plan::movement_key(any_name);
+        let key = crate::exercise::movement_key(any_name);
         if !m.days.is_empty() {
             trained_days.insert(key.clone(), m.days);
         }
@@ -389,15 +394,14 @@ pub(super) fn build_plan_anchors<'a>(
     ));
     out.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
     derates.sort_by(|a, b| a.exercise.cmp(&b.exercise));
-    crate::plan::Anchors {
-        lift_e1rm: out
+    crate::plan::LiftAnchors {
+        e1rm: out
             .into_iter()
             .map(|(k, e1, _)| (k, round_tenths(e1)))
             .collect(),
-        lift_derates: derates,
+        derates,
         reentry_novice,
         last_working,
-        ..Default::default()
     }
 }
 
@@ -503,7 +507,10 @@ fn finish(w: WindowResult, last: Option<i64>, today: i64) -> Option<Picked> {
             w.anchor,
             Some((c, DerateCause::Detraining { days_since: d })),
         )),
-        _ if w.dropped => Some((w.anchor, Some((E1RM_DROP_GATE, DerateCause::E1rmDrop)))),
+        _ if w.dropped => Some((
+            w.anchor,
+            Some((autoreg::E1RM_REDUCE_RATIO, DerateCause::E1rmDrop)),
+        )),
         _ => Some((w.anchor, None)),
     }
 }
@@ -614,7 +621,8 @@ fn last_working_derates(
 ) -> Vec<LiftDerate> {
     let mut derates = Vec::new();
     for lw in last_working {
-        let Some(mut days) = trained_days.remove(&crate::plan::movement_key(&lw.exercise)) else {
+        let Some(mut days) = trained_days.remove(&crate::exercise::movement_key(&lw.exercise))
+        else {
             continue;
         };
         days.sort_unstable();
@@ -757,10 +765,8 @@ pub(super) fn build_run_week_km(
     weeks
 }
 
-/// Full-credit window of the longest-recent-run anchor, days (RUN-SPIKE-001's
-/// "longest run in the last 30 days"); the stated longest run shares it.
-pub(super) const LONGEST_RUN_WINDOW_DAYS: i64 = 30;
-/// Days past [`LONGEST_RUN_WINDOW_DAYS`] over which a demonstrated long run's
+/// Days past the RUN-SPIKE-001 window ([`crate::running::SPIKE_WINDOW_DAYS`],
+/// which the stated longest run shares) over which a demonstrated long run's
 /// credit tapers linearly to zero (DETRAIN-001). The linear shape and the
 /// length are an expert-opinion parameter the KB does not state, flagged per
 /// the GRADE good-practice-statement precedent
@@ -770,11 +776,11 @@ const RUN_DETRAIN_TAPER_DAYS: i64 = 28;
 /// Age at which a demonstrated long run carries no credit: 30 + 28 = 58 days,
 /// about 8 weeks, the edge of the KB's re-entry bracket (Table 3.4b: 4–8 wk off
 /// → "treat near-novice for spike caps").
-const RUN_DECAY_END_DAYS: i64 = LONGEST_RUN_WINDOW_DAYS + RUN_DETRAIN_TAPER_DAYS;
+const RUN_DECAY_END_DAYS: i64 = crate::running::SPIKE_WINDOW_DAYS + RUN_DETRAIN_TAPER_DAYS;
 /// Trailing window of the measured weekly running volume, days (4 weeks).
 const WEEKLY_VOLUME_WINDOW_DAYS: i64 = 28;
 
-/// Run-history anchors for plan synthesis ([`RunAnchors`]), the run twin of
+/// Run-history anchors for plan synthesis ([`crate::plan::RunAnchors`]), the run twin of
 /// [`build_plan_anchors`]. The "now" is the shell-supplied `today_epoch_day`,
 /// and runs are bucketed by the LOCAL day they STARTED (`RunFacts::started`
 /// shifted by `utc_offset_sec`), so a run started earlier today counts and a
@@ -786,7 +792,7 @@ pub(super) fn build_run_anchors(
     facts: &RunFacts,
     today_epoch_day: i64,
     utc_offset_sec: i64,
-) -> RunAnchors {
+) -> crate::plan::RunAnchors {
     // An in-window run counts at full credit, so an older, decayed run only
     // wins when it was longer than every in-window run.
     let longest = longest_credited(
@@ -794,10 +800,10 @@ pub(super) fn build_run_anchors(
             .started
             .iter()
             .zip(&facts.km)
-            .map(|(&s, &km)| (crate::local_day(s, utc_offset_sec), km)),
+            .map(|(&s, &km)| (crate::day::local_day(s, utc_offset_sec), km)),
         today_epoch_day,
     );
-    RunAnchors {
+    crate::plan::RunAnchors {
         longest_recent_run_km: longest.map(|(km, _)| km),
         recent_weekly_km: recent_weekly_km(facts, today_epoch_day, utc_offset_sec),
         longest_run_detrained: longest.is_some_and(|(_, d)| d),
@@ -814,7 +820,7 @@ fn recent_weekly_km(facts: &RunFacts, day: i64, utc_offset_sec: i64) -> Option<f
     let mut first_run_day: Option<i64> = None;
     for &i in &facts.chrono {
         let km = facts.km[i];
-        let d = crate::local_day(facts.started[i], utc_offset_sec);
+        let d = crate::day::local_day(facts.started[i], utc_offset_sec);
         if d <= day && day.saturating_sub(d) < WEEKLY_VOLUME_WINDOW_DAYS {
             total_km += km;
             first_run_day = Some(first_run_day.map_or(d, |f| f.min(d)));
@@ -845,7 +851,7 @@ pub(super) fn build_run_break(
     day: i64,
     utc_offset_sec: i64,
 ) -> Option<crate::plan::RunBreak> {
-    let local_day = |t: i64| crate::local_day(t, utc_offset_sec);
+    let local_day = |t: i64| crate::day::local_day(t, utc_offset_sec);
     let mut days: Vec<i64> = runs
         .iter()
         .zip(&facts.started)
@@ -903,21 +909,21 @@ fn longest_credited(runs: impl Iterator<Item = (i64, f64)>, today: i64) -> Optio
         let eff = km * detrain_credit(age);
         if eff > best {
             best = eff;
-            detrained = age > LONGEST_RUN_WINDOW_DAYS;
+            detrained = age > crate::running::SPIKE_WINDOW_DAYS;
         }
     }
     (best > 0.0).then_some((best, detrained))
 }
 
 /// Detraining-credit factor for a demonstrated running capacity `age_days`
-/// old: full credit through [`LONGEST_RUN_WINDOW_DAYS`], then a linear taper
+/// old: full credit through [`crate::running::SPIKE_WINDOW_DAYS`], then a linear taper
 /// to 0 at [`RUN_DECAY_END_DAYS`] (DETRAIN-001).
 fn detrain_credit(age_days: i64) -> f64 {
-    if age_days <= LONGEST_RUN_WINDOW_DAYS {
+    if age_days <= crate::running::SPIKE_WINDOW_DAYS {
         1.0
     } else if age_days >= RUN_DECAY_END_DAYS {
         0.0
     } else {
-        1.0 - (age_days - LONGEST_RUN_WINDOW_DAYS) as f64 / RUN_DETRAIN_TAPER_DAYS as f64
+        1.0 - (age_days - crate::running::SPIKE_WINDOW_DAYS) as f64 / RUN_DETRAIN_TAPER_DAYS as f64
     }
 }

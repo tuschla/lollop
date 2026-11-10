@@ -2,7 +2,26 @@
 //! source rows, the Today headline, baseline echoes, and the readiness signal
 //! groups.
 
-use super::*;
+use crate::app::evidence_views::{is_illness_claim, is_pain_claim, to_view, to_view_with};
+use crate::app::format::monday_of;
+use crate::app::logged_days::{DeloadDays, LoggedDays, lift_deload_days, plan_week_index};
+use crate::app::model::{LoggedSet, Model};
+use crate::app::run_metrics::RunFacts;
+use crate::app::view_types::{
+    AdjustmentView, BaselineStatusView, EvidenceTagView, FeedbackView, HeadlineKind, HoldReason,
+    HoldResolutionView, ReadinessSignalView, SessionPlanView, SessionStatus, SignalGroupView,
+    TodayHeadlineView,
+};
+use crate::autoreg;
+use crate::day::{DAY_SEC, is_undated, local_day};
+use crate::evidence::claims;
+use crate::feedback::{self, FeedbackCategory};
+use crate::profile::Profile;
+use crate::schema::{
+    Adjustment, CheckinInput, HealthScreen, ReadinessInput, ReadinessSignal, Recommended,
+    SafetyTier,
+};
+use crate::strength::LiftGoal;
 
 /// Human label for one still-collecting check-in channel. The shell phrases
 /// the progress row itself from `kind`/`have`/`need`; no training claim
@@ -70,7 +89,7 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
         .iter()
         .map(|i| i.observed_at)
         .chain(model.sets.iter().map(|s| s.observed_at))
-        .filter(|t| *t > 0)
+        .filter(|t| !is_undated(*t))
         .map(|t| local_day(t, offset))
         .chain(
             model
@@ -81,23 +100,10 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
                 .map(|(_, &start)| local_day(start, offset)),
         )
         .collect();
-    // Count check-in days only within the baseline window of the NEWEST check-in:
-    // an older check-in never affects the derived baselines, so it does not count
-    // towards the provisional "N so far".
-    let newest_checkin_day = model
-        .checkins
-        .iter()
-        .filter(|c| !is_undated(c.observed_at))
-        .map(|c| local_day(c.observed_at, offset))
-        .max();
-    for c in &model.checkins {
-        if !is_undated(c.observed_at) {
-            let d = local_day(c.observed_at, offset);
-            if newest_checkin_day.is_none_or(|n| n - d < autoreg::LONG_BASELINE_WINDOW_DAYS) {
-                days.insert(d);
-            }
-        }
-    }
+    // Count check-in days only within the derivation's reach of the NEWEST
+    // check-in: an older check-in never affects the derived baselines, so it
+    // does not count towards the provisional "N so far".
+    days.extend(autoreg::checkin_days_in_reach(&model.checkins, offset));
     let n = days.len().min(usize::from(u16::MAX)) as u16;
     let prov = feedback::provisional_until_baseline(n);
     prov.value.then(|| {
@@ -158,19 +164,21 @@ pub(super) fn build_autoreg_source(
     let text = match src.value {
         _ if hrv_suspended => {
             "HRV readings look unreliable, so weights follow your check-ins and logged sets."
+                .to_string()
         }
         // ready-upd-001: on lift days HRV only pauses progression; runs ease.
-        autoreg::AutoregSource::HrvRolling => {
-            "Your 7-day HRV trend can pause progress and ease runs; lift weights follow your logged sets."
-        }
+        autoreg::AutoregSource::HrvRolling => format!(
+            "Your {}-day HRV trend can pause progress and ease runs; lift weights follow your logged sets.",
+            autoreg::HRV_ROLLING_DAYS
+        ),
         autoreg::AutoregSource::SubjectivePlusPerformance => {
-            "Weights follow your check-ins and logged sets."
+            "Weights follow your check-ins and logged sets.".to_string()
         }
         autoreg::AutoregSource::PerformanceOnlyHold => {
-            "Weights stay as planned until you add a Morning check-in."
+            "Weights stay as planned until you add a Morning check-in.".to_string()
         }
     };
-    Some(to_view_with(text.to_string(), &src))
+    Some(to_view_with(text, &src))
 }
 
 /// Whether any active readiness adjustment suppresses a load/volume increase: a
@@ -203,54 +211,6 @@ pub(super) fn suppression_active(recs: &[Recommended<Adjustment>], train_blocked
 /// (REDS-SCREEN-001): the 4 weekly check-ins after it, an engine window for a
 /// recurring weekly screen (conservative: it only withholds a deficit).
 pub(super) const REDS_SCREEN_WINDOW_DAYS: i64 = 28;
-
-/// Claims behind a pain response (the File 08 pain ladder).
-fn is_pain_claim(c: ClaimId) -> bool {
-    matches!(
-        c,
-        claims::SAFE_PAIN_001 | claims::SAFE_PAIN_STRUCT_001 | claims::SAFE_TENDON_001
-    )
-}
-
-/// Claims behind an illness response (neck check, return-to-training, head cold).
-fn is_illness_claim(c: ClaimId) -> bool {
-    matches!(
-        c,
-        claims::ILLNESS_NECK_001 | claims::ILLNESS_RTT_001 | claims::ILLNESS_COLD_RUN_001
-    )
-}
-
-/// The File 06 §5 ladder tier a recommendation belongs to, for ranking the
-/// Today headline: the same ladder `autoreg::resolve_safety_in` raises, keyed
-/// by the rule that emitted the call. `None` for calls off the ladder (e.g. a
-/// load increase).
-pub(super) fn adjustment_tier(r: &Recommended<Adjustment>) -> Option<SafetyTier> {
-    let tier = match (r.value.base(), r.claim_id()) {
-        (Adjustment::Defer { .. }, _) => SafetyTier::MedicalReferral,
-        (_, c) if is_pain_claim(c) => SafetyTier::Pain,
-        (_, c) if is_illness_claim(c) || c == claims::RETURN_HOLD_001 => SafetyTier::Illness,
-        (Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001) => SafetyTier::Illness,
-        (Adjustment::IncreaseLoadPct(_), _) => return None,
-        (Adjustment::DowngradeSession, claims::WELLNESS_001) => SafetyTier::SubjectiveMultiDay,
-        (Adjustment::DowngradeSession, claims::HRV_001) => SafetyTier::HrvTrend,
-        (Adjustment::CapTopEnd { trigger }, _) if *trigger == ReadinessSignal::HrvLnRmssd => {
-            SafetyTier::HrvTrend
-        }
-        (Adjustment::CapTopEnd { .. }, _) => SafetyTier::SingleDayMarker,
-        (_, claims::AUTOREG_RHR_NOISE_001 | claims::AUTOREG_RHR_DOWN_001) => {
-            SafetyTier::SingleDayMarker
-        }
-        (
-            Adjustment::ReduceLoadPct(_)
-            | Adjustment::Deload { .. }
-            | Adjustment::CapRpe(_)
-            | Adjustment::DowngradeSession,
-            _,
-        ) => SafetyTier::ObjectivePerformance,
-        _ => return None,
-    };
-    Some(tier)
-}
 
 /// Whether an adjustment takes training off today (stop, rest day, deferral).
 pub(super) fn blocks_training(r: &Recommended<Adjustment>) -> bool {
@@ -538,8 +498,7 @@ pub(super) fn effective_high_load_block(
     let Some(idx) = plan_week_index(model, days, monday_of(day)) else {
         return false;
     };
-    let (load_weeks, cycle_len) = crate::plan::cycle_shape(profile);
-    load_weeks >= 2 && cycle_len > 0 && idx % cycle_len == load_weeks - 1
+    crate::plan::last_load_week(&crate::profile::PlanProfile::new(profile), idx)
 }
 
 /// Whether a row stamped `at` is dated on or before local day `day` (an undated
@@ -583,7 +542,10 @@ pub(super) struct ReadinessPicture {
     /// derived one; stale increase-driving performance readings dropped.
     pub(super) inputs: Vec<ReadinessInput>,
     perf: Vec<autoreg::MovementPerf>,
-    goal: Option<Goal>,
+    /// The profile's lifting goal (`None`: no profile): selects the
+    /// velocity-loss threshold (autoreg-010).
+    lift_goal: Option<LiftGoal>,
+    /// Arms the autoreg-029 HRV saturation guard.
     high_load_block: bool,
     as_of: Option<i64>,
     offset: i64,
@@ -592,18 +554,73 @@ pub(super) struct ReadinessPicture {
 impl ReadinessPicture {
     pub(super) fn rule_ctx(&self) -> autoreg::RuleContext<'_> {
         autoreg::RuleContext {
-            goal: self.goal.as_ref(),
-            high_load_block: self.high_load_block,
             today_epoch_day: self.as_of,
             utc_offset_sec: self.offset,
             rhr: self.derived.rhr,
             perf: &self.perf,
-            wellness_collecting: self
-                .derived
-                .collecting
-                .iter()
-                .any(|b| b.signal == ReadinessSignal::WellnessZ),
         }
+    }
+
+    /// The wellness composite is still collecting its baseline: a reading that
+    /// fires the rule is the absolute floor of a very low morning, not a drop
+    /// below a personal normal that doesn't exist yet.
+    pub(super) fn wellness_collecting(&self) -> bool {
+        self.derived
+            .collecting
+            .iter()
+            .any(|b| b.signal == ReadinessSignal::WellnessZ)
+    }
+
+    /// The highest §5 safety tier the readiness inputs raise.
+    pub(super) fn safety_tier(&self) -> Option<SafetyTier> {
+        autoreg::resolve_safety_in(&self.inputs, &self.rule_ctx(), self.lift_goal)
+    }
+
+    /// Whether auto load-adds are withheld (autoreg-044 / autoreg-029).
+    pub(super) fn increase_hold(&self) -> bool {
+        autoreg::increase_hold(
+            &self.inputs,
+            &self.rule_ctx(),
+            self.lift_goal,
+            self.high_load_block,
+        )
+    }
+
+    /// The per-signal readiness rows, resolving each row's judging claim to its
+    /// registry evidence (rows with no judging rule keep an empty tag, they
+    /// state facts, not recommendations). The strip surfaces recency-expired
+    /// RHR/wellness readings as an "out of date" row, so it reads the stale
+    /// inputs too; the rules run only on the fresh ones.
+    pub(super) fn signal_rows(&self) -> Vec<ReadinessSignalView> {
+        let mut display_inputs = self.inputs.clone();
+        display_inputs.extend(self.derived.stale.iter().cloned());
+        autoreg::signal_states_in(
+            &display_inputs,
+            &self.rule_ctx(),
+            self.lift_goal,
+            self.high_load_block,
+            self.wellness_collecting(),
+            &self.derived.stale,
+        )
+        .into_iter()
+        .map(|s| {
+            let evidence = s
+                .claim
+                .map(|id| EvidenceTagView::of(&Recommended::new((), id)))
+                .unwrap_or_default();
+            ReadinessSignalView {
+                signal: s.signal,
+                group: autoreg::signal_group(s.signal),
+                value: s.value,
+                streak: s.streak,
+                state: s.state,
+                detail: s.detail,
+                evidence,
+                from_today: s.from_today,
+                stale: s.stale,
+            }
+        })
+        .collect()
     }
 
     /// The rules' adjustments plus, with a clock, the first session after a
@@ -614,7 +631,12 @@ impl ReadinessPicture {
         model: &Model,
         days: &LoggedDays,
     ) -> Vec<Recommended<Adjustment>> {
-        let mut recs = autoreg::adjustments_in(&self.inputs, &self.rule_ctx());
+        let mut recs = autoreg::adjustments_in(
+            &self.inputs,
+            &self.rule_ctx(),
+            self.lift_goal,
+            self.high_load_block,
+        );
         if let Some(day) = self.as_of {
             recs.extend(return_step_on(model, days, day, self.offset));
         }
@@ -632,11 +654,7 @@ pub(super) fn readiness_picture(
     as_of: Option<i64>,
 ) -> ReadinessPicture {
     let offset = model.today_utc_offset_sec;
-    let goal = profile.map(|p| match p.lift_goal {
-        LiftGoal::MaxStrength => Goal::Strength,
-        LiftGoal::Power => Goal::Power,
-        LiftGoal::Hypertrophy => Goal::Hypertrophy,
-    });
+    let lift_goal = profile.map(|p| p.lift_goal);
     // autoreg-029 guard: the manual "hard block" flag, or auto-armed in the
     // block's peak accumulation week.
     let high_load_block = match (profile, as_of) {
@@ -681,7 +699,7 @@ pub(super) fn readiness_picture(
         derived,
         inputs,
         perf,
-        goal,
+        lift_goal,
         high_load_block,
         as_of,
         offset,
@@ -727,7 +745,7 @@ pub(super) fn return_step_on(
         )
         .collect();
     let (kind, ended_at) = autoreg::last_hold_resolution(&timeline)?;
-    let ended_day = if ended_at > 0 {
+    let ended_day = if !is_undated(ended_at) {
         local_day(ended_at, offset)
     } else {
         i64::MIN
@@ -739,7 +757,7 @@ pub(super) fn return_step_on(
         .sets
         .iter()
         .map(|s| s.observed_at)
-        .filter(|t| *t > 0)
+        .filter(|t| !is_undated(*t))
         .map(|t| local_day(t, offset))
         .chain(days.run_days().iter().flatten().copied())
         .any(|d| d >= ended_day && d < day);

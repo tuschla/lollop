@@ -64,11 +64,11 @@ fn aliases_point_at_real_rungs_and_never_shadow_a_canonical_name() {
 
 #[test]
 fn legacy_labels_name_their_rung_and_display_as_it() {
-    for &(old, new) in LEGACY_NAMES {
+    for &(old, new) in crate::exercise::CALIS_LEGACY_NAMES {
         let (id, rung) = tier_by_name(old).unwrap_or_else(|| panic!("{old:?} matches no rung"));
         assert_eq!(tier(id, rung).map(|t| t.name), Some(new), "{old:?}");
-        assert_eq!(crate::hypertrophy::canonical_name(old), new);
-        assert_eq!(crate::hypertrophy::canonical_name(&old.to_uppercase()), new);
+        assert_eq!(crate::exercise::canonical_name(old), new);
+        assert_eq!(crate::exercise::canonical_name(&old.to_uppercase()), new);
     }
 }
 
@@ -169,7 +169,7 @@ fn measured_fractions_carry_load_claims_inferred_carry_inferred() {
                     );
                     assert_eq!(
                         t.load_claim.entry().grade,
-                        crate::schema::EvidenceGrade::Moderate,
+                        crate::evidence::EvidenceGrade::Moderate,
                         "measured {:?} claim must be Moderate",
                         t.name
                     );
@@ -528,8 +528,9 @@ fn pounds_profile_load_step_lands_on_the_two_and_a_half_lb_grid() {
     assert!((lb(load_step_kg(Some(100.0), 0.0, true).value) - 7.5).abs() < 1e-9);
     // An on-grid load never loses a plate to float error when floored.
     let five = 5.0 * 0.45359237;
-    assert!((lb(floor_to_load_grid(five - LOAD_GRID_LB_IN_KG, true)) - 2.5).abs() < 1e-9);
-    assert_eq!(floor_to_load_grid(2.4, false), 1.25);
+    let floor = crate::plates::floor_added_load_kg;
+    assert!((lb(floor(five - crate::plates::added_load_grid_kg(true), true)) - 2.5).abs() < 1e-9);
+    assert_eq!(floor(2.4, false), 1.25);
 }
 
 #[test]
@@ -582,8 +583,8 @@ fn gates_and_templates() {
     assert!(tier_advance_met(2).value);
     assert!(!static_acclimation_ok(27).value);
     assert!(static_acclimation_ok(28).value);
-    assert!(!muscle_up_gate_met(11, 12).value);
-    assert!(muscle_up_gate_met(12, 12).value);
+    assert!(!count_gate_met([11, 12]).value);
+    assert!(count_gate_met([12, 12]).value);
     assert_eq!(
         session_template(LiftGoal::MaxStrength).value,
         CalisTemplate {

@@ -1,7 +1,15 @@
 //! The program summary card and its per-muscle weekly volume.
 
-use super::*;
 use std::fmt::Write as _;
+
+use crate::app::evidence_views::why_from;
+use crate::app::format::{capitalize_first, fmt_rounded, human_goal, round_tenths};
+use crate::app::view_types::{EvidenceTagView, MuscleVolumeView, ProgramSummaryView};
+use crate::evidence::claims;
+use crate::profile::{PlanProfile, Profile};
+use crate::running::GoalDistance;
+use crate::schema::{Mesocycle, Prescription, Program, Recommended, SessionType};
+use crate::strength::LiftGoal;
 
 /// The program summary card, graded with the plan's representative claim.
 /// `(week, weeks_total)` is the current program week, 1-based, of its block or
@@ -10,16 +18,16 @@ use std::fmt::Write as _;
 /// plan was synthesized for (it locates this week's per-muscle volume
 /// targets).
 pub(super) fn build_program_summary(
-    profile: &Profile,
+    pp: &PlanProfile,
     program: &Program,
     (week, weeks_total): (u8, u8),
     week_index: u32,
 ) -> ProgramSummaryView {
     let meso = &program.mesocycle;
-    let g = graded((), crate::plan::summary_claim(profile));
-    let (muscle_volume, muscle_volume_note) = muscle_volume_rows(profile, meso, week_index);
+    let g = Recommended::new((), crate::plan::summary_claim(pp));
+    let (muscle_volume, muscle_volume_note) = muscle_volume_rows(pp, meso, week_index);
     ProgramSummaryView {
-        name: program.name.clone(),
+        name: program_name(crate::plan::ProgramFocus::of(pp)),
         goal: human_goal(&program.goal),
         phase: meso.phase,
         week,
@@ -34,31 +42,51 @@ pub(super) fn build_program_summary(
     }
 }
 
+/// The program name shown in the plan footer: one short, sentence-case focus
+/// name (the shell adds the phase and week).
+pub(in crate::app) fn program_name(focus: crate::plan::ProgramFocus) -> String {
+    use crate::plan::ProgramFocus;
+    let lift = |goal: LiftGoal| match goal {
+        LiftGoal::MaxStrength => "Strength",
+        LiftGoal::Power => "Power",
+        LiftGoal::Hypertrophy => "Muscle building",
+    };
+    match focus {
+        ProgramFocus::Hybrid(goal) => format!("{} + running", lift(goal)),
+        ProgramFocus::Calisthenics(LiftGoal::MaxStrength) => "Calisthenics strength".into(),
+        ProgramFocus::Calisthenics(LiftGoal::Power) => "Calisthenics power".into(),
+        ProgramFocus::Calisthenics(LiftGoal::Hypertrophy) => "Calisthenics muscle building".into(),
+        ProgramFocus::Lifting(goal) => lift(goal).into(),
+        ProgramFocus::Running(GoalDistance::General | GoalDistance::C25k) => "Running base".into(),
+        ProgramFocus::Running(GoalDistance::HalfMarathon) => "Half-marathon plan".into(),
+        ProgramFocus::Running(goal) => format!("{} plan", goal.label()),
+        ProgramFocus::Unplanned => "Training plan".into(),
+    }
+}
+
 /// Weekly sets per muscle the hypertrophy week delivers vs its target, counted
 /// fractionally exactly as the plan sized them
 /// (`hypertrophy::delivered_weekly_sets`), plus one plain note. Empty for any
 /// other goal.
 fn muscle_volume_rows(
-    profile: &Profile,
+    pp: &PlanProfile,
     meso: &Mesocycle,
     week_index: u32,
 ) -> (Vec<MuscleVolumeView>, String) {
-    if !crate::plan::uses_double_progression(profile) || profile.weekly_sets == 0 {
+    if !crate::plan::uses_double_progression(pp) || !pp.lifts() {
         return (Vec::new(), String::new());
     }
-    let ta = crate::individualization::training_age_from_cadence(profile.progression_cadence).value;
     let crate::plan::BlockPosition {
         week_in_block,
         block_weeks,
         recovery,
-    } = crate::plan::lift_block_position(profile, week_index);
+    } = crate::plan::lift_block_position(pp, week_index);
     let lift_days = meso
         .sessions
         .iter()
         .filter(|s| matches!(s.session_type, SessionType::Lift(_)))
         .count();
-    let targets =
-        crate::plan::hypertrophy_week_targets(profile, ta, week_in_block, block_weeks, lift_days);
+    let targets = crate::plan::hypertrophy_week_targets(pp, week_in_block, block_weeks, lift_days);
     let items: Vec<(&str, u8)> = meso
         .sessions
         .iter()
@@ -133,7 +161,13 @@ fn muscle_volume_rows(
             label,
         });
     }
-    let note = muscle_volume_note(profile, ta, recovery, maintenance, &uncovered);
+    let note = muscle_volume_note(
+        pp.profile(),
+        pp.training_age(),
+        recovery,
+        maintenance,
+        &uncovered,
+    );
     (rows, note)
 }
 

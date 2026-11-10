@@ -556,7 +556,10 @@ fn a_reds_answer_refuses_the_deficit_and_holds_the_hypertrophy_ramp() {
         }),
         ("weekly screen", |s| {
             s.ev(Event::SubmitWeeklyCheckin(SessionReview {
-                reds_signal_reported: true,
+                safety: crate::feedback::SafetyScreen {
+                    reds_signal_reported: true,
+                    ..Default::default()
+                },
                 observed_at: local(TODAY, 7),
                 ..Default::default()
             }))
@@ -588,7 +591,10 @@ fn compulsive_exercise_refuses_the_deficit_like_every_reds_channel() {
     });
     request_calculators(&mut s);
     s.ev(Event::SubmitWeeklyCheckin(SessionReview {
-        compulsive_flag: true,
+        safety: crate::feedback::SafetyScreen {
+            compulsive_flag: true,
+            ..Default::default()
+        },
         observed_at: local(TODAY, 7),
         ..Default::default()
     }));
@@ -1324,7 +1330,10 @@ fn a_session_review_cannot_overwrite_a_weekly_referral() {
     // (safety-040 DEFER, urgent).
     let mut s = boot(hybrid_profile());
     s.ev(Event::SubmitWeeklyCheckin(SessionReview {
-        bone_pain_red_flag: true,
+        safety: crate::feedback::SafetyScreen {
+            bone_pain_red_flag: true,
+            ..Default::default()
+        },
         observed_at: local(TODAY, 7),
         ..Default::default()
     }));

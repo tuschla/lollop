@@ -1,6 +1,14 @@
 //! The `ViewModel` and every `*View` wire type the shells render.
 
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use crate::app::model::{ActivityKind, HrZoneInputView, HypertrophyInputView, ProteinInputView};
+use crate::evidence::EvidenceGrade;
+use crate::profile::{PlanWithheld, Profile};
+use crate::schema::{
+    CheckinInput, MesoPhase, ReadinessSignal, Recommended, SafetyTier, SessionType, ThreeZone,
+    WorkoutType,
+};
 
 /// The evidence chrome every graded row carries, flattened onto its parent
 /// view so the wire keys stay `grade`/`citation`/`confidence`/
@@ -35,7 +43,7 @@ impl EvidenceTagView {
 
 /// Wire form of an optional grade: the variant name, or `""` for none.
 pub(crate) mod grade_or_empty {
-    use crate::schema::EvidenceGrade;
+    use crate::evidence::EvidenceGrade;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     pub fn serialize<S: Serializer>(g: &Option<EvidenceGrade>, s: S) -> Result<S::Ok, S::Error> {
@@ -493,16 +501,6 @@ pub struct YouthActivityView {
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     pub why: WhyView,
-}
-
-/// Why no plan can be built ([`ViewModel::plan_withheld`], wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanWithheld {
-    /// A profile health answer holds training (illness, a doctor's OK, age…).
-    HealthHold,
-    /// The profile plans no lifting sessions and no running days.
-    NothingToPlan,
 }
 
 /// Planned vs done for the active plan (ADH-SELFMON-001).
@@ -1333,25 +1331,6 @@ pub struct RacePredictionView {
     pub weeks_since_race: Option<u8>,
 }
 
-/// The heart-rate-zone query, stored on the model and echoed back so a shell
-/// rehydrates its form. Sibling to the `hr_zones` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
-pub struct HrZoneInputView {
-    pub age_years: f64,
-    /// Resting HR, bpm: arms the running-005 %HRmax-vs-Karvonen method
-    /// preference and the Karvonen band targets. `None` = %HRmax only.
-    pub resting_hr_bpm: Option<f64>,
-}
-
-/// The absolute-protein-target query, stored on the model and echoed back so a
-/// shell rehydrates its form. Sibling to the `protein_targets` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
-pub struct ProteinInputView {
-    pub bodyweight_kg: f64,
-    pub masters: bool,
-    pub deficit: bool,
-}
-
 /// Structured form of the HRmax figure, so a shell never regex-scrapes it out
 /// of the `hr_zones` summary rows (incl. the "208 − 0.7 × age" Tanaka split).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -1461,19 +1440,6 @@ pub enum ProteinTargetKind {
     Deficit,
 }
 
-/// The hypertrophy-plan query, stored on the model and echoed back so a shell
-/// rehydrates its form. Sibling to the `hypertrophy_plan` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
-pub struct HypertrophyInputView {
-    pub muscle: String,
-    pub weeks: u8,
-    /// The muscle is not growing on the current volume (hypertrophy-008).
-    pub not_growing: bool,
-    /// Recovery from the current volume is easy (hypertrophy-008; with
-    /// `not_growing` → +2 sets next mesocycle).
-    pub recovering_easily: bool,
-}
-
 /// The one resolved coaching message for a session, flattened for shells.
 /// Safety concerns short-circuit and suppress competing praise (HARD RULE 3).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -1576,7 +1542,7 @@ pub enum PaceVariability {
 
 /// One per-unit (per-km or per-mile) split of a GPS run, flattened for shells.
 /// Purely descriptive, a measurement of the run, not a recommendation, so it
-/// carries no evidence chrome. Built from [`running::track_splits`]; the core
+/// carries no evidence chrome. Built from [`gps::track_splits`]; the core
 /// owns the pace formatting so a shell renders `pace` verbatim.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct RunSplitView {

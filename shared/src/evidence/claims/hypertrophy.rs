@@ -1,18 +1,17 @@
-//! Hypertrophy claims: File 03 per-rule rows (`hypertrophy.rs`,
-//! `plan/hypertrophy.rs`), the caloric-deficit rule, and
+//! Hypertrophy claims: File 03 per-rule rows, the caloric-deficit rule, and
 //! `13-hypertrophy-update.md`.
 
 use crate::evidence::cite::{
     CITE_BELL_2023, CITE_COLEMAN_2024, CITE_ISRAETEL_2021, CITE_PELLAND_2026, CITE_ROBINSON_2024,
     CITE_SINGER_2024, CONTRA_COLEMAN_DELOAD,
 };
-use crate::evidence::claim;
-use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
+use crate::evidence::contested::ContestedId;
+use crate::evidence::draft::claim;
+use crate::evidence::grade::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
 
 claim_group! {
     HypertrophyClaim => Hypertrophy;
     DEFICIT_001 => claim(
-        "DEFICIT-001",
         "When you eat less than you burn, keep your muscle by eating 1.8–2.7 g of protein per kg of bodyweight a day, keeping weights heavy, and cutting sets toward the fewest that still build muscle rather than lightening the weight.",
         Strong,
         &[
@@ -22,7 +21,6 @@ claim_group! {
     )
     .contradicting(&["Volume-sparing ordering itself is Moderate"]),
     HYP_REPLOAD_001 => claim(
-        "HYP-REPLOAD-001",
         "Reps and weight by exercise: heavy multi-joint lifts 5–10 reps at 75–85% of your one-rep max, lighter multi-joint and machine lifts 8–15 at 65–75%, single-joint lifts 12–25 at 50–70%.",
         Moderate,
         &[
@@ -32,7 +30,6 @@ claim_group! {
     )
     .contradicting(&["Load interchangeable when effort matched (HYP-LOAD-001)"]),
     HYP_FREQ_001 => claim(
-        "HYP-FREQ-001",
         "Train each muscle 2–3 times a week. Twice a week or more beats once because it fits in more weekly sets; with the same weekly sets, how often you train barely matters.",
         Strong,
         &[
@@ -43,7 +40,6 @@ claim_group! {
     )
     .contradicting(&["3x specifically Moderate"]),
     HYP_REST_001 => claim(
-        "HYP-REST-001",
         "Rest 2–3 minutes on multi-joint lifts and 1–2 on single-joint lifts, long enough to keep at least 90% of your first-set reps on later sets.",
         Moderate,
         &[
@@ -55,14 +51,12 @@ claim_group! {
         "Singer et al. 2024: the added benefit of resting beyond ~90 s is uncertain, and 60 s still produced substantial growth",
     ]),
     HYP_RIR_RAMP_001 => claim(
-        "HYP-RIR-RAMP-001",
         "Across a 4-week block, finish sets closer to failure each week (4, 3, 2, then 1 rep left), then take a lighter week.",
         ExpertOpinion,
         &["Renaissance Periodization (rpstrength.com 2018)"],
     )
     .contradicting(&["Consistent with, not established by, Robinson 2024"]),
     HYP_MEV_AGE_001 => claim(
-        "HYP-MEV-AGE-001",
         "The fewest weekly sets that build muscle go up with experience: about 6–10 per muscle for beginners, 10–18 for intermediates and 12–20+ for advanced lifters, varying by person.",
         Weak,
         &[
@@ -71,25 +65,21 @@ claim_group! {
         ],
     ),
     HYP_MESO_ADD_001 => claim(
-        "HYP-MESO-ADD-001",
         "If a muscle isn't growing and recovery feels easy, add 2 weekly sets next block: it's below the fewest sets that make it grow.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     ),
     HYP_MRV_DELOAD_001 => claim(
-        "HYP-MRV-DELOAD-001",
         "More than about 20 weekly sets for a muscle, with falling performance or aching joints, means you're at or past what you can recover from. Take a lighter week.",
         Moderate,
         &[CITE_ISRAETEL_2021],
     ),
     HYP_RECOVOL_001 => claim(
-        "HYP-RECOVOL-001",
         "When eating less than you burn, sleeping badly or under high stress, cut weekly sets by 20–30% and go to failure less often; with good recovery you can handle more sets.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     ),
     HYP_SETRAMP_001 => claim(
-        "HYP-SETRAMP-001",
         "Set progression: start each muscle near the fewest sets that build muscle and add sets week by week toward the most it can recover from (for example 10, 13, 16, then 20 sets), while moving from about 4 reps left down to about 1.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
@@ -97,23 +87,20 @@ claim_group! {
     .contradicting(&[
         "Enes, De Souza & Souza-Junior 2024, MSSE 56(3):553-563 (no significant hypertrophy difference vs constant volume)",
     ])
-    .contested("CQ-F03-04"),
+    .contested(ContestedId::CQ_F03_04),
     HYP_DELOAD_TRIG_001 => claim(
-        "HYP-DELOAD-TRIG-001",
         "Take a lighter week when 2 or more signs show up together (performance dropping, sets drifting to failure without meaning to, lasting joint or tendon aches, poor sleep, a higher resting heart rate, low mood or motivation), or every 4–8 weeks as planned.",
         Moderate,
         &[CITE_ISRAETEL_2021],
     )
     .contradicting(&[CONTRA_COLEMAN_DELOAD]),
     HYP_DELOAD_RX_001 => claim(
-        "HYP-DELOAD-RX-001",
         "A lighter week: one week at about maintenance volume (roughly half the sets), with 2–4 or more reps left, at about 60–70% of your working weights, with the same movements.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     )
     .contradicting(&[CONTRA_COLEMAN_DELOAD]),
     HYP_SPLIT_001 => claim(
-        "HYP-SPLIT-001",
         "Spread any weekly target above about 12 sets per muscle over 2 or more sessions.",
         ExpertOpinion,
         &[
@@ -125,7 +112,6 @@ claim_group! {
         "Preprint only: graded expert opinion until a peer-reviewed version is verified",
     ]),
     HYP_SESSCAP_001 => claim(
-        "HYP-SESSCAP-001",
         "Keep each session to about 11 sets per muscle (an indirect set counts as half); move extra sets to another session rather than adding them.",
         ExpertOpinion,
         &[
@@ -139,7 +125,6 @@ claim_group! {
     // the default weekly set ramp ends at each muscle's MAV high end, and one
     // hypertrophy lift day holds at most 32 working sets.
     HYP_VOL_CAP_001 => claim(
-        "HYP-VOL-CAP-001",
         "By default each muscle's weekly sets rise only to the top of its productive range, not to its recovery limit, and one lift day holds about 32 working sets at most. Your body can't recover with every muscle at its limit at once, and extra sets add less and less.",
         ExpertOpinion,
         &[
@@ -159,9 +144,8 @@ claim_group! {
     // (see knowledge-base/autoreg-citation-provenance-resolution.md): keep the
     // Moderate principle grade and flag the unstudied allocation parameter as
     // expert-opinion in `contradicting`, rather than overstate the split or drop
-    // the rule. Volume-sized lift prescriptions (`plan::lift`) cite this.
+    // the rule.
     HYP_VOL_DOSE_001 => claim(
-        "HYP-VOL-DOSE-001",
         "More weekly sets per muscle build more muscle (and strength), with smaller gains from each extra set. A plan can size each session's sets from a weekly target per muscle, within the coaching set ranges.",
         Moderate,
         &[
@@ -176,7 +160,6 @@ claim_group! {
     ])
     .review(6),
     HYP_PAIN_SHIFT_001 => claim(
-        "HYP-PAIN-SHIFT-001",
         "If a joint hurts under heavy weights, switch that muscle's work to lighter weights for 12–25 reps; muscle growth is preserved.",
         Strong,
         &[
@@ -185,7 +168,6 @@ claim_group! {
     )
     .safety(),
     HYP_LOADRANGE_001 => claim(
-        "HYP-LOADRANGE-001",
         "Muscle grows equally well across about 30–85% of your one-rep max (about 5–30+ reps) when sets end close to failure; heavier weights build more strength.",
         Strong,
         &[
@@ -198,16 +180,14 @@ claim_group! {
         "Older ACSM 6-12 rep / 70-85% 1RM guidance",
         "Very light loads (<~30% 1RM) underperform",
     ])
-    .contested("CQ-F03-02"),
+    .contested(ContestedId::CQ_F03_02),
     HYP_VOLRAMP_SAFE_001 => claim(
-        "HYP-VOLRAMP-SAFE-001",
         "Raise weekly sets gradually from a low start and never jump straight to your recovery limit; big week-to-week jumps raise injury risk.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     )
     .safety(),
     HYP_SKILL_RIR_001 => claim(
-        "HYP-SKILL-RIR-001",
         "On high-skill exercises or ones that demand a lot of balance, do at least 5 reps and stop with 1–2 or more reps left to protect your form.",
         ExpertOpinion,
         &[
@@ -217,7 +197,6 @@ claim_group! {
     )
     .safety(),
     HYP_RIR_DEFAULT_001 => claim(
-        "HYP-RIR-DEFAULT-001",
         "End most sets with 1–3 reps left. Muscle growth rises steadily as sets get closer to failure, but going all the way isn't needed and isn't worth the extra fatigue.",
         Moderate,
         &[
@@ -230,15 +209,13 @@ claim_group! {
         "Refalo 2023 trivial failure advantage ES=0.19 (CI 0.00,0.37)",
         "Consistent-failure advocates",
     ])
-    .contested("CQ-02"),
+    .contested(ContestedId::CQ_02),
     HYP_RIR_ACC_001 => claim(
-        "HYP-RIR-ACC-001",
         "Guesses of reps left are accurate to within about 1 rep only near failure (0–5 left); further away they miss by more than 2. Beginners should start with 3–4 reps left and check against a set taken to failure.",
         Moderate,
         &["Hackett 2017", "Zourdos 2016/2021", "Refalo/Remmert 2023"],
     ),
     HYP_FAIL_SAFE_001 => claim(
-        "HYP-FAIL-SAFE-001",
         "Save going to failure (0 reps left) for machines and single-joint lifts, where it's safe; avoid it on heavy free-weight multi-joint lifts like an unspotted squat or bench, because of injury risk.",
         ExpertOpinion,
         &[
@@ -249,7 +226,6 @@ claim_group! {
     .safety(),
     #[kb_only]
     HYP_CUT_OBJ_001 => claim(
-        "HYP-CUT-OBJ-001",
         "On a cut, trust rep count and bar speed over perceived effort because RPE inflates in a deficit.",
         Moderate,
         &[
@@ -259,7 +235,6 @@ claim_group! {
     ),
     #[kb_only]
     HYP_VEL_CHECK_001 => claim(
-        "HYP-VEL-CHECK-001",
         "Use last-rep bar-speed slowdown as an objective cross-check on proximity to failure.",
         Moderate,
         &[
@@ -269,14 +244,12 @@ claim_group! {
     ),
     #[kb_only]
     HYP_SFR_001 => claim(
-        "HYP-SFR-001",
         "Select exercises maximizing stimulus-to-fatigue ratio (SFR): favor machines, cables, and stable isolation; reserve lower-SFR heavy deadlifts and high-skill free weights for compound stimulus/strength.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     ),
     #[kb_only]
     HYP_LENGTHSEL_001 => claim(
-        "HYP-LENGTHSEL-001",
         "Bias exercise selection toward long muscle lengths (lengthened positions/partials), e.g., seated over prone leg curl (+14% vs +9% hamstrings) and overhead over pushdown triceps.",
         Moderate,
         &[
@@ -293,14 +266,12 @@ claim_group! {
     ]),
     #[kb_only]
     HYP_SUBST_001 => claim(
-        "HYP-SUBST-001",
         "Substitute exercises by filtering to same primary muscle and available equipment, then ranking by long-length bias, SFR, and stability; fall back to bodyweight variants if no equipment match.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     ),
     #[kb_only]
     HYP_PAIN_SWAP_001 => claim(
-        "HYP-PAIN-SWAP-001",
         "On movement-specific joint pain, substitute a same-muscle exercise with higher stability or a different resistance profile.",
         ExpertOpinion,
         &[
@@ -310,14 +281,12 @@ claim_group! {
     )
     .safety(),
     HYP_MESO_STRUCT_001 => claim(
-        "HYP-MESO-STRUCT-001",
         "Train in blocks of 4–6 hard weeks, each followed by 1 lighter week. Programs put a lighter week anywhere from every 4 to every 8 weeks.",
         Moderate,
         &[CITE_ISRAETEL_2021, CITE_BELL_2023],
     )
     .contradicting(&[CONTRA_COLEMAN_DELOAD]),
     HYP_DOUBLEPROG_001 => claim(
-        "HYP-DOUBLEPROG-001",
         "Progress with a rep range: add reps each week until you reach the top of the range (for example 10–15 reps with 2–0 reps left), then add the smallest step, about 2.5 kg (5 lb), and start again at the bottom, keeping the same number of sets.",
         Weak,
         &[
@@ -328,9 +297,8 @@ claim_group! {
     .contradicting(&[
         "The trial compared rep vs load progression only; the exact rep range and load step are coaching convention",
     ])
-    .contested("CQ-F03-04"),
+    .contested(ContestedId::CQ_F03_04),
     HYP_LAYOFF_001 => claim(
-        "HYP-LAYOFF-001",
         "After a break, restart at a lower set count: the fewest weekly sets that build muscle, and your other set ranges, drop for a while.",
         ExpertOpinion,
         &[
@@ -339,7 +307,6 @@ claim_group! {
         ],
     ),
     HYP_TEMPO_001 => claim(
-        "HYP-TEMPO-001",
         "Lift at a controlled pace of about 0.5–8 seconds per rep (for example 1–2 seconds up, 2–3 down); speed matters little for muscle growth. Avoid super-slow reps over 10 seconds, which force lighter weights.",
         Moderate,
         &[
@@ -350,7 +317,6 @@ claim_group! {
     .contradicting(&["Superslow/HIT time-under-tension proponents (unsupported)"]),
     #[kb_only]
     HYP_SUPERSET_001 => claim(
-        "HYP-SUPERSET-001",
         "When time-limited, use antagonist/non-competing supersets to save time without cutting rest for the working muscle (accept small volume loss at >=90 s).",
         Moderate,
         &[
@@ -358,19 +324,16 @@ claim_group! {
         ],
     ),
     HYP_DEFAULT_PROG_001 => claim(
-        "HYP-DEFAULT-PROG-001",
         "Default plan for intermediates: each muscle twice a week near the fewest sets that build muscle (about 8–10 sets a week, up to about 8 per session). Multi-joint lifts 5–10 reps, single-joint 10–20. Start week 1 at 3 reps left and go about 1 rep closer each week, down to 1. Rest 2–3 minutes on multi-joint lifts and 1–2 on single-joint, at a controlled pace. Pick 1–2 exercises per muscle that give a lot of growth for little fatigue or train it at long muscle lengths, and take a lighter week in week 5 or 6.",
         Moderate,
         &[CITE_ISRAETEL_2021],
     ),
     HYP_SPEC_BLOCK_001 => claim(
-        "HYP-SPEC-BLOCK-001",
         "If you're advanced and a muscle isn't responding to about 15 sets, run a focus block: raise that muscle's sets and drop the others to maintenance sets.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     ),
     HYP_REST_002 => claim(
-        "HYP-REST-002",
         "For muscle growth, rest more than 60 seconds between sets: longer rest gives a small benefit, likely because you keep more reps per set. Beyond about 90 seconds the extra benefit is uncertain, so about 90 seconds suits isolation and machine work and 2–3 minutes suits heavy compound lifts.",
         Moderate,
         &[
@@ -383,7 +346,6 @@ claim_group! {
     ]),
     #[kb_only]
     HYP_RIR_DOSE_001 => claim(
-        "HYP-RIR-DOSE-001",
         "Muscle growth increases as sets end closer to failure, while strength gains barely depend on it at a given load; stopping 1-2 reps short grew muscle about as well as going to failure in trained lifters. Sets ending 5 or more reps short, like speed work, are a weak growth stimulus.",
         Moderate,
         &[
@@ -394,7 +356,6 @@ claim_group! {
     .contradicting(&["Close to failure, the extra growth per rep is small (Refalo 2023)"]),
     #[kb_only]
     HYP_VL_001 => claim(
-        "HYP-VL-001",
         "Sets stopped after a larger slowdown in bar speed (40%) grew parts of the thigh more than sets stopped at 20%, with similar strength gains, while the 20% sets improved jumping more; low-fatigue speed sets are a strength and power tool rather than a muscle-building one.",
         Weak,
         &[
@@ -406,7 +367,6 @@ claim_group! {
     ]),
     #[kb_only]
     HYP_PERIOD_001 => claim(
-        "HYP-PERIOD-001",
         "Linear and daily-undulating plans build similar muscle, so a muscle-building plan does not need a strength plan's heavy and power days.",
         Moderate,
         &[
@@ -414,7 +374,6 @@ claim_group! {
         ],
     ),
     HYP_DELOAD_CADENCE_001 => claim(
-        "HYP-DELOAD-CADENCE-001",
         "Taking one lighter week in the middle of a 9-week program did not change muscle growth and slightly slowed lower-body strength gains. A consensus of strength and physique coaches puts a lighter week about every 4–6 weeks, lasting about a week and made by cutting volume, effort or both, so build in blocks of 4–6 weeks and take a lighter week earlier only when 2 or more fatigue signs appear.",
         Weak,
         &[CITE_COLEMAN_2024, CITE_BELL_2023],

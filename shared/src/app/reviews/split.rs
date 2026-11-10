@@ -2,7 +2,9 @@
 //! per-session part and its weekly part, so a routine session review never
 //! overwrites the weekly check-in; plus review age and expiry.
 
-use super::*;
+use crate::app::model::SessionReview;
+use crate::day::{is_undated, local_day};
+use crate::schema::Adjustment;
 
 /// Copy every PER-SESSION field of `src` into `dst`: the single list of
 /// session fields (one session's execution context). Every field NOT listed
@@ -88,11 +90,18 @@ pub(in crate::app) fn merged_review(
     Some(m)
 }
 
-/// The effective overtraining-sign count: the number of listed signs ticked
-/// when the check-in carries them, else the bare count (legacy wire).
-pub(in crate::app) fn overtraining_count(r: &SessionReview) -> u8 {
-    r.overtraining_signs
-        .map_or(r.overtraining_signal_count, |s| s.count())
+/// Days a session-execution note (manual or derived) stays current: transient
+/// coaching on ONE session expires after a week so a stale verdict stops
+/// leading. Safety signals never expire here.
+pub(super) const FEEDBACK_FRESH_DAYS: i64 = 7;
+
+/// Whether `day` is at most `days` before `today`; true without a clock or a
+/// date.
+pub(super) fn fresh_within(today: Option<i64>, day: Option<i64>, days: i64) -> bool {
+    match (today, day) {
+        (Some(t), Some(d)) => t.saturating_sub(d) <= days,
+        _ => true,
+    }
 }
 
 /// Days since the review was recorded, in local time; `None` when the review is

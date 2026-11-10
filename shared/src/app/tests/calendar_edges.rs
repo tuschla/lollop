@@ -9,7 +9,7 @@
 //! here is a combination of those two.
 
 use super::*;
-use crate::civil_from_days;
+use crate::day::civil_from_days;
 
 /// The Monday on or before local day `d` (1970-01-05 was a Monday), computed
 /// without the core's `mon0_weekday`.
@@ -477,12 +477,12 @@ fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
             let vm = app.view(&model);
             assert_eq!(vm.runs.len(), 1, "{ctx}");
             assert_eq!(
-                crate::local_day(vm.runs[0].started_at, offset),
+                crate::day::local_day(vm.runs[0].started_at, offset),
                 sunday,
                 "{ctx}: the card names Sunday"
             );
             assert_eq!(
-                crate::local_day(vm.runs[0].observed_at, offset),
+                crate::day::local_day(vm.runs[0].observed_at, offset),
                 sunday + 1,
                 "{ctx}: logged on Monday"
             );
@@ -554,7 +554,10 @@ fn runs_ending_after_midnight(km: f64, start_day: i64) -> Vec<LoggedRun> {
     let mut model = Model::default();
     let end = local(start_day + 1, 0, 30, 0);
     send(&app, &mut model, log_run(km, km * 6.0, 70.0, 0.0, end, 1));
-    assert_eq!(crate::local_day(end - (km * 360.0) as i64, 0), start_day);
+    assert_eq!(
+        crate::day::local_day(end - (km * 360.0) as i64, 0),
+        start_day
+    );
     model.runs
 }
 
@@ -639,7 +642,7 @@ fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
         t += if k < 20 { 30 } else { 36 };
     }
     let end = pts.last().unwrap().observed_at;
-    assert_eq!(crate::local_day(end, 0), sunday + 1);
+    assert_eq!(crate::day::local_day(end, 0), sunday + 1);
     send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
     send(
         &app,
@@ -820,7 +823,7 @@ fn plan_completion_dates_a_run_by_its_first_kept_fix() {
     send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
     set_today(&app, &mut model, sunday + 1);
     let vm = app.view(&model);
-    let card_day = crate::local_day(vm.runs[0].started_at, 0);
+    let card_day = crate::day::local_day(vm.runs[0].started_at, 0);
     assert_eq!(
         card_day,
         sunday + 1,
@@ -901,7 +904,7 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
             }
         }
         assert!(
-            crate::local_day(t, offset) == mon + 1 && total_sets >= 4,
+            crate::day::local_day(t, offset) == mon + 1 && total_sets >= 4,
             "the session must cross midnight"
         );
         send(&app, &mut model, set_today_off_ev(mon + 1, offset));
@@ -1211,8 +1214,7 @@ fn a_clock_moving_backwards_never_judges_future_days() {
     assert_eq!(back.consistency.as_ref().unwrap().this_week_done, 1);
     if let Some(f) = &back.feedback {
         assert!(
-            !f.message
-                .contains(&format!("on {}", crate::app::plan_views::weekday_name(wed))),
+            !f.message.contains(&format!("on {}", weekday_name(wed))),
             "{}",
             f.message
         );

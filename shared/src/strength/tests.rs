@@ -1,5 +1,5 @@
 use super::*;
-use crate::schema::EvidenceGrade;
+use crate::evidence::{ContestedId, EvidenceGrade};
 
 #[test]
 fn back_off_and_vl_thresholds() {
@@ -118,7 +118,7 @@ fn periodization_by_training_age() {
     assert!(m.contested().is_none());
     // Block phases stay contested via the global model-superiority CQ-03.
     let b = block_phase_rx(BlockPhase::Accumulation);
-    assert_eq!(b.contested(), Some("CQ-03"));
+    assert_eq!(b.contested(), Some(ContestedId::CQ_03));
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn dup_days_match_kb_example_week() {
     // Moderate (mixed), contested via the global model-superiority CQ-03.
     let r = dup_day_rx(DupDay::Heavy);
     assert_eq!(r.grade(), EvidenceGrade::Moderate);
-    assert_eq!(r.contested(), Some("CQ-03"));
+    assert_eq!(r.contested(), Some(ContestedId::CQ_03));
     assert!(!r.safety_critical());
 }
 

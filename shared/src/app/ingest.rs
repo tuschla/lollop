@@ -2,7 +2,18 @@
 //! logging and profile events `update` applies, so a logged row and its
 //! amended replacement are built by the same code.
 
-use super::*;
+use crate::app::model::{
+    LoggedRun, LoggedSet, Model, SessionReview, history_key, profile_at, sanitize_entry_id,
+    set_passes_gate,
+};
+use crate::app::profile_age::{PROFILE_EPOCH_DAY_RANGE, derive_birthday_age};
+use crate::app::reviews::weekly_part;
+use crate::app::run_metrics::{in_spike_window, spike_km};
+use crate::app::run_targets;
+use crate::gps::GpsPoint;
+use crate::hypertrophy;
+use crate::profile::Profile;
+use crate::schema::WorkoutType;
 
 /// Clamp a wire float to a finite, bounded domain on ingest. `serde_json`
 /// already refuses NaN/Inf *tokens*, but a huge FINITE magnitude (e.g. 1e300)
@@ -18,12 +29,6 @@ pub(super) fn sanitize_f64(x: f64) -> f64 {
     }
 }
 
-/// Plausible calendar window for a wire epoch day on the profile (race / meet
-/// / layoff / race-result dates): 1920-01-02 through 2120-01-02. A corrupt
-/// value outside it would push week arithmetic toward overflow or make a
-/// race "decades away"; it is dropped (`None` = unstated) instead.
-pub(super) const PROFILE_EPOCH_DAY_RANGE: std::ops::RangeInclusive<i64> = -18_262..=54_787;
-
 /// Clean the planning fields of a wire `Profile` on `SetProfile` ingest, so a
 /// corrupt or hand-edited event can neither poison plan math nor surface an
 /// impossible value. Anything implausible becomes "unstated" (`None`), which
@@ -38,7 +43,7 @@ pub(super) const PROFILE_EPOCH_DAY_RANGE: std::ops::RangeInclusive<i64> = -18_26
 ///   as its canonical key.
 pub(super) fn sanitize_planning_fields(p: &mut Profile) {
     p.lift_days_per_week = p.lift_days_per_week.filter(|d| (2..=5).contains(d));
-    p.training_weekdays = p.training_weekdays.map(|m| m & 0x7f).filter(|m| *m != 0);
+    p.training_weekdays = p.chosen_weekdays();
     let date_ok = |d: &i64| PROFILE_EPOCH_DAY_RANGE.contains(d);
     p.goal_race_epoch_day = p.goal_race_epoch_day.filter(date_ok);
     p.meet_epoch_day = p.meet_epoch_day.filter(date_ok);
@@ -68,21 +73,13 @@ pub(super) fn sanitize_reps(r: u32) -> u32 {
     r.min(10_000)
 }
 
-/// Clamp a wire entry id into the range a Kotlin `Long` (`i64`) can decode: a
-/// `u64` above `i64::MAX` round-trips out of range and breaks the shell. Every
-/// store and match key in `update` and every compaction identity in `log.rs`
-/// goes through this, so replay and compaction agree on which rows an id names.
-pub(crate) fn sanitize_entry_id(id: u64) -> u64 {
-    id.min(i64::MAX as u64)
-}
-
 /// Clamp every wire float on a submitted review, including the nested
 /// execution contexts. A review is replayed from the event log, so an
 /// out-of-domain magnitude that reached disk once would otherwise poison
 /// `view()` on every launch.
 pub(super) fn sanitize_review(r: &mut SessionReview) {
     for v in [
-        &mut r.overtraining_signal_weeks,
+        &mut r.safety.overtraining_signal_weeks,
         &mut r.single_session_spike_frac,
         &mut r.easy_frac_time_above_vt1,
         &mut r.positive_split_pct,
@@ -124,10 +121,10 @@ impl SetFields {
     /// with no hold carries no e1RM (the e1RM formulas require reps >= 1). A
     /// `NaN` load passes the gate and is sanitized to 0. A set logged under an
     /// earlier catalog label is stored under the current name
-    /// (`hypertrophy::renamed`), so every view shows one name for the lift.
+    /// (`exercise::renamed`), so every view shows one name for the lift.
     pub(super) fn into_logged(self) -> Option<LoggedSet> {
-        crate::log::set_passes_gate(self.weight_kg, self.reps, self.hold_sec).then(|| LoggedSet {
-            exercise: match crate::hypertrophy::renamed(&self.exercise) {
+        set_passes_gate(self.weight_kg, self.reps, self.hold_sec).then(|| LoggedSet {
+            exercise: match crate::exercise::renamed(&self.exercise) {
                 Some(name) => name.to_owned(),
                 None => self.exercise,
             },
@@ -278,8 +275,8 @@ pub(super) fn refresh_spike_baselines(runs: &mut [LoggedRun], changed: &[i64]) {
 }
 
 /// The wire fixes with every float sanitized. Length and order are preserved,
-/// so the raw segment-start indices still align (the core's `segments()`
-/// ignores any that are 0, out-of-range, or duplicated).
+/// so the raw segment-start indices still align (the `gps` track fns ignore
+/// any that are 0, out-of-range, or duplicated).
 pub(super) fn sanitize_track(points: Vec<GpsPoint>) -> Vec<GpsPoint> {
     points
         .into_iter()
@@ -298,6 +295,20 @@ pub(super) fn sanitize_track(points: Vec<GpsPoint>) -> Vec<GpsPoint> {
         .collect()
 }
 
+/// The distance (km) and moving time (min) a GPS track will be SAVED with,
+/// before it is logged: the tracker's Finish review shows these, so the
+/// figures the runner confirms are the ones History then lists. Same ingest
+/// sanitizing and `run_metrics::qc_figures` as a logged `LogRunTrack`, and the same
+/// "fewer than two usable fixes measures nothing" rule as its card.
+#[cfg(any(target_os = "android", feature = "ffi", test))]
+pub(crate) fn preview_track_figures(points: Vec<GpsPoint>, segment_starts: &[u32]) -> (f64, f64) {
+    let q = crate::app::run_metrics::qc_figures(&sanitize_track(points), segment_starts);
+    if q.track.len() < 2 {
+        return (0.0, 0.0);
+    }
+    (q.distance_km, q.moving_min)
+}
+
 /// The timestamp an amend locates its target row by: the OLD
 /// `observed_at_fallback` of a re-dated legacy row, else the new `observed_at`
 /// (for logs that predate the fallback field). Matching the OLD row is what
@@ -310,46 +321,11 @@ pub(super) fn amend_match_at(observed_at_fallback: i64, observed_at: i64) -> i64
     }
 }
 
-/// Store `review`'s weekly part as the weekly check-in in force and append it
-/// to the weekly history.
+/// Store `review`'s weekly part as the weekly check-in in force: the newest
+/// entry of the weekly history.
 pub(super) fn store_weekly(model: &mut Model, review: &SessionReview) {
-    let weekly = weekly_part(review);
-    model.weekly_history.push(weekly.clone());
-    model.weekly_checkin = Some(weekly);
-}
-
-/// `run`'s track cut to the fixes whose per-point `observed_at` lies in
-/// `[keep_from_sec, keep_until_sec]`, with the segment starts remapped, or
-/// `None` unless that is a REAL trim: at least 2 surviving fixes and at least
-/// one dropped.
-///
-/// Boundaries follow `qc_track`'s pending-boundary rule: a boundary whose fix
-/// is cut shifts to the first survivor of its segment; a fully-cut segment
-/// drops its boundary.
-pub(super) fn trim_track(
-    run: &LoggedRun,
-    keep_from_sec: i64,
-    keep_until_sec: i64,
-) -> Option<(Vec<GpsPoint>, Vec<u32>)> {
-    let old_len = run.track.len();
-    let mut new_track: Vec<GpsPoint> = Vec::with_capacity(old_len);
-    let mut new_starts: Vec<u32> = Vec::new();
-    let mut pending_boundary = false;
-    let starts: std::collections::HashSet<u32> = run.track_segment_starts.iter().copied().collect();
-    for (idx, p) in run.track.iter().enumerate() {
-        if starts.contains(&(idx as u32)) {
-            pending_boundary = true;
-        }
-        if p.observed_at < keep_from_sec || p.observed_at > keep_until_sec {
-            continue;
-        }
-        if pending_boundary && !new_track.is_empty() {
-            new_starts.push(new_track.len() as u32);
-        }
-        pending_boundary = false;
-        new_track.push(*p);
-    }
-    (new_track.len() >= 2 && new_track.len() < old_len).then_some((new_track, new_starts))
+    model.weekly_history.push(weekly_part(review));
+    model.weekly_checkin_cleared = false;
 }
 
 /// `SetProfile`: sanitize the profile, derive what the core owns, and record
@@ -411,7 +387,7 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     // HARD RULE 3: derive the pediatric gate from age (18 y; safety-011 gives no
     // cutoff). No age = adult, not gated (KB onboard-050). Runs after
     // sanitizing, so a NaN age (0) gates.
-    if profile.age_years.is_some_and(|a| a < YOUTH_AGE_YEARS) {
+    if profile.age_years.is_some_and(Profile::youth_age) {
         profile.health.youth = true;
     }
     // Profile history: an edit supersedes every entry at or after its own
@@ -423,15 +399,12 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     model.profile_history.push(profile);
 }
 
-/// Age below which the pediatric gate is set (safety-011 names no numeric
-/// cutoff for "child/adolescent"; 18 y is the core's choice).
-const YOUTH_AGE_YEARS: f64 = 18.0;
-
 /// `SetToday`: re-derive every birthday-carrying profile's age (and with it
 /// the under-18 gate) for the new day, so the age never goes stale and the
 /// gate lifts on the 18th birthday without a profile edit. The stored values
-/// are TODAY's; a past day reads its own day's age through [`aged_on`]
-/// (`profile_for_day`), so the birthday never rewrites the days it held.
+/// are TODAY's; a past day reads its own day's age through
+/// `profile_age::aged_on` (`profile_for_day`), so the birthday never rewrites
+/// the days it held.
 pub(super) fn refresh_birthday_ages(model: &mut Model) {
     let Some(today) = model.today_epoch_day else {
         return;
@@ -439,48 +412,4 @@ pub(super) fn refresh_birthday_ages(model: &mut Model) {
     for p in &mut model.profile_history {
         derive_birthday_age(p, today);
     }
-}
-
-/// `p` as of local day `day`: a birthday-carrying profile's age and under-18
-/// gate are those of `day`, not of today (SAFE-PEDS-001: a day the gate held
-/// stays held after the 18th birthday). Borrowed unless the day's derived
-/// values differ from the stored ones (only across a birthday).
-pub(super) fn aged_on(p: &Profile, day: i64) -> std::borrow::Cow<'_, Profile> {
-    let Some(birth) = p.birth_epoch_day else {
-        return std::borrow::Cow::Borrowed(p);
-    };
-    let age = whole_years_between(birth, day) as f64;
-    if p.age_years == Some(age) && p.health.youth == (age < YOUTH_AGE_YEARS) {
-        return std::borrow::Cow::Borrowed(p);
-    }
-    let mut q = p.clone();
-    derive_birthday_age(&mut q, day);
-    std::borrow::Cow::Owned(q)
-}
-
-/// With a birthday, `age_years` is the whole calendar years lived by `today`
-/// and the youth flag is exactly "under 18 today": the birthday is the
-/// authoritative age source, so the core owns both. A future birthday derives
-/// age 0 (gate on, the conservative reading).
-fn derive_birthday_age(p: &mut Profile, today: i64) {
-    if let Some(birth) = p.birth_epoch_day {
-        let age = whole_years_between(birth, today);
-        p.age_years = Some(age as f64);
-        p.health.youth = (age as f64) < YOUTH_AGE_YEARS;
-    }
-}
-
-/// Completed calendar years from `birth` to `today` (both local epoch days).
-/// A 29 February birthday completes its year on 1 March in common years.
-/// `today` is clamped to the profile date window so a corrupt clock can't
-/// overflow the calendar math.
-pub(super) fn whole_years_between(birth: i64, today: i64) -> i64 {
-    let range = PROFILE_EPOCH_DAY_RANGE;
-    let today = today.clamp(*range.start(), *range.end());
-    if today <= birth {
-        return 0;
-    }
-    let (by, bm, bd) = crate::civil_from_days(birth);
-    let (ty, tm, td) = crate::civil_from_days(today);
-    ty - by - i64::from((tm, td) < (bm, bd))
 }

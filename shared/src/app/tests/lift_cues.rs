@@ -195,13 +195,13 @@ fn stacked_holds_apply_once_and_read_as_one_call() {
     // Two lift-holding signals add one rep in reserve, not two, and their
     // rows merge into one call naming both.
     let recs = vec![
-        graded(
+        Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::HrvLnRmssd,
             },
             claims::AUTOREG_HRV_LIFT_001,
         ),
-        graded(
+        Recommended::new(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::WellnessZ,
             },
@@ -237,7 +237,7 @@ fn a_held_lift_goes_no_heavier_than_already_lifted_for_its_reps() {
     let mut it = lift_item("Back squat", 100.0);
     it.hold_load_cap_kg = Some(95.0);
     let mut ns = session(vec![it]);
-    let hold = graded(
+    let hold = Recommended::new(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -249,7 +249,7 @@ fn a_held_lift_goes_no_heavier_than_already_lifted_for_its_reps() {
     let mut bench = lift_item("Bench press", 80.0);
     bench.hold_load_cap_kg = Some(77.5);
     let mut ns = session(vec![bench]);
-    let knee = graded(
+    let knee = Recommended::new(
         Adjustment::StopItems {
             location: "Left knee".into(),
         },
@@ -318,7 +318,7 @@ fn short_reps_read_short_and_a_pain_stop_reads_stopped() {
     let mut it = lift_item("Back squat", 100.0);
     it.logged_sets = vec![full(5, 1)];
     it.sets_done = 1;
-    let knee = graded(
+    let knee = Recommended::new(
         Adjustment::StopItems {
             location: "Left knee".into(),
         },
@@ -406,8 +406,14 @@ fn a_hybrid_plan_is_named_for_its_lifting_goal() {
         lift_goal: LiftGoal::Hypertrophy,
         ..sample_profile()
     };
-    let prog = crate::plan::synthesize(&p, &crate::plan::Anchors::default(), 0).unwrap();
-    assert_eq!(prog.name, "Muscle building + running");
+    assert_eq!(
+        program_name(crate::plan::ProgramFocus::of(&PlanProfile::new(&p))),
+        "Muscle building + running"
+    );
+    assert_eq!(
+        program_name(crate::plan::ProgramFocus::Calisthenics(LiftGoal::Power)),
+        "Calisthenics power"
+    );
 }
 
 #[test]
@@ -422,7 +428,8 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
         }),
         ..strength_profile()
     };
-    let prog = crate::plan::synthesize(&p, &crate::plan::Anchors::default(), 0).unwrap();
+    let prog = crate::plan::synthesize(&PlanProfile::new(&p), &crate::plan::Anchors::default(), 0)
+        .unwrap();
     let row = prog
         .mesocycle
         .sessions
@@ -446,7 +453,10 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
     let mut ns = session(vec![view.clone()]);
     crate::app::plan_views::apply_adjustments_to_session(
         &mut ns,
-        &[graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
+        &[Recommended::new(
+            Adjustment::CapRpe(1),
+            claims::AUTOREG_E1RM_GATE_001,
+        )],
         false,
     );
     let eased = &ns.items[0];
@@ -791,7 +801,7 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
         rir: Some(2),
     });
     let mut ns = session(vec![it]);
-    let hold = graded(
+    let hold = Recommended::new(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -818,7 +828,7 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
         rir: Some(2),
     });
     let mut ns = session(vec![it]);
-    let deload = graded(
+    let deload = Recommended::new(
         Adjustment::Deload {
             volume_reduction_pct: 50.0,
             load_reduction_pct: 10.0,
@@ -826,7 +836,7 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
         },
         claims::RUN_DELOAD_001,
     );
-    let hold = graded(
+    let hold = Recommended::new(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },

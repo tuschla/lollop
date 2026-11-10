@@ -1,105 +1,24 @@
 //! Completion judgement: which logged sets and runs count toward a plan item,
 //! and the resulting item and session statuses.
 
-use super::*;
 use std::fmt::Write as _;
 
-/// A set logged before this local time of day (04:00) may still belong to the
-/// previous evening's session.
-const SESSION_CHAIN_CUTOFF_SEC: i64 = 4 * 3_600;
-/// The longest gap (3 h) after the previous set at which such an early set
-/// still chains to that set's session day.
-const SESSION_CHAIN_GAP_SEC: i64 = 3 * 3_600;
-
-/// Session-day attribution for every logged set, aligned to `sets` by
-/// index: `None` for an undated legacy row ([`is_undated`], which never
-/// counts toward a day), else the local day it belongs to. Sets are walked in
-/// `observed_at` order; a set logged before [`SESSION_CHAIN_CUTOFF_SEC`]
-/// inherits the previous set's session day when that set is at most
-/// [`SESSION_CHAIN_GAP_SEC`] earlier (chaining transitively), so a late
-/// session that crosses midnight scores as ONE day.
-/// The single attribution pass every `view()` shares — the completion counts and
-/// the per-day plan-snapshot cutoff both read it, so no rescan per rendered day.
-fn attribute_session_days(sets: &[LoggedSet], offset: i64) -> Vec<Option<i64>> {
-    let mut order: Vec<usize> = (0..sets.len())
-        .filter(|&i| !is_undated(sets[i].observed_at))
-        .collect();
-    order.sort_by_key(|&i| sets[i].observed_at);
-    let mut out = vec![None; sets.len()];
-    let mut prev: Option<(i64, i64)> = None; // (observed_at, session_day)
-    for &i in &order {
-        let oa = sets[i].observed_at;
-        let shifted = oa.saturating_add(offset);
-        let local = shifted.div_euclid(DAY_SEC);
-        let tod = shifted.rem_euclid(DAY_SEC);
-        let sd = match prev {
-            Some((poa, psd))
-                if tod < SESSION_CHAIN_CUTOFF_SEC
-                    && oa.saturating_sub(poa) <= SESSION_CHAIN_GAP_SEC =>
-            {
-                psd
-            }
-            _ => local,
-        };
-        out[i] = Some(sd);
-        prev = Some((oa, sd));
-    }
-    out
-}
-
-/// Per-run session day, aligned to `runs` by index: the local day of the run's
-/// START, [`RunFacts::started`] (its first QC'd fix, else its stamp minus its
-/// duration), the one start every view and coaching bucket uses. `None` for an
-/// undated legacy run ([`is_undated`]), which never counts.
-fn attribute_run_days(runs: &[LoggedRun], facts: &RunFacts, offset: i64) -> Vec<Option<i64>> {
-    runs.iter()
-        .zip(&facts.started)
-        .map(|(r, &start)| (!is_undated(r.observed_at)).then(|| local_day(start, offset)))
-        .collect()
-}
-
-/// Every logged set's and run's session day plus the distinct local days with
-/// lifting and with running, computed once per `view()` and shared by the
-/// completion counts, the per-day snapshot cutoff and the plan-week records.
-pub(in crate::app) struct LoggedDays {
-    /// Per-set session day, aligned to `model.sets`.
-    pub(super) sets: Vec<Option<i64>>,
-    /// Per-run session day (its start day), aligned to `model.runs`.
-    pub(super) runs: Vec<Option<i64>>,
-    /// Distinct days with lifting / running, indexed by [`Discipline`].
-    pub(super) by_discipline: [std::collections::BTreeSet<i64>; 2],
-    /// Distinct days with any logged training.
-    pub(super) active: std::collections::BTreeSet<i64>,
-    /// The view's plan-week records through today's week, built on first use
-    /// (`consistency::plan_weeks`).
-    pub(super) plan_weeks: std::cell::OnceCell<Option<PlanWeeks>>,
-}
-
-impl LoggedDays {
-    pub(in crate::app) fn new(model: &Model, facts: &RunFacts) -> Self {
-        let offset = model.today_utc_offset_sec;
-        let sets = attribute_session_days(&model.sets, offset);
-        let runs = attribute_run_days(&model.runs, facts, offset);
-        let by_discipline: [std::collections::BTreeSet<i64>; 2] = [
-            sets.iter().flatten().copied().collect(),
-            runs.iter().flatten().copied().collect(),
-        ];
-        let active = by_discipline[0].union(&by_discipline[1]).copied().collect();
-        Self {
-            sets,
-            runs,
-            by_discipline,
-            active,
-            plan_weeks: std::cell::OnceCell::new(),
-        }
-    }
-
-    /// Per-run session day (the day the run STARTED), aligned to `model.runs`;
-    /// `None` for an undated run.
-    pub(in crate::app) fn run_days(&self) -> &[Option<i64>] {
-        &self.runs
-    }
-}
+use crate::app::format::fmt_weight;
+use crate::app::model::{LoggedSet, Model};
+use crate::app::plan_views::adjust_fold::{
+    AdjustFold, fold_completion_adjustments, fold_item_numbers, required_sets,
+};
+use crate::app::plan_views::flatten::{flatten_prescription, plan_session_title};
+use crate::app::plan_views::item_render::{
+    derate_reason, refresh_lift_summary, round_load_or_drop,
+};
+use crate::app::run_metrics::RunFacts;
+use crate::app::set_index::SetIndex;
+use crate::app::view_types::{
+    ItemSetView, ItemStatus, PrescriptionView, SessionPlanView, SessionStatus,
+};
+use crate::plates::{load_grid_step_kg, round_load_grid};
+use crate::schema::{Adjustment, Prescription, Recommended, Session, SessionType};
 
 /// How one logged set counts toward a plan item.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -182,38 +101,19 @@ fn set_credit(
 /// ramp step that rounds onto the first step or up to the work load is
 /// dropped. Empty at or below the first step.
 fn warm_up_steps(work_kg: f64, weight_lb: bool, exercise: &str) -> Vec<(f64, u32)> {
-    let lb_kg = |lb: f64| (lb / LB_PER_KG * 100.0).round() / 100.0;
-    let first = match (starts_from_floor(exercise), weight_lb) {
-        (true, true) => lb_kg(135.0),
-        (true, false) => 60.0,
-        (false, true) => lb_kg(45.0),
-        (false, false) => 20.0,
-    };
+    let first =
+        crate::plates::warm_up_start_kg(crate::exercise::starts_from_floor(exercise), weight_lb);
     if work_kg <= first + 1e-6 {
         return Vec::new();
     }
     let mut steps = vec![(first, 5)];
     for (share, reps) in WARM_UP_RAMP {
-        let kg = if weight_lb {
-            lb_kg((work_kg * share * LB_PER_KG / 5.0).round() * 5.0)
-        } else {
-            (work_kg * share / 2.5).round() * 2.5
-        };
+        let kg = crate::plates::round_warm_up_kg(work_kg * share, weight_lb);
         if kg > first + 1e-6 && kg < work_kg - 1e-6 && steps.iter().all(|(k, _)| *k != kg) {
             steps.push((kg, reps));
         }
     }
     steps
-}
-
-/// Whether `exercise` starts each rep from the floor (a deadlift, a clean or
-/// snatch from the floor, a Pendlay row; not a Romanian, stiff-leg or hang
-/// variant), as `isFloorLift` in `SetEditorState.kt` reads it.
-fn starts_from_floor(exercise: &str) -> bool {
-    let e = crate::names::fold(exercise);
-    let has = |k: &str| e.contains(k);
-    !(has("romanian") || has("rdl") || has("stiff") || has("hang"))
-        && (has("deadlift") || has("clean") || has("snatch") || has("pendlay"))
 }
 
 /// Whether a set fell short of the prescribed reps (or hold).
@@ -281,7 +181,7 @@ pub(in crate::app) fn apply_last_sets(
     items: &mut [PrescriptionView],
     model: &Model,
     set_index: &SetIndex,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     session_days: &[Option<i64>],
     epoch_day: i64,
     weight_lb: bool,
@@ -499,21 +399,15 @@ fn run_item_share(rx: &Recommended<Prescription>, km: f64, min: f64, vol_frac: f
     }
 }
 
-/// The set count required to complete a lift/calisthenics item after folding the
-/// day's volume reduction: a deloaded week needs `round(sets·(1−pct/100)).max(1)`
-/// sets. A day judged with `frac > 0` is never held to more sets than it showed.
-pub(super) fn required_sets(sets: u8, vol_frac: f64) -> u8 {
-    let scaled = (sets as f64 * (1.0 - vol_frac)).round() as i64;
-    scaled.clamp(1, u8::MAX as i64) as u8
-}
-
 /// Whether the user ended this exercise early on `epoch_day`: the latest
 /// same-movement marker for the day wins (last-write-wins on `observed_at`).
 fn ended_early(model: &Model, exercise: &str, epoch_day: i64) -> bool {
     model
         .ended_exercises
         .iter()
-        .filter(|m| m.epoch_day == epoch_day && crate::plan::same_movement(&m.exercise, exercise))
+        .filter(|m| {
+            m.epoch_day == epoch_day && crate::exercise::same_movement(&m.exercise, exercise)
+        })
         .max_by_key(|m| m.observed_at)
         .is_some_and(|m| m.ended)
 }
@@ -688,7 +582,7 @@ fn any_work_logged(items: &[PrescriptionView]) -> bool {
 /// done, `done_lighter` when all are finished (done, short, lighter, skipped
 /// or stopped) with some work; `None` otherwise or with no items.
 pub(in crate::app) fn finished_status(items: &[PrescriptionView]) -> Option<SessionStatus> {
-    use ItemStatus::*;
+    use ItemStatus::{Done, DoneLighter, DoneShort, Skipped, SkippedPain, StoppedPain};
     if items.is_empty() {
         return None;
     }
@@ -792,7 +686,7 @@ pub(super) fn flatten_session(
         &mut items,
         model,
         set_index,
-        anchors,
+        &anchors.lift,
         session_days,
         epoch_day.min(judge_day),
         weight_lb,
@@ -949,7 +843,7 @@ fn day_credits(
         it.load_kg
     };
     let mut ramp = match shown_load.or(it.suggested_load_kg) {
-        Some(work) if !it.timed_hold && crate::plan::is_barbell_lift(&it.exercise) => {
+        Some(work) if !it.timed_hold && crate::exercise::is_barbell_lift(&it.exercise) => {
             warm_up_steps(work, weight_lb, &it.exercise)
         }
         _ => Vec::new(),
@@ -979,7 +873,10 @@ fn day_credits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::LoggedSet;
+    use crate::app::logged_days::attribute_session_days;
+    use crate::app::view_types::PlanIntensity;
+    use crate::day::DAY_SEC;
+    use crate::plates::LB_PER_KG;
 
     fn set_at(weight_kg: f64, reps: u32, observed_at: i64) -> LoggedSet {
         LoggedSet {
@@ -1191,7 +1088,7 @@ mod tests {
             std::slice::from_mut(&mut item),
             &model,
             &SetIndex::new(&model.sets),
-            &crate::plan::Anchors::default(),
+            &crate::plan::LiftAnchors::default(),
             &[Some(97)],
             100,
             true,

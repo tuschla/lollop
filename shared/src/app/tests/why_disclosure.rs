@@ -2,6 +2,7 @@
 //! the grade legend.
 
 use super::*;
+use crate::evidence::ContestedId;
 
 #[test]
 fn why_disclosure_on_hr_zones_carries_basis_grade_note_and_improves() {
@@ -88,7 +89,7 @@ fn contested_render_shows_one_opposing_side_when_kb_supplies_it() {
     // CQ-01 carries a KB-sourced opposing citation → the disclosure shows
     // it as "another view"; CQ-02 has none → the render stops at the plan's
     // default and fabricates no opposing view.
-    let with = grade_note_str(EvidenceGrade::Strong, Some("CQ-01"));
+    let with = grade_note_str(EvidenceGrade::Strong, Some(ContestedId::CQ_01));
     assert!(
         with.contains("Contested:") && with.contains("The plan's default:"),
         "contested render carries the plan's default: {with}"
@@ -98,7 +99,7 @@ fn contested_render_shows_one_opposing_side_when_kb_supplies_it() {
         "CQ-01's KB opposing cite surfaces: {with}"
     );
 
-    let without = grade_note_str(EvidenceGrade::Moderate, Some("CQ-02"));
+    let without = grade_note_str(EvidenceGrade::Moderate, Some(ContestedId::CQ_02));
     assert!(
         without.contains("Contested:"),
         "CQ-02 still flags the debate: {without}"

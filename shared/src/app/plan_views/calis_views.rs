@@ -1,7 +1,15 @@
 //! Calisthenics plan items and the rung picker.
 
-use super::*;
 use std::fmt::Write as _;
+
+use crate::app::evidence_views::why_from;
+use crate::app::format::{fmt_frac_pct_range, fmt_weight};
+use crate::app::plan_views::item_render::{hold_band, rir_band_left, set_named_summary};
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{
+    CalisItemView, CalisLadderView, CalisRungView, EvidenceTagView, PlanIntensity, PrescriptionView,
+};
+use crate::schema::{Prescription, Recommended};
 
 /// The face cue for a row done with no bar or rings (CAL-EQUIP-001).
 const TABLE_ROW_CUE: &str = "use a sturdy table edge";
@@ -464,11 +472,7 @@ fn calis_rung_view(ladder: crate::schema::LadderId, rung: u8, available: bool) -
 /// rung and a plain-language note when it had to move.
 pub(in crate::app) fn build_calisthenics_ladders(cx: &ViewCtx) -> Vec<CalisLadderView> {
     use crate::calisthenics as cal;
-    let Some(profile) = cx
-        .model
-        .profile()
-        .filter(|p| p.resistance_modality == ResistanceModality::Calisthenics)
-    else {
+    let Some(profile) = cx.model.profile().filter(|p| p.uses_calisthenics()) else {
         return Vec::new();
     };
     let kit = cal::Kit::from_profile(profile);

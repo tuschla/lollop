@@ -1,7 +1,16 @@
 //! Logged-lift views and the lift audit: per-set intensity, the memoized
 //! lift result list, and the lift-audit guidance rows.
 
-use super::*;
+use crate::app::format::{fmt_weight_num, round_tenths, weight_num, weight_suffix};
+use crate::app::guidance::push_guidance;
+use crate::app::memo::{Memo, VIEW_LIST_CACHE_CAP, memoized};
+use crate::app::model::{LoggedSet, Model};
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{E1rmRangeView, EvidenceTagView, GuidanceView, LiftResultView};
+use crate::day::{DAY_SEC, is_undated, local_day};
+use crate::profile::Profile;
+use crate::{hypertrophy, strength};
 
 /// Estimated working %1RM for a logged set. With a trustworthy e1RM anchor for
 /// the lift, intensity is the actual load as a share of that anchor; without one
@@ -41,9 +50,7 @@ const AUDIT_SECTION: &str = "";
 pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
     let model = cx.model;
     let mut rows = Vec::new();
-    let calis = model
-        .profile()
-        .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
+    let calis = model.profile().is_some_and(Profile::uses_calisthenics);
     // Exclude two kinds of set from every %1RM/e1RM/Prilepin audit row: a
     // Calisthenics profile's leverage-rung ladder work (rep-max-at-tier, not
     // %1RM — CAL-E1RM-001), and ANY timed hold (a hold has no e1RM regardless of
@@ -132,7 +139,7 @@ fn push_day_audit_rows(
         // against it only for non-isolation work loaded at ≥70 %1RM in sets of
         // ≤6 reps. A hypertrophy set as prescribed sits outside that table and
         // gets no row.
-        let isolation = crate::plan::is_isolation_lift(exercise);
+        let isolation = crate::exercise::is_isolation_lift(exercise);
         if !isolation && mean_pct >= PRILEPIN_MIN_PCT && max_reps <= PRILEPIN_MAX_REPS {
             let ok =
                 strength::prilepin_volume_ok(mean_pct, total_reps.min(u32::from(u16::MAX)) as u16);
@@ -235,7 +242,7 @@ fn push_depth_jump_row(
         return;
     };
     let within_today = |t: i64| today_end.is_none_or(|end| t <= end);
-    // Only a reliable, recent barbell back squat (`plan::is_back_squat`, the
+    // Only a reliable, recent barbell back squat (`exercise::is_back_squat`, the
     // plan's own depth-jump gate) anchors the 1.5×BW gate; high-rep (>10)
     // sets do not estimate a trustworthy 1RM (strength-006/033).
     let recent_cutoff =
@@ -246,7 +253,7 @@ fn push_depth_jump_row(
     let mut is_back_squat = |name| -> bool {
         *back_squat
             .entry(name)
-            .or_insert_with(|| crate::plan::is_back_squat(name))
+            .or_insert_with(|| crate::exercise::is_back_squat(name))
     };
     let squat_e1rm = model
         .sets
@@ -280,41 +287,12 @@ fn push_depth_jump_row(
     }
 }
 
-/// Cap on the whole-list view memos ([`lift_views`] / [`run_views`]). Only a
-/// couple of distinct set/run histories are live within a session (the current
-/// one plus a just-superseded one across an edit), and `LIFT_VIEWS_CACHE` needs
-/// the kg AND lb slots of an unchanged `model.sets` warm simultaneously (its key
-/// folds `weight_lb`), so a small cap bounds growth without ever evicting the
-/// hot keys. Each entry is a full-history list clone, so the cap directly bounds
-/// worst-case accumulation.
-pub(super) const VIEW_LIST_CACHE_CAP: usize = 8;
-
 thread_local! {
     /// The finished lift list keyed by the sets' content fingerprint and the
     /// display unit: `model.sets` changes only on a log/amend/delete, so an
     /// unchanged model skips the sort and per-set e1RM math.
     static LIFT_VIEWS_CACHE: std::cell::RefCell<Memo<(u64, bool), Vec<LiftResultView>>> =
         std::cell::RefCell::new(Memo::new(VIEW_LIST_CACHE_CAP));
-}
-
-/// Cheap content fingerprint of the logged sets, every field a `LiftResultView`
-/// depends on. Integer/string hashing versus the sort + per-set e1RM math +
-/// string allocation the cached list avoids. Collision risk is negligible for a
-/// personal history; the fingerprint also keys the plan snapshots.
-pub(super) fn sets_fingerprint(sets: &[LoggedSet]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    sets.len().hash(&mut h);
-    for s in sets {
-        s.entry_id.hash(&mut h);
-        s.observed_at.hash(&mut h);
-        s.exercise.hash(&mut h);
-        s.weight_kg.to_bits().hash(&mut h);
-        s.reps.hash(&mut h);
-        s.rpe.to_bits().hash(&mut h);
-        s.hold_sec.hash(&mut h);
-    }
-    h.finish()
 }
 
 /// Every logged set in log order. `e1rm_pr` marks a set whose e1RM beats
@@ -359,7 +337,7 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
                 if chain == chains.len() {
                     chains.push(None);
                 }
-                (chain, crate::plan::is_isolation_lift(&s.exercise))
+                (chain, crate::exercise::is_isolation_lift(&s.exercise))
             });
             let best_e1rm = &mut chains[chain];
             let mut view = to_lift_view(s, isolation, weight_lb);
@@ -383,7 +361,7 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
 }
 
 /// Derive strength metrics for one logged set (Epley e1RM, RIR from RPE).
-/// `isolation` is [`crate::plan::is_isolation_lift`] of its name.
+/// `isolation` is [`crate::exercise::is_isolation_lift`] of its name.
 pub(super) fn to_lift_view(s: &LoggedSet, isolation: bool, weight_lb: bool) -> LiftResultView {
     // A timed hold is isometric time, not a rep-max, so it has NO e1RM / %1RM /
     // cross-check (CAL-E1RM-001). Its numeric strength fields stay zeroed, so a

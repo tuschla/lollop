@@ -522,14 +522,14 @@ fn all_diffs(a: &str, b: &str) -> Vec<String> {
 /// Every catalog name (hypertrophy table, retired labels, every calisthenics
 /// rung, retired rung labels) and spelling variants of each.
 fn name_universe() -> Vec<String> {
-    let mut base: Vec<String> = crate::hypertrophy::EXERCISES
+    let mut base: Vec<String> = crate::exercise::EXERCISES
         .iter()
         .map(|e| e.name.to_string())
         .collect();
     base.extend(
-        crate::hypertrophy::LEGACY_NAMES
+        crate::exercise::LEGACY_NAMES
             .iter()
-            .chain(crate::calisthenics::LEGACY_NAMES)
+            .chain(crate::exercise::CALIS_LEGACY_NAMES)
             .flat_map(|&(a, b)| [a.to_string(), b.to_string()]),
     );
     for l in crate::calisthenics::LADDERS {
@@ -599,7 +599,7 @@ fn review_set_index_matches_per_call_classifiers() {
     for i in 0..sets.len() {
         let f = idx.facts(i);
         let n = &sets[i].exercise;
-        if f.isolation != crate::plan::is_isolation_lift(n) {
+        if f.isolation != crate::exercise::is_isolation_lift(n) {
             mismatches.push(format!("isolation {n:?}"));
         }
         if f.calis_tier != crate::calisthenics::tier_by_name(n) {
@@ -607,14 +607,14 @@ fn review_set_index_matches_per_call_classifiers() {
         }
         for (j, other) in sets.iter().enumerate() {
             let same_id = f.movement == idx.facts(j).movement;
-            if same_id != crate::plan::same_movement(n, &other.exercise) {
+            if same_id != crate::exercise::same_movement(n, &other.exercise) {
                 mismatches.push(format!("movement {n:?} vs {:?}", other.exercise));
             }
         }
     }
     for q in &names {
         let want: Vec<usize> = (0..sets.len())
-            .filter(|&i| crate::plan::same_movement(q, &sets[i].exercise))
+            .filter(|&i| crate::exercise::same_movement(q, &sets[i].exercise))
             .collect();
         if idx.same_movement_sets(q) != want.as_slice() {
             mismatches.push(format!("same_movement_sets {q:?}"));

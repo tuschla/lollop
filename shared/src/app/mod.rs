@@ -3,68 +3,102 @@
 //! autoregulation layer (`crate::autoreg`), the plan synthesis and every
 //! evidence-cited builder over it. No IO, no clock, no randomness.
 
-use crux_core::{
-    App, Command,
-    macros::effect,
-    render::{RenderOperation, render},
-};
-use serde::{Deserialize, Serialize};
+use crux_core::macros::effect;
+use crux_core::render::{RenderOperation, render};
+use crux_core::{App, Command};
 
-use crate::evidence::{ClaimId, claims, graded};
-use crate::feedback::FeedbackCategory;
-use crate::hybrid::ConcurrentGoal;
-use crate::individualization::{Environment, ProgressionCadence};
-use crate::running::{GoalDistance, GpsPoint};
+use crate::app::calculators::{
+    build_hypertrophy_plan, build_protein_targets, build_srpe_load, build_training_load,
+    build_weekly_report, calculator_hold, hr_zones_for, to_race_view,
+};
+use crate::app::evidence_views::{
+    FIRST_SET_CLAUSE, checkin_floor_wording, grade_definitions, hrv_morning_wording,
+    hrv_single_morning, merge_hold_rows, to_view,
+};
+use crate::app::guidance::{
+    build_calisthenics_guidance, build_guidance_measured, build_reference,
+    stated_or_measured_weekly_km,
+};
+use crate::app::ingest::{
+    RunFields, SetFields, amend_match_at, apply_profile, logged_run, refresh_run_hr,
+    refresh_spike_baselines, sanitize_f64, sanitize_review, sanitize_session_rpe, sanitize_track,
+    store_run, store_weekly,
+};
+use crate::app::lift_audit::{build_lift_audit, lift_views};
+use crate::app::model::{
+    EndedMarker, LoggedActivity, PlanRequest, RaceQuery, RetractedInput, SessionMove, find_entry,
+    profile_for_day,
+};
+use crate::app::plan_views::{
+    PlanViews, apply_first_set_autoreg, build_calisthenics_ladders, build_consistency,
+    build_plan_views, finished_status, name_modified_exercises, restate_basis,
+};
+use crate::app::readiness::{
+    HeadlineInputs, REDS_SCREEN_WINDOW_DAYS, ReadinessPicture, blocks_training,
+    build_autoreg_source, build_headline, build_provisional, build_signal_groups, hold_reason,
+    hold_resolutions, readiness_picture, suppression_active, to_baseline_status_view,
+};
+use crate::app::review_deloads::{RECOVERY_WEEK_CLAIM, review_deloads, weekly_reds_signal};
+use crate::app::reviews::{
+    FeedbackCtx, ReviewCtx, annotate_last_time, build_feedback, build_session_done, build_trend,
+    derive_session_exec, detect_mastery, feedback_track_split, latest_run_spike, merged_review,
+    next_time_add_superseded, remaining_sets_call_spent, review_adjustment_expired,
+    review_age_days, review_views, session_part,
+};
+use crate::app::run_metrics::longest_logged_run_km;
+use crate::app::run_views::{annotate_run_views, build_run_progress, prune_run_memos, run_views};
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{
+    CalisLadderView, HoldReason, HoldResolutionView, HrZoneBandView, HypertrophyFiguresView,
+    RunProgressView, SessionStatus, SrpeLoadView,
+};
+use crate::app::youth_activity::{activity_views, build_youth_activity};
+use crate::day::{is_undated, local_day};
+use crate::profile::{PlanProfile, PlanWithheld};
 use crate::schema::{
-    Adjustment, CheckinInput, EvidenceGrade, Goal, HealthScreen, LiftIntensity, LiftSessionType,
-    MesoPhase, Mesocycle, Prescription, Program, ReadinessInput, ReadinessSignal, Recommended,
-    RunIntensity, RunSessionType, RunVolume, SafetyTier, Session, SessionType, ThreeZone, VdotBand,
-    WorkoutType,
+    Adjustment, CheckinInput, ReadinessInput, ReadinessSignal, Recommended, SafetyTier,
 };
-use crate::strength::LiftGoal;
-use crate::{DAY_SEC, is_undated, local_day};
-use crate::{autoreg, feedback, hybrid, hypertrophy, individualization, load, running, strength};
+use crate::{autoreg, gps, individualization};
 
-// State, wire types and builders live in submodules, glob-imported here.
 mod anchors;
 mod calculators;
+mod calis_anchors;
 mod evidence_views;
 mod format;
 mod guidance;
 mod ingest;
 mod lift_audit;
+mod logged_days;
 mod memo;
 mod model;
 mod plan_views;
+mod profile_age;
 mod readiness;
+mod review_deloads;
 mod reviews;
 mod run_metrics;
 mod run_targets;
 mod run_views;
+mod set_index;
 mod view_ctx;
 mod view_types;
 mod youth_activity;
 
-use anchors::*;
-use calculators::*;
-use evidence_views::*;
-use format::*;
-use guidance::*;
-use ingest::*;
-use lift_audit::*;
-use memo::*;
-pub use model::*;
-use plan_views::*;
-use readiness::*;
-use reviews::*;
-use run_metrics::*;
-use run_views::*;
-use view_ctx::*;
-pub use view_types::*;
-use youth_activity::*;
-
+pub use model::{
+    ActivityKind, Decouple, EntryKind, Event, HrZoneInputView, HypertrophyInputView, IntervalExec,
+    LiftExec, Model, ProteinInputView, SessionReview,
+};
+pub use view_types::{
+    ActivityResultView, AdjustmentView, BaselineStatusView, E1rmRangeView, FeedbackView,
+    GradeDefView, GuidanceView, HrMaxView, IntervalVerdictView, LiftResultView, PrescriptionView,
+    ProgramSummaryView, ProteinFigureView, RacePredictionView, ReadinessSignalView, RunResultView,
+    RunSplitView, SessionPlanView, SignalGroupView, SplitVerdictView, TodayHeadlineView,
+    TrainingLoadView, ViewModel, WhyView, YouthActivityView,
+};
+// `log.rs` replays legacy set/activity lines through the ingest gates.
+pub(crate) use model::{activity_passes_gate, set_passes_gate};
 // `log.rs` normalizes replayed entry ids through this.
-pub(crate) use ingest::sanitize_entry_id;
+pub(crate) use model::sanitize_entry_id;
 // `log.rs` compaction asks which store a legacy `SubmitReview` line replaces.
 pub(crate) use reviews::{submit_review_sets_session, submit_review_sets_weekly};
 
@@ -72,7 +106,11 @@ pub(crate) use reviews::{submit_review_sets_session, submit_review_sets_weekly};
 // / `crate::app::preview_track_figures`; like the ffi glue they feed, they are
 // compiled only where the bridge exists (Android, or the `ffi` feature).
 #[cfg(any(target_os = "android", feature = "ffi", test))]
-pub(crate) use run_views::{export_run_gpx, preview_track_figures};
+use crate::app::run_views::refresh_gpx_registry;
+#[cfg(any(target_os = "android", feature = "ffi", test))]
+pub(crate) use ingest::preview_track_figures;
+#[cfg(any(target_os = "android", feature = "ffi", test))]
+pub(crate) use run_views::export_run_gpx;
 
 #[effect(typegen)]
 #[derive(Debug)]
@@ -202,7 +240,7 @@ impl App for Engine {
             } => {
                 model.ended_exercises.retain(|m| {
                     !(m.epoch_day == epoch_day
-                        && crate::plan::same_movement(&m.exercise, &exercise))
+                        && crate::exercise::same_movement(&m.exercise, &exercise))
                 });
                 model.ended_exercises.push(EndedMarker {
                     exercise,
@@ -218,11 +256,13 @@ impl App for Engine {
             } => {
                 // An out-of-range rung is a no-op (like other rejected inputs).
                 if crate::calisthenics::tier(ladder, rung).is_some() {
-                    model.calis_placements.push(CalisPlacement {
-                        ladder,
-                        rung,
-                        observed_at,
-                    });
+                    model
+                        .calis_placements
+                        .push(crate::calisthenics::progression::CalisPlacement {
+                            ladder,
+                            rung,
+                            observed_at,
+                        });
                 }
             }
             Event::LogRun {
@@ -403,11 +443,15 @@ impl App for Engine {
                 keep_until_sec,
             } => {
                 // An inverted range, a no-match or a slice that is not a real
-                // trim (`trim_track`) leaves the run untouched.
+                // trim (`gps::trim_track`) leaves the run untouched.
                 if keep_from_sec <= keep_until_sec
                     && let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback)
-                    && let Some((track, starts)) =
-                        trim_track(&model.runs[pos], keep_from_sec, keep_until_sec)
+                    && let Some((track, starts)) = gps::trim_track(
+                        &model.runs[pos].track,
+                        &model.runs[pos].track_segment_starts,
+                        keep_from_sec,
+                        keep_until_sec,
+                    )
                 {
                     let run = &mut model.runs[pos];
                     run.track = track;
@@ -460,7 +504,7 @@ impl App for Engine {
                 sanitize_review(&mut review);
                 store_weekly(model, &review);
             }
-            Event::ClearWeeklyCheckin => model.weekly_checkin = None,
+            Event::ClearWeeklyCheckin => model.clear_weekly_checkin(),
             Event::PredictRace {
                 recent_distance_m,
                 recent_time_sec,
@@ -577,50 +621,42 @@ impl App for Engine {
         let picture = readiness_picture(model, &cx.days, model.profile(), model.today_epoch_day);
         let derived = &picture.derived;
         let readiness_inputs = &picture.inputs;
-        let rule_ctx = picture.rule_ctx();
         let review = review_pipeline(model, picture.adjustments(model, &cx.days));
-        let safety = safety_state(
-            model,
-            readiness_inputs,
-            autoreg::resolve_safety_in(readiness_inputs, &rule_ctx),
-            &review,
-        );
+        let safety = safety_state(model, readiness_inputs, picture.safety_tier(), &review);
         let v = Verdicts {
             readiness_inputs,
-            rule_ctx,
+            picture: &picture,
             review,
             safety,
         };
-        let rule_ctx = &v.rule_ctx;
         let recommended = &v.review.recommended;
         let review_recs = &v.review.review_recs;
         let train_blocked = v.safety.hold.is_some();
         let reds_present = v.safety.reds_present;
 
         let (derived_hrv_streak, derived_wellness_streak) = derived_streaks(derived);
-        let review_adjustments =
-            merged_review(model.weekly_checkin.as_ref(), model.review.as_ref())
-                .as_ref()
-                .map(|r| {
-                    review_views(
-                        r,
-                        ReviewCtx {
-                            recs: review_recs,
-                            readiness_recs: recommended,
-                            train_blocked,
-                            review_age: v.review.review_age,
-                            profile: model.profile(),
-                            derived_hrv_streak,
-                            derived_wellness_streak,
-                        },
-                    )
-                })
-                .unwrap_or_default();
+        let review_adjustments = merged_review(model.weekly_checkin(), model.review.as_ref())
+            .as_ref()
+            .map(|r| {
+                review_views(
+                    r,
+                    ReviewCtx {
+                        recs: review_recs,
+                        readiness_recs: recommended,
+                        train_blocked,
+                        review_age: v.review.review_age,
+                        profile: model.profile(),
+                        derived_hrv_streak,
+                        derived_wellness_streak,
+                    },
+                )
+            })
+            .unwrap_or_default();
 
         let mut adjustments: Vec<AdjustmentView> = recommended.iter().map(to_view).collect();
         // Several lift-holding signals apply once, so they read as one call.
         let merged_away = merge_hold_rows(recommended, &mut adjustments);
-        let PlanSection {
+        let PlanViews {
             next_session,
             week_plan,
             next_week_plan,
@@ -628,26 +664,25 @@ impl App for Engine {
             planned_run_km,
         } = plan_section(&cx, &v, &mut adjustments, &merged_away, weight_lb);
 
-        let FeedbackSection { feedback, spike } = feedback_section(&cx, &v, &week_plan, weight_lb);
-        let session_done = build_session_done(&week_plan, model.today_epoch_day);
-        // feedback-039/041/042: no trend praise or causal story while a concern
-        // card leads or training is blocked.
-        let trend_suppressed =
-            train_blocked || feedback.as_ref().is_some_and(|f| f.suppresses_praise);
-
+        let FeedbackSection { feedback, trend } =
+            feedback_section(&cx, &v, &week_plan, derived_wellness_streak, weight_lb);
         // One hold for Today, the plan calculators and the prescriptive
         // guidance: today's training hold, else a RED-S signal.
         let calc_hold = calculator_hold(v.safety.hold.as_ref(), reds_present);
         let CalcSection {
             protein_targets,
             protein_figures,
+            protein_input,
             hr_zones,
             hr_max,
             hr_zone_bands,
+            hr_zone_input,
             hypertrophy_plan,
             hypertrophy_figures,
             hypertrophy_ramp,
-        } = calc_section(model, calc_hold.as_ref(), reds_present, weight_lb);
+            hypertrophy_input,
+            race_prediction,
+        } = calc_section(&cx, calc_hold.as_ref(), reds_present, weight_lb);
         let today_headline = build_headline(&HeadlineInputs {
             train_blocked,
             gates: &v.safety.gates,
@@ -658,97 +693,82 @@ impl App for Engine {
             feedback: feedback.as_ref(),
             prescription: next_session.as_ref(),
         });
-
-        let (runs, run_progress) = history_section(&cx, planned_run_km);
-
-        // The readiness strip surfaces recency-expired RHR/wellness readings as an
-        // "out of date" row, so it is fed the stale inputs too; the rules
-        // above ran only on the fresh `readiness_inputs`.
-        let mut display_inputs = readiness_inputs.clone();
-        display_inputs.extend(derived.stale.iter().cloned());
+        let HistorySection {
+            lifts,
+            runs,
+            run_progress,
+            training_load,
+            srpe_load,
+            provisional,
+            activities,
+            youth_activity,
+        } = history_section(&cx, planned_run_km, weight_lb);
+        let GuidanceSection {
+            guidance,
+            reference,
+            weekly_report,
+            lift_audit,
+            calisthenics_ladders,
+        } = guidance_section(&cx, calc_hold.as_ref(), reds_present, &week_plan);
+        let ReadinessSection {
+            checked_in_today,
+            weekly_checkin_present,
+            input_count,
+            readiness_summary,
+            autoreg_source,
+            signal_groups,
+            latest_checkin,
+            baseline_status,
+        } = readiness_section(model, &v, derived_hrv_streak.is_some());
+        let SafetySection {
+            safety_tier,
+            hold_reason,
+            hold_resolutions,
+            illness_check_prompt,
+            plan_withheld,
+        } = safety_section(model, &v);
+        // ADH-SELFMON-001: planned vs done, built off the week strip before it
+        // moves into the view.
+        let consistency = build_consistency(model, &cx.days, &week_plan, train_blocked);
+        let session_done = build_session_done(&week_plan, model.today_epoch_day);
 
         ViewModel {
-            safety_tier: v.safety.safety_tier,
-            hold_reason: hold_reason(v.safety.hold.as_ref(), model.profile().map(|p| &p.health)),
-            checked_in_today: model.today_epoch_day.is_some_and(|t| {
-                model.checkins.iter().any(|c| {
-                    !is_undated(c.observed_at)
-                        && local_day(c.observed_at, model.today_utc_offset_sec) == t
-                })
-            }),
+            safety_tier,
+            hold_reason,
+            checked_in_today,
             adjustments,
             review_adjustments,
-            weekly_checkin_present: model.weekly_checkin.is_some(),
-            input_count: model.inputs.len(),
-            lifts: lift_views(&model.sets, cx.sets_fp, weight_lb),
+            weekly_checkin_present,
+            input_count,
+            lifts,
             runs,
-            guidance: model
-                .profile()
-                .map(|p| {
-                    // Feed the km-gated safety/hybrid guards the athlete's real
-                    // recent volume, not just the stated setup figure.
-                    let recent_weekly = model
-                        .today_epoch_day
-                        .and_then(|today| cx.run_anchors_on(today).recent_weekly_km);
-                    let (weekly_km, basis) = effective_weekly_km(p, recent_weekly);
-                    build_guidance_measured(p, weekly_km, basis, calc_hold.as_ref())
-                })
-                .unwrap_or_default(),
+            guidance,
             feedback,
-            reference: build_reference(reds_present),
+            reference,
             profile: model.profile().cloned(),
-            race_prediction: model
-                .race_query
-                .as_ref()
-                .map(|q| to_race_view(q, longest_logged_run_km(&cx.runs))),
+            race_prediction,
             hypertrophy_plan,
             protein_targets,
             hr_zones,
-            training_load: build_training_load(model, &cx.runs),
-            srpe_load: run_progress.as_ref().and_then(build_srpe_load),
-            weekly_report: build_weekly_report(&cx, &week_plan),
+            training_load,
+            srpe_load,
+            weekly_report,
             run_progress,
-            lift_audit: {
-                let mut a = build_lift_audit(&cx);
-                a.extend(build_calisthenics_guidance(&cx));
-                a
-            },
-            hr_zone_input: model.hr_zone_query.clone(),
-            protein_input: model.protein_query.clone(),
-            hypertrophy_input: model.hypertrophy_plan_query.clone(),
+            lift_audit,
+            hr_zone_input,
+            protein_input,
+            hypertrophy_input,
             hypertrophy_ramp,
-            trend: build_trend(
-                model,
-                &cx.set_index,
-                model.weekly_checkin.as_ref(),
-                derived_wellness_streak,
-                spike,
-                trend_suppressed,
-                weight_lb,
-            ),
-            provisional: build_provisional(model, &cx.runs),
-            autoreg_source: build_autoreg_source(
-                readiness_inputs,
-                derived_hrv_streak.is_some(),
-                derived
-                    .collecting
-                    .iter()
-                    .any(|b| b.kind == autoreg::BaselineKind::Suspended),
-                model.today_utc_offset_sec,
-            ),
-            readiness_summary: build_readiness_summary(&display_inputs, rule_ctx, &derived.stale),
+            trend,
+            provisional,
+            autoreg_source,
+            readiness_summary,
             today_headline,
-            signal_groups: build_signal_groups(),
-            latest_checkin: model.checkins.iter().max_by_key(|c| c.observed_at).cloned(),
-            baseline_status: derived
-                .collecting
-                .iter()
-                .map(to_baseline_status_view)
-                .collect(),
+            signal_groups,
+            latest_checkin,
+            baseline_status,
             grade_definitions: grade_definitions(),
-            // ADH-SELFMON-001: planned vs done, built off the week strip before
-            // it moves into the view.
-            consistency: build_consistency(model, &cx.days, &week_plan, train_blocked),
+            consistency,
             next_session,
             week_plan,
             next_week_plan,
@@ -759,21 +779,12 @@ impl App for Engine {
             hypertrophy_figures,
             today_epoch_day: model.today_epoch_day,
             session_done,
-            calisthenics_ladders: build_calisthenics_ladders(&cx),
-            hold_resolutions: hold_resolutions(
-                readiness_inputs,
-                model.profile().is_some_and(|p| p.health.acute_illness),
-            ),
-            illness_check_prompt: autoreg::illness_active(readiness_inputs)
-                || autoreg::rhr_neck_check_due(readiness_inputs, rule_ctx),
-            plan_withheld: model
-                .today_epoch_day
-                .and_then(|d| profile_for_day(model, d))
-                .as_deref()
-                .or(model.profile())
-                .and_then(crate::plan::plan_withheld),
-            activities: activity_views(&model.activities),
-            youth_activity: build_youth_activity(&cx),
+            calisthenics_ladders,
+            hold_resolutions,
+            illness_check_prompt,
+            plan_withheld,
+            activities,
+            youth_activity,
         }
     }
 }
@@ -783,7 +794,7 @@ impl App for Engine {
 struct Verdicts<'a> {
     /// Today's fresh readiness inputs (recency-expired readings excluded).
     readiness_inputs: &'a [ReadinessInput],
-    rule_ctx: autoreg::RuleContext<'a>,
+    picture: &'a ReadinessPicture,
     review: ReviewPipeline,
     safety: SafetyState,
 }
@@ -806,16 +817,14 @@ struct ReviewPipeline {
 fn review_pipeline(model: &Model, recommended: Vec<Recommended<Adjustment>>) -> ReviewPipeline {
     let offset = model.today_utc_offset_sec;
     let weekly_age = model
-        .weekly_checkin
-        .as_ref()
+        .weekly_checkin()
         .and_then(|r| review_age_days(r, model.today_epoch_day, offset));
     let review_age = model
         .review
         .as_ref()
         .and_then(|r| review_age_days(r, model.today_epoch_day, offset));
     let review_recs: Vec<Recommended<Adjustment>> = model
-        .weekly_checkin
-        .as_ref()
+        .weekly_checkin()
         .map(review_deloads)
         .unwrap_or_default()
         .into_iter()
@@ -900,10 +909,7 @@ fn safety_state(
     // window.
     let reds_present = autoreg::reds_defer(readiness_inputs)
         || model.profile().is_some_and(|p| p.health.reds_signal)
-        || model
-            .weekly_checkin
-            .as_ref()
-            .is_some_and(weekly_reds_signal)
+        || model.weekly_checkin().is_some_and(weekly_reds_signal)
         || model.weekly_history.iter().any(|r| {
             weekly_reds_signal(r)
                 && model.today_epoch_day.is_none_or(|today| {
@@ -949,17 +955,6 @@ fn derived_streaks(derived: &autoreg::DerivedReadiness) -> (Option<u8>, Option<u
     (hrv, wellness)
 }
 
-/// The dated week with today's session as the coach prescribes it, and next
-/// week's days.
-struct PlanSection {
-    next_session: Option<SessionPlanView>,
-    week_plan: Vec<SessionPlanView>,
-    next_week_plan: Vec<SessionPlanView>,
-    program: Option<ProgramSummaryView>,
-    /// The run km this plan week prescribes (0 without a plan).
-    planned_run_km: f64,
-}
-
 /// Coach-as-planner: synthesize + date the week, then apply readiness/safety
 /// INSIDE the rendered session (strictly downstream of the gates; HARD RULE
 /// 3). The prescription becomes the top non-safety headline rung. Settles the
@@ -971,20 +966,24 @@ fn plan_section(
     adjustments: &mut Vec<AdjustmentView>,
     merged_away: &[bool],
     weight_lb: bool,
-) -> PlanSection {
+) -> PlanViews {
     let model = cx.model;
     let today = model.today_epoch_day;
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
-    let train_blocked = v.safety.hold.is_some();
-    let (mut next_session, mut week_plan, mut next_week_plan, program, planned_run_km) =
-        build_plan_views(cx, train_blocked, recommended, review_recs);
+    let PlanViews {
+        mut next_session,
+        mut week_plan,
+        mut next_week_plan,
+        program,
+        planned_run_km,
+    } = build_plan_views(cx, v.safety.hold.is_some(), recommended, review_recs);
     let wordings = [
         (
             hrv_single_morning(v.readiness_inputs),
             hrv_morning_wording as fn(&mut AdjustmentView),
         ),
-        (v.rule_ctx.wellness_collecting, checkin_floor_wording),
+        (v.picture.wellness_collecting(), checkin_floor_wording),
     ];
     for (_, wording) in wordings.into_iter().filter(|(applies, _)| *applies) {
         adjustments.iter_mut().for_each(wording);
@@ -996,18 +995,14 @@ fn plan_section(
             }
         }
     }
-    let (fresh, fresh_rows) = if train_blocked {
-        Default::default()
-    } else {
-        apply_first_set_cues(
-            v,
-            today,
-            &mut next_session,
-            &mut week_plan,
-            adjustments,
-            weight_lb,
-        )
-    };
+    let (fresh, fresh_rows) = apply_first_set_cues(
+        v,
+        today,
+        &mut next_session,
+        &mut week_plan,
+        adjustments,
+        weight_lb,
+    );
     // Every fold, hold and cue has moved its numbers: the why? basis restates
     // the planned prescription against today's, so the session panel reads
     // the face.
@@ -1067,7 +1062,7 @@ fn plan_section(
             }
         }
     }
-    PlanSection {
+    PlanViews {
         next_session,
         week_plan,
         next_week_plan,
@@ -1089,9 +1084,13 @@ fn apply_first_set_cues(
     adjustments: &mut [AdjustmentView],
     weight_lb: bool,
 ) -> (Vec<Recommended<Adjustment>>, Vec<AdjustmentView>) {
+    // A training hold blanks today's session (HARD RULE 3): no cue to give.
+    if v.safety.hold.is_some() {
+        return Default::default();
+    }
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
-    let no_increase = autoreg::increase_hold(v.readiness_inputs, &v.rule_ctx)
+    let no_increase = v.picture.increase_hold()
         || suppression_active(recommended, false)
         || suppression_active(review_recs, false);
     // Today's row honours the in-session cue loads too (a lift finished at
@@ -1139,25 +1138,31 @@ fn apply_first_set_cues(
         .unzip()
 }
 
-/// The calculators' prose rows and the structured figures beside them, so a
-/// shell reads numbers instead of scraping the summary strings.
+/// The calculators' prose rows, the structured figures beside them (so a
+/// shell reads numbers instead of scraping the summary strings) and the
+/// queries they answer.
 struct CalcSection {
     protein_targets: Vec<GuidanceView>,
     protein_figures: Vec<ProteinFigureView>,
+    protein_input: Option<ProteinInputView>,
     hr_zones: Vec<GuidanceView>,
     hr_max: Option<HrMaxView>,
     hr_zone_bands: Vec<HrZoneBandView>,
+    hr_zone_input: Option<HrZoneInputView>,
     hypertrophy_plan: Vec<GuidanceView>,
     hypertrophy_figures: Option<HypertrophyFiguresView>,
     hypertrophy_ramp: Vec<u8>,
+    hypertrophy_input: Option<HypertrophyInputView>,
+    race_prediction: Option<RacePredictionView>,
 }
 
 fn calc_section(
-    model: &Model,
+    cx: &ViewCtx,
     calc_hold: Option<&Recommended<Adjustment>>,
     reds_present: bool,
     weight_lb: bool,
 ) -> CalcSection {
+    let model = cx.model;
     let (protein_targets, protein_figures) = model
         .protein_query
         .as_ref()
@@ -1171,41 +1176,53 @@ fn calc_section(
     let (hypertrophy_plan, hypertrophy_figures, hypertrophy_ramp) = model
         .hypertrophy_plan_query
         .as_ref()
-        .map(|q| build_hypertrophy_plan(q, model.profile(), calc_hold))
+        .map(|q| {
+            let pp = model.profile().map(PlanProfile::new);
+            build_hypertrophy_plan(q, pp.as_ref(), calc_hold)
+        })
         .unwrap_or_default();
     CalcSection {
         protein_targets,
         protein_figures,
+        protein_input: model.protein_query.clone(),
         hr_zones,
         hr_max,
         hr_zone_bands,
+        hr_zone_input: model.hr_zone_query.clone(),
         hypertrophy_plan,
         hypertrophy_figures,
         hypertrophy_ramp,
+        hypertrophy_input: model.hypertrophy_plan_query.clone(),
+        race_prediction: model
+            .race_query
+            .as_ref()
+            .map(|q| to_race_view(q, longest_logged_run_km(&cx.runs))),
     }
 }
 
-/// The coaching takeaway and the latest run's spike it (and the trend) read.
+/// The coaching takeaway and the trend line beside it.
 struct FeedbackSection {
     feedback: Option<FeedbackView>,
-    spike: Option<RunSpike>,
+    trend: Option<AdjustmentView>,
 }
 
 /// One coaching takeaway from the weekly check-in's safety signals, the
 /// latest run's spike, the session review, the latest completed plan day
-/// judged from the logs (no form needed) and any new best.
+/// judged from the logs (no form needed) and any new best; and the trend
+/// line, which reads the same spike.
 fn feedback_section(
     cx: &ViewCtx,
     v: &Verdicts,
     week_plan: &[SessionPlanView],
+    derived_wellness_streak: Option<u8>,
     weight_lb: bool,
 ) -> FeedbackSection {
     let model = cx.model;
     // Feedback personalization inputs (feedback-023/024/035).
-    let advanced_user = model.profile().is_some_and(|p| {
-        individualization::training_age_from_cadence(p.progression_cadence).value
-            == individualization::TrainingAge::Advanced
-    });
+    let advanced_user = cx
+        .plan_profile
+        .as_ref()
+        .is_some_and(|pp| pp.training_age() == individualization::TrainingAge::Advanced);
     let female_user = model.profile().is_some_and(|p| p.female.unwrap_or(false));
     let derived_exec = model
         .today_epoch_day
@@ -1215,7 +1232,7 @@ fn feedback_section(
     let review_recs = &v.review.review_recs;
     let feedback = build_feedback(FeedbackCtx {
         cx,
-        weekly: model.weekly_checkin.as_ref(),
+        weekly: model.weekly_checkin(),
         session: model.review.as_ref(),
         session_age: v.review.review_age,
         derived: derived_exec.as_ref(),
@@ -1234,7 +1251,33 @@ fn feedback_section(
         female_user,
         weight_lb,
     });
-    FeedbackSection { feedback, spike }
+    // feedback-039/041/042: no trend praise or causal story while a concern
+    // card leads or training is blocked.
+    let trend_suppressed =
+        v.safety.hold.is_some() || feedback.as_ref().is_some_and(|f| f.suppresses_praise);
+    let trend = build_trend(
+        model,
+        &cx.set_index,
+        model.weekly_checkin(),
+        derived_wellness_streak,
+        spike,
+        trend_suppressed,
+        weight_lb,
+    );
+    FeedbackSection { feedback, trend }
+}
+
+/// The logged history: lift and run results, run progress and the load and
+/// activity views built on them.
+struct HistorySection {
+    lifts: Vec<LiftResultView>,
+    runs: Vec<RunResultView>,
+    run_progress: Option<RunProgressView>,
+    training_load: Option<TrainingLoadView>,
+    srpe_load: Option<SrpeLoadView>,
+    provisional: Option<AdjustmentView>,
+    activities: Vec<ActivityResultView>,
+    youth_activity: Option<YouthActivityView>,
 }
 
 /// The run history views in chronological (observed_at) order, stable for
@@ -1243,10 +1286,7 @@ fn feedback_section(
 /// submission order; plus the run progress layered on them, its target marker
 /// at `planned_run_km`. Every run consumer reads `cx.runs`, so each track is
 /// QC'd at most once per view.
-fn history_section(
-    cx: &ViewCtx,
-    planned_run_km: f64,
-) -> (Vec<RunResultView>, Option<RunProgressView>) {
+fn history_section(cx: &ViewCtx, planned_run_km: f64, weight_lb: bool) -> HistorySection {
     let model = cx.model;
     let mut runs = run_views(&model.runs, &cx.runs);
     // Run progress and the cross-run best-effort records are layered on the
@@ -1261,7 +1301,131 @@ fn history_section(
     // Bound the per-run memos to the live history: a deleted run's entries
     // stop lingering past this view().
     prune_run_memos(&cx.runs.keys);
-    (runs, run_progress)
+    HistorySection {
+        lifts: lift_views(&model.sets, cx.sets_fp, weight_lb),
+        runs,
+        training_load: build_training_load(model, &cx.runs),
+        srpe_load: run_progress.as_ref().and_then(build_srpe_load),
+        run_progress,
+        provisional: build_provisional(model, &cx.runs),
+        activities: activity_views(&model.activities),
+        youth_activity: build_youth_activity(cx),
+    }
+}
+
+/// The prescriptive guidance rows: the profile's guidance, the reference
+/// card, the weekly running report, the lift audit and the calisthenics
+/// ladders.
+struct GuidanceSection {
+    guidance: Vec<GuidanceView>,
+    reference: std::borrow::Cow<'static, [GuidanceView]>,
+    weekly_report: Vec<GuidanceView>,
+    lift_audit: Vec<GuidanceView>,
+    calisthenics_ladders: Vec<CalisLadderView>,
+}
+
+fn guidance_section(
+    cx: &ViewCtx,
+    calc_hold: Option<&Recommended<Adjustment>>,
+    reds_present: bool,
+    week_plan: &[SessionPlanView],
+) -> GuidanceSection {
+    let model = cx.model;
+    let guidance = model
+        .profile()
+        .map(|p| {
+            // Feed the km-gated safety/hybrid guards the athlete's real
+            // recent volume, not just the stated setup figure.
+            let recent_weekly = model
+                .today_epoch_day
+                .and_then(|today| cx.run_anchors_on(today).recent_weekly_km);
+            let (weekly_km, basis) = stated_or_measured_weekly_km(p, recent_weekly);
+            build_guidance_measured(p, weekly_km, basis, calc_hold)
+        })
+        .unwrap_or_default();
+    let mut lift_audit = build_lift_audit(cx);
+    lift_audit.extend(build_calisthenics_guidance(cx));
+    GuidanceSection {
+        guidance,
+        reference: build_reference(reds_present),
+        weekly_report: build_weekly_report(cx, week_plan),
+        lift_audit,
+        calisthenics_ladders: build_calisthenics_ladders(cx),
+    }
+}
+
+/// Today's readiness picture: the check-in state, the signal rows, where the
+/// autoregulation reads from, and the baselines still collecting.
+struct ReadinessSection {
+    checked_in_today: bool,
+    weekly_checkin_present: bool,
+    input_count: usize,
+    readiness_summary: Vec<ReadinessSignalView>,
+    autoreg_source: Option<AdjustmentView>,
+    signal_groups: std::borrow::Cow<'static, [SignalGroupView]>,
+    latest_checkin: Option<CheckinInput>,
+    baseline_status: Vec<BaselineStatusView>,
+}
+
+fn readiness_section(model: &Model, v: &Verdicts, hrv_streak_derived: bool) -> ReadinessSection {
+    let derived = &v.picture.derived;
+    ReadinessSection {
+        checked_in_today: model.today_epoch_day.is_some_and(|t| {
+            model.checkins.iter().any(|c| {
+                !is_undated(c.observed_at)
+                    && local_day(c.observed_at, model.today_utc_offset_sec) == t
+            })
+        }),
+        weekly_checkin_present: model.weekly_checkin().is_some(),
+        input_count: model.inputs.len(),
+        readiness_summary: v.picture.signal_rows(),
+        autoreg_source: build_autoreg_source(
+            v.readiness_inputs,
+            hrv_streak_derived,
+            derived
+                .collecting
+                .iter()
+                .any(|b| b.kind == autoreg::BaselineKind::Suspended),
+            model.today_utc_offset_sec,
+        ),
+        signal_groups: build_signal_groups(),
+        latest_checkin: model.checkins.iter().max_by_key(|c| c.observed_at).cloned(),
+        baseline_status: derived
+            .collecting
+            .iter()
+            .map(to_baseline_status_view)
+            .collect(),
+    }
+}
+
+/// The safety banner: the highest tier, why training is held and how the
+/// hold resolves, the illness check prompt, and why no plan is shown.
+struct SafetySection {
+    safety_tier: Option<SafetyTier>,
+    hold_reason: Option<HoldReason>,
+    hold_resolutions: Vec<HoldResolutionView>,
+    illness_check_prompt: bool,
+    plan_withheld: Option<PlanWithheld>,
+}
+
+fn safety_section(model: &Model, v: &Verdicts) -> SafetySection {
+    let readiness_inputs = v.readiness_inputs;
+    SafetySection {
+        safety_tier: v.safety.safety_tier,
+        hold_reason: hold_reason(v.safety.hold.as_ref(), model.profile().map(|p| &p.health)),
+        hold_resolutions: hold_resolutions(
+            readiness_inputs,
+            model.profile().is_some_and(|p| p.health.acute_illness),
+        ),
+        illness_check_prompt: autoreg::illness_active(readiness_inputs)
+            || autoreg::rhr_neck_check_due(readiness_inputs, &v.picture.rule_ctx()),
+        plan_withheld: model
+            .today_epoch_day
+            .and_then(|d| profile_for_day(model, d))
+            .as_deref()
+            .or(model.profile())
+            .and_then(|p| PlanProfile::new(p).withheld()),
+    }
 }
 
 #[cfg(test)]

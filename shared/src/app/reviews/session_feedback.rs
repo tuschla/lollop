@@ -1,8 +1,25 @@
 //! The feedback card: the latest run's spike and split, the single resolved
 //! message (safety gate first) and its coaching copy.
 
-use super::*;
-use crate::feedback;
+use crate::app::evidence_views::{reps_word, why_from};
+use crate::app::format::{fmt_km_or_mi, fmt_weight, is_ratio_base_km, weekday_name};
+use crate::app::model::{Model, SessionReview};
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::reviews::exec::{
+    DerivedExec, Exec, ExecInput, LiftEval, LiftOutcome, RunOutcome, Trigger, eval_of,
+    lift_severity, run_done_message, session_execution,
+};
+use crate::app::reviews::mastery::{Mastery, MasteryKind};
+use crate::app::reviews::split::{FEEDBACK_FRESH_DAYS, fresh_within};
+use crate::app::run_metrics::{RunFacts, spike_baseline_km};
+use crate::app::run_views::to_run_view;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{EvidenceTagView, FeedbackView, SessionPlanView, WhyView};
+use crate::day::{is_undated, local_day};
+use crate::evidence::claims;
+use crate::feedback::FeedbackCategory;
+use crate::schema::{Recommended, WorkoutType};
+use crate::{autoreg, feedback, running};
 
 /// Days a win (a new best, a completed week, a session or run done as planned,
 /// good pacing) stays on the card: today and yesterday, so a lift day never
@@ -206,9 +223,10 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     };
 
     let verbosity = feedback::verbosity_for_experience(c.advanced_user).value;
-    let double_progression = model
-        .profile()
-        .is_some_and(crate::plan::uses_double_progression);
+    let double_progression =
+        c.cx.plan_profile
+            .as_ref()
+            .is_some_and(crate::plan::uses_double_progression);
     let lighter_next = lighter_next(c.cx, lift.as_ref());
     let ctx = MessageCtx {
         cat: resolved.value,
@@ -222,8 +240,8 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
         run: inp.run.as_ref(),
         mastery: mastery.map(|m| &m.kind),
         derived_lift_count: derived.map_or(0, |d| d.lifts.len()),
-        signs: w.and_then(|w| w.overtraining_signs),
-        signal_count: w.map_or(0, overtraining_count),
+        signs: w.and_then(|w| w.safety.overtraining_signs),
+        signal_count: w.map_or(0, |w| w.safety.signal_count()),
         recovery_week_active: c.recovery_week_active,
         lighter_next,
         double_progression,
@@ -238,7 +256,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     ))
 }
 
-/// The weekly check-in's safety signals and the run spike for the safety gate:
+/// The weekly check-in's safety screens and the run spike for the safety gate:
 /// a spike fraction stated on the session review wins over the derived one.
 fn safety_signals(
     w: Option<&SessionReview>,
@@ -246,11 +264,7 @@ fn safety_signals(
     spike: Option<RunSpike>,
 ) -> feedback::SafetySignals {
     feedback::SafetySignals {
-        bone_pain_red_flag: w.is_some_and(|w| w.bone_pain_red_flag),
-        compulsive_flag: w.is_some_and(|w| w.compulsive_flag),
-        reds_signal_reported: w.is_some_and(|w| w.reds_signal_reported),
-        overtraining_signal_count: w.map_or(0, overtraining_count),
-        overtraining_weeks: w.and_then(|w| w.overtraining_signal_weeks),
+        screen: w.map(|w| w.safety).unwrap_or_default(),
         single_session_spike_frac: session
             .and_then(|s| s.single_session_spike_frac)
             .or(spike.map(|s| s.frac)),
@@ -320,9 +334,9 @@ fn execution_input(
     let superseded = |d: &DerivedExec, o: &LiftOutcome| {
         c.today_session.is_some_and(|t| {
             t.epoch_day > d.epoch_day
-                && t.items
-                    .iter()
-                    .any(|it| !it.is_run() && crate::plan::same_movement(&it.exercise, &o.exercise))
+                && t.items.iter().any(|it| {
+                    !it.is_run() && crate::exercise::same_movement(&it.exercise, &o.exercise)
+                })
         })
     };
     let derived_lift = || {
@@ -386,7 +400,7 @@ fn mastery_lead(exec: Option<Exec>, exec_day: Option<i64>, m: &Mastery) -> Optio
     });
     if mastery_newer || exec_yields {
         return Some(Exec {
-            rec: graded(
+            rec: Recommended::new(
                 FeedbackCategory::PositiveMastery,
                 claims::FB_MASTERY_ANCHOR_001,
             ),
@@ -460,7 +474,7 @@ pub(in crate::app) struct MessageCtx<'a> {
     pub(in crate::app) run: Option<&'a RunOutcome>,
     pub(in crate::app) mastery: Option<&'a MasteryKind>,
     pub(in crate::app) derived_lift_count: usize,
-    pub(in crate::app) signs: Option<OvertrainingSigns>,
+    pub(in crate::app) signs: Option<feedback::OvertrainingSigns>,
     pub(in crate::app) signal_count: u8,
     pub(in crate::app) recovery_week_active: bool,
     /// The plan derated this lift's next session (AUTOREG-E1RM-GATE-001).
@@ -711,7 +725,7 @@ fn corrective_message(m: &MessageCtx) -> String {
                     format!(
                         " Your next {} session is set about {:.0}% lighter.",
                         o.exercise,
-                        crate::app::anchors::E1RM_DROP_PCT
+                        autoreg::E1RM_NOISE_FRAC * 100.0
                     )
                 } else {
                     " Keep the same weight next time and aim to finish every set.".to_string()
@@ -722,7 +736,7 @@ fn corrective_message(m: &MessageCtx) -> String {
                         if Some(d) == m.today {
                             " today".to_string()
                         } else {
-                            format!(" on {}", crate::app::plan_views::weekday_name(d))
+                            format!(" on {}", weekday_name(d))
                         }
                     })
                     .unwrap_or_default();

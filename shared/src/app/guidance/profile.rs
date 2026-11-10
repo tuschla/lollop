@@ -1,21 +1,28 @@
-use super::*;
+use crate::app::evidence_views::describe;
+use crate::app::format::{fmt_u8_range, fmt_whole_km_or_mi};
+use crate::app::guidance::hybrid::build_hybrid_guidance;
+use crate::app::guidance::rows::{
+    WeeklyBasis, push_guidance, push_guidance_mi, push_hold_row, training_age_label,
+    weekly_basis_text,
+};
+use crate::app::guidance::running::build_running_guidance;
+use crate::app::guidance::strength::build_strength_guidance;
+use crate::app::memo::LastMemo;
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
 use crate::hybrid;
-
-/// Where the weekly running volume the guidance reasons about came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::app) enum WeeklyBasis {
-    /// Measured from the athlete's logged runs.
-    Logged,
-    /// The stated profile figure.
-    Profile,
-}
+use crate::individualization::{self, Environment};
+use crate::profile::{PlanProfile, Profile};
+use crate::schema::{Adjustment, Recommended};
 
 /// The weekly running volume the guidance rows should reason about, and how it
 /// was determined: the LARGER of the stated profile figure and the MEASURED
 /// recent volume from logged runs, so a runner who set up at 30 km/wk but now
 /// logs 70 still trips the volume-gated safety guards. `None` measured (no run
-/// history) → the stated figure.
-pub(in crate::app) fn effective_weekly_km(
+/// history) → the stated figure. Unlike the plan's layoff-aware
+/// `plan::run::effective_weekly_km`, the stated figure always stays a floor
+/// here: the safety guards must err towards the larger volume.
+pub(in crate::app) fn stated_or_measured_weekly_km(
     p: &Profile,
     recent_weekly_km: Option<f64>,
 ) -> (f64, WeeklyBasis) {
@@ -26,23 +33,13 @@ pub(in crate::app) fn effective_weekly_km(
     }
 }
 
-/// The weekly volume with its source, in km or miles: "70 km a week from your
-/// logged runs" / "19 mi a week from your profile".
-pub(super) fn weekly_basis_text(weekly_km: f64, basis: WeeklyBasis, mi: bool) -> String {
-    let source = match basis {
-        WeeklyBasis::Logged => "from your logged runs",
-        WeeklyBasis::Profile => "from your profile",
-    };
-    format!("{} a week {source}", fmt_whole_km_or_mi(weekly_km, mi))
-}
-
 /// Run the programming engine over the profile, producing evidence-cited rows.
 /// Uses the STATED weekly volume (no logged-run history in scope) and no
 /// training hold; `view()` calls [`build_guidance_measured`] with the measured
 /// volume and today's [`calculator_hold`].
 #[cfg(test)]
 pub(in crate::app) fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
-    let (weekly_km, basis) = effective_weekly_km(p, None);
+    let (weekly_km, basis) = stated_or_measured_weekly_km(p, None);
     build_guidance_measured(p, weekly_km, basis, None)
 }
 
@@ -110,17 +107,15 @@ fn build_guidance_measured_uncached(
         push_hold_row(&mut rows, "Safety", hold);
     }
 
-    let lifting = p.weekly_sets > 0;
-    let running = p.running_days_per_week > 0;
-
-    let age_r = individualization::training_age_from_cadence(p.progression_cadence);
+    let pp = PlanProfile::new(p);
+    let age_r = pp.training_age_rec();
     let age = age_r.value;
     let before = rows.len();
     push_guidance(
         &mut rows,
         "Profile",
         format!("Training age: {}", training_age_label(age)),
-        &age_r,
+        age_r,
     );
     if let Some(row) = rows.get_mut(before) {
         row.training_age = training_age_label(age).to_string();
@@ -137,8 +132,8 @@ fn build_guidance_measured_uncached(
         return rows;
     }
 
-    if lifting {
-        build_strength_guidance(p, age, &mut rows);
+    if pp.lifts() {
+        build_strength_guidance(&pp, &mut rows);
     }
 
     // indiv-006: novices get the largest return per added set, advanced
@@ -162,19 +157,15 @@ fn build_guidance_measured_uncached(
         &vs,
     );
 
-    // Training-age years for the running weekly volume-increase cap and the
-    // hybrid lower-body interference check.
-    let age_years = crate::plan::training_age_years(age);
-
-    if running {
-        build_running_guidance(p, age, age_years, &mut rows);
+    if pp.runs() {
+        build_running_guidance(&pp, &mut rows);
     }
 
     build_environment_guidance(p, &mut rows);
     build_reentry_guidance(p, &mut rows);
 
-    if lifting && running {
-        build_hybrid_guidance(p, weekly_km, weekly_basis, &mut rows);
+    if pp.lifts() && pp.runs() {
+        build_hybrid_guidance(&pp, weekly_km, weekly_basis, &mut rows);
     }
 
     rows
@@ -225,7 +216,7 @@ fn build_safety_guidance(
             ),
             &pre,
         );
-        let warn = graded((), claims::SAFE_PREG_WARN_001);
+        let warn = Recommended::new((), claims::SAFE_PREG_WARN_001);
         push_guidance(
             rows,
             "Safety",
@@ -250,7 +241,7 @@ fn build_safety_guidance(
         push_guidance_mi(rows, "Safety", bsi_text(false), bsi_text(true), &bsi);
         // hybrid-024 energy-availability guard: high-volume endurance is one
         // of its higher-risk cohorts.
-        let ea = graded((), claims::HYB_EA_001);
+        let ea = Recommended::new((), claims::HYB_EA_001);
         push_guidance(
             rows,
             "Safety",
@@ -317,7 +308,7 @@ fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
             ),
         };
         push_guidance(rows, "Return to training", summary, &re);
-        let mev = graded((), claims::HYP_LAYOFF_001);
+        let mev = Recommended::new((), claims::HYP_LAYOFF_001);
         push_guidance(
             rows,
             "Return to training",

@@ -1,4 +1,8 @@
-use super::*;
+use crate::app::guidance::rows::push_guidance;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
+use crate::schema::Recommended;
 
 /// Calisthenics-only guidance rows (same `GuidanceView` shape as the lift audit),
 /// surfaced only for a `Calisthenics` profile: the muscle-up count gate (when
@@ -11,10 +15,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
     use crate::schema::LadderId;
     let model = cx.model;
     let mut rows = Vec::new();
-    let Some(profile) = model
-        .profile()
-        .filter(|p| p.resistance_modality == ResistanceModality::Calisthenics)
-    else {
+    let Some(profile) = model.profile().filter(|p| p.uses_calisthenics()) else {
         return rows;
     };
     let anchors = cx.calis_anchors_now();
@@ -33,7 +34,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
                  (a coaching rule of thumb).",
                 n = cal::MUSCLE_UP_GATE_REPS
             ),
-            &graded((), claims::CAL_GATE_NUMBERS_001),
+            &Recommended::new((), claims::CAL_GATE_NUMBERS_001),
         );
     }
 
@@ -61,7 +62,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
                 "Skill tracks are optional. To start one, pick it as a starting step or log a first set: {}.",
                 starts.join(", ")
             ),
-            &graded((), claims::CAL_PROG_STATIC_001),
+            &Recommended::new((), claims::CAL_PROG_STATIC_001),
         );
     }
 
@@ -98,18 +99,18 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
             "Handstand and pike work loads your wrists. Warm up first (wrist circles, \
              rocking on all fours), and only progress while bending the wrist back \
              under load is pain-free.",
-            graded((), claims::CAL_INJURY_WRIST_001),
+            Recommended::new((), claims::CAL_INJURY_WRIST_001),
         ),
         (
             straight_arm_tier,
             "Straight-arm holds load the elbow tendons, which adapt slowly: stay at \
              least 4 weeks per lever stage and stop if the front of the elbow hurts.",
-            graded((), claims::CAL_TENDON_001),
+            Recommended::new((), claims::CAL_TENDON_001),
         ),
         (
             straight_arm_tier,
             "Keep breathing through every hold.",
-            graded((), claims::CAL_BP_VALSALVA_001),
+            Recommended::new((), claims::CAL_BP_VALSALVA_001),
         ),
     ];
     for (show, text, claim) in fixed_rows {

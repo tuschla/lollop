@@ -28,7 +28,10 @@ fn two_qualifying_pushup_sessions() -> Vec<LoggedSet> {
 
 /// Calisthenics anchors for the two-day push-up fixture (days 100–101), as of
 /// day 101 on a strength goal.
-fn pushup_anchors(sets: &[LoggedSet], inputs: &[ReadinessInput]) -> Vec<crate::plan::CalisAnchor> {
+fn pushup_anchors(
+    sets: &[LoggedSet],
+    inputs: &[ReadinessInput],
+) -> Vec<crate::calisthenics::progression::CalisAnchor> {
     build_calisthenics_anchors(
         sets.iter()
             .map(|s| (s, crate::calisthenics::tier_by_name(&s.exercise))),
@@ -462,7 +465,10 @@ fn a_downgrade_on_a_calisthenics_hold_shows_no_zero_reps_or_rir_advice() {
         items: vec![hold, dynamic],
         ..Default::default()
     };
-    let recs = vec![graded(Adjustment::DowngradeSession, claims::HRV_001)];
+    let recs = vec![Recommended::new(
+        Adjustment::DowngradeSession,
+        claims::HRV_001,
+    )];
     apply_adjustments_to_session(&mut ns, &recs, false);
     let h = &ns.items[0];
     assert!(!h.summary.contains("×0"), "no ×0 on a hold: {}", h.summary);
@@ -609,7 +615,10 @@ fn cap_rpe_caps_a_calisthenics_rir_band() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
+        &[Recommended::new(
+            Adjustment::CapRpe(1),
+            claims::AUTOREG_E1RM_GATE_001,
+        )],
         false,
     );
     assert_eq!(
@@ -652,7 +661,10 @@ fn cap_rpe_over_a_holds_only_session_does_not_mark_adjusted() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
+        &[Recommended::new(
+            Adjustment::CapRpe(1),
+            claims::AUTOREG_E1RM_GATE_001,
+        )],
         false,
     );
     assert_ne!(
@@ -680,7 +692,7 @@ fn doms_only_inputs_leave_calisthenics_advance_ready() {
     // "continue") and must NOT freeze ladder progression.
     let sets = two_qualifying_pushup_sessions();
     let base = pushup_anchors(&sets, &[]);
-    let ready = |anchors: &[crate::plan::CalisAnchor]| {
+    let ready = |anchors: &[crate::calisthenics::progression::CalisAnchor]| {
         anchors
             .iter()
             .find(|a| a.ladder == crate::schema::LadderId::HorizontalPush)
@@ -707,7 +719,7 @@ fn a_pain_clear_after_pain_re_enables_calisthenics_advance() {
     // (value 0, the LATEST reading) re-opens it; an "any Pain signal ever"
     // gate would never re-enable.
     let sets = two_qualifying_pushup_sessions();
-    let ready = |anchors: &[crate::plan::CalisAnchor]| {
+    let ready = |anchors: &[crate::calisthenics::progression::CalisAnchor]| {
         anchors
             .iter()
             .find(|a| a.ladder == crate::schema::LadderId::HorizontalPush)

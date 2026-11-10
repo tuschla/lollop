@@ -4,42 +4,31 @@
 //! card, the "session done" summary, the trend row and the "last time" line on
 //! the next session.
 
-use super::*;
-
 mod exec;
-// The card child shadows the glob-imported `crate::feedback` engine in this
-// module; children that call the engine import it by path.
-mod feedback;
 mod last_time;
 mod mastery;
 mod rows;
+mod session_feedback;
 mod split;
 mod trend;
 
-pub(super) use exec::*;
-pub(super) use feedback::*;
-pub(super) use last_time::*;
-pub(super) use mastery::*;
-pub(super) use rows::*;
-pub(super) use split::*;
-pub(super) use trend::*;
+pub(super) use exec::{build_session_done, derive_session_exec};
+pub(super) use last_time::annotate_last_time;
+pub(super) use mastery::detect_mastery;
+pub(super) use rows::{
+    ReviewCtx, next_time_add_superseded, remaining_sets_call_spent, review_views,
+};
+pub(super) use session_feedback::{
+    FeedbackCtx, build_feedback, feedback_track_split, latest_run_spike,
+};
+pub(super) use split::{
+    merged_review, review_adjustment_expired, review_age_days, session_part, weekly_part,
+};
 // `log.rs` compaction reaches these through `crate::app`.
 pub(crate) use split::{submit_review_sets_session, submit_review_sets_weekly};
+pub(super) use trend::build_trend;
 
-/// Days a session-execution note (manual or derived) stays current: transient
-/// coaching on ONE session expires after a week so a stale verdict stops
-/// leading. Safety signals never expire here.
-pub(super) const FEEDBACK_FRESH_DAYS: i64 = 7;
-
-/// Whether `day` is at most `days` before `today`; true without a clock or a
-/// date.
-fn fresh_within(today: Option<i64>, day: Option<i64>, days: i64) -> bool {
-    match (today, day) {
-        (Some(t), Some(d)) => t.saturating_sub(d) <= days,
-        _ => true,
-    }
-}
-
-/// The e1RM change that clears day-to-day noise: ±5 % (autoreg-006/007, Helms
-/// 2018). A new best counts only beyond it; the trend row bands on it too.
-const E1RM_NOISE_FRAC: f64 = 0.05;
+#[cfg(test)]
+pub(super) use exec::target_rir;
+#[cfg(test)]
+pub(super) use session_feedback::{MessageCtx, feedback_message};

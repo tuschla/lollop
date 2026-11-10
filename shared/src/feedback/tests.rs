@@ -60,11 +60,13 @@ fn trend_summary_precedence_and_bands() {
 fn safety_gate_priority_order() {
     // Pain outranks everything.
     let all = SafetySignals {
-        bone_pain_red_flag: true,
-        compulsive_flag: true,
-        overtraining_signal_count: 5,
+        screen: SafetyScreen {
+            bone_pain_red_flag: true,
+            compulsive_flag: true,
+            overtraining_signal_count: 5,
+            ..Default::default()
+        },
         single_session_spike_frac: Some(0.9),
-        ..Default::default()
     };
     assert_eq!(
         safety_gate(all).unwrap().value,
@@ -73,11 +75,13 @@ fn safety_gate_priority_order() {
 
     // Behavior outranks recovery + progression.
     let behav = SafetySignals {
-        bone_pain_red_flag: false,
-        compulsive_flag: true,
-        overtraining_signal_count: 5,
+        screen: SafetyScreen {
+            bone_pain_red_flag: false,
+            compulsive_flag: true,
+            overtraining_signal_count: 5,
+            ..Default::default()
+        },
         single_session_spike_frac: Some(0.9),
-        ..Default::default()
     };
     assert_eq!(
         safety_gate(behav).unwrap().value,
@@ -86,9 +90,11 @@ fn safety_gate_priority_order() {
 
     // Recovery outranks progression.
     let rec = SafetySignals {
-        overtraining_signal_count: 2,
+        screen: SafetyScreen {
+            overtraining_signal_count: 2,
+            ..Default::default()
+        },
         single_session_spike_frac: Some(0.9),
-        ..Default::default()
     };
     assert_eq!(
         safety_gate(rec).unwrap().value,
@@ -110,7 +116,10 @@ fn safety_gate_priority_order() {
     // A single NFOR signal does not fire (needs >=2).
     assert!(
         safety_gate(SafetySignals {
-            overtraining_signal_count: 1,
+            screen: SafetyScreen {
+                overtraining_signal_count: 1,
+                ..Default::default()
+            },
             ..Default::default()
         })
         .is_none()
@@ -158,8 +167,11 @@ fn suppression_set_matches_file05() {
 #[test]
 fn reds_screen_routes_to_energy_referral_above_behavior() {
     let reds = SafetySignals {
-        reds_signal_reported: true,
-        overtraining_signal_count: 3,
+        screen: SafetyScreen {
+            reds_signal_reported: true,
+            overtraining_signal_count: 3,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let c = safety_gate(reds).expect("energy concern");
@@ -169,7 +181,10 @@ fn reds_screen_routes_to_energy_referral_above_behavior() {
     // With the compulsive-exercise screen also positive, the referral
     // still shows (one card only).
     let both = SafetySignals {
-        compulsive_flag: true,
+        screen: SafetyScreen {
+            compulsive_flag: true,
+            ..reds.screen
+        },
         ..reds
     };
     assert_eq!(
@@ -188,12 +203,15 @@ fn overtraining_sustained_needs_two_signs_for_a_week() {
 
 #[test]
 fn resolve_suppresses_praise_under_concern() {
-    let praise = Some(evidence::graded(
+    let praise = Some(Recommended::new(
         FeedbackCategory::PositiveMastery,
         claims::AUTOREG_RIR_001,
     ));
     let injury = SafetySignals {
-        bone_pain_red_flag: true,
+        screen: SafetyScreen {
+            bone_pain_red_flag: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(
@@ -202,7 +220,7 @@ fn resolve_suppresses_praise_under_concern() {
     );
 
     // Safety-clear: execution passes through.
-    let praise = Some(evidence::graded(
+    let praise = Some(Recommended::new(
         FeedbackCategory::PositiveMastery,
         claims::AUTOREG_RIR_001,
     ));
@@ -316,15 +334,21 @@ fn recovery_concern_respects_duration_condition() {
     // Two signals over half a week is a "single noisy night" territory -
     // the gate must NOT fire (feedback-036 duration condition).
     let short = SafetySignals {
-        overtraining_signal_count: 2,
-        overtraining_weeks: Some(0.5),
+        screen: SafetyScreen {
+            overtraining_signal_count: 2,
+            overtraining_signal_weeks: Some(0.5),
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert!(safety_gate(short).is_none());
     // >=1 week satisfies the stated >=1-2 wk band.
     let sustained = SafetySignals {
-        overtraining_signal_count: 2,
-        overtraining_weeks: Some(1.0),
+        screen: SafetyScreen {
+            overtraining_signal_count: 2,
+            overtraining_signal_weeks: Some(1.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(
@@ -333,8 +357,11 @@ fn recovery_concern_respects_duration_condition() {
     );
     // Untracked duration errs protective: count alone still fires.
     let untracked = SafetySignals {
-        overtraining_signal_count: 2,
-        overtraining_weeks: None,
+        screen: SafetyScreen {
+            overtraining_signal_count: 2,
+            overtraining_signal_weeks: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert!(safety_gate(untracked).is_some());

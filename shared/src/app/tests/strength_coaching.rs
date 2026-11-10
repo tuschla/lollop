@@ -18,7 +18,7 @@ fn set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, day: i64) -> LoggedS
     }
 }
 
-fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::Anchors {
+fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::LiftAnchors {
     build_plan_anchors(
         SetIndex::new(sets)
             .with_facts(sets)
@@ -72,12 +72,7 @@ fn anchor_merges_same_movement_names() {
         set("Barbell back squat", 110.0, 5, 8.0, 2),
     ];
     let a = anchors_at(&sets, AnchorCtx::default(), 3);
-    assert_eq!(
-        a.lift_e1rm.len(),
-        1,
-        "one anchor per movement: {:?}",
-        a.lift_e1rm
-    );
+    assert_eq!(a.e1rm.len(), 1, "one anchor per movement: {:?}", a.e1rm);
     let want = (crate::strength::e1rm_epley_rpe(110.0, 5, 8.0) * 10.0).round() / 10.0;
     assert_eq!(a.e1rm_for("Back squat"), Some(want));
     assert_eq!(a.e1rm_for("Barbell back squat"), Some(want));
@@ -142,7 +137,7 @@ fn declared_layoff_and_inactivity_do_not_stack() {
     let d = a.load_frac_for("Back Squat").expect("a re-entry derate");
     assert_eq!(d.frac, 0.70);
     assert!(matches!(d.cause, DerateCause::Reentry { .. }));
-    assert_eq!(a.lift_derates.len(), 1, "one derate, never stacked");
+    assert_eq!(a.derates.len(), 1, "one derate, never stacked");
 }
 
 #[test]
@@ -252,7 +247,10 @@ fn a_plate_floored_load_is_asked_at_the_effort_it_takes() {
     // unfloored effort (RPE 8) it reads 52.5 kg, a 5.4 % drop
     // (AUTOREG-E1RM-GATE-001 at fixed RPE, autoreg-022).
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 55.5)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 55.5)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
@@ -277,12 +275,15 @@ fn e1rm_drop_cut_also_leaves_one_more_rep_in_reserve() {
     // rep left than planned as well as ~5 % less weight, so the lighter load
     // done as asked reads at the estimate instead of as a second drop.
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
-        lift_derates: vec![crate::plan::LiftDerate {
-            exercise: "Back Squat".into(),
-            frac: crate::app::anchors::E1RM_DROP_GATE,
-            cause: DerateCause::E1rmDrop,
-        }],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            derates: vec![crate::plan::LiftDerate {
+                exercise: "Back Squat".into(),
+                frac: crate::autoreg::E1RM_REDUCE_RATIO,
+                cause: DerateCause::E1rmDrop,
+            }],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
@@ -360,7 +361,7 @@ fn planned_deload_sets_never_score_as_a_readiness_e1rm_drop() {
 }
 
 fn pct_rx(pct: f32, reps: u8, velocity: Option<u8>) -> Recommended<Prescription> {
-    graded(
+    Recommended::new(
         Prescription::Lift(LiftPrescription {
             exercise: "Back Squat".into(),
             sets: 4,
@@ -380,7 +381,10 @@ fn percent_item_carries_expected_target_rpe_and_plates() {
     // 85 % × 3 implies ~2 reps in reserve → RPE 8 on the face and the
     // editor hint. The barbell load comes with its plates.
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
@@ -399,7 +403,10 @@ fn percent_item_carries_expected_target_rpe_and_plates() {
 fn power_item_face_shows_move_fast_without_a_device_number() {
     // The speed cue is on the face and needs no device.
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(50.0, 3, Some(10)), &anchors, None, false);
@@ -412,12 +419,15 @@ fn power_item_face_shows_move_fast_without_a_device_number() {
 #[test]
 fn derated_card_names_the_reason_and_cites_detraining() {
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
-        lift_derates: vec![crate::plan::LiftDerate {
-            exercise: "Back Squat".into(),
-            frac: 0.70,
-            cause: DerateCause::Detraining { days_since: 44 },
-        }],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            derates: vec![crate::plan::LiftDerate {
+                exercise: "Back Squat".into(),
+                frac: 0.70,
+                cause: DerateCause::Detraining { days_since: 44 },
+            }],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(80.0, 5, None), &anchors, None, false);
@@ -473,7 +483,7 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
         .week_plan
         .into_iter()
         .flat_map(|s| s.items.into_iter())
-        .find(|i| crate::plan::same_movement(&i.exercise, "Row") && i.load_kg.is_none())
+        .find(|i| crate::exercise::same_movement(&i.exercise, "Row") && i.load_kg.is_none())
         .expect("an effort-prescribed row item");
     let last = item.last_set.expect("last time is shown");
     assert_eq!((last.weight_kg, last.reps), (60.0, 8));
@@ -489,7 +499,7 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
 /// set: one 60 kg × 8 @ RPE 7 row logged `age_days` before day 100.
 fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> PrescriptionView {
     let today = 100;
-    let rx = graded(
+    let rx = Recommended::new(
         Prescription::Lift(LiftPrescription {
             exercise: "Row".into(),
             sets: 3,
@@ -509,7 +519,7 @@ fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> Pres
         &mut items,
         &model,
         &SetIndex::new(&model.sets),
-        anchors,
+        &anchors.lift,
         &[Some(today - age_days)],
         today,
         false,
@@ -527,7 +537,10 @@ fn no_start_weight_after_a_break_the_plan_treats_as_a_fresh_start() {
     assert!(old.last_set.is_some(), "last time is still shown");
     assert_eq!(old.suggested_load_kg, None);
     let reentry = crate::plan::Anchors {
-        reentry_novice: true,
+        lift: crate::plan::LiftAnchors {
+            reentry_novice: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(rir_row_item(&reentry, 3, 5).suggested_load_kg, None);
@@ -640,7 +653,7 @@ fn warm_up_sets_do_not_silence_the_prilepin_audit() {
 #[test]
 fn a_deload_lift_day_is_titled_as_the_lighter_version() {
     let rx = |claim: ClaimId| {
-        graded(
+        Recommended::new(
             Prescription::Lift(LiftPrescription {
                 exercise: "Back Squat".into(),
                 sets: 3,
@@ -794,10 +807,10 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         0,
     );
     assert_eq!(
-        fresh.lift_e1rm[0].1, returning.lift_e1rm[0].1,
+        fresh.e1rm[0].1, returning.e1rm[0].1,
         "the e1RM anchor is the logged value either way"
     );
-    assert!(fresh.lift_derates.is_empty());
+    assert!(fresh.derates.is_empty());
     assert_eq!(
         returning.load_frac_for("Back Squat").map(|d| d.frac),
         Some(0.70),
@@ -819,21 +832,27 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = graded(pres, claims::STR_INTENT_001);
+    let rx = Recommended::new(pres, claims::STR_INTENT_001);
     let anchors_full = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let anchors_re = crate::plan::Anchors {
-        lift_e1rm: vec![("Back Squat".into(), 100.0)],
-        lift_derates: vec![crate::plan::LiftDerate {
-            exercise: "Back Squat".into(),
-            frac: 0.70,
-            cause: crate::plan::DerateCause::Reentry {
-                day: 0,
-                ramp_days: 28,
-            },
-        }],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Back Squat".into(), 100.0)],
+            derates: vec![crate::plan::LiftDerate {
+                exercise: "Back Squat".into(),
+                frac: 0.70,
+                cause: crate::plan::DerateCause::Reentry {
+                    day: 0,
+                    ramp_days: 28,
+                },
+            }],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let full = flatten_prescription(&rx, &anchors_full, None, false);
@@ -991,7 +1010,7 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
         "12 wk off → treat as a fresh novice"
     );
     assert!(
-        anchors.e1rm_for("Back Squat").is_none() && anchors.lift_derates.is_empty(),
+        anchors.e1rm_for("Back Squat").is_none() && anchors.derates.is_empty(),
         "no invented load fraction beyond 8 wk: the pre-layoff anchor is set aside"
     );
 
@@ -1006,7 +1025,11 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = graded(pres, claims::STR_INTENT_001);
+    let rx = Recommended::new(pres, claims::STR_INTENT_001);
+    let anchors = crate::plan::Anchors {
+        lift: anchors,
+        ..Default::default()
+    };
     let item = flatten_prescription(&rx, &anchors, None, false);
     // No anchor-derived %e1RM load: a novice re-entry trains by RIR (HARD RULE 1).
     assert_eq!(item.load_kg, None, "no %e1RM load on a novice re-entry");

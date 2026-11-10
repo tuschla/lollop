@@ -486,7 +486,7 @@ fn hr_of(app: &Engine, model: &Model, id: u64) -> f64 {
 fn review_bpm_run_uses_the_age_of_its_own_day_across_birthdays() {
     // 40th birthday on D0 + 10.
     let b40 = {
-        let (y, m, d) = crate::civil_from_days(D0 + 10);
+        let (y, m, d) = crate::day::civil_from_days(D0 + 10);
         days_from_civil(y - 40, m, d)
     };
     let eve = (D0 + 9) * DAY_SEC + 12 * 3600;
@@ -509,7 +509,7 @@ fn review_bpm_run_uses_the_age_of_its_own_day_across_birthdays() {
     assert_eq!(hr_of(&app, &model, 2), pct(tanaka(40.0)), "40th birthday");
 }
 
-/// `ingest::aged_on`: after the 18th birthday a past day keeps its under-18
+/// `profile_age::aged_on`: after the 18th birthday a past day keeps its under-18
 /// gate (SAFE-PEDS-001); a 29 February birthday completes on 1 March in a
 /// common year.
 #[test]
@@ -538,7 +538,7 @@ fn review_youth_gate_is_aged_per_day_across_the_18th_birthday() {
 #[test]
 fn a_past_runs_hr_keeps_its_logged_offset_across_a_timezone_change() {
     let b40 = {
-        let (y, m, d) = crate::civil_from_days(D0 + 10);
+        let (y, m, d) = crate::day::civil_from_days(D0 + 10);
         days_from_civil(y - 40, m, d)
     };
     // 00:30 local on the 40th birthday at UTC+2 (= 22:30 UTC the day before).

@@ -6,13 +6,13 @@
 use crate::evidence::cite::{
     CITE_BOSQUET_2007, CITE_DANIELS_2022, CITE_MEEUSEN_2013, CITE_NHS_C25K, CITE_PFITZINGER_2009,
 };
-use crate::evidence::claim;
-use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
+use crate::evidence::contested::ContestedId;
+use crate::evidence::draft::claim;
+use crate::evidence::grade::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
 
 claim_group! {
     RunningClaim => Running;
     RUN_DELOAD_001 => claim(
-        "RUN-DELOAD-001",
         "Train in a 3:1 cycle: three building weeks, then one lighter week that cuts both distance and intensity by 20–40% (2:1 if you're older, injury-prone or new to training).",
         Moderate,
         &[
@@ -26,7 +26,6 @@ claim_group! {
     // This is the Riegel/Daniels equivalency combiner, NOT the VDOT-fitness
     // estimate (RUN-VDOT-001); `running::race_equivalency` cites this.
     RUN_EQUIV_001 => claim(
-        "RUN-EQUIV-001",
         "Race predictions use two standard methods, Riegel's formula and Daniels' VDOT: when they agree within about 2% you see their midpoint, otherwise a range.",
         Moderate,
         &[
@@ -43,7 +42,6 @@ claim_group! {
     // at the bookkeeping level here; the statement carries the caveat so
     // no caller can present TSB as a validated performance predictor.
     LOAD_PMC_001 => claim(
-        "LOAD-PMC-001",
         "Fitness and fatigue are tracked as two running averages of your daily training load: a 42-day one (fitness) and a 7-day one (fatigue). Yesterday's gap between them shows how fresh you are. The evidence is moderate for this as bookkeeping, but weak for predicting performance.",
         Moderate,
         &[
@@ -61,7 +59,6 @@ claim_group! {
     // is empirically confirmed (mean-HR methods under-rate intermittent work).
     #[kb_only]
     RUN_INTERVAL_AVG_FAIL_001 => claim(
-        "RUN-INTERVAL-AVG-FAIL-001",
         "A single average pace or average %HRmax cannot distinguish an interval session from a steady run of equal average intensity; only a convex weighting over a per-sample time-series can. Mean-HR load methods empirically under-estimate and misrank intermittent/high-intensity work.",
         Moderate,
         &[
@@ -79,10 +76,9 @@ claim_group! {
     // average speed (variability index > 1). Graded WEAK/ExpertOpinion
     // honestly: Skiba's GOVSS is a self-published, non-peer-reviewed white
     // paper, and the app has no elevation → no grade adjustment (normalized
-    // *speed*, not power). `running::track_variability_index` computes it.
+    // *speed*, not power). `gps::track_variability_index` computes it.
     // See the KB file's caveats.
     RUN_INTERVAL_VI_001 => claim(
-        "RUN-INTERVAL-VI-001",
         "The variability index compares your GPS speed, weighted toward the fast stretches, with your average speed. It stays near 1.0 on steady runs and rises above 1.0 on interval-like runs, so the GPS track alone tells them apart without heart rate. It assumes flat ground, with no adjustment for hills.",
         Weak,
         &[
@@ -97,19 +93,16 @@ claim_group! {
     // 12-min max run. [Moderate]
     #[kb_only]
     LOAD_COOPER_001 => claim(
-        "LOAD-COOPER-001",
         "The Cooper test estimates your aerobic fitness (VO2max) from how far you run in 12 minutes: (meters covered − 504.9) ÷ 44.73.",
         Moderate,
         &["Cooper 1968, JAMA 203(3):201-204 (12-min run field test of VO2max)"],
     ),
     RUN_WORKOUT_001 => claim(
-        "RUN-WORKOUT-001",
         "Each run type has its own pace, heart-rate, effort and duration targets, taken from standard coaching tables.",
         ExpertOpinion,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_MAF_001 => claim(
-        "RUN-MAF-001",
         "The Maffetone heart-rate cap for base training is 180 minus your age, adjusted: add 5 if you're elite or have trained 2 or more years injury-free and kept improving; subtract 5 if you're returning from injury or illness or get 2 or more colds a year; subtract 10 if you're chronically overtrained, inactive or on medication. It's an option for base training, not the default, and moves toward a measured easy-effort ceiling (your first lactate threshold) when you have that data.",
         Weak,
         &[
@@ -121,16 +114,14 @@ claim_group! {
     ])
     // Global CQ-12 (MAF 180-formula vs measured LT1), not File 04's local
     // numbering.
-    .contested("CQ-12"),
+    .contested(ContestedId::CQ_12),
     RUN_PROGRESS_001 => claim(
-        "RUN-PROGRESS-001",
         "Raising weekly distance by more than 30% over two weeks is linked to about 1.6 times the injury risk of rises under 10%. A safer ramp is 5–10% a week: beginners at most 10% (holding 2–3 weeks between increases), experienced runners about 5% or a fixed cap. Increase one thing at a time.",
         Weak,
         &["Nielsen et al. 2014, J Orthop Sports Phys Ther 44(10):739-747"],
     )
     .contradicting(&["10%/week rule failed its RCT (Buist 2008)"]),
     RUN_HRRECALC_001 => claim(
-        "RUN-HRRECALC-001",
         "Prefer a measured max HR (all-out field test) over age formulas; recalculate HR zones every 4–6 weeks.",
         Strong,
         &[
@@ -143,7 +134,6 @@ claim_group! {
     ])
     .safety(),
     RUN_SPIKE_BLOCK_001 => claim(
-        "RUN-SPIKE-BLOCK-001",
         "A single run more than 10% longer than your longest run of the previous 30 days is flagged, because one-off distance spikes are linked to overuse injury.",
         Moderate,
         &[
@@ -152,14 +142,12 @@ claim_group! {
     )
     .safety(),
     RUN_TAPER_001 => claim(
-        "RUN-TAPER-001",
         "Before a race, taper for about 2 weeks: cut distance by 41–60%, most steeply at the start, keep the intensity and number of runs, and add nothing new. By race distance, the same shape runs 7–10 days with about 40–50% less for a 5K or 10K, 10–14 days with about 50% less for a half marathon, and 2–3 weeks with 40–60% less for a marathon.",
         Strong,
         &[CITE_BOSQUET_2007, "Mujika & Padilla"],
     )
     .safety(),
     RUN_QUALITY_001 => claim(
-        "RUN-QUALITY-001",
         "Keep hard runs to 2–3 a week, at least 48 hours apart, and unless you're an elite runner, never do two very hard (zone 3) sessions on back-to-back days.",
         ExpertOpinion,
         &[
@@ -169,7 +157,6 @@ claim_group! {
     )
     .safety(),
     RUN_C25K_001 => claim(
-        "RUN-C25K-001",
         "Couch to 5K: three run/walk sessions a week for 9 weeks (10–12 if needed), at an effort you can talk at, with rest days between. Repeat any week that feels too hard.",
         ExpertOpinion,
         &["Josh Clark 1996; NHS version"],
@@ -177,14 +164,12 @@ claim_group! {
     .safety(),
     #[kb_only]
     RUN_DOWNWEEK_001 => claim(
-        "RUN-DOWNWEEK-001",
         "Insert an unscheduled down week when >=2 overtraining signals fire (RHR +5-7 bpm >=3 days, HRV downtrend, rising RPE, disrupted sleep/soreness/mood, standard-workout performance down >3-5%).",
         ExpertOpinion,
         &[CITE_MEEUSEN_2013, CITE_PFITZINGER_2009],
     )
     .safety(),
     RUN_VOLCAP_001 => claim(
-        "RUN-VOLCAP-001",
         "Daniels' weekly limits by run type: long run up to 25–30% of your weekly running (about 2–2.5 hours at most), threshold running up to 10%, intervals up to 8%, repetitions up to 5%.",
         ExpertOpinion,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
@@ -193,21 +178,18 @@ claim_group! {
         "The threshold and interval band caps rest on stronger evidence than the long-run share, which is a coaching convention - the whole set is registered at the more conservative expert-opinion floor",
     ]),
     RUN_TEMPO_001 => claim(
-        "RUN-TEMPO-001",
         "Tempo (threshold) runs: about your 15K-to-half-marathon race pace (about 90% of marathon pace), 88–92% of your max heart rate, effort 6–7 out of 10, for 20–40 minutes in one go or as cruise intervals (long repeats with short rests). Keep threshold running to 10% of your weekly running or less.",
         Moderate,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_INTERVAL_001 => claim(
-        "RUN-INTERVAL-001",
         "Intervals (VO2max work): about your 3K–5K race pace, 95–100% of your max heart rate, effort 8–9 out of 10, repeats of 3–5 minutes (800–1600 m) with about as long to recover. Keep interval running to 8% of your weekly running or less.",
         Moderate,
         &[CITE_DANIELS_2022],
     )
     .contradicting(&["Ronnestad: short intervals may be superior for VO2max"])
-    .contested("CQ-10"),
+    .contested(ContestedId::CQ_10),
     RUN_KARVONEN_001 => claim(
-        "RUN-KARVONEN-001",
         "If your resting heart rate is under 55 bpm, use heart-rate-reserve zones (Karvonen, based on max minus resting) rather than zones from max alone, because the two differ a lot. At 70 bpm or above they agree closely and either is fine. Between 55 and 69 bpm neither is established as better.",
         Moderate,
         &[
@@ -217,7 +199,6 @@ claim_group! {
     ),
     #[kb_only]
     RUN_CS_PROTOCOL_001 => claim(
-        "RUN-CS-PROTOCOL-001",
         "Critical speed, about the pace at your second lactate threshold, is estimated from 2–5 all-out efforts of different lengths: mostly 2–20 minutes, never under 2 or over 30 minutes, ideally one of 3–8 minutes and one of 12–30. A negative distance reserve in the result means the efforts weren't all-out. Avoid pairs that are too similar (1500 m and a mile) or too far apart (800 m and a half marathon).",
         Moderate,
         &["Galbraith/Nicolo et al. 2018 (linearity r=0.979-0.999)"],
@@ -227,7 +208,6 @@ claim_group! {
     ]),
     #[kb_only]
     RUN_POWER_001 => claim(
-        "RUN-POWER-001",
         "Running power zones (Coggan %FTP 7-zone: Z1<55, Z2 56-75, Z3 76-90, Z4 91-105, Z5 106-120, Z6 121-150, Z7>150, SweetSpot 88-94; Stryd %CP 5-zone: Z1 65-80, Z2 80-90, Z3 90-100, Z4 100-115, Z5 115-130; Stryd CP ~= 40-min power) are a consistent proxy, not a criterion metabolic measure; the two frameworks are NOT interchangeable.",
         Weak,
         &[
@@ -237,7 +217,6 @@ claim_group! {
     )
     .contradicting(&["Weak that power = metabolic cost (Moderate as a framework only)"]),
     RUN_RECOVERY_001 => claim(
-        "RUN-RECOVERY-001",
         "Recovery runs: at least 20% slower than marathon pace, under 76% of your max heart rate and under 70% of your heart-rate reserve, effort 2–3 out of 10, for 20–40 minutes.",
         ExpertOpinion,
         &[CITE_PFITZINGER_2009],
@@ -246,13 +225,11 @@ claim_group! {
         "KB internal inconsistency: the statement gives <76%HRmax AND <70%HRR (different reference scales) while the parameters line collapses them to <70-76%HRmax; the engine carries both ceilings and lets the stricter govern (conservative)",
     ]),
     RUN_EASY_001 => claim(
-        "RUN-EASY-001",
         "Easy runs: 15–25% slower than marathon pace, 65–79% of your max heart rate, effort 3–4 out of 10, for 30–90 minutes.",
         ExpertOpinion,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_LONGRUN_001 => claim(
-        "RUN-LONGRUN-001",
         "Long runs: easy to steady pace (10–20% slower than marathon pace), 65–80% of your max heart rate, effort 3–5 out of 10. A long run is 25–30% of your weekly distance (Daniels caps a single run at 25%), about 2–2.5 hours at most, and when your weekly distance is low, no more than twice your average daily run.",
         ExpertOpinion,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
@@ -261,7 +238,6 @@ claim_group! {
         "Two KB long-run-share figures conflicted (25-30% vs 20-30%); resolved in favour of 25-30% (Daniels' prescribed long-run share for >=64 km/wk; the 20% lower bound was uncited) - the planner uses 0.25.",
     ]),
     RUN_RACEPACE_001 => claim(
-        "RUN-RACEPACE-001",
         "Marathon-pace runs: your marathon race pace, 80–85% of your max heart rate, effort 5–6 out of 10, in blocks of 8–26 km (about 5–16 miles).",
         ExpertOpinion,
         &[
@@ -270,7 +246,6 @@ claim_group! {
         ],
     ),
     RUN_REPETITION_001 => claim(
-        "RUN-REPETITION-001",
         "Repetitions: faster than interval pace, set by pace rather than heart rate, 2 minutes or shorter each, and at most 5% of your weekly running. The best distance, number, recovery and effort for them are not established.",
         ExpertOpinion,
         &[CITE_DANIELS_2022],
@@ -279,13 +254,11 @@ claim_group! {
         "Band values (>100% VO2max, pace-not-HR) are Moderate via the Daniels VDOT pace tables; registered at the ExpertOpinion floor of the caps column (see RUN-VOLCAP-001)",
     ]),
     RUN_STRIDES_001 => claim(
-        "RUN-STRIDES-001",
         "Strides: 4–8 controlled fast efforts (not sprints) of 15–30 seconds, effort 6–7 out of 10, with 45 seconds to 2 minutes of near-full recovery, 1–3 times a week, added a few weeks into base training.",
         ExpertOpinion,
         &[CITE_DANIELS_2022],
     ),
     RUN_HILLSPRINT_001 => claim(
-        "RUN-HILLSPRINT-001",
         "Hill sprints: 4–10 near-all-out (90–95%) efforts of 8–20 seconds up a 6–10% slope, effort 9 out of 10, with full recovery (walk back down, about 2 minutes), done on easy days as strength work.",
         ExpertOpinion,
         &[
@@ -299,20 +272,17 @@ claim_group! {
     ]),
     #[kb_only]
     RUN_RUNWALK_EXT_001 => claim(
-        "RUN-RUNWALK-EXT-001",
         "For obese/very deconditioned runners, extend run/walk intervals longer before continuous running to manage impact-injury risk (no numeric extension length or defining threshold stated).",
         ExpertOpinion,
         &["Galloway 2016, The Run-Walk-Run Method (Meyer & Meyer Sport)"],
     )
     .safety(),
     RUN_ONEVAR_001 => claim(
-        "RUN-ONEVAR-001",
         "Increase one thing at a time: distance or intensity, not both in the same week.",
         ExpertOpinion,
         &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_DELOAD_DEPTH_001 => claim(
-        "RUN-DELOAD-DEPTH-001",
         "On a lighter week, cut distance by 20–40% (10–30% at high mileage, up to 50% at low mileage), ease the intensity too, and drop one hard session. No source sets how much to ease intensity or where high and low mileage start.",
         ExpertOpinion,
         &[
@@ -321,7 +291,6 @@ claim_group! {
         ],
     ),
     RUN_RETEST_001 => claim(
-        "RUN-RETEST-001",
         "Set training paces from your current fitness, not your goal, re-test every 4–6 weeks, and update paces as your fitness improves. Use a recent race (within 6–8 weeks), run all-out on a flat course in cool weather. Heat above about 15 °C and altitude above about 900 m call for a correction, but how big is not established.",
         Moderate,
         &[
@@ -331,7 +300,6 @@ claim_group! {
         ],
     ),
     RUN_PERIOD_001 => claim(
-        "RUN-PERIOD-001",
         "Anchor a race plan to the race date and end it with a taper of up to 3 weeks: cut volume progressively by about 41–60% while keeping intensity and session frequency; tapers of 1, 2 and 3 weeks all improved time-trial performance.",
         Strong,
         &[
@@ -340,7 +308,6 @@ claim_group! {
         ],
     ),
     RUN_PHASE_TID_001 => claim(
-        "RUN-PHASE-TID-001",
         "Elite distance runners mostly train with a pyramidal intensity mix (lots of easy running, some threshold, a little very hard) while preparing, and shift toward a polarized mix (mostly easy, some very hard, little in between) with lower total volume in the competition period.",
         Moderate,
         &[
@@ -348,10 +315,9 @@ claim_group! {
         ],
     )
     .contradicting(&["Descriptive review of elite practice, not a controlled comparison"])
-    .contested("CQ-07"),
+    .contested(ContestedId::CQ_07),
     #[kb_only]
     RUN_VOLUME_001 => claim(
-        "RUN-VOLUME-001",
         "Runners who run more each week, have a longer longest run and do more runs of 32 km or more tend to run faster marathons; weekly volume is the most consistent training predictor, so a plan keeps building volume across cycles (within safe ramp limits) rather than restarting each cycle.",
         Moderate,
         &[
@@ -362,7 +328,6 @@ claim_group! {
         "Observational: associations, not proof that each variable causes faster times",
     ]),
     RUN_LONGRUN_TARGET_001 => claim(
-        "RUN-LONGRUN-TARGET-001",
         "Long-run goals are ceilings to work toward, not weekly musts: about 16–21 km (10–13 miles) for a half marathon and 29–32 km (18–20 miles) for a marathon. You reach them only within three limits: no run more than 10% past your recent longest, the weekly increase limit, and a share cap of at most 30% of your weekly distance below 64 km (40 miles) a week, 25% above that, and no more than about 150 minutes.",
         ExpertOpinion,
         &[
@@ -372,7 +337,6 @@ claim_group! {
         ],
     ),
     RUN_TALKTEST_001 => claim(
-        "RUN-TALKTEST-001",
         "Without a measured heart-rate max or pace, keep easy runs at a pace where you can talk in full sentences; that keeps you below the first breathing threshold, where easy running ends.",
         Moderate,
         &[
@@ -385,7 +349,6 @@ claim_group! {
         "The talk test may not suit high-intensity interval work (Reed & Pipe 2014)",
     ]),
     RUN_STRENGTH_001 => claim(
-        "RUN-STRENGTH-001",
         "Strength training helps runners, including those who only run. Studies used 1–4 sessions a week (twice is a common choice); heavy lifting at 80% of your max or more, alone or with jumps, improved time-trial results and time to exhaustion.",
         Moderate,
         &[
@@ -398,14 +361,12 @@ claim_group! {
         "Jump training alone did not significantly improve time-trial performance (Llanos-Lagos et al. 2024)",
     ]),
     RUN_C25K_002 => claim(
-        "RUN-C25K-002",
         "Couch to 5K builds continuous running gradually: the first 20-minute run comes at the end of week 5, 25 minutes by the end of week 6, then 25, 28 and 30 minutes in weeks 7–9, and any week can be repeated.",
         ExpertOpinion,
         &[CITE_NHS_C25K],
     )
     .safety(),
     RUN_WARMUP_001 => claim(
-        "RUN-WARMUP-001",
         "Start threshold, interval, repetition and race-pace runs with about 10–15 minutes of easy running and finish with about 10 minutes easy; a warm-up improves the performance that follows, and both count toward the week's running.",
         Moderate,
         &[
@@ -418,14 +379,12 @@ claim_group! {
         "A warm-up that is too hard or too hot can hurt endurance performance (Bishop 2003); the exact minutes are coaching convention",
     ]),
     RUN_REPETITION_002 => claim(
-        "RUN-REPETITION-002",
         "Repetitions: 200 m or 400 m repeats at repetition pace, with an easy jog of the same distance between, keeping all repetition running to 5% of your weekly running or less.",
         ExpertOpinion,
         &[CITE_DANIELS_2022],
     )
     .contradicting(&["The number of repeats per session is coaching convention, not tested"]),
     RUN_RACEPACE_002 => claim(
-        "RUN-RACEPACE-002",
         "Keep marathon-pace running to about 15–20% of the week, and any single marathon-pace run to the lesser of 110 minutes or 29 km (18 miles).",
         ExpertOpinion,
         &[CITE_DANIELS_2022],
@@ -434,7 +393,6 @@ claim_group! {
         "The marathon-pace segment rule (RUN-RACEPACE-001) states no weekly marathon-pace limit",
     ]),
     RUN_START_001 => claim(
-        "RUN-START-001",
         "Before a running plan starts, it needs your current weekly distance and your longest run of the last 30 days; the first long run stays within 10% of that longest run, and logged runs replace the numbers you entered.",
         Moderate,
         &[
@@ -447,7 +405,6 @@ claim_group! {
     .safety(),
     #[kb_only]
     RUN_LIVECUE_001 => claim(
-        "RUN-LIVECUE-001",
         "Live cues tied to a target pace help runners stay on that pace, and sound or vibration cues work better than glancing at a screen.",
         Weak,
         &[
@@ -459,7 +416,6 @@ claim_group! {
     ]),
     #[kb_only]
     RUN_EASYDRIFT_001 => claim(
-        "RUN-EASYDRIFT-001",
         "Runners tend to run planned easy days harder than intended, drifting toward moderate effort, so the easy-day limit stays visible while running.",
         Weak,
         &[
@@ -470,7 +426,6 @@ claim_group! {
         "Single observational cohort of collegiate runners; applying it to recreational runners is by analogy",
     ]),
     LOAD_SRPE_001 => claim(
-        "LOAD-SRPE-001",
         "Session effort times minutes (one 0–10 rating of the whole session about 30 minutes afterwards, multiplied by its duration) is a valid, reliable training-load measure that needs no sensors. It is not interchangeable with heart-rate load, and on its own it cannot tell intervals from steady runs.",
         Moderate,
         &[

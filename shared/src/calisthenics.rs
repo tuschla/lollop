@@ -12,8 +12,9 @@
 //!
 //! Intensity is the leverage tier, then added load, then RIR (CAL-INTENSITY-001).
 
+pub mod progression;
+
 use crate::evidence::claims;
-use crate::evidence::graded;
 use crate::schema::Recommended;
 use crate::strength::LiftGoal;
 
@@ -87,6 +88,17 @@ pub struct Ladder {
     /// Power (ballistic) ladder, scheduled first on a bodyweight Power goal
     /// (CAL-POWER-001). Never part of the pattern rotation or the skill round-robin.
     pub power: bool,
+    /// Count gate before the track is scheduled ([`count_gate_met`]): each
+    /// listed rung, or a harder one on its ladder, done for
+    /// [`MUSCLE_UP_GATE_REPS`] reps in a single set. Empty = no gate.
+    pub gate: &'static [GateRung],
+}
+
+/// One prerequisite rung of a ladder's count gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GateRung {
+    pub ladder: LadderId,
+    pub rung: u8,
 }
 
 /// Goal-specific working-set template (CAL-TEMPLATE-001; calis-programming.md §1.3).
@@ -322,8 +334,8 @@ static BACK_LEVER_TIERS: &[Tier] = &[
 ];
 
 // §3.10 Muscle-up (dynamic combination skill track; the rung-0 prereq GATE is
-// NOT a tier — it is [`muscle_up_gate_met`], applied when the calisthenics
-// anchors are built).
+// NOT a tier — it is the ladder's `gate` ([`MUSCLE_UP_GATE`], judged by
+// [`count_gate_met`]), applied when the calisthenics anchors are built).
 #[rustfmt::skip]
 static MUSCLE_UP_TIERS: &[Tier] = &[
     mk("Explosive pull-up",          reps(3, 5), false, None, INF, LeaveRir(1), false, false),
@@ -352,26 +364,59 @@ static PLYO_PUSH_TIERS: &[Tier] = &[
     mk("Clap push-up",               reps(3, 5), false, None, INF, Ballistic, false, false),
 ];
 
+/// The muscle-up's count gate (CAL-GATE-NUMBERS-001): strict pull-ups (Full
+/// pull-up or harder) AND dips (Full parallel-bar dip or harder).
+static MUSCLE_UP_GATE: &[GateRung] = &[
+    GateRung {
+        ladder: VerticalPull,
+        rung: rung_of(VERTICAL_PULL_TIERS, "Full pull-up"),
+    },
+    GateRung {
+        ladder: Dip,
+        rung: rung_of(DIP_TIERS, "Full parallel-bar dip"),
+    },
+];
+
+/// Index of the rung named `name` in `tiers`, at compile time (an unknown name
+/// fails the build).
+const fn rung_of(tiers: &[Tier], name: &str) -> u8 {
+    let mut i = 0;
+    while i < tiers.len() {
+        let (a, b) = (tiers[i].name.as_bytes(), name.as_bytes());
+        if a.len() == b.len() {
+            let mut j = 0;
+            while j < a.len() && a[j] == b[j] {
+                j += 1;
+            }
+            if j == a.len() {
+                return i as u8;
+            }
+        }
+        i += 1;
+    }
+    panic!("unknown rung name")
+}
+
 /// Every leverage ladder (8 dynamic + 5 skill tracks + 2 power ladders), in
 /// `LadderId` enum order: [`ladder`] indexes it by `id as usize`. Skill tracks
 /// are round-robined by this order in plan synthesis.
 #[rustfmt::skip]
 pub static LADDERS: &[Ladder] = &[
-    Ladder { id: HorizontalPush, pattern: "Push-up",             skill: false, tiers: HORIZONTAL_PUSH_TIERS, weighted_rungs: &[8],    power: false },
-    Ladder { id: Dip,            pattern: "Dip",                 skill: false, tiers: DIP_TIERS,             weighted_rungs: &[5],    power: false },
-    Ladder { id: VerticalPush,   pattern: "Overhead push",       skill: false, tiers: VERTICAL_PUSH_TIERS,   weighted_rungs: &[6],    power: false },
-    Ladder { id: HorizontalPull, pattern: "Row",                 skill: false, tiers: HORIZONTAL_PULL_TIERS, weighted_rungs: &[6],    power: false },
-    Ladder { id: VerticalPull,   pattern: "Pull-up",             skill: false, tiers: VERTICAL_PULL_TIERS,   weighted_rungs: &[4, 7], power: false },
-    Ladder { id: Squat,          pattern: "Squat",               skill: false, tiers: SQUAT_TIERS,           weighted_rungs: &[6],    power: false },
-    Ladder { id: Hinge,          pattern: "Hips and hamstrings", skill: false, tiers: HINGE_TIERS,           weighted_rungs: &[7],    power: false },
-    Ladder { id: Core,           pattern: "Core",                skill: false, tiers: CORE_TIERS,            weighted_rungs: &[6],    power: false },
-    Ladder { id: Handstand,      pattern: "Handstand",           skill: true,  tiers: HANDSTAND_TIERS,       weighted_rungs: &[],     power: false },
-    Ladder { id: FrontLever,     pattern: "Front lever",         skill: true,  tiers: FRONT_LEVER_TIERS,     weighted_rungs: &[4],    power: false },
-    Ladder { id: Planche,        pattern: "Planche",             skill: true,  tiers: PLANCHE_TIERS,         weighted_rungs: &[5],    power: false },
-    Ladder { id: BackLever,      pattern: "Back lever",          skill: true,  tiers: BACK_LEVER_TIERS,      weighted_rungs: &[],     power: false },
-    Ladder { id: MuscleUp,       pattern: "Muscle-up",           skill: true,  tiers: MUSCLE_UP_TIERS,       weighted_rungs: &[4],    power: false },
-    Ladder { id: Jump,           pattern: "Jump",                skill: false, tiers: JUMP_TIERS,            weighted_rungs: &[],     power: true },
-    Ladder { id: PlyoPush,       pattern: "Explosive push-up",   skill: false, tiers: PLYO_PUSH_TIERS,       weighted_rungs: &[],     power: true },
+    Ladder { id: HorizontalPush, pattern: "Push-up",             skill: false, tiers: HORIZONTAL_PUSH_TIERS, weighted_rungs: &[8],    power: false, gate: &[] },
+    Ladder { id: Dip,            pattern: "Dip",                 skill: false, tiers: DIP_TIERS,             weighted_rungs: &[5],    power: false, gate: &[] },
+    Ladder { id: VerticalPush,   pattern: "Overhead push",       skill: false, tiers: VERTICAL_PUSH_TIERS,   weighted_rungs: &[6],    power: false, gate: &[] },
+    Ladder { id: HorizontalPull, pattern: "Row",                 skill: false, tiers: HORIZONTAL_PULL_TIERS, weighted_rungs: &[6],    power: false, gate: &[] },
+    Ladder { id: VerticalPull,   pattern: "Pull-up",             skill: false, tiers: VERTICAL_PULL_TIERS,   weighted_rungs: &[4, 7], power: false, gate: &[] },
+    Ladder { id: Squat,          pattern: "Squat",               skill: false, tiers: SQUAT_TIERS,           weighted_rungs: &[6],    power: false, gate: &[] },
+    Ladder { id: Hinge,          pattern: "Hips and hamstrings", skill: false, tiers: HINGE_TIERS,           weighted_rungs: &[7],    power: false, gate: &[] },
+    Ladder { id: Core,           pattern: "Core",                skill: false, tiers: CORE_TIERS,            weighted_rungs: &[6],    power: false, gate: &[] },
+    Ladder { id: Handstand,      pattern: "Handstand",           skill: true,  tiers: HANDSTAND_TIERS,       weighted_rungs: &[],     power: false, gate: &[] },
+    Ladder { id: FrontLever,     pattern: "Front lever",         skill: true,  tiers: FRONT_LEVER_TIERS,     weighted_rungs: &[4],    power: false, gate: &[] },
+    Ladder { id: Planche,        pattern: "Planche",             skill: true,  tiers: PLANCHE_TIERS,         weighted_rungs: &[5],    power: false, gate: &[] },
+    Ladder { id: BackLever,      pattern: "Back lever",          skill: true,  tiers: BACK_LEVER_TIERS,      weighted_rungs: &[],     power: false, gate: &[] },
+    Ladder { id: MuscleUp,       pattern: "Muscle-up",           skill: true,  tiers: MUSCLE_UP_TIERS,       weighted_rungs: &[4],    power: false, gate: MUSCLE_UP_GATE },
+    Ladder { id: Jump,           pattern: "Jump",                skill: false, tiers: JUMP_TIERS,            weighted_rungs: &[],     power: true,  gate: &[] },
+    Ladder { id: PlyoPush,       pattern: "Explosive push-up",   skill: false, tiers: PLYO_PUSH_TIERS,       weighted_rungs: &[],     power: true,  gate: &[] },
 ];
 
 /// Everyday names for canonical rungs, so a set logged as "Pull-ups", "Dips"
@@ -415,20 +460,6 @@ static ALIASES: &[(&str, LadderId, u8)] = &[
     ("countermovement jump", Jump, 0),
     ("standing long jump", Jump, 1),
     ("plyo push-up", PlyoPush, 1),
-];
-
-/// The KB progression tables' row labels (`calis-progression.md`), the
-/// earlier names of these rungs, paired with each rung's current name. They
-/// stay in [`ALIASES`] so they keep matching their rung; display goes through
-/// `hypertrophy::canonical_name`, so a set logged under an old label shows
-/// under the current name. "Nordic negative" is left out: its current name
-/// ("Negative Nordic curl") reads as isolation to the keyword rules.
-pub const LEGACY_NAMES: &[(&str, &str)] = &[
-    ("Feet-elevated / decline push-up", "Decline push-up"),
-    ("Parallette / straight-bar dip", "Straight-bar dip"),
-    ("Single-leg RDL", "Single-leg Romanian deadlift"),
-    ("Plank (front)", "Front plank"),
-    ("Advanced tuck (open hips)", "Advanced tuck front lever"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -487,7 +518,7 @@ static NAME_INDEX: std::sync::LazyLock<std::collections::HashMap<String, (Ladder
 /// spacing and a plural "s". Canonical names are unique across ALL ladders, so
 /// a hit is unambiguous.
 pub fn tier_by_name(name: &str) -> Option<(LadderId, u8)> {
-    crate::plan::count_name_classification();
+    crate::exercise::count_name_classification();
     let key = name_key(name);
     if key.is_empty() {
         return None;
@@ -524,7 +555,7 @@ pub struct Kit {
 impl Kit {
     /// The athlete's stated equipment (`Profile::calis_equipment`); `None`
     /// (unstated) assumes every piece is available.
-    pub fn from_profile(profile: &crate::app::Profile) -> Kit {
+    pub fn from_profile(profile: &crate::profile::Profile) -> Kit {
         profile.calis_equipment.map_or(Kit::ALL, |e| Kit {
             pull_up_bar: e.pull_up_bar,
             dip_bars: e.dip_bars,
@@ -625,7 +656,7 @@ pub fn nearest_available(id: LadderId, idx: u8, kit: Kit) -> Option<u8> {
 
 /// Graded face of an equipment substitution (CAL-EQUIP-001).
 pub fn equipment_substitution() -> Recommended<()> {
-    graded((), claims::CAL_EQUIP_001)
+    Recommended::new((), claims::CAL_EQUIP_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -636,7 +667,7 @@ pub fn equipment_substitution() -> Recommended<()> {
 /// 2 consecutive qualifying sessions — the calisthenics analogue of the
 /// strength 2-for-2 rule (STR-2FOR2-001).
 pub fn tier_advance_met(qualifying_consecutive_sessions: u8) -> Recommended<bool> {
-    graded(
+    Recommended::new(
         qualifying_consecutive_sessions >= 2,
         claims::CAL_PROG_TRIGGER_001,
     )
@@ -652,7 +683,7 @@ const STRAIGHT_ARM_ACCLIMATION_DAYS: i64 = 28;
 /// straight-arm lever tier must be held ≥ `STRAIGHT_ARM_ACCLIMATION_DAYS` (28)
 /// before advancing (CAL-TENDON-001 rate-limit).
 pub fn static_acclimation_ok(days_at_current_tier: i64) -> Recommended<bool> {
-    graded(
+    Recommended::new(
         days_at_current_tier >= STRAIGHT_ARM_ACCLIMATION_DAYS,
         claims::CAL_GATE_NUMBERS_001,
     )
@@ -662,16 +693,15 @@ pub fn static_acclimation_ok(days_at_current_tier: i64) -> Recommended<bool> {
 /// work (CAL-GATE-NUMBERS-001 engine default, contested CQ-F11-02).
 pub const MUSCLE_UP_GATE_REPS: u8 = 12;
 
-/// Muscle-up gate (CAL-GATE-NUMBERS-001 engine default, contested CQ-F11-02):
-/// [`MUSCLE_UP_GATE_REPS`] strict pull-ups AND dips in a single set before
-/// muscle-up work.
-pub fn muscle_up_gate_met(
-    best_pullup_session_reps: u8,
-    best_dip_session_reps: u8,
-) -> Recommended<bool> {
-    graded(
-        best_pullup_session_reps >= MUSCLE_UP_GATE_REPS
-            && best_dip_session_reps >= MUSCLE_UP_GATE_REPS,
+/// A ladder's count gate (CAL-GATE-NUMBERS-001 engine default, contested
+/// CQ-F11-02): the best single-set reps at each of its [`Ladder::gate`] rungs
+/// all reach [`MUSCLE_UP_GATE_REPS`] (the muscle-up: strict pull-ups AND dips
+/// in a single set before muscle-up work).
+pub fn count_gate_met(best_single_set_reps: impl IntoIterator<Item = u8>) -> Recommended<bool> {
+    Recommended::new(
+        best_single_set_reps
+            .into_iter()
+            .all(|r| r >= MUSCLE_UP_GATE_REPS),
         claims::CAL_GATE_NUMBERS_001,
     )
 }
@@ -730,22 +760,22 @@ pub fn rir_band(
     match tier.failure {
         FailurePolicy::LeaveRir(n) => {
             let lo = if novice { n.max(NOVICE_RIR.0) } else { n };
-            Some(graded((lo, lo + 1), claims::CAL_EFAIL_SAFE_001))
+            Some(Recommended::new((lo, lo + 1), claims::CAL_EFAIL_SAFE_001))
         }
         FailurePolicy::Ballistic => None,
         FailurePolicy::SelfLimiting => Some(if tier.target.is_timed() {
             // A self-limiting TIMED rung (dead hang, plank, hollow) is held to
             // near-failure unconditionally — never compare hold seconds against
             // the rep threshold.
-            graded((0, 1), claims::CAL_INTENSITY_FLOOR_001)
+            Recommended::new((0, 1), claims::CAL_INTENSITY_FLOOR_001)
         } else if novice {
-            graded(NOVICE_RIR, claims::HYP_RIR_ACC_001)
+            Recommended::new(NOVICE_RIR, claims::HYP_RIR_ACC_001)
         } else if goal == LiftGoal::Hypertrophy {
-            graded((0, 1), claims::CAL_GOAL_RIR_001)
+            Recommended::new((0, 1), claims::CAL_GOAL_RIR_001)
         } else if easy_rung(id, idx) {
-            graded((0, 1), claims::CAL_INTENSITY_FLOOR_001)
+            Recommended::new((0, 1), claims::CAL_INTENSITY_FLOOR_001)
         } else {
-            graded((1, 2), claims::CAL_INTENSITY_001)
+            Recommended::new((1, 2), claims::CAL_INTENSITY_001)
         }),
     }
 }
@@ -844,7 +874,7 @@ pub fn skip_threshold(tier: &Tier, goal: LiftGoal) -> Recommended<Option<u16>> {
             LiftGoal::MaxStrength | LiftGoal::Power => one_and_half.min(STRENGTH_GOAL_SKIP_REPS),
         })
     };
-    graded(th, claims::CAL_PLACE_001)
+    Recommended::new(th, claims::CAL_PLACE_001)
 }
 
 /// Rungs a CAL-PLACE-001 skip moves up.
@@ -888,30 +918,7 @@ pub fn reentry(gap_days: i64) -> Recommended<Reentry> {
             retest: true,
         }
     };
-    graded(r, claims::CAL_REENTRY_001)
-}
-
-/// Plate grid for added calisthenics load (kg): the smallest common plate.
-const LOAD_GRID_KG: f64 = 1.25;
-
-/// The pounds-profile plate grid in kg: the 2.5 lb small plate (1 lb =
-/// 0.45359237 kg exactly), so a lb user never sees a fractional-lb load.
-const LOAD_GRID_LB_IN_KG: f64 = 2.5 * 0.45359237;
-
-/// The added-load plate grid in kg for the profile's display unit.
-fn load_grid_kg(weight_lb: bool) -> f64 {
-    if weight_lb {
-        LOAD_GRID_LB_IN_KG
-    } else {
-        LOAD_GRID_KG
-    }
-}
-
-/// `kg` floored onto the profile's plate grid (tolerant of float error, so an
-/// on-grid value never drops a plate).
-pub fn floor_to_load_grid(kg: f64, weight_lb: bool) -> f64 {
-    let grid = load_grid_kg(weight_lb);
-    (kg / grid + 1e-9).floor() * grid
+    Recommended::new(r, claims::CAL_REENTRY_001)
 }
 
 /// Share of the system load (bodyweight + added) one weighted-rung load step
@@ -928,13 +935,13 @@ pub fn load_step_kg(
     added_kg: f64,
     weight_lb: bool,
 ) -> Recommended<f64> {
-    let grid = load_grid_kg(weight_lb);
+    let grid = crate::plates::added_load_grid_kg(weight_lb);
     let system = bodyweight_kg.filter(|b| *b > 0.0).unwrap_or(0.0) + added_kg.max(0.0);
     let raw = (LOAD_STEP_SYSTEM_FRAC * system).max(grid);
     // Tolerance so a float-exact grid value (2.5000000000000004) is not bumped
     // a whole plate.
     let step = (raw / grid - 1e-9).ceil() * grid;
-    graded(step, claims::STR_LOADPROG_001)
+    Recommended::new(step, claims::STR_LOADPROG_001)
 }
 
 /// Effective system load (kg) for a MEASURED-fraction rung:
@@ -979,7 +986,8 @@ pub fn system_load_e1rm(
         None => return None,
     };
     let e1 = crate::strength::e1rm_epley_rpe(system, reps, rpe);
-    (e1 > 0.0 && e1.is_finite()).then(|| graded((e1 * 10.0).round() / 10.0, claims::CAL_E1RM_001))
+    (e1 > 0.0 && e1.is_finite())
+        .then(|| Recommended::new((e1 * 10.0).round() / 10.0, claims::CAL_E1RM_001))
 }
 
 /// Ballistic dosing for a bodyweight Power goal (CAL-POWER-001 dose via
@@ -989,7 +997,7 @@ pub fn system_load_e1rm(
 pub fn ballistic_sets(tier: &Tier) -> Recommended<u8> {
     let per_set = tier.target.top() as u32 * if tier.unilateral { 2 } else { 1 };
     let cap = (PLYO_CONTACT_CAP / per_set.max(1)).min(5) as u8;
-    graded(cap.max(1), claims::PLYO_001)
+    Recommended::new(cap.max(1), claims::PLYO_001)
 }
 
 /// Beginner plyometric contact ceiling per item (PLYO-001: beginner 80–100
@@ -1013,7 +1021,7 @@ pub fn session_template(goal: LiftGoal) -> Recommended<CalisTemplate> {
             rest_sec: 180,
         },
     };
-    graded(t, claims::CAL_TEMPLATE_001)
+    Recommended::new(t, claims::CAL_TEMPLATE_001)
 }
 
 #[cfg(test)]

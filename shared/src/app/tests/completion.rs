@@ -268,7 +268,7 @@ fn a_cable_row_completes_the_equipment_qualified_row_fill() {
         let mut found = None;
         for s in &vm.week_plan {
             for it in &s.items {
-                if !it.exercise.is_empty() && crate::plan::same_movement(&it.exercise, "Row") {
+                if !it.exercise.is_empty() && crate::exercise::same_movement(&it.exercise, "Row") {
                     found = Some((
                         s.epoch_day,
                         it.exercise.clone(),
@@ -281,7 +281,7 @@ fn a_cable_row_completes_the_equipment_qualified_row_fill() {
         found.expect("a Row item is scheduled")
     };
     assert!(
-        crate::plan::same_movement("Cable row", &ex),
+        crate::exercise::same_movement("Cable row", &ex),
         "'Cable row' is the same movement as {ex:?}"
     );
     // Make the Row day today so its completion is computed (the plan window is
@@ -1099,7 +1099,7 @@ fn stacked_deloads_take_the_single_deepest_cut_not_compounded() {
         }],
         ..Default::default()
     };
-    let deload = crate::evidence::graded(
+    let deload = Recommended::new(
         Adjustment::Deload {
             volume_reduction_pct: 50.0,
             load_reduction_pct: 10.0,

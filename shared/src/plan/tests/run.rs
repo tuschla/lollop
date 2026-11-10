@@ -2,12 +2,12 @@
 //! spike-ceiling sizing, easy vs recovery days, session structure, C25K.
 
 use super::*;
-use crate::app::Profile;
 use crate::plan::run::{
-    DayCtx, LongRunBind, RunWeekPlan, RunWeekRequest, cap_km_to_spike, daily_avg_run_km,
-    effective_weekly_km, is_quality, long_run_decision, run_week_plan, run_week_sessions,
+    DayCtx, LongRunBind, RunWeekPlan, RunWeekRequest, cap_km_to_spike, effective_weekly_km,
+    long_run_decision, run_week_plan, run_week_sessions,
 };
-use crate::running;
+use crate::profile::Profile;
+use crate::running::{self, daily_avg_run_km, is_quality_session};
 use crate::schema::{
     MesoPhase, Program, RepRecovery, RunIntensity, RunPrescription, RunVolume, Session,
 };
@@ -36,7 +36,7 @@ fn place(plan: &RunWeekPlan) -> Vec<(u16, RunSessionType)> {
     {
         out.push((d, RunSessionType::LongRun));
     }
-    for &k in plan.kinds.iter().filter(|k| is_quality(**k)) {
+    for &k in plan.kinds.iter().filter(|k| is_quality_session(**k)) {
         let d = [1u16, 3, 5, 0, 2, 4]
             .into_iter()
             .find(|d| free.contains(d))
@@ -47,7 +47,7 @@ fn place(plan: &RunWeekPlan) -> Vec<(u16, RunSessionType)> {
     for &k in plan
         .kinds
         .iter()
-        .filter(|k| !is_quality(**k) && **k != RunSessionType::LongRun)
+        .filter(|k| !is_quality_session(**k) && **k != RunSessionType::LongRun)
     {
         if free.is_empty() {
             break;
@@ -60,7 +60,7 @@ fn place(plan: &RunWeekPlan) -> Vec<(u16, RunSessionType)> {
 /// `run_week_plan` for direct run-week tests: a taper week cuts from its last
 /// load week laid out by [`place`].
 fn plan_week(p: &Profile, a: &Anchors, r: &RunWeekRequest) -> RunWeekPlan {
-    run_week_plan(p, a, r, &|k| {
+    run_week_plan(&PlanProfile::new(p), a, r, &|k| {
         let a = Anchors {
             week_start_epoch_day: a.week_start_epoch_day.map(|d| d - 7 * i64::from(k)),
             ..a.clone()
@@ -76,7 +76,7 @@ fn plan_week(p: &Profile, a: &Anchors, r: &RunWeekRequest) -> RunWeekPlan {
 
 /// Plan + prescribe one week directly (no lift days).
 fn week(p: &Profile, a: &Anchors, week_index: u32) -> (RunWeekPlan, Vec<Session>) {
-    let days = run_slot_count(p);
+    let days = PlanProfile::new(p).run_slot_count().expect("a runner");
     let plan = plan_week(p, a, &req(week_index, days));
     let sessions = run_week_sessions(&plan, &place(&plan), p, a);
     (plan, sessions)
@@ -182,7 +182,7 @@ fn sessions_km(sessions: &[Session]) -> f64 {
 #[test]
 fn running_profile_yields_a_long_run() {
     let p = runner(GoalDistance::TenK, 4, 30.0);
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     assert!(matches!(prog.goal, Goal::RunningRace { .. }));
     assert!(
         run_kinds_of(&prog).contains(&RunSessionType::LongRun),
@@ -196,7 +196,7 @@ fn hybrid_caps_run_days_at_the_endurance_frequency_cap() {
     p.goal_distance = GoalDistance::TenK;
     p.running_days_per_week = 5;
     p.running_km_per_week = 40.0;
-    let prog = synthesize(&p, &anchored("Back Squat", 130.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 130.0), 0).unwrap();
     assert!(
         run_kinds_of(&prog).len() <= 3,
         "hybrid run days capped at 3"
@@ -269,7 +269,7 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
     let mut p = runner(GoalDistance::TenK, 5, 60.0);
     // Race on the Saturday six weeks after the first plan week's Monday.
     p.goal_race_epoch_day = Some(MON0 + 42 + 5);
-    let shape = week_shape(&p);
+    let pp = PlanProfile::new(&p);
     let mut phases = Vec::new();
     let mut plans = Vec::new();
     for i in 0..=6u32 {
@@ -277,8 +277,8 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
             week_start_epoch_day: Some(MON0 + 7 * i as i64),
             ..Default::default()
         };
-        let plan = run_plan(&p, &a, &shape, i);
-        let prog = synthesize(&p, &a, i).unwrap();
+        let plan = run_plan(&pp, &a, i);
+        let prog = synthesize(&pp, &a, i).unwrap();
         let sessions: Vec<Session> = prog
             .mesocycle
             .sessions
@@ -328,7 +328,7 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
     // Intensity held: each taper week keeps a quality session.
     for (plan, sessions) in &plans[5..] {
         assert!(
-            sessions.iter().any(|s| is_quality(kind_of(s))),
+            sessions.iter().any(|s| is_quality_session(kind_of(s))),
             "taper week {:?} keeps quality",
             plan.taper_week
         );
@@ -351,10 +351,11 @@ fn synthesized_week(p: &Profile, i: u32) -> (f64, RunWeekPlan, Program) {
         week_start_epoch_day: Some(MON0 + 7 * i64::from(i)),
         ..Default::default()
     };
-    let prog = synthesize(p, &a, i).expect("a plan");
+    let pp = PlanProfile::new(p);
+    let prog = synthesize(&pp, &a, i).expect("a plan");
     (
         sessions_km(&prog.mesocycle.sessions),
-        run_plan(p, &a, &week_shape(p), i),
+        run_plan(&pp, &a, i),
         prog,
     )
 }
@@ -551,7 +552,10 @@ fn recovery_week_cuts_by_the_kb_midpoint_and_shrinks_the_long_run() {
     // (at 3 run days the share's low-volume form, the week's average run).
     let p = runner(GoalDistance::HalfMarathon, 3, 30.0);
     let a = Anchors {
-        longest_recent_run_km: Some(14.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(14.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let rec = (0..8u32)
@@ -620,8 +624,10 @@ fn running_volume_progresses_across_load_weeks() {
     // A novice (larger +10% cap): the long run grows on a load week.
     let mut p = runner(GoalDistance::TenK, 5, 40.0);
     p.progression_cadence = ProgressionCadence::EverySession;
-    let long0 = long_run_km(&synthesize(&p, &Anchors::default(), 0).unwrap()).unwrap();
-    let long1 = long_run_km(&synthesize(&p, &Anchors::default(), 1).unwrap()).unwrap();
+    let long0 =
+        long_run_km(&synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap()).unwrap();
+    let long1 =
+        long_run_km(&synthesize(&PlanProfile::new(&p), &Anchors::default(), 1).unwrap()).unwrap();
     assert!(long1 > long0, "{long1} !> {long0}");
     assert!(long1 <= long0 * 1.10 + 0.01);
 }
@@ -679,7 +685,7 @@ fn fivek_peak_has_interval_and_repetition() {
 fn interval_falls_back_to_800m_before_dropping() {
     let p = runner(GoalDistance::FiveK, 5, 40.0);
     let bw = build_week(&p);
-    let prog = synthesize(&p, &Anchors::default(), bw).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), bw).unwrap();
     let interval = prog
         .mesocycle
         .sessions
@@ -690,21 +696,21 @@ fn interval_falls_back_to_800m_before_dropping() {
     assert!(reps >= 3);
     assert_eq!(rep_vol, RunVolume::DistanceKm(0.8));
     let low = runner(GoalDistance::FiveK, 5, 16.0);
-    let low_prog = synthesize(&low, &Anchors::default(), bw).unwrap();
+    let low_prog = synthesize(&PlanProfile::new(&low), &Anchors::default(), bw).unwrap();
     assert!(!run_kinds_of(&low_prog).contains(&RunSessionType::Interval));
 }
 
 #[test]
 fn interval_dropped_for_the_degenerate_low_volume_profile() {
     let p = runner(GoalDistance::FiveK, 6, 5.0);
-    let prog = synthesize(&p, &Anchors::default(), build_week(&p)).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), build_week(&p)).unwrap();
     assert!(!run_kinds_of(&prog).contains(&RunSessionType::Interval));
 }
 
 #[test]
 fn interval_prescribed_and_within_cap_when_volume_supports_it() {
     let p = runner(GoalDistance::FiveK, 5, 45.0);
-    let prog = synthesize(&p, &Anchors::default(), build_week(&p)).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), build_week(&p)).unwrap();
     let interval = prog
         .mesocycle
         .sessions
@@ -742,7 +748,7 @@ fn interval_rx_carries_recovery_equal_to_rep_time() {
     );
     let (_, rep) = r.repeats.unwrap();
     let (fast, slow) =
-        crate::load::vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Interval).unwrap();
+        crate::running::vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Interval).unwrap();
     let Some(RepRecovery::Seconds(rec)) = r.recovery else {
         panic!("numeric recovery: {:?}", r.recovery);
     };
@@ -765,7 +771,7 @@ fn interval_rep_stays_within_the_five_minute_ceiling() {
     };
     let mut checked = 0;
     for w in 0..16 {
-        let prog = synthesize(&p, &anchors(40.0), w).unwrap();
+        let prog = synthesize(&PlanProfile::new(&p), &anchors(40.0), w).unwrap();
         for s in &prog.mesocycle.sessions {
             if s.session_type != SessionType::Run(RunSessionType::Interval) {
                 continue;
@@ -782,7 +788,7 @@ fn interval_rep_stays_within_the_five_minute_ceiling() {
             assert!(rec <= 300, "week {w}: {rec} s rep");
             checked += 1;
         }
-        let slow = synthesize(&p, &anchors(25.0), w).unwrap();
+        let slow = synthesize(&PlanProfile::new(&p), &anchors(25.0), w).unwrap();
         assert!(
             !run_kinds_of(&slow).contains(&RunSessionType::Interval),
             "week {w}"
@@ -794,10 +800,10 @@ fn interval_rep_stays_within_the_five_minute_ceiling() {
 #[test]
 fn low_quality_budget_honours_the_goal_table_at_four_run_days() {
     let p = runner(GoalDistance::FiveK, 4, 50.0);
-    let prog = synthesize(&p, &Anchors::default(), build_week(&p)).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), build_week(&p)).unwrap();
     let quality = run_days_sorted(&prog)
         .into_iter()
-        .filter(|(_, k)| is_quality(*k))
+        .filter(|(_, k)| is_quality_session(*k))
         .count();
     assert_eq!(
         quality, 2,
@@ -817,10 +823,11 @@ fn quality_run_days_stay_spaced_across_goals_and_frequencies() {
     for goal in goals {
         for days in 2u8..=7 {
             let p = runner(goal, days, 80.0);
-            let prog = synthesize(&p, &Anchors::default(), build_week(&p)).unwrap();
+            let prog =
+                synthesize(&PlanProfile::new(&p), &Anchors::default(), build_week(&p)).unwrap();
             let q_days: Vec<u16> = run_days_sorted(&prog)
                 .into_iter()
-                .filter(|(_, k)| is_quality(*k))
+                .filter(|(_, k)| is_quality_session(*k))
                 .map(|(d, _)| d)
                 .collect();
             assert!(
@@ -881,7 +888,7 @@ fn stated_longest_8km_with_no_logs_caps_week_one_long_run() {
     // logged: the first long run respects the spike rule from day one.
     let mut p = runner(GoalDistance::HalfMarathon, 6, 66.0);
     p.stated_longest_recent_km = Some(8.0);
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let km = long_run_km(&prog).expect("a long-run distance");
     assert!(km <= 8.8 + 1e-9, "week-1 long run {km} ≤ 8.8 km");
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_START_001));
@@ -895,10 +902,13 @@ fn stated_longest_8km_with_no_logs_caps_week_one_long_run() {
     }
     // A logged run supersedes the stated figure.
     let logged = Anchors {
-        longest_recent_run_km: Some(12.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(12.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &logged, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &logged, 0).unwrap();
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_SPIKE_001));
 }
 
@@ -909,11 +919,14 @@ fn a_short_logged_run_does_not_collapse_an_in_window_stated_long_run() {
     let mut p = runner(GoalDistance::TenK, 3, 32.19);
     p.stated_longest_recent_km = Some(12.87);
     let in_window = Anchors {
-        longest_recent_run_km: Some(3.22),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(3.22),
+            ..Default::default()
+        },
         stated_longest_in_window: true,
         ..Default::default()
     };
-    let prog = synthesize(&p, &in_window, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &in_window, 0).unwrap();
     let km = long_run_km(&prog).expect("a long-run distance");
     let mi = (km / 1.609_344 * 10.0).round() / 10.0;
     assert!(mi >= 7.8, "week-1 long run {km} km shows ≥ 7.8 mi");
@@ -927,16 +940,19 @@ fn a_short_logged_run_does_not_collapse_an_in_window_stated_long_run() {
         stated_longest_in_window: false,
         ..in_window
     };
-    let prog = synthesize(&p, &stale, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &stale, 0).unwrap();
     let km = long_run_km(&prog).expect("a long-run distance");
     assert!(km <= 3.22 * 1.1 + 1e-9, "logged baseline governs: {km}");
     // A logged run longer than the stated one wins either way.
     let longer = Anchors {
-        longest_recent_run_km: Some(14.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(14.0),
+            ..Default::default()
+        },
         stated_longest_in_window: true,
         ..Default::default()
     };
-    let prog = synthesize(&p, &longer, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &longer, 0).unwrap();
     assert_ne!(long_run_claim(&prog), Some(claims::RUN_START_001));
 }
 
@@ -944,7 +960,10 @@ fn a_short_logged_run_does_not_collapse_an_in_window_stated_long_run() {
 fn sub_1km_baseline_tempo_becomes_an_easy_duration() {
     let p = runner(GoalDistance::TenK, 5, 50.0);
     let anchors = Anchors {
-        longest_recent_run_km: Some(0.5),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(0.5),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (_, sessions) = week(&p, &anchors, 0);
@@ -986,7 +1005,8 @@ fn marathon_long_run_trends_toward_target_under_spike_cap() {
 #[test]
 fn long_run_is_not_always_the_150_min_ceiling() {
     let p = runner(GoalDistance::HalfMarathon, 4, 40.0);
-    let km = long_run_km(&synthesize(&p, &Anchors::default(), 0).unwrap()).unwrap();
+    let km =
+        long_run_km(&synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap()).unwrap();
     assert!(km > 0.0 && km <= 0.30 * 40.0 + 0.01, "{km}");
 }
 
@@ -996,11 +1016,14 @@ fn a_logged_21k_long_run_is_prescribed_not_a_4k_run() {
     // ≤2×-daily-average bound 20 binds.
     let p = half_marathoner();
     let anchors = Anchors {
-        longest_recent_run_km: Some(21.0),
-        recent_weekly_km: Some(30.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(21.0),
+            recent_weekly_km: Some(30.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(20.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
@@ -1010,10 +1033,13 @@ fn full_demonstrated_distance_is_not_prescribed_weekly_when_it_dwarfs_volume() {
     // 16 km/wk over 3 days: 2×daily average = 10.67 → 10.5 km.
     let p = half_marathoner();
     let anchors = Anchors {
-        longest_recent_run_km: Some(21.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(21.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(10.5));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
@@ -1025,11 +1051,14 @@ fn a_demonstrated_anchored_long_run_within_bounds_cites_the_spike_rule() {
     p.running_days_per_week = 4;
     p.running_km_per_week = 40.0;
     let anchors = Anchors {
-        longest_recent_run_km: Some(14.0),
-        recent_weekly_km: Some(40.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(14.0),
+            recent_weekly_km: Some(40.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(14.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_SPIKE_001));
 }
@@ -1042,7 +1071,7 @@ fn a_volume_dominated_long_run_still_cites_the_share_cap() {
     let mut p = half_marathoner();
     p.running_days_per_week = 4;
     p.running_km_per_week = 48.0;
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(14.0), "30 % of 48 km, floored");
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
@@ -1052,11 +1081,14 @@ fn a_low_demonstrated_run_caps_a_higher_volume_target_at_the_spike_ceiling() {
     let mut p = half_marathoner();
     p.running_km_per_week = 60.0;
     let anchors = Anchors {
-        longest_recent_run_km: Some(12.0),
-        recent_weekly_km: Some(60.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(12.0),
+            recent_weekly_km: Some(60.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(13.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_SPIKE_001));
 }
@@ -1065,7 +1097,7 @@ fn a_low_demonstrated_run_caps_a_higher_volume_target_at_the_spike_ceiling() {
 fn no_run_history_sets_the_long_run_from_volume_alone() {
     let mut p = half_marathoner();
     p.running_km_per_week = 40.0;
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     // 3 run days: the week's average run (40 / 3 → 13 km) is above its 30 %
     // share, so it sets the long run (low-volume guardrail, RUN-LONGRUN-001).
     assert_eq!(long_run_km(&prog), Some(13.0));
@@ -1076,10 +1108,13 @@ fn measured_volume_raises_the_long_run_even_without_a_longest_anchor() {
     let mut p = half_marathoner();
     p.running_km_per_week = 16.0;
     let anchors = Anchors {
-        recent_weekly_km: Some(27.0),
+        run: crate::plan::RunAnchors {
+            recent_weekly_km: Some(27.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     // 27 km over 3 run days: the average run, 9 km.
     assert_eq!(long_run_km(&prog), Some(9.0));
 }
@@ -1089,11 +1124,14 @@ fn a_high_volume_target_is_still_capped_by_a_low_demonstrated_run() {
     let mut p = half_marathoner();
     p.running_km_per_week = 16.0;
     let anchors = Anchors {
-        longest_recent_run_km: Some(12.0),
-        recent_weekly_km: Some(80.0),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(12.0),
+            recent_weekly_km: Some(80.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let prog = synthesize(&p, &anchors, 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchors, 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(13.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_SPIKE_001));
 }
@@ -1103,7 +1141,10 @@ fn effective_weekly_km_takes_the_higher_of_stated_and_measured() {
     let mut p = half_marathoner();
     p.running_km_per_week = 16.0;
     let with = |m: Option<f64>| Anchors {
-        recent_weekly_km: m,
+        run: crate::plan::RunAnchors {
+            recent_weekly_km: m,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(effective_weekly_km(&p, &with(Some(48.0))), 48.0);
@@ -1116,7 +1157,10 @@ fn post_layoff_prefers_measured_over_a_stale_stated_volume() {
     let mut p = runner(GoalDistance::TenK, 4, 40.0);
     p.weeks_off = Some(4.0);
     let anchors = Anchors {
-        recent_weekly_km: Some(10.0),
+        run: crate::plan::RunAnchors {
+            recent_weekly_km: Some(10.0),
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(effective_weekly_km(&p, &anchors), 10.0);
@@ -1130,8 +1174,11 @@ fn post_layoff_prefers_measured_over_a_stale_stated_volume() {
 
 fn detrained_anchor(km: f64) -> Anchors {
     Anchors {
-        longest_recent_run_km: Some(km),
-        longest_run_detrained: true,
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(km),
+            longest_run_detrained: true,
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -1139,17 +1186,27 @@ fn detrained_anchor(km: f64) -> Anchors {
 #[test]
 fn detrained_anchor_keeps_a_long_run_instead_of_collapsing_to_the_volume_floor() {
     let p = half_marathoner(); // 16 km/wk, 3 days
-    let cliff = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let cliff = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     // 16 km over 3 days: the average run (5.3 → 5 km) is the volume floor.
     let cliff_km = long_run_km(&cliff).expect("a long-run distance");
     assert!((cliff_km - 5.0).abs() < 1e-5, "{cliff_km}");
     assert_eq!(long_run_claim(&cliff), Some(claims::RUN_LONGRUN_001));
     // Day 31: anchor 20.3 km, held at the 2×-daily-average bound (10.5).
-    let d31 = synthesize(&p, &detrained_anchor(21.1 * 27.0 / 28.0), 0).unwrap();
+    let d31 = synthesize(
+        &PlanProfile::new(&p),
+        &detrained_anchor(21.1 * 27.0 / 28.0),
+        0,
+    )
+    .unwrap();
     assert_eq!(long_run_km(&d31), Some(10.5));
     assert_eq!(long_run_claim(&d31), Some(claims::DETRAIN_001));
     // Day 45: anchor 9.8 km → its own floor (9.5) governs.
-    let d45 = synthesize(&p, &detrained_anchor(21.1 * 13.0 / 28.0), 0).unwrap();
+    let d45 = synthesize(
+        &PlanProfile::new(&p),
+        &detrained_anchor(21.1 * 13.0 / 28.0),
+        0,
+    )
+    .unwrap();
     assert_eq!(long_run_km(&d45), Some(9.5));
     assert_eq!(long_run_claim(&d45), Some(claims::DETRAIN_001));
     assert!(long_run_km(&d31) > long_run_km(&d45));
@@ -1162,7 +1219,7 @@ fn detrained_flag_does_not_relabel_a_pure_volume_long_run() {
     let mut p = half_marathoner();
     p.running_days_per_week = 4;
     p.running_km_per_week = 40.0;
-    let prog = synthesize(&p, &detrained_anchor(12.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &detrained_anchor(12.0), 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(12.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
@@ -1192,7 +1249,7 @@ fn recovery_day_only_after_quality() {
     let (_, sessions) = week(&p, &Anchors::default(), build_week(&p));
     let hard: Vec<u16> = sessions
         .iter()
-        .filter(|s| is_quality(kind_of(s)) || kind_of(s) == RunSessionType::LongRun)
+        .filter(|s| is_quality_session(kind_of(s)) || kind_of(s) == RunSessionType::LongRun)
         .map(|s| s.day)
         .collect();
     let mut saw_recovery = false;
@@ -1225,7 +1282,7 @@ fn hybrid_two_run_week_includes_an_easy_run() {
     p.goal_distance = GoalDistance::HalfMarathon;
     p.running_days_per_week = 2;
     p.running_km_per_week = 30.0;
-    let prog = synthesize(&p, &anchored("Back Squat", 130.0), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 130.0), 0).unwrap();
     let kinds = run_kinds_of(&prog);
     assert!(
         kinds.contains(&RunSessionType::Easy) || kinds.contains(&RunSessionType::Recovery),
@@ -1294,7 +1351,10 @@ fn a_sub_1km_baseline_never_gets_a_fixed_duration_above_its_ceiling() {
     // quality slot all stay within the 0.5 km ceiling at easy pace.
     let p = runner(GoalDistance::TenK, 3, 40.0);
     let a = Anchors {
-        longest_recent_run_km: Some(0.5),
+        run: crate::plan::RunAnchors {
+            longest_recent_run_km: Some(0.5),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (_, sessions) = week(&p, &a, 0);
@@ -1346,7 +1406,7 @@ fn quality_week_with_wu_cd_sums_to_weekly_km() {
             (_, v) => km_of(v),
         };
         let wucd = (r.warmup_min.unwrap_or(0) + r.cooldown_min.unwrap_or(0)) as f64 * 60.0 / pace;
-        if is_quality(kind_of(s)) {
+        if is_quality_session(kind_of(s)) {
             assert_eq!(r.warmup_min, Some(10), "quality runs carry a warm-up");
             assert_eq!(r.cooldown_min, Some(10), "and a cool-down");
         }
@@ -1365,7 +1425,7 @@ fn quality_week_with_wu_cd_sums_to_weekly_km() {
 #[test]
 fn residual_easy_day_never_exceeds_twice_the_executed_daily_average() {
     let p = runner(GoalDistance::TenK, 4, 40.0);
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let km: Vec<f64> = prog
         .mesocycle
         .sessions
@@ -1421,7 +1481,7 @@ fn strides_attached_to_easy_day_after_base_week_2() {
 #[test]
 fn c25k_week_one_prescribes_8x60s_90s_run_walk_and_no_long_run() {
     let p = runner(GoalDistance::C25k, 3, 15.0);
-    let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
     let kinds = run_kinds_of(&prog);
     assert!(!kinds.contains(&RunSessionType::LongRun));
     let run_walks = prog
@@ -1444,7 +1504,7 @@ fn c25k_week_one_prescribes_8x60s_90s_run_walk_and_no_long_run() {
 #[test]
 fn c25k_week_nine_is_30_min_continuous() {
     let p = runner(GoalDistance::C25k, 3, 15.0);
-    let prog = synthesize(&p, &Anchors::default(), 8).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 8).unwrap();
     let continuous = prog
         .mesocycle
         .sessions
@@ -1488,7 +1548,7 @@ fn c25k_week_five_runs_follow_the_nhs_bouts_in_order() {
 fn c25k_never_skips_the_bridge_run_with_fewer_run_days() {
     // running-025: three runs a week even when two days are stated.
     let p = runner(GoalDistance::C25k, 2, 0.0);
-    assert_eq!(run_slot_count(&p), 3);
+    assert_eq!(PlanProfile::new(&p).run_slot_count(), Some(3));
     // Only two days fit: the week keeps its last two runs, so week 5 still
     // ends on the first 20-min continuous run.
     let plan = plan_week(&p, &Anchors::default(), &req(4, 2));
@@ -1517,7 +1577,7 @@ fn hard_runs_never_land_back_to_back() {
         ..runner(GoalDistance::TenK, 4, 40.0)
     };
     // Week 4 opens the second rolling cycle: a Build week.
-    let prog = synthesize(&p, &Anchors::default(), 4).unwrap();
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 4).unwrap();
     let kinds: Vec<(u16, SessionType)> = prog
         .mesocycle
         .sessions
@@ -1527,7 +1587,7 @@ fn hard_runs_never_land_back_to_back() {
     let hard_days: Vec<u16> = kinds
         .iter()
         .filter(|(_, t)| {
-            matches!(t, SessionType::Run(k) if *k == RunSessionType::LongRun || is_quality(*k))
+            matches!(t, SessionType::Run(k) if *k == RunSessionType::LongRun || is_quality_session(*k))
         })
         .map(|(d, _)| *d)
         .collect();

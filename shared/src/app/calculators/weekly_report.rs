@@ -1,4 +1,20 @@
-use super::*;
+use crate::app::format::{
+    fmt_frac_pct_range, fmt_km_or_mi, fmt_u8_range, fmt_whole_km_or_mi, is_ratio_base_km,
+    local_week, week_monday,
+};
+use crate::app::guidance::{push_guidance, push_guidance_mi};
+use crate::app::lift_audit::set_intensity_pct;
+use crate::app::logged_days::plan_week_index;
+use crate::app::model::Model;
+use crate::app::readiness::end_of_local_today_sec;
+use crate::app::run_metrics::RunFacts;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::{GuidanceView, SessionPlanView};
+use crate::day::{DAY_SEC, is_undated, local_day};
+use crate::evidence::claims;
+use crate::profile::PlanProfile;
+use crate::schema::{Recommended, SessionType, WorkoutType};
+use crate::{hybrid, individualization, running};
 
 /// One dated run of the weekly report.
 struct DatedRun {
@@ -42,16 +58,6 @@ fn dated_runs(model: &Model, facts: &RunFacts, cutoff: Option<i64>) -> Vec<Dated
         .collect()
 }
 
-/// Training-age years for the running progression caps
-/// ([`crate::plan::training_age_years`]); without a profile the athlete reads
-/// as a novice.
-fn training_age_years(profile: Option<&Profile>) -> f64 {
-    let ta = profile.map_or(individualization::TrainingAge::Novice, |p| {
-        individualization::training_age_from_cadence(p.progression_cadence).value
-    });
-    crate::plan::training_age_years(ta)
-}
-
 /// Whether a logged run counts as a HARD session for the running-023 spacing
 /// check and the File 10 CAP-3 heavy-leg spacing:
 /// - its workout tag or average %HRmax makes it threshold/interval work
@@ -61,7 +67,7 @@ fn training_age_years(profile: Option<&Profile>) -> f64 {
 ///   design), or its average pace is at/faster than the slow end of the
 ///   athlete's threshold band (running-007 VDOT table), so phone-only runs
 ///   without heart rate are judged too.
-fn is_hard_run(
+fn is_hard_logged_run(
     r: &DatedRun,
     workout_type: Option<&WorkoutType>,
     offset: i64,
@@ -85,11 +91,6 @@ fn is_hard_run(
     threshold_slow_pace_sec_per_km
         .is_some_and(|slow| r.km > 0.0 && r.minutes > 0.0 && r.minutes * 60.0 / r.km <= slow)
 }
-
-/// Heavy leg work for the hybrid-012 / CAP-3 spacing check (HYB-CAP-001): a
-/// squat- or hinge-pattern set at or above this %1RM, the floor of the
-/// max-strength band (STR-HEAVYFREQ-001; File 02 strength-001 80–100 %).
-const HEAVY_LEG_PCT_1RM: f64 = 80.0;
 
 /// A float sum as the report prints it: an empty (or all -0.0) `f64` sum is
 /// -0.0, which would print "-0.0 km" / "-0%", so `+ 0.0` turns it into 0.0.
@@ -120,7 +121,8 @@ struct WeekRuns {
     prev_km: f64,
     baseline2_km: f64,
     long_run_km: f64,
-    /// `observed_at` of this week's HARD runs ([`is_hard_run`]), chronological.
+    /// `observed_at` of this week's HARD runs ([`is_hard_logged_run`]),
+    /// chronological.
     hard_runs: Vec<i64>,
     recovery_this_week: bool,
     prev_was_recovery: bool,
@@ -153,7 +155,7 @@ impl WeekRuns {
         let planned_quality_days: Vec<i64> = week_plan
             .iter()
             .filter(
-                |s| matches!(s.session_type, SessionType::Run(k) if crate::plan::is_quality_run(k)),
+                |s| matches!(s.session_type, SessionType::Run(k) if running::is_quality_session(k)),
             )
             .map(|s| s.epoch_day)
             .collect();
@@ -163,13 +165,13 @@ impl WeekRuns {
         let threshold_slow_pace = model
             .profile()
             .and_then(|p| crate::app::run_targets::pace_anchor_vdot(p, pace_day))
-            .and_then(|v| load::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Threshold))
+            .and_then(|v| running::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Threshold))
             .map(|(_, slow)| slow);
         let hard_runs: Vec<i64> = runs
             .iter()
             .filter(|r| local_week(r.started_at, offset) == cur_week)
             .filter(|r| {
-                is_hard_run(
+                is_hard_logged_run(
                     r,
                     model.runs[r.idx].workout_type.as_ref(),
                     offset,
@@ -184,10 +186,10 @@ impl WeekRuns {
         // reduction must not be flagged, and the week AFTER a recovery week must ratio
         // against the last LOAD week, not the deloaded one. False without a profile/plan.
         let is_recovery = |w: i64| -> bool {
-            model.profile().is_some_and(|profile| {
+            cx.plan_profile.as_ref().is_some_and(|pp| {
                 let monday = week_monday(w);
-                crate::app::plan_views::plan_week_index(model, &cx.days, monday)
-                    .is_some_and(|wi| crate::plan::planned_recovery_week(profile, wi, monday))
+                plan_week_index(model, &cx.days, monday)
+                    .is_some_and(|wi| crate::plan::planned_recovery_week(pp, wi, monday))
             })
         };
         let recovery_this_week = is_recovery(cur_week);
@@ -256,25 +258,28 @@ pub(in crate::app) fn build_weekly_report(
     cx: &ViewCtx,
     week_plan: &[SessionPlanView],
 ) -> Vec<GuidanceView> {
-    let model = cx.model;
+    let pp = cx.plan_profile.as_ref();
     let mut rows = Vec::new();
     let Some(week) = WeekRuns::new(cx, week_plan) else {
         return rows;
     };
-    push_increase_row(&mut rows, model, &week);
+    // Training-age years for the running progression caps; without a profile
+    // the athlete reads as a novice.
+    let age_years = individualization::training_age_years(pp.map_or(
+        individualization::TrainingAge::Novice,
+        PlanProfile::training_age,
+    ));
+    push_increase_row(&mut rows, age_years, &week);
     push_two_week_ramp_row(&mut rows, &week);
     if week.weekly_km > 0.0 {
         push_counting_method_row(&mut rows);
-        // Run-day denominator: the plan's capped run-day count (goal-table
-        // ceiling + hybrid concurrency cap) via `run_slot_count`, so the
-        // ≤2×-daily-average guardrail here and the plan's long-run sizing average
-        // over the same run days.
-        let n_run_days = model
-            .profile()
-            .filter(|p| p.running_days_per_week > 0)
-            .map(crate::plan::run_slot_count)
-            .unwrap_or(7);
-        let daily_avg_km = crate::plan::daily_avg_run_km(week.weekly_km, n_run_days);
+        // Run-day denominator: the plan's run slots (goal-table ceiling +
+        // hybrid concurrency cap), so the ≤2×-daily-average guardrail here and
+        // the plan's long-run sizing average over the same run days. A profile
+        // that plans no running (or no profile) averages over the calendar
+        // week.
+        let n_run_days = pp.and_then(PlanProfile::run_slot_count).unwrap_or(7);
+        let daily_avg_km = running::daily_avg_run_km(week.weekly_km, n_run_days);
         // A long-run row states the share itself; the default band row is for
         // a week whose long run is within it.
         if !push_volume_cap_row(&mut rows, &week, daily_avg_km) {
@@ -283,16 +288,16 @@ pub(in crate::app) fn build_weekly_report(
     }
     push_easy_share_row(&mut rows, &week);
     push_quality_row(&mut rows, &week);
-    push_hybrid_ramp_row(&mut rows, model, &week);
+    push_hybrid_ramp_row(&mut rows, pp, &week);
     push_heavy_leg_spacing_row(&mut rows, cx, &week);
-    push_bump_hold_row(&mut rows, model);
+    push_bump_hold_row(&mut rows, age_years);
     rows
 }
 
 /// Week-over-week increase vs the training-age cap (running-031). Only
 /// meaningful with a prior week to ratio against; skipped when THIS week is the
 /// planned recovery week (a cut is expected, not a violation).
-fn push_increase_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRuns) {
+fn push_increase_row(rows: &mut Vec<GuidanceView>, age_years: f64, week: &WeekRuns) {
     if week.recovery_this_week {
         return;
     }
@@ -300,7 +305,7 @@ fn push_increase_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRun
         return;
     };
     let weekly_km = week.weekly_km;
-    let ok = running::weekly_increase_ok(base_km, weekly_km, training_age_years(model.profile()));
+    let ok = running::weekly_increase_ok(base_km, weekly_km, age_years);
     let pct = (weekly_km - base_km) / base_km * 100.0;
     let text = |mi: bool| {
         format!(
@@ -347,7 +352,7 @@ fn push_two_week_ramp_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// Zone-counting convention note (running-012): time-in-zone is the
 /// reporting default; the T/I shares below are avg-HR-classified.
 fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
-    let method = graded((), claims::RUN_DIST_001);
+    let method = Recommended::new((), claims::RUN_DIST_001);
     push_guidance(
         rows,
         "Weekly volume",
@@ -392,7 +397,7 @@ fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_
                     format!(
                         "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
                         fmt_whole_km_or_mi(running::LONG_RUN_SHARE_SPLIT_KM, mi),
-                        fmt_km_or_mi(2.0 * daily_avg_km, mi)
+                        fmt_km_or_mi(running::DAILY_AVG_RUN_MULTIPLE * daily_avg_km, mi)
                     )
                 } else {
                     format!(
@@ -530,10 +535,9 @@ fn push_quality_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// Hybrid combined-load ramp guard (hybrid-021): a concurrent athlete keeps
 /// weekly running growth ≤~10% to bound stacked mechanical+systemic load.
 /// Same baseline and same recovery-week skip as the running-031 row.
-fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRuns) {
+fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, pp: Option<&PlanProfile>, week: &WeekRuns) {
     let weekly_km = week.weekly_km;
-    if let Some(p) = model.profile()
-        && p.weekly_sets > 0
+    if pp.is_some_and(PlanProfile::lifts)
         && !week.recovery_this_week
         && let Some((ramp_base_km, ramp_base_label)) = week.ramp_base()
     {
@@ -560,15 +564,14 @@ fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &Week
 /// otherwise the 25% test is self-referential (25% of the jog's own distance)
 /// and would flag a recovery jog near leg day. A configured runner (or an
 /// unknown profile) keeps the week's-longest rule.
-fn spaced_run_times(model: &Model, week: &WeekRuns) -> Vec<i64> {
+fn spaced_run_times(model: &Model, pp: Option<&PlanProfile>, week: &WeekRuns) -> Vec<i64> {
     let long_run_km = week.long_run_km;
     let planned_km = model
         .profile()
         .map(|p| p.running_km_per_week.max(0.0))
         .unwrap_or(0.0);
-    let pure_lifter = model.profile().is_some_and(|p| {
-        p.weekly_sets > 0 && p.running_days_per_week == 0 && p.running_km_per_week <= 0.0
-    });
+    let pure_lifter =
+        pp.is_some_and(|pp| pp.lifts() && !pp.runs() && pp.profile().running_km_per_week <= 0.0);
     let mut spaced_runs: Vec<i64> = week
         .current()
         .filter(|r| r.km > 0.0 && r.km >= long_run_km - 1e-9)
@@ -599,7 +602,7 @@ fn spaced_run_times(model: &Model, week: &WeekRuns) -> Vec<i64> {
 /// same-day pair ≥6 h apart meets the same-day separation floor (hybrid-007,
 /// CONC-SEP-001) and gets a softer note; under 6 h, or any cross-day pair
 /// under 24 h, is the CAP-3 warning. Heavy leg work = a squat- or
-/// hinge-pattern set at or above [`HEAVY_LEG_PCT_1RM`] %1RM. Hard runs are the week's
+/// hinge-pattern set at or above `strength::HEAVY_PCT_1RM` %1RM. Hard runs are the week's
 /// quality runs (tag, heart rate, plan slot or pace); the long run is the
 /// week's LONGEST run that also clears 25% of a full-week volume basis
 /// ([`spaced_run_times`]) — a short Z1 recovery jog is neither hard nor long.
@@ -610,7 +613,7 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
     // exists (actual load ≥ 0.8× anchor), else the rep/RPE estimate; a
     // bodyweight set with no RPE has no knowable intensity and is not heavy.
     let anchors = cx.lift_anchors_now();
-    let spaced_runs = spaced_run_times(model, week);
+    let spaced_runs = spaced_run_times(model, cx.plan_profile.as_ref(), week);
     let same_day_floor = f64::from(hybrid::session_spacing().value.ideal_min_hours);
     // Closest heavy-leg pairing per kind: (gap hours, same local day).
     let mut warn_h: Option<f64> = None;
@@ -622,11 +625,10 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
             if (set_day - run_day).abs() > 1 {
                 continue;
             }
-            let heavy_leg = matches!(
-                crate::plan::movement_pattern(&s.exercise),
-                Some(crate::plan::MovementPattern::Squat | crate::plan::MovementPattern::Hinge)
-            ) && set_intensity_pct(s, anchors.e1rm_for(&s.exercise))
-                .is_some_and(|p| p >= HEAVY_LEG_PCT_1RM);
+            let heavy_leg = crate::exercise::movement_pattern(&s.exercise)
+                .is_some_and(crate::exercise::MovementPattern::is_lower)
+                && set_intensity_pct(s, anchors.e1rm_for(&s.exercise))
+                    .is_some_and(crate::strength::is_heavy_pct);
             if !heavy_leg {
                 continue;
             }
@@ -668,8 +670,8 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
 }
 
 /// Novice volume-bump hold (running-031): hold 2–3 weeks between bumps.
-fn push_bump_hold_row(rows: &mut Vec<GuidanceView>, model: &Model) {
-    let hold = running::novice_volume_bump_hold_weeks(training_age_years(model.profile()));
+fn push_bump_hold_row(rows: &mut Vec<GuidanceView>, age_years: f64) {
+    let hold = running::novice_volume_bump_hold_weeks(age_years);
     if let Some((lo, hi)) = hold.value {
         push_guidance(
             rows,

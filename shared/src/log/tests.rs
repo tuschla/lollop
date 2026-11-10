@@ -1,7 +1,8 @@
 use super::*;
-use crate::DAY_SEC;
-use crate::app::tests::base_profile;
-use crate::app::{Engine, Model, Profile, SessionReview};
+use crate::app::{Engine, Model, SessionReview};
+use crate::day::DAY_SEC;
+use crate::profile::Profile;
+use crate::profile::test_support::base_profile;
 use crate::running::GoalDistance;
 use crate::schema::{ReadinessInput, ReadinessSignal};
 use crux_core::App;
@@ -56,7 +57,10 @@ fn profile(weekly_sets: u8) -> Event {
 
 fn review(overtraining: u8) -> Event {
     Event::SubmitReview(SessionReview {
-        overtraining_signal_count: overtraining,
+        safety: crate::feedback::SafetyScreen {
+            overtraining_signal_count: overtraining,
+            ..Default::default()
+        },
         ..SessionReview::default()
     })
 }
@@ -94,7 +98,10 @@ fn session_review(bad_day: bool) -> Event {
 
 fn weekly(overtraining: u8) -> Event {
     Event::SubmitWeeklyCheckin(SessionReview {
-        overtraining_signal_count: overtraining,
+        safety: crate::feedback::SafetyScreen {
+            overtraining_signal_count: overtraining,
+            ..Default::default()
+        },
         ..SessionReview::default()
     })
 }
@@ -843,31 +850,31 @@ fn run_amend_keeps_its_base_log() {
 fn run_track_id(id: u64, observed_at: i64) -> Event {
     Event::LogRunTrack {
         points: vec![
-            crate::running::GpsPoint {
+            crate::gps::GpsPoint {
                 lat: 0.0,
                 lon: 0.000,
                 observed_at: 0,
                 accuracy_m: 5.0,
             },
-            crate::running::GpsPoint {
+            crate::gps::GpsPoint {
                 lat: 0.0,
                 lon: 0.005,
                 observed_at: 100,
                 accuracy_m: 5.0,
             },
-            crate::running::GpsPoint {
+            crate::gps::GpsPoint {
                 lat: 0.0,
                 lon: 0.010,
                 observed_at: 200,
                 accuracy_m: 5.0,
             },
-            crate::running::GpsPoint {
+            crate::gps::GpsPoint {
                 lat: 0.0,
                 lon: 0.015,
                 observed_at: 300,
                 accuracy_m: 5.0,
             },
-            crate::running::GpsPoint {
+            crate::gps::GpsPoint {
                 lat: 0.0,
                 lon: 0.020,
                 observed_at: 400,
@@ -1455,7 +1462,7 @@ fn retired_calculator_lines_are_dropped() {
 
 /// A Turkish keyboard's "İNCLİNE BENCH PRESS" / "Inclıne bench press" is the same
 /// `SetExerciseEnded` key as "Incline bench press" (`names::exercise_key`), as
-/// `update` treats it (`plan::same_movement`): the later marker replaces the
+/// `update` treats it (`exercise::same_movement`): the later marker replaces the
 /// earlier one, and the compacted log replays to the same view.
 #[test]
 fn turkish_keyboard_spellings_share_one_ended_marker_key() {

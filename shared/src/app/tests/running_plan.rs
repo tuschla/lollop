@@ -82,8 +82,8 @@ fn endurance_priority_hybrid_keeps_full_run_frequency() {
     // day (File 10 hybrid-010/CONC-RE-001), so 6 running days stay 6, not 3.
     let endurance = hybrid_run_profile(ConcurrentGoal::EndurancePriority, 6, 50.0);
     assert_eq!(
-        crate::plan::run_slot_count(&endurance),
-        6,
+        PlanProfile::new(&endurance).run_slot_count(),
+        Some(6),
         "endurance-priority hybrid must not be capped to the ≤3 d/wk concurrency limit"
     );
     // The cap still applies when a strength quality is co-primary.
@@ -94,8 +94,8 @@ fn endurance_priority_hybrid_keeps_full_run_frequency() {
     ] {
         let strength = hybrid_run_profile(goal, 6, 50.0);
         assert_eq!(
-            crate::plan::run_slot_count(&strength),
-            3,
+            PlanProfile::new(&strength).run_slot_count(),
+            Some(3),
             "{goal:?} co-primary must cap endurance at 3 d/wk"
         );
     }
@@ -139,11 +139,11 @@ fn a_race_ten_days_out_synthesizes_a_taper_week() {
         week_start_epoch_day: Some(PLAN_MONDAY),
         ..Default::default()
     };
-    let prog = crate::plan::synthesize(&p, &anchors, 3).expect("a plan");
+    let prog = crate::plan::synthesize(&PlanProfile::new(&p), &anchors, 3).expect("a plan");
     assert_eq!(prog.mesocycle.phase, MesoPhase::Taper);
     // Without the date the same week is an ordinary rolling-cycle week.
     p.goal_race_epoch_day = None;
-    let prog = crate::plan::synthesize(&p, &anchors, 3).expect("a plan");
+    let prog = crate::plan::synthesize(&PlanProfile::new(&p), &anchors, 3).expect("a plan");
     assert_ne!(prog.mesocycle.phase, MesoPhase::Taper);
 }
 
@@ -204,7 +204,7 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
     assert!(mi >= 7.8, "long run {km} km shows ≥ 7.8 mi");
     assert_eq!(
         item.evidence.citation,
-        graded((), claims::RUN_START_001).reference()
+        Recommended::new((), claims::RUN_START_001).reference()
     );
     // The safety badge says what it caps, in plain words.
     assert_eq!(
@@ -614,7 +614,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
     use crate::schema::RunPrescription;
     let anchors = crate::plan::Anchors::default();
 
-    let interval = graded(
+    let interval = Recommended::new(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(16),
             RunIntensity::Vdot(VdotBand::Interval),
@@ -637,7 +637,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A continuous ceiling-only %HRmax run: rep fields empty, band rendered
     // as a ceiling.
-    let cont = graded(
+    let cont = Recommended::new(
         Prescription::Run(RunPrescription::new(
             RunVolume::DistanceKm(10.0),
             RunIntensity::HrPercentMax {
@@ -659,7 +659,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A two-sided %HRmax band (Tempo 88–92) renders as a range, not a floor
     // masquerading as a ceiling.
-    let tempo = graded(
+    let tempo = Recommended::new(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(30),
             RunIntensity::HrPercentMax {
@@ -676,7 +676,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A Recovery band carries both its %HRmax ceiling and the Karvonen %HRR
     // ceiling: the stricter reading is surfaced too.
-    let recovery = graded(
+    let recovery = Recommended::new(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(30),
             RunIntensity::HrPercentMax {

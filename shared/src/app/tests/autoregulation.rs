@@ -7,7 +7,7 @@ use super::*;
 use crate::schema::{PainDetail, PainKind, PainTrend};
 
 fn rec(a: Adjustment, claim: ClaimId) -> Recommended<Adjustment> {
-    graded(a, claim)
+    Recommended::new(a, claim)
 }
 
 fn interval_item() -> PrescriptionView {

@@ -1,8 +1,12 @@
 //! Run-derived metrics shared by the reducer and the view builders: the
 //! per-view [`RunFacts`] (realised distance/time per run), the 30-day spike
-//! baseline and the QC'd-track record.
+//! baseline, the run content key and the memoized QC'd-track record.
 
-use super::*;
+use crate::app::memo::{Memo, RUN_MEMO_CAP, memoized};
+use crate::app::model::LoggedRun;
+use crate::day::DAY_SEC;
+use crate::gps::{self, GpsPoint};
+use crate::running;
 
 /// Widest CTL/ATL window (~2 years): both EWMAs have converged, and the cap
 /// bounds the daily loop when a corrupt stamp spreads the runs over millions of
@@ -74,17 +78,12 @@ impl RunFacts {
     }
 }
 
-/// RUN-SPIKE-001: the spike baseline is the longest run in the TRAILING
-/// 30-day window ending at `at`, NOT all-time. An old long run before a layoff
-/// must not permanently suppress a genuine load spike after the layoff. Runs
-/// with `observed_at` in `[at − 30 d, at]` count (a future-dated row is excluded
-/// so a back-dated amend can't seed the baseline of an earlier run).
-pub(super) const SPIKE_WINDOW_SEC: i64 = 30 * DAY_SEC;
-
-/// Whether a run at `from` lies in the spike window ending at `at` (the
-/// trailing 30 days, inclusive of `at` itself).
+/// Whether a run at `from` lies in the RUN-SPIKE-001 baseline window ending at
+/// `at`: the trailing [`running::SPIKE_WINDOW_DAYS`], inclusive of `at`
+/// itself. A future-dated row is excluded so a back-dated amend can't seed the
+/// baseline of an earlier run.
 pub(super) fn in_spike_window(from: i64, at: i64) -> bool {
-    from <= at && at.saturating_sub(from) <= SPIKE_WINDOW_SEC
+    from <= at && at.saturating_sub(from) <= running::SPIKE_WINDOW_DAYS * DAY_SEC
 }
 
 /// The longest run (km, from `km` aligned with `runs`) in the spike window
@@ -122,4 +121,91 @@ pub(super) struct QcTrack {
     pub(super) distance_km: f64,
     /// Moving time over the QC'd, segment-aware track (minutes).
     pub(super) moving_min: f64,
+}
+
+/// A content fingerprint of a logged run, every field the derived view depends
+/// on. Cheap integer hashing (bit patterns for the floats) versus the trig +
+/// string allocation the cached derivation avoids. Collision probability is
+/// ~n²/2⁶⁴, negligible for a personal history; a collision would serve another
+/// run's QC'd distance, which feeds the spike gate and the run anchors.
+pub(in crate::app) fn run_content_key(r: &LoggedRun) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    r.entry_id.hash(&mut h);
+    r.observed_at.hash(&mut h);
+    r.distance_km.to_bits().hash(&mut h);
+    r.duration_min.to_bits().hash(&mut h);
+    r.hr_pct_max.to_bits().hash(&mut h);
+    r.longest_recent_km.to_bits().hash(&mut h);
+    r.workout_type.hash(&mut h);
+    r.session_rpe.hash(&mut h);
+    r.avg_hr_bpm.map(f64::to_bits).hash(&mut h);
+    r.logged_utc_offset_sec.hash(&mut h);
+    r.track_segment_starts.hash(&mut h);
+    for p in &r.track {
+        p.lat.to_bits().hash(&mut h);
+        p.lon.to_bits().hash(&mut h);
+        p.observed_at.hash(&mut h);
+        p.accuracy_m.to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
+thread_local! {
+    /// The File 07 GPS QC pass ([`gps::qc_track`], an O(points) haversine scan) plus
+    /// the distance and moving-time derivations, keyed by the run's content
+    /// fingerprint like [`RUN_VIEW_CACHE`].
+    pub(in crate::app) static QC_TRACK_CACHE: std::cell::RefCell<Memo<u64, std::rc::Rc<QcTrack>>> =
+        std::cell::RefCell::new(Memo::new(RUN_MEMO_CAP));
+}
+
+/// The QC'd track + derived distance/moving-time for one logged run whose
+/// content key the caller already holds, memoized.
+pub(in crate::app) fn run_qc_keyed(r: &LoggedRun, key: u64) -> std::rc::Rc<QcTrack> {
+    memoized(&QC_TRACK_CACHE, key, || {
+        std::rc::Rc::new(qc_figures(&r.track, &r.track_segment_starts))
+    })
+}
+
+/// The one derivation of a track's of-record figures: [`gps::qc_track`], then
+/// distance and moving time over the same legs.
+pub(super) fn qc_figures(points: &[GpsPoint], segment_starts: &[u32]) -> QcTrack {
+    let qc = gps::qc_track(points, segment_starts);
+    let distance_km = gps::track_distance_km(&qc.track, &qc.seg_starts);
+    let moving_min = gps::moving_duration_min(&qc);
+    QcTrack {
+        track: qc.track,
+        seg_starts: qc.seg_starts,
+        distance_km,
+        moving_min,
+    }
+}
+
+/// [`RunResultView::started_at`]: a GPS run's first QC'd fix (its first raw
+/// fix when fewer than two survived QC, the card's unmeasurable case), a
+/// hand-entered run's stamp minus its duration. Never after `observed_at` (a
+/// corrupt fix time cannot date a run's start past its end); 0 stays 0
+/// (undated). The run's day everywhere a view groups runs by day for the shell
+/// (the card's title and date, the progress weeks), so they agree.
+pub(in crate::app) fn run_started_at(r: &LoggedRun, qc: Option<&QcTrack>) -> i64 {
+    if r.observed_at == 0 {
+        return 0;
+    }
+    let qc_track = qc.map_or(&[][..], |q| &q.track[..]);
+    let qc_track = if qc_track.len() >= 2 { qc_track } else { &[] };
+    let start = match qc_track.first().or(r.track.first()) {
+        Some(p) => p.observed_at,
+        None => {
+            let secs = r.duration_min * 60.0;
+            // A non-finite or negative duration (corrupt log) has no length;
+            // `as` saturates a huge one.
+            let secs = if secs.is_finite() && secs > 0.0 {
+                secs.round() as i64
+            } else {
+                0
+            };
+            r.observed_at.saturating_sub(secs)
+        }
+    };
+    start.min(r.observed_at)
 }

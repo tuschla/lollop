@@ -1,13 +1,16 @@
-use super::*;
-use crate::strength;
+use crate::app::format::{fmt_rounded, fmt_u8_range, weight_num, weight_suffix};
+use crate::app::guidance::rows::{lift_goal_phrase, push_guidance, training_age_label};
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
+use crate::profile::{PlanProfile, Profile};
+use crate::schema::Recommended;
+use crate::strength::{self, LiftGoal};
+use crate::{hypertrophy, individualization};
 
 /// Strength + Hypertrophy rows for a lifting profile.
-pub(super) fn build_strength_guidance(
-    p: &Profile,
-    age: individualization::TrainingAge,
-    rows: &mut Vec<GuidanceView>,
-) {
-    push_lift_week_layout(p, rows);
+pub(super) fn build_strength_guidance(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
+    let (p, age) = (pp.profile(), pp.training_age());
+    push_lift_week_layout(pp, rows);
     let lr = push_loading_rows(p, age, rows);
     push_one_rm_rows(age, rows);
     push_periodization_rows(age, rows);
@@ -17,33 +20,57 @@ pub(super) fn build_strength_guidance(
     push_hypertrophy_rows(p, age, rows);
 }
 
-/// The lifting week the plan actually lays out (Table 1.6 templates,
-/// LIFT-DAYS-001), with the athlete's weekday choice (ADH-DAYS-001).
-fn push_lift_week_layout(p: &Profile, rows: &mut Vec<GuidanceView>) {
-    let n = crate::plan::week_shape(p).lift_days;
-    let layout = match n {
-        0 | 1 => None,
-        2 => Some("2 full-body days built on the big compound lifts"),
-        3 => Some("3 full-body days"),
-        4 => Some("2 upper-body and 2 lower-body days"),
-        _ => Some("2 upper-body, 2 lower-body and 1 full-body day"),
-    };
-    if let Some(layout) = layout {
-        let ld = graded((), claims::LIFT_DAYS_001);
-        let days_note = if p.training_weekdays.is_some_and(|m| m & 0x7f != 0) {
-            " on the days you picked"
-        } else {
-            ""
-        };
-        push_guidance(
-            rows,
-            "Strength",
-            format!(
-                "Lifting {n} days a week{days_note}: {layout}. Weekly sets per muscle stay the same however many days you lift, and days that train the same muscles are about 48 hours apart."
-            ),
-            &ld,
-        );
+/// The lifting week the plan lays out before the hybrid leg-day cap (the
+/// Table 1.6 template, LIFT-DAYS-001; a 2-day week keeps the compounds), with
+/// the athlete's weekday choice (ADH-DAYS-001).
+fn push_lift_week_layout(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
+    use crate::plan::DayRegion;
+    let n = pp.shape().lift_days;
+    if n < 2 {
+        return;
     }
+    let template = crate::plan::lift_template(n);
+    let parts: Vec<(usize, &str)> = [
+        (DayRegion::Upper, "upper-body"),
+        (DayRegion::Lower, "lower-body"),
+        (DayRegion::Full, "full-body"),
+    ]
+    .into_iter()
+    .map(|(region, name)| (template.iter().filter(|r| **r == region).count(), name))
+    .filter(|(k, _)| *k > 0)
+    .collect();
+    let named: Vec<String> = parts
+        .iter()
+        .map(|(k, name)| format!("{k} {name}"))
+        .collect();
+    let mut layout = match named.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => return,
+    };
+    layout.push_str(if parts.last().is_some_and(|(k, _)| *k == 1) {
+        " day"
+    } else {
+        " days"
+    });
+    if n == 2 {
+        layout.push_str(" built on the big compound lifts");
+    }
+    let ld = Recommended::new((), claims::LIFT_DAYS_001);
+    let days_note = if pp.profile().chosen_weekdays().is_some() {
+        " on the days you picked"
+    } else {
+        ""
+    };
+    push_guidance(
+        rows,
+        "Strength",
+        format!(
+            "Lifting {n} days a week{days_note}: {layout}. Weekly sets per muscle stay the same however many days you lift, and days that train the same muscles are about {:.0} hours apart.",
+            crate::plan::SAME_MUSCLE_GAP_H
+        ),
+        &ld,
+    );
 }
 
 /// Training-age defaults, the goal's loading band and the velocity-loss set
@@ -116,7 +143,7 @@ fn push_one_rm_rows(age: individualization::TrainingAge, rows: &mut Vec<Guidance
     // (every %1RM leaves `strength::MIN_STRENGTH_RIR` in reserve) and caps a
     // novice's load jumps (`plan/lift.rs`); this row states the gate.
     let novice = matches!(age, individualization::TrainingAge::Novice);
-    let test_gate = graded((), claims::STR_1RMTEST_001);
+    let test_gate = Recommended::new((), claims::STR_1RMTEST_001);
     push_guidance(
         rows,
         "Strength",
@@ -195,7 +222,7 @@ fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<G
     };
     match pm.value {
         strength::PeriodizationModel::Linear => {
-            use strength::LinearPhase::*;
+            use strength::LinearPhase::{Base, Build, Peak, Taper};
             for (name, phase) in [
                 ("Base", Base),
                 ("Build", Build),
@@ -212,7 +239,7 @@ fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<G
             }
         }
         strength::PeriodizationModel::Block => {
-            use strength::BlockPhase::*;
+            use strength::BlockPhase::{Accumulation, Realization, Transmutation};
             for (name, phase) in [
                 ("Accumulation", Accumulation),
                 ("Transmutation (strength)", Transmutation),
@@ -286,7 +313,7 @@ fn push_prilepin_row(lr: &Recommended<strength::LoadingRx>, rows: &mut Vec<Guida
     // header only for consecutive same-section rows.
     let pct_mid = f64::from(lr.value.pct_1rm.0 + lr.value.pct_1rm.1) / 2.0;
     if let Some(pr) = strength::prilepin_for(pct_mid) {
-        let pr = graded(*pr, claims::STR_PRILEPIN_001);
+        let pr = Recommended::new(*pr, claims::STR_PRILEPIN_001);
         push_guidance(
             rows,
             "Strength",
@@ -361,9 +388,9 @@ fn push_hypertrophy_rows(
     // answer "how many sets"; this answers "how many reps and what load", the
     // per-set target. All three classes share one evidence source, so surface
     // them together.
-    let heavy = hypertrophy::rep_load(hypertrophy::ExerciseClass::HeavyCompound);
-    let moderate = hypertrophy::rep_load(hypertrophy::ExerciseClass::ModerateCompound);
-    let iso = hypertrophy::rep_load(hypertrophy::ExerciseClass::Isolation);
+    let heavy = hypertrophy::rep_load(crate::exercise::ExerciseClass::HeavyCompound);
+    let moderate = hypertrophy::rep_load(crate::exercise::ExerciseClass::ModerateCompound);
+    let iso = hypertrophy::rep_load(crate::exercise::ExerciseClass::Isolation);
     push_guidance(
         rows,
         "Hypertrophy",

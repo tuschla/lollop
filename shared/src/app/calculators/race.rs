@@ -1,8 +1,10 @@
-use super::*;
+use crate::app::format::{fmt_clock, fmt_km_or_mi, race_distance_title};
+use crate::app::guidance::{push_guidance, push_guidance_mi};
+use crate::app::model::RaceQuery;
+use crate::app::view_types::{EvidenceTagView, RacePredictionView};
+use crate::load;
+use crate::running::{self, GoalDistance};
 
-/// How close a goal distance must be to [`running::MARATHON_M`] to count as the
-/// marathon, m.
-const MARATHON_MATCH_TOLERANCE_M: f64 = 10.0;
 /// Longest plausible race distance, m (~500 km events with headroom).
 /// Sanitized floats are finite; bounding distances makes a 1e12 m input read
 /// as no prediction.
@@ -33,7 +35,7 @@ pub(in crate::app) fn to_race_view(
 
     // running-040/008: derate the displayed band for an under-mileaged
     // marathoner (logged history only); the note below states it.
-    let is_marathon = (q.goal_distance_m - running::MARATHON_M).abs() < MARATHON_MATCH_TOLERANCE_M;
+    let is_marathon = GoalDistance::Marathon.is_race_distance(q.goal_distance_m);
     let marathon_derate = if is_marathon {
         longest_logged_km.and_then(|longest| {
             let opt = running::marathon_prediction_optimistic(longest);

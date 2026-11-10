@@ -1,6 +1,15 @@
 //! Flattening a `Prescription::Lift` arm.
 
-use super::*;
+use crate::app::evidence_views::{grade_note_str, reps_word, why_from};
+use crate::app::format::{fmt_rounded, fmt_weight};
+use crate::app::plan_views::item_render::{
+    derate_reason, face_rir, range_text, refresh_lift_summary, round_load_or_drop, sets_reps_lead,
+    with_reps_left,
+};
+use crate::app::view_types::{BasisRx, EvidenceTagView, PlanIntensity, PrescriptionView};
+use crate::evidence::{ClaimId, claims};
+use crate::plates::{f32_load_ceil, round_load_grid};
+use crate::schema::{LiftIntensity, Prescription, Recommended};
 
 /// What one lift intensity arm resolves before the item is assembled.
 #[derive(Default)]
@@ -31,7 +40,7 @@ struct LiftArm {
 /// %1RM target and re-points the evidence triad for a declared layoff.
 pub(super) fn flatten_lift_prescription(
     l: &crate::schema::LiftPrescription,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     rx: &Recommended<Prescription>,
     weight_lb: bool,
 ) -> PrescriptionView {
@@ -73,7 +82,7 @@ pub(super) fn flatten_lift_prescription(
     };
     let mut evidence = EvidenceTagView::of(rx);
     if let Some(id) = repoint {
-        let re = graded((), id);
+        let re = Recommended::new((), id);
         evidence = EvidenceTagView::of(&re);
         why.grade_note = grade_note_str(re.grade(), re.contested());
     }
@@ -115,7 +124,7 @@ pub(super) fn flatten_lift_prescription(
 fn percent_arm(
     l: &crate::schema::LiftPrescription,
     p: f32,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     weight_lb: bool,
 ) -> LiftArm {
     let e1 = anchors.e1rm_for(&l.exercise);
@@ -234,7 +243,7 @@ fn percent_arm(
 fn rir_arm(
     l: &crate::schema::LiftPrescription,
     n: u8,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     rx: &Recommended<Prescription>,
     weight_lb: bool,
 ) -> LiftArm {
@@ -273,12 +282,12 @@ fn rep_range_arm(
     l: &crate::schema::LiftPrescription,
     n: u8,
     top: u8,
-    anchors: &crate::plan::Anchors,
+    anchors: &crate::plan::LiftAnchors,
     rx: &Recommended<Prescription>,
     weight_lb: bool,
 ) -> LiftArm {
     let (bottom, _) =
-        crate::hypertrophy::rep_range_for(crate::hypertrophy::classify(&l.exercise)).value;
+        crate::hypertrophy::rep_range_for(crate::exercise::classify(&l.exercise)).value;
     let bottom = bottom.min(l.reps);
     let derate = anchors.carried_derate_for(&l.exercise);
     let frac = derate.map_or(1.0, |d| d.frac);
@@ -389,7 +398,11 @@ fn rep_range_arm(
 /// An RPE target. An unanchored lift prescribed at an RPE is a calibration set
 /// (STR-E1RM-CHECK-001: a 3–6 rep test set): the athlete picks the weight, and
 /// the logged set sets their working loads.
-fn rpe_arm(l: &crate::schema::LiftPrescription, r: f32, anchors: &crate::plan::Anchors) -> LiftArm {
+fn rpe_arm(
+    l: &crate::schema::LiftPrescription,
+    r: f32,
+    anchors: &crate::plan::LiftAnchors,
+) -> LiftArm {
     let rir = crate::strength::rpe_to_rir(r as f64).round();
     let calibration = anchors.e1rm_for(&l.exercise).is_none();
     let effort = with_reps_left(rir as i64);

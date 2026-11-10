@@ -1,17 +1,20 @@
-use super::*;
+use crate::app::format::{fmt_frac_pct_range, fmt_pct_range, fmt_u8_range};
+use crate::app::guidance::rows::push_guidance;
+use crate::app::view_types::GuidanceView;
+use crate::evidence::claims;
+use crate::individualization;
+use crate::profile::{PlanProfile, Profile};
 use crate::running::{self, PACE_CORRECTION_ALTITUDE_M, PACE_CORRECTION_HEAT_C};
+use crate::schema::{MesoPhase, Recommended};
+use crate::strength::LiftGoal;
 
 /// Running rows for a profile that runs.
-pub(super) fn build_running_guidance(
-    p: &Profile,
-    age: individualization::TrainingAge,
-    age_years: f64,
-    rows: &mut Vec<GuidanceView>,
-) {
+pub(super) fn build_running_guidance(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
+    let p = pp.profile();
     push_goal_week_row(p, rows);
     push_intensity_rows(rows);
-    push_runner_strength_row(p, rows);
-    push_volume_progression_rows(p, age, age_years, rows);
+    push_runner_strength_row(pp, rows);
+    push_volume_progression_rows(p, pp.training_age(), rows);
     push_session_rx_rows(p, rows);
     push_recovery_and_taper_rows(p, rows);
     push_pace_correction_row(p, rows);
@@ -30,7 +33,7 @@ fn push_goal_week_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
     };
     let head = format!(
         "{}: {} runs a week, {hard} of them hard",
-        goal_distance_label(p.goal_distance),
+        p.goal_distance.label(),
         fmt_u8_range(gp.value.sessions_per_week),
     );
     let summary = if gp.value.long_run_share.1 > 0.0 {
@@ -73,14 +76,14 @@ fn push_intensity_rows(rows: &mut Vec<GuidanceView>) {
     );
 }
 
-fn push_runner_strength_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
+fn push_runner_strength_row(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
     // A run-only athlete is offered supplemental strength work
     // (RUN-STRENGTH-001; heavy ≥80% or jump work is what helps running economy,
     // HYB-RE-DOSE-001). The ≤3-run-day hybrid default is NOT shown here: it only
     // applies when lifting is a co-primary goal (see the Hybrid rows).
-    if p.weekly_sets == 0 {
-        if p.runner_strength {
-            let re = graded((), claims::HYB_RE_DOSE_001);
+    if !pp.lifts() {
+        if pp.runner_strength() {
+            let re = Recommended::new((), claims::HYB_RE_DOSE_001);
             push_guidance(
                 rows,
                 "Running",
@@ -88,7 +91,7 @@ fn push_runner_strength_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
                 &re,
             );
         } else {
-            let rs = graded((), claims::RUN_STRENGTH_001);
+            let rs = Recommended::new((), claims::RUN_STRENGTH_001);
             push_guidance(
                 rows,
                 "Running",
@@ -102,13 +105,12 @@ fn push_runner_strength_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
 fn push_volume_progression_rows(
     p: &Profile,
     age: individualization::TrainingAge,
-    age_years: f64,
     rows: &mut Vec<GuidanceView>,
 ) {
     // Shared predicate with the program synthesizer (RUN-DELOAD-001: masters age
     // ≥ 65 OR novice training age), so the displayed cadence matches the one the
     // program actually builds.
-    let conservative = crate::plan::conservative_deload(p.age_years, age);
+    let conservative = individualization::conservative_deload(p.age_years, age);
     let dc = running::deload_cadence(conservative);
     push_guidance(
         rows,
@@ -127,7 +129,7 @@ fn push_volume_progression_rows(
         &dc,
     );
 
-    let wc = running::weekly_increase_cap_frac(age_years);
+    let wc = running::weekly_increase_cap_frac(individualization::training_age_years(age));
     push_guidance(
         rows,
         "Running",
@@ -284,7 +286,7 @@ fn push_recovery_and_taper_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
             "Running",
             format!(
                 "Race taper ({}): {} days, cut volume {}%{}. Hold intensity and frequency",
-                goal_distance_label(p.goal_distance),
+                p.goal_distance.label(),
                 fmt_u8_range(t.days),
                 fmt_frac_pct_range(t.volume_cut_frac.0, t.volume_cut_frac.1),
                 if t.keep_mp_touches_and_short_tempo {
@@ -300,7 +302,7 @@ fn push_recovery_and_taper_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
     }
 
     // running-032 single-variable rule, stated as a reference row.
-    let onevar = graded((), claims::RUN_ONEVAR_001);
+    let onevar = Recommended::new((), claims::RUN_ONEVAR_001);
     push_guidance(
         rows,
         "Running",

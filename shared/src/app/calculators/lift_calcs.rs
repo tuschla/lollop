@@ -1,4 +1,13 @@
-use super::*;
+use crate::app::format::{fmt_kg, fmt_u8_range, weight_num};
+use crate::app::guidance::{DEFICIT_REFUSAL, push_guidance, push_hold_row};
+use crate::app::model::{HypertrophyInputView, ProteinInputView};
+use crate::app::view_types::{
+    GuidanceView, HypertrophyFiguresView, ProteinFigureView, ProteinTargetKind,
+};
+use crate::evidence::claims;
+use crate::profile::{PlanProfile, Profile};
+use crate::schema::{Adjustment, Recommended};
+use crate::{autoreg, hypertrophy, individualization};
 
 /// The hold that keeps the hypertrophy-plan calculator and the
 /// prescriptive guidance from giving load or volume numbers: today's training
@@ -17,22 +26,6 @@ pub(in crate::app) fn calculator_hold(
         .or_else(|| reds_present.then(autoreg::reds_referral))
 }
 
-/// The single row a held calculator or guidance list shows instead of
-/// numbers, carrying the hold's own evidence.
-pub(in crate::app) fn push_hold_row(
-    rows: &mut Vec<GuidanceView>,
-    section: &str,
-    hold: &Recommended<Adjustment>,
-) {
-    push_guidance(
-        rows,
-        section,
-        "No numbers while training is paused. The banner at the top says what to do next."
-            .to_string(),
-        hold,
-    );
-}
-
 /// Weekly set ramp across the accumulation block: the SAME
 /// `hypertrophy::weekly_targets` the plan sizes its week from, so the planner
 /// and the Today plan never disagree. With a profile the ramp opens at the
@@ -47,39 +40,41 @@ pub(in crate::app) fn push_hold_row(
 /// whole-session cap cut it (HYP-VOL-CAP-001).
 fn block_ramp(
     lm: &hypertrophy::VolumeLandmarks,
-    profile: Option<&Profile>,
-    ta: Option<individualization::TrainingAge>,
+    pp: Option<&PlanProfile>,
     weeks: u8,
 ) -> (Recommended<Vec<u8>>, hypertrophy::VolumeRole, bool, bool) {
-    let role = match (profile, ta) {
-        (Some(p), Some(ta)) => {
-            hypertrophy::volume_role(lm.muscle, p.specialization_muscle.as_deref(), ta).value
+    let role = match pp {
+        Some(pp) => {
+            hypertrophy::volume_role(
+                lm.muscle,
+                pp.profile().specialization_muscle.as_deref(),
+                pp.training_age(),
+            )
+            .value
         }
-        _ => hypertrophy::VolumeRole::Standard,
+        None => hypertrophy::VolumeRole::Standard,
     };
-    let stated = profile.map_or(lm.mev, |p| p.weekly_sets);
+    let stated = pp.map_or(lm.mev, |pp| pp.profile().weekly_sets);
     let mut planned = hypertrophy::weekly_targets(lm, stated, role, weeks);
     let mut session_trimmed = false;
     // A profile that runs the hypertrophy week reads the plan's own targets,
     // already fitted to the whole-session cap (HYP-VOL-CAP-001) block-wide.
-    if let (Some(p), Some(ta)) = (profile, ta)
-        && crate::plan::uses_double_progression(p)
-    {
-        let days = crate::plan::week_shape(p).lift_days;
-        let fitted: Vec<u8> = crate::plan::hypertrophy_block_targets(p, ta, weeks, days)
-            .iter()
-            .map(|week| {
-                week.iter()
-                    .find(|t| t.muscle == lm.muscle)
-                    .map_or(0, |t| t.target)
-            })
-            .collect();
+    if let Some(pp) = pp.filter(|pp| crate::plan::uses_double_progression(pp)) {
+        let fitted: Vec<u8> =
+            crate::plan::hypertrophy_block_targets(pp, weeks, pp.shape().lift_days)
+                .iter()
+                .map(|week| {
+                    week.iter()
+                        .find(|t| t.muscle == lm.muscle)
+                        .map_or(0, |t| t.target)
+                })
+                .collect();
         session_trimmed = fitted != planned.value;
         planned.value = fitted;
     }
     let optional_only = planned.value.iter().all(|&s| s == 0);
     let ramp = if optional_only {
-        graded(
+        Recommended::new(
             hypertrophy::weekly_set_ramp(lm.mav.0, lm.mav.1, weeks).value,
             claims::HYP_VOL_CAP_001,
         )
@@ -99,7 +94,7 @@ fn block_ramp(
 /// it stands for.
 pub(in crate::app) fn build_hypertrophy_plan(
     q: &HypertrophyInputView,
-    profile: Option<&Profile>,
+    pp: Option<&PlanProfile>,
     hold: Option<&Recommended<Adjustment>>,
 ) -> (Vec<GuidanceView>, Option<HypertrophyFiguresView>, Vec<u8>) {
     let mut rows = Vec::new();
@@ -112,7 +107,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
     let Some(lm) = hypertrophy::resolve_muscle(&q.muscle) else {
         // No landmarks for this muscle: say so plainly rather than guess. The
         // note itself is the RP landmark framing, so it is graded from that claim.
-        let note = graded((), claims::HYP_LANDMARKS_001);
+        let note = Recommended::new((), claims::HYP_LANDMARKS_001);
         push_guidance(
             &mut rows,
             &section,
@@ -132,7 +127,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
 
     // Landmarks row, landmarks are a raw engine value, not a Recommended, so
     // wrap them in their HYP-LANDMARKS-001 evidence (ExpertOpinion) to grade it.
-    let landmarks = graded((), claims::HYP_LANDMARKS_001);
+    let landmarks = Recommended::new((), claims::HYP_LANDMARKS_001);
     push_guidance(
         &mut rows,
         &section,
@@ -149,9 +144,8 @@ pub(in crate::app) fn build_hypertrophy_plan(
         return (rows, None, Vec::new());
     }
 
-    let ta =
-        profile.map(|p| individualization::training_age_from_cadence(p.progression_cadence).value);
-    let (ramp, role, optional_only, session_trimmed) = block_ramp(lm, profile, ta, q.weeks);
+    let ta = pp.map(PlanProfile::training_age);
+    let (ramp, role, optional_only, session_trimmed) = block_ramp(lm, pp, q.weeks);
     let ramp_row = rows.len() as u32;
     push_ramp_row(
         &mut rows,
@@ -169,8 +163,9 @@ pub(in crate::app) fn build_hypertrophy_plan(
     let [heavy, isolation] = push_rest_rows(&mut rows, &section);
     let shape_row = rows.len() as u32;
     let ms = push_execution_rows(&mut rows, &section);
+    let profile = pp.map(PlanProfile::profile);
     push_next_meso_rows(&mut rows, &section, lm, q, profile, &ramp.value);
-    push_training_age_rows(&mut rows, &section, profile);
+    push_training_age_rows(&mut rows, &section, ta);
 
     // The ramp row stands for the chart only on a standard block: a
     // specialization, maintenance or optional-only ramp keeps its sentence.
@@ -320,10 +315,13 @@ fn push_dose_rows(
 fn push_rest_rows(rows: &mut Vec<GuidanceView>, section: &str) -> [(u16, u16); 2] {
     let mut windows = [(0, 0); 2];
     for (slot, (label, class)) in [
-        ("heavy compounds", hypertrophy::ExerciseClass::HeavyCompound),
+        (
+            "heavy compounds",
+            crate::exercise::ExerciseClass::HeavyCompound,
+        ),
         (
             "machines and isolation work",
-            hypertrophy::ExerciseClass::Isolation,
+            crate::exercise::ExerciseClass::Isolation,
         ),
     ]
     .into_iter()
@@ -388,7 +386,7 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) -> hypertrop
 
     // hypertrophy-021: failure only on machines/isolation. The plan programs
     // no set to failure on any weighted lift (RIR ≥ 1); this row states the rule.
-    let fail = graded((), claims::HYP_FAIL_SAFE_001);
+    let fail = Recommended::new((), claims::HYP_FAIL_SAFE_001);
     push_guidance(
         rows,
         section,
@@ -491,9 +489,13 @@ fn push_next_meso_rows(
 
 /// Training-age extras: the novice RIR calibration start, the intermediate
 /// default program synthesis.
-fn push_training_age_rows(rows: &mut Vec<GuidanceView>, section: &str, profile: Option<&Profile>) {
-    if let Some(p) = profile {
-        match individualization::training_age_from_cadence(p.progression_cadence).value {
+fn push_training_age_rows(
+    rows: &mut Vec<GuidanceView>,
+    section: &str,
+    ta: Option<individualization::TrainingAge>,
+) {
+    if let Some(ta) = ta {
+        match ta {
             individualization::TrainingAge::Novice => {
                 let start = hypertrophy::novice_start_rir();
                 push_guidance(

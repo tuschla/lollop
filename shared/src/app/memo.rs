@@ -1,4 +1,4 @@
-//! One bounded memo type for the per-thread view caches.
+//! The bounded memo types for the per-thread view caches, and their caps.
 //!
 //! Every cached value is a pure function of its key (content fingerprints of
 //! immutable history, never a clock), so a hit and a miss yield the same
@@ -10,6 +10,20 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::thread::LocalKey;
+
+/// Cap on the per-run memos (view, QC track, best efforts). Live runs are
+/// pruned every `view()` (`prune_run_memos`); the cap is a backstop for a
+/// thread that derives runs without viewing. No real history approaches it.
+pub(super) const RUN_MEMO_CAP: usize = 4096;
+
+/// Cap on the whole-list view memos (`lift_audit::lift_views` / `run_views`). Only a
+/// couple of distinct set/run histories are live within a session (the current
+/// one plus a just-superseded one across an edit), and `LIFT_VIEWS_CACHE` needs
+/// the kg AND lb slots of an unchanged `model.sets` warm simultaneously (its key
+/// folds `weight_lb`), so a small cap bounds growth without ever evicting the
+/// hot keys. Each entry is a full-history list clone, so the cap directly bounds
+/// worst-case accumulation.
+pub(super) const VIEW_LIST_CACHE_CAP: usize = 8;
 
 pub(super) struct Memo<K, V> {
     map: HashMap<K, V>,

@@ -1,7 +1,10 @@
 //! Evidence presentation: `Recommended<T>` → `AdjustmentView`, the grade
 //! definitions, claim statements, the "why" sheet, and grade notes.
 
-use super::*;
+use crate::app::view_types::{AdjustmentView, EvidenceTagView, GradeDefView, WhyView};
+use crate::autoreg;
+use crate::evidence::{ClaimId, EvidenceGrade, claims};
+use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended, SafetyTier};
 
 /// Flatten one evidence-wrapped adjustment into a shell-facing row: the call,
 /// the exercise an item-scoped call names, its safety-ladder tier (for the
@@ -51,6 +54,54 @@ fn applied_rule(r: &Recommended<Adjustment>) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// Claims behind a pain response (the File 08 pain ladder).
+pub(super) fn is_pain_claim(c: ClaimId) -> bool {
+    matches!(
+        c,
+        claims::SAFE_PAIN_001 | claims::SAFE_PAIN_STRUCT_001 | claims::SAFE_TENDON_001
+    )
+}
+
+/// Claims behind an illness response (neck check, return-to-training, head cold).
+pub(super) fn is_illness_claim(c: ClaimId) -> bool {
+    matches!(
+        c,
+        claims::ILLNESS_NECK_001 | claims::ILLNESS_RTT_001 | claims::ILLNESS_COLD_RUN_001
+    )
+}
+
+/// The File 06 §5 ladder tier a recommendation belongs to, for ranking the
+/// Today headline: the same ladder `autoreg::resolve_safety_in` raises, keyed
+/// by the rule that emitted the call. `None` for calls off the ladder (e.g. a
+/// load increase).
+pub(super) fn adjustment_tier(r: &Recommended<Adjustment>) -> Option<SafetyTier> {
+    let tier = match (r.value.base(), r.claim_id()) {
+        (Adjustment::Defer { .. }, _) => SafetyTier::MedicalReferral,
+        (_, c) if is_pain_claim(c) => SafetyTier::Pain,
+        (_, c) if is_illness_claim(c) || c == claims::RETURN_HOLD_001 => SafetyTier::Illness,
+        (Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001) => SafetyTier::Illness,
+        (Adjustment::IncreaseLoadPct(_), _) => return None,
+        (Adjustment::DowngradeSession, claims::WELLNESS_001) => SafetyTier::SubjectiveMultiDay,
+        (Adjustment::DowngradeSession, claims::HRV_001) => SafetyTier::HrvTrend,
+        (Adjustment::CapTopEnd { trigger }, _) if *trigger == ReadinessSignal::HrvLnRmssd => {
+            SafetyTier::HrvTrend
+        }
+        (Adjustment::CapTopEnd { .. }, _) => SafetyTier::SingleDayMarker,
+        (_, claims::AUTOREG_RHR_NOISE_001 | claims::AUTOREG_RHR_DOWN_001) => {
+            SafetyTier::SingleDayMarker
+        }
+        (
+            Adjustment::ReduceLoadPct(_)
+            | Adjustment::Deload { .. }
+            | Adjustment::CapRpe(_)
+            | Adjustment::DowngradeSession,
+            _,
+        ) => SafetyTier::ObjectivePerformance,
+        _ => return None,
+    };
+    Some(tier)
 }
 
 /// The "first set decides the rest" sentence a progression hold's call ends
@@ -390,9 +441,12 @@ pub(super) fn why_from<T>(basis_override: Option<String>, r: &Recommended<T>) ->
 }
 
 /// One-sentence gloss of what an evidence grade means for a claim, with the
-/// contested question (`contested_ref`, e.g. `"CQ-01"`) appended when the
-/// claim is under active debate.
-pub(super) fn grade_note_str(grade: EvidenceGrade, contested_ref: Option<&str>) -> String {
+/// contested question (`contested_ref`) appended when the claim is under
+/// active debate.
+pub(super) fn grade_note_str(
+    grade: EvidenceGrade,
+    contested_ref: Option<crate::evidence::ContestedId>,
+) -> String {
     let (label, definition) = grade_words(grade);
     let first = char::from(definition.as_bytes()[0].to_ascii_lowercase());
     let rest = &definition[1..];
@@ -401,7 +455,7 @@ pub(super) fn grade_note_str(grade: EvidenceGrade, contested_ref: Option<&str>) 
         EvidenceGrade::ExpertOpinion => format!("{label}: {first}{rest}"),
         _ => format!("{label} evidence: {first}{rest}"),
     };
-    let Some(cq) = contested_ref.and_then(crate::evidence::contested_question) else {
+    let Some(cq) = contested_ref.map(crate::evidence::ContestedId::question) else {
         return base;
     };
     // Honour the deck's "here's both sides" promise: name the open question

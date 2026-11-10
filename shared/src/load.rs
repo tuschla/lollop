@@ -1,6 +1,7 @@
 //! Training-load & running-analytics math core: pure, deterministic formulas
 //! from File 07 ("Data Harvesting & Analytics - Ingestion Spec"), KB 13
-//! session-RPE and the running-007/015 pace bands. Constants are copied
+//! session-RPE and the %VO2max → pace inversion the running-007 bands read
+//! (`running::vdot_band_pace_sec_per_km`). Constants are copied
 //! verbatim from the spec. Raw scalars are not graded; the decoupling band
 //! verdict cites `RUN_DECOUPLE_001`.
 
@@ -35,7 +36,7 @@ pub fn decoupling_band(decoupling_pct: f64) -> Recommended<DecouplingBand> {
     } else {
         DecouplingBand::Insufficient
     };
-    crate::evidence::graded(band, claims::RUN_DECOUPLE_001)
+    Recommended::new(band, claims::RUN_DECOUPLE_001)
 }
 
 /// Decoupling percentage below which the aerobic base counts as sound
@@ -140,7 +141,7 @@ pub fn karvonen_target_hr(hr_rest: f64, hr_max: f64, frac: f64) -> f64 {
 
 /// Daniels & Gilbert VO2 at running speed `v` (m/min):
 /// `VO2 = −4.60 + 0.182258·v + 0.000104·v²` (File 07 verbatim).
-fn daniels_vo2(v_m_per_min: f64) -> f64 {
+pub(crate) fn daniels_vo2(v_m_per_min: f64) -> f64 {
     let v = v_m_per_min;
     -4.60 + 0.182258 * v + 0.000104 * v * v
 }
@@ -204,7 +205,7 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
 /// Running speed (m/min) whose Daniels & Gilbert oxygen cost equals `vo2`:
 /// the positive root of `0.000104·v² + 0.182258·v − (4.60 + vo2) = 0`, the
 /// inverse of [`daniels_vo2`]. `None` for a non-finite/non-positive target.
-fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
+pub(crate) fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
     if !vo2.is_finite() || vo2 <= 0.0 {
         return None;
     }
@@ -223,30 +224,6 @@ pub fn pace_sec_per_km_at(vdot: f64, pct_vo2max: f64) -> Option<f64> {
         return None;
     }
     daniels_speed_for_vo2(vdot * pct_vo2max / 100.0).map(|v| 60_000.0 / v)
-}
-
-/// Pace band (fast, slow) in seconds per km for a Daniels VDOT band, from the
-/// band's %VO2max limits (`running::vdot_band_vo2max_pct`, running-007 table).
-/// Easy is the exception: its pace comes from marathon pace, 15–25 % slower
-/// (running-015, the claim every easy prescription cites), because the 59–74
-/// %VO2max row inverted through the oxygen-cost equation lands only ~7–9 %
-/// slower than MP, well faster than Daniels' published E paces.
-/// Repetition is ">100 %VO2max" with no stated upper limit, so it returns the
-/// 100 % pace for both ends, read as "at least this fast". `[Moderate]`
-pub fn vdot_band_pace_sec_per_km(vdot: f64, band: crate::schema::VdotBand) -> Option<(f64, f64)> {
-    if matches!(band, crate::schema::VdotBand::Easy) {
-        return crate::running::mp_relative_pace_sec_per_km(
-            vdot,
-            crate::schema::RunSessionType::Easy,
-        );
-    }
-    let (lo_pct, hi_pct) = crate::running::vdot_band_vo2max_pct(band);
-    let slow = pace_sec_per_km_at(vdot, lo_pct)?;
-    let fast = match hi_pct {
-        Some(hi) => pace_sec_per_km_at(vdot, hi)?,
-        None => slow,
-    };
-    Some((fast, slow))
 }
 
 // ---------------------------------------------------------------------------
@@ -277,38 +254,6 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
         .enumerate()
         .map(|(i, m)| m * (i as f64 + 1.0))
         .sum()
-}
-
-// ---------------------------------------------------------------------------
-// Ingest data-quality gates (File 07 "Sanity / QC")
-// ---------------------------------------------------------------------------
-
-/// A GPS ground speed above this (m/s) is impossible for a runner and is treated
-/// as jitter (File 07 "reject samples implying >12 m/s"). One value for the
-/// ingest QC gate, the core moving-leg cap (`running::moving_legs`) and the
-/// shell live-jitter guard.
-pub const MAX_PLAUSIBLE_SPEED_MPS: f64 = 12.0;
-
-/// GPS speed sanity gate: reject samples implying an implausible runner speed
-/// (File 07). Returns true when the speed is plausible (≤ [`MAX_PLAUSIBLE_SPEED_MPS`]).
-pub fn gps_speed_plausible(speed_m_s: f64) -> bool {
-    speed_m_s <= MAX_PLAUSIBLE_SPEED_MPS
-}
-
-/// The smallest move that counts as one (File 07, Apple pattern): a fix closer
-/// than this to the previous one is jitter.
-pub const GPS_MIN_MOVE_M: f64 = 2.5;
-
-/// GPS point-acceptance gate (Apple pattern, File 07): accept a new fix only if
-/// it moved ≥ [`GPS_MIN_MOVE_M`] AND the implied vertical rate is ≤ 5 m/s.
-pub fn gps_point_accept(distance_moved_m: f64, vertical_rate_m_s: f64) -> bool {
-    distance_moved_m >= GPS_MIN_MOVE_M && vertical_rate_m_s.abs() <= 5.0
-}
-
-/// Stop detection for pace/load exclusion: speed < 0.5 m/s counts as stopped
-/// (File 07 auto-pause rule).
-pub fn is_stopped(speed_m_s: f64) -> bool {
-    speed_m_s < 0.5
 }
 
 // ---------------------------------------------------------------------------
@@ -344,38 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn vdot_50_threshold_pace_matches_daniels_table() {
-        // Daniels' table: VDOT 50 → T pace ≈ 4:15/km (255 s). The T band is
-        // 83–88 %VO2max; its fast end (88 %) is the table's T pace.
-        let (fast, slow) = vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Threshold)
-            .expect("T band pace");
-        assert!((fast - 255.0).abs() <= 3.0, "T fast end {fast}");
-        assert!(slow > fast && slow < 275.0, "T slow end {slow}");
-        // Easy sits well slower than threshold, 15–25 % slower than marathon
-        // pace (running-015).
-        let (e_fast, e_slow) =
-            vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Easy).unwrap();
-        assert!(e_fast > slow && e_slow > e_fast, "E {e_fast}..{e_slow}");
-        let mp = daniels_predict(50.0, 42_195.0) / 42.195;
-        for e in [e_fast, e_slow] {
-            let pct = (e / mp - 1.0) * 100.0;
-            assert!(
-                (15.0 - 1e-6..=25.0 + 1e-6).contains(&pct),
-                "E {e} is {pct}% slower than MP {mp}"
-            );
-        }
-        assert!((e_fast / mp - 1.15).abs() < 1e-9 && (e_slow / mp - 1.25).abs() < 1e-9);
-        // The inversion round-trips through daniels_vo2.
-        let v = daniels_speed_for_vo2(40.0).unwrap();
-        assert!((daniels_vo2(v) - 40.0).abs() < 1e-9);
-        // Repetition has no upper %VO2max: both ends are the 100 % pace.
-        let (r_fast, r_slow) =
-            vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Repetition).unwrap();
-        assert_eq!(r_fast, r_slow);
-        assert_eq!(pace_sec_per_km_at(0.0, 88.0), None);
-    }
-
-    #[test]
     fn srpe_load_is_minutes_times_cr10() {
         assert_eq!(srpe_load_au(40.0, 7), 280.0);
         assert_eq!(srpe_load_au(30.0, 15), 300.0, "rating clamps to 10");
@@ -398,30 +311,6 @@ mod tests {
         // Non-positive inputs guarded.
         assert_eq!(daniels_predict(0.0, 5000.0), 0.0);
         assert_eq!(daniels_predict(50.0, 0.0), 0.0);
-    }
-
-    #[test]
-    fn daniels_marathon_bracket_covers_slow_vdots() {
-        // A VDOT-20 marathon finishes past 6 h; the search returns the true
-        // (slower) prediction, not a clamped optimistic bound.
-        let t = daniels_predict(20.0, 42_195.0);
-        assert!(
-            t > 6.0 * 3600.0 && t < 12.0 * 3600.0,
-            "expected 6–12 h, got {t}"
-        );
-        assert!(
-            (vdot(42_195.0, t) - 20.0).abs() < 0.5,
-            "round-trips to VDOT 20, got {}",
-            vdot(42_195.0, t)
-        );
-        // The running-040 marathon derate holds for its target population: at
-        // VDOT 22 the band is non-degenerate.
-        let band = crate::running::marathon_derated_band(4.0 * 3600.0, 4.5 * 3600.0, 22.0);
-        assert!(
-            band.value.0 < band.value.1,
-            "derated band f_min < f_max: {:?}",
-            band.value
-        );
     }
 
     #[test]

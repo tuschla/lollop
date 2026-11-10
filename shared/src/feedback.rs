@@ -1,8 +1,8 @@
 //! Feedback & coaching-communication decision core (knowledge-base File 05).
 //!
 //! Pure, deterministic message-category selection. Given observed session
-//! signals it decides *which* feedback category to emit; the copy for it is
-//! rendered in `app::reviews::feedback::feedback_message`.
+//! signals it decides *which* feedback category to emit; the app renders the
+//! copy for it.
 //!
 //! The overriding rule is feedback-042: **safety gates run first**. Any
 //! CONCERN_INJURY / CONCERN_BEHAVIOR / CONCERN_RECOVERY (and the dangerous
@@ -10,7 +10,6 @@
 //! suppresses every competing praise/progression message in the same cycle
 //! (File 05 §6.5).
 
-use crate::evidence;
 use crate::evidence::claims;
 use crate::schema::Recommended;
 
@@ -65,8 +64,8 @@ impl FeedbackCategory {
 }
 
 /// Which condition produced a [`FeedbackCategory::CorrectiveProcess`] verdict, so
-/// `app::reviews::feedback::feedback_message` can write trigger-specific copy
-/// (KB File 05 §6.2) rather than one generic corrective line.
+/// the card copy can be trigger-specific (KB File 05 §6.2) rather than one
+/// generic corrective line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CorrectiveTrigger {
     /// Lifting reps not completed (feedback-021).
@@ -81,26 +80,87 @@ pub enum CorrectiveTrigger {
 // 1. Safety gate: runs first (feedback-042)
 // ---------------------------------------------------------------------------
 
-/// Observed safety signals, checked before any execution evaluation.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SafetySignals {
+/// The safety screens of a weekly check-in, the part of the review wire
+/// payload the safety gate reads (`SessionReview` flattens it, so these are
+/// top-level wire fields). A new safety screen is added here once.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub struct SafetyScreen {
     /// Localized bone pain worsening through effort, night/rest pain, high-risk
     /// site, or mechanical joint symptoms (feedback-032/033/034).
     pub bone_pain_red_flag: bool,
     /// Compulsive pattern: training through pain, distress at missed sessions,
     /// rapidly escalating volume (feedback-039).
     pub compulsive_flag: bool,
-    /// A positive answer on the recurring RED-S screen (REDS-SCREEN-001):
-    /// missed/irregular periods, or low libido / fewer morning erections.
+    /// Weekly RED-S screen positive (File 13 ready-upd-005, REDS-SCREEN-001):
+    /// missed or longer cycles over the last 3 months (not explained by
+    /// pregnancy or contraception), or noticeably lower sex drive / fewer
+    /// morning erections for several weeks. Routes to the RED-S referral
+    /// feedback and the deficit refusal, never a programming variable.
+    #[serde(default)]
     pub reds_signal_reported: bool,
-    /// Count of co-occurring NFOR signals over >=1-2 wks (feedback-036; >=2 fires).
+    /// Count of co-occurring NFOR signals (feedback-036; >=2 fires); the legacy
+    /// wire count, overridden by `overtraining_signs` when present.
     pub overtraining_signal_count: u8,
     /// How long the NFOR signals have co-occurred, in weeks (feedback-036
     /// duration condition: ">=2 signals over >=1-2 wks; do not fire on a
     /// single noisy night"). `None` = duration untracked by the shell, the
     /// gate then errs protective and still fires on count alone; `Some(w)`
     /// requires w >= 1.
-    pub overtraining_weeks: Option<f64>,
+    pub overtraining_signal_weeks: Option<f64>,
+    /// Which of the four listed overtraining signs were ticked. `Some` → the
+    /// effective signal count is the ticked count.
+    pub overtraining_signs: Option<OvertrainingSigns>,
+}
+
+impl SafetyScreen {
+    /// The effective overtraining-sign count: the number of listed signs
+    /// ticked when the check-in carries them, else the bare count (legacy
+    /// wire).
+    pub fn signal_count(&self) -> u8 {
+        self.overtraining_signs
+            .map_or(self.overtraining_signal_count, |s| s.count())
+    }
+
+    /// [`overtraining_sustained`] over this screen's signs and duration.
+    pub fn overtraining_sustained(&self) -> bool {
+        overtraining_sustained(self.signal_count(), self.overtraining_signal_weeks)
+    }
+}
+
+/// The four overtraining signs the weekly check-in asks about (feedback-036:
+/// performance decrement, mood disturbance, elevated resting HR / suppressed
+/// HRV, sleep deterioration). When a check-in carries this, the signal count
+/// IS the number of signs ticked (it overrides the bare
+/// `overtraining_signal_count`), so "a sign" always means one of these four.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct OvertrainingSigns {
+    pub worse_performance: bool,
+    pub low_mood: bool,
+    pub higher_resting_hr: bool,
+    pub worse_sleep: bool,
+}
+
+impl OvertrainingSigns {
+    /// How many of the four signs are ticked.
+    pub fn count(&self) -> u8 {
+        [
+            self.worse_performance,
+            self.low_mood,
+            self.higher_resting_hr,
+            self.worse_sleep,
+        ]
+        .iter()
+        .filter(|b| **b)
+        .count() as u8
+    }
+}
+
+/// Observed safety signals, checked before any execution evaluation: the
+/// weekly check-in's screens plus the session's distance spike.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SafetySignals {
+    pub screen: SafetyScreen,
     /// Single-session distance over the prior-30-day longest, as a fraction
     /// (feedback-037; >0.10 warns, never praises).
     pub single_session_spike_frac: Option<f64>,
@@ -123,32 +183,32 @@ pub fn overtraining_sustained(signal_count: u8, weeks: Option<f64>) -> bool {
 /// clinician referral. `None` when the session is safety-clear and execution
 /// evaluation may proceed.
 pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
-    if s.bone_pain_red_flag {
-        return Some(evidence::graded(
+    if s.screen.bone_pain_red_flag {
+        return Some(Recommended::new(
             FeedbackCategory::ConcernInjury,
             claims::SAFE_BSI_001,
         ));
     }
-    if s.reds_signal_reported {
+    if s.screen.reds_signal_reported {
         // REDS-SCREEN-001 (Strong, safety-critical): any positive answer on
         // the recurring low-energy-availability screen goes to the referral.
-        return Some(evidence::graded(
+        return Some(Recommended::new(
             FeedbackCategory::ConcernEnergy,
             claims::REDS_SCREEN_001,
         ));
     }
-    if s.compulsive_flag {
+    if s.screen.compulsive_flag {
         // feedback-039: ExpertOpinion, safety-critical (suppresses praise).
-        return Some(evidence::graded(
+        return Some(Recommended::new(
             FeedbackCategory::ConcernBehavior,
             claims::FB_BEHAVIOR_001,
         ));
     }
-    if overtraining_sustained(s.overtraining_signal_count, s.overtraining_weeks) {
+    if s.screen.overtraining_sustained() {
         // feedback-036: Moderate (Meeusen 2013), safety-critical. The >=1-2 wk
         // duration condition keeps a single noisy night from firing; an
         // untracked duration still fires on the signal count (protective).
-        return Some(evidence::graded(
+        return Some(Recommended::new(
             FeedbackCategory::ConcernRecovery,
             claims::FB_RECOVERY_001,
         ));
@@ -157,7 +217,7 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
         .is_some_and(|f| f > crate::running::SPIKE_FRAC)
     {
         // running-029 hard rule: block/flag, never praise (feedback-037).
-        return Some(evidence::graded(
+        return Some(Recommended::new(
             FeedbackCategory::DangerousProgression,
             claims::RUN_SPIKE_BLOCK_001,
         ));
@@ -205,7 +265,7 @@ pub fn lifting_feedback(
         // Harder than planned but short of failure, neutral process note.
         (FeedbackCategory::InformationalNeutral, None)
     };
-    (evidence::graded(cat, claims::FB_RIR_001), trigger)
+    (Recommended::new(cat, claims::FB_RIR_001), trigger)
 }
 
 /// Running interval/threshold mastery (feedback-015; FB-INTERVAL-MASTERY-001,
@@ -217,7 +277,7 @@ pub fn interval_mastery_feedback(
     rpe_at_or_below_target: bool,
 ) -> Option<Recommended<FeedbackCategory>> {
     (target_paces_met && rpe_at_or_below_target).then(|| {
-        evidence::graded(
+        Recommended::new(
             FeedbackCategory::PositiveMastery,
             claims::FB_INTERVAL_MASTERY_001,
         )
@@ -228,7 +288,7 @@ pub fn interval_mastery_feedback(
 /// Attributes to normal variation, never guilt; the stimulus still counts.
 /// FB-BADDAY-001 (ExpertOpinion).
 pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
-    evidence::graded(FeedbackCategory::ContextualBadDay, claims::FB_BADDAY_001)
+    Recommended::new(FeedbackCategory::ContextualBadDay, claims::FB_BADDAY_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +319,7 @@ pub fn decoupling_feedback(
             Some(CorrectiveTrigger::DecouplingHigh),
         )
     };
-    Some((evidence::graded(cat, claims::RUN_DECOUPLE_001), trigger))
+    Some((Recommended::new(cat, claims::RUN_DECOUPLE_001), trigger))
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +338,7 @@ pub fn easy_run_intensity_discipline(
     frac_time_above_vt1: f64,
 ) -> Option<Recommended<FeedbackCategory>> {
     if frac_time_above_vt1 > EASY_RUN_ABOVE_VT1_MAX_FRAC {
-        Some(evidence::graded(
+        Some(Recommended::new(
             FeedbackCategory::IntensityDiscipline,
             claims::RUN_DIST_001,
         ))
@@ -288,9 +348,9 @@ pub fn easy_run_intensity_discipline(
 }
 
 /// Percent a run's back half may slow before it counts as a positive split worth
-/// flagging. Shared so the coaching cue here and the descriptive run-summary note
-/// (`app::to_run_view`) draw the same line: a run exactly at the threshold must
-/// not show the note without the cue, or vice versa.
+/// flagging. Shared so the coaching cue here and the descriptive run-summary
+/// note draw the same line: a run exactly at the threshold must not show the
+/// note without the cue, or vice versa.
 pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
 
 /// Pacing verdict for a measured split (feedback-016/017; FB-PACING-001,
@@ -302,9 +362,9 @@ pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
 /// emits POSITIVE_EXECUTION, "textbook pacing discipline" (feedback-017).
 pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<FeedbackCategory> {
     if second_half_slower_pct > POSITIVE_SPLIT_FLAG_PCT {
-        evidence::graded(FeedbackCategory::IntensityDiscipline, claims::FB_PACING_001)
+        Recommended::new(FeedbackCategory::IntensityDiscipline, claims::FB_PACING_001)
     } else {
-        evidence::graded(FeedbackCategory::PositiveExecution, claims::FB_PACING_001)
+        Recommended::new(FeedbackCategory::PositiveExecution, claims::FB_PACING_001)
     }
 }
 
@@ -321,7 +381,7 @@ pub fn resolve_feedback(
     execution: Option<Recommended<FeedbackCategory>>,
 ) -> Recommended<FeedbackCategory> {
     concern.or(execution).unwrap_or_else(|| {
-        evidence::graded(FeedbackCategory::InformationalNeutral, claims::FEEDBACK_001)
+        Recommended::new(FeedbackCategory::InformationalNeutral, claims::FEEDBACK_001)
     })
 }
 
@@ -342,7 +402,7 @@ pub fn bsi_menstrual_nutrition_prompt(
     female_user: bool,
     bsi_referral_fired: bool,
 ) -> Recommended<bool> {
-    evidence::graded(female_user && bsi_referral_fired, claims::FB_BSI_FEMALE_001)
+    Recommended::new(female_user && bsi_referral_fired, claims::FB_BSI_FEMALE_001)
 }
 
 /// Message verbosity / metric-density personalization (feedback-023/024;
@@ -380,7 +440,7 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
             minimize_jargon: true,
         }
     };
-    evidence::graded(v, claims::FB_VERBOSITY_001)
+    Recommended::new(v, claims::FB_VERBOSITY_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -444,7 +504,7 @@ pub fn trend_summary(
     } else {
         TrendSummary::Stable
     };
-    evidence::graded(summary, claims::FB_TREND_001)
+    Recommended::new(summary, claims::FB_TREND_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +521,7 @@ pub const PROVISIONAL_BASELINE_DAYS: u16 = 14;
 /// lower the surfaced confidence and show "using population default until
 /// N days" copy. FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
 pub fn provisional_until_baseline(days_of_data: u16) -> Recommended<bool> {
-    evidence::graded(
+    Recommended::new(
         days_of_data < PROVISIONAL_BASELINE_DAYS,
         claims::FB_PROVISIONAL_001,
     )

@@ -1,16 +1,33 @@
 //! The longitudinal trend row: per main lift, the best estimated max over the
 //! last 4 weeks against the 4 before.
 
-use super::*;
-use crate::feedback;
+use crate::app::evidence_views::to_view_with;
+use crate::app::format::{MIN_RATIO_BASE_KG, fmt_weight};
+use crate::app::model::{Model, SessionReview};
+use crate::app::reviews::mastery::pr_e1rm;
+use crate::app::reviews::session_feedback::RunSpike;
+use crate::app::reviews::split::{FEEDBACK_FRESH_DAYS, fresh_within};
+use crate::app::set_index::SetIndex;
+use crate::app::view_types::AdjustmentView;
+use crate::autoreg::E1RM_NOISE_FRAC;
+use crate::day::{is_undated, local_day};
+use crate::evidence::claims;
+use crate::profile::Profile;
+use crate::schema::Recommended;
+use crate::strength::LiftGoal;
+use crate::{feedback, running};
 
-/// 4-week blocks the trend reads back from today: the current block, the one
-/// it is compared against, and the rest of the plateau run.
+/// Weeks per trend block: the last 4 weeks against the 4 before.
+const BLOCK_WEEKS: u8 = 4;
+const BLOCK_DAYS: usize = BLOCK_WEEKS as usize * 7;
+
+/// Blocks the trend reads back from today: the current block, the one it is
+/// compared against, and the rest of the plateau run.
 const TREND_BLOCKS: usize = 7;
 
-/// Best reliable e1RM of `movement` in each 4-week block back from `today`
-/// (block `k` covers local days `today - 28k - 27 ..= today - 28k`), in one
-/// pass over the movement's sets.
+/// Best reliable e1RM of `movement` in each block back from `today` (block `k`
+/// covers local days `today - 28k - 27 ..= today - 28k`), in one pass over the
+/// movement's sets.
 fn block_bests(
     model: &Model,
     set_index: &SetIndex,
@@ -29,7 +46,7 @@ fn block_bests(
         else {
             continue;
         };
-        let k = back / 28;
+        let k = back / BLOCK_DAYS;
         if k >= TREND_BLOCKS {
             continue;
         }
@@ -76,7 +93,7 @@ fn lift_trend(
         for pair in blocks.windows(2) {
             match (pair[0], pair[1]) {
                 (Some(a), Some(b)) if (a / b - 1.0).abs() <= E1RM_NOISE_FRAC => {
-                    weeks_flat = weeks_flat.saturating_add(4);
+                    weeks_flat = weeks_flat.saturating_add(BLOCK_WEEKS);
                 }
                 _ => break,
             }
@@ -100,9 +117,7 @@ fn pick_lift_trend(
     today: i64,
     low_recovery: bool,
 ) -> Option<(LiftTrend, Recommended<feedback::TrendSummary>)> {
-    let calis = model
-        .profile()
-        .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
+    let calis = model.profile().is_some_and(Profile::uses_calisthenics);
     // Distinct movements trained in the last 4 weeks, each under its
     // first-logged name: chronological (`observed_at`, then `entry_id`, the
     // `lifts` order), so the name and the tie between equal-rank trends do
@@ -208,7 +223,10 @@ pub(in crate::app) fn build_trend(
                     "{} has held steady for {} weeks (estimated max {max}). Suggested change: {lever}.",
                     t.exercise, t.weeks_flat
                 );
-                return Some(to_view_with(text, &graded(rec.value, lever_claim)));
+                return Some(to_view_with(
+                    text,
+                    &Recommended::new(rec.value, lever_claim),
+                ));
             }
             feedback::TrendSummary::LoadExplainedDecline => format!(
                 "{} is down {:.0}% over the last 4 weeks, likely from low recovery, not lost fitness. Take a lighter week first.",
@@ -233,7 +251,7 @@ pub(in crate::app) fn build_trend(
         feedback::TrendSummary::Improving => "Your lifts are trending up.".to_string(),
         feedback::TrendSummary::Plateau => {
             let text = format!("Flat for 4+ weeks. Suggested change: {lever}.");
-            return Some(to_view_with(text, &graded(t.value, lever_claim)));
+            return Some(to_view_with(text, &Recommended::new(t.value, lever_claim)));
         }
         feedback::TrendSummary::LoadExplainedDecline => {
             "Performance is down, likely from training load and low recovery, not lost fitness. Take a lighter week first.".to_string()

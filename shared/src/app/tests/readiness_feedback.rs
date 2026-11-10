@@ -113,7 +113,10 @@ fn female_bsi_referral_appends_clinician_prompt() {
     )
     .expect_only_render();
     let review = SessionReview {
-        bone_pain_red_flag: true,
+        safety: crate::feedback::SafetyScreen {
+            bone_pain_red_flag: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     app.update(Event::SubmitReview(review), &mut model)
@@ -156,8 +159,11 @@ fn overtraining_duration_condition_flows_through_review() {
     let app = Engine;
     let mut model = Model::default();
     let review = SessionReview {
-        overtraining_signal_count: 2,
-        overtraining_signal_weeks: Some(0.5),
+        safety: crate::feedback::SafetyScreen {
+            overtraining_signal_count: 2,
+            overtraining_signal_weeks: Some(0.5),
+            ..Default::default()
+        },
         ..Default::default()
     };
     app.update(Event::SubmitReview(review), &mut model)
@@ -169,8 +175,11 @@ fn overtraining_duration_condition_flows_through_review() {
         "a single noisy night must not fire the recovery concern"
     );
     let review = SessionReview {
-        overtraining_signal_count: 2,
-        overtraining_signal_weeks: Some(1.5),
+        safety: crate::feedback::SafetyScreen {
+            overtraining_signal_count: 2,
+            overtraining_signal_weeks: Some(1.5),
+            ..Default::default()
+        },
         ..Default::default()
     };
     app.update(Event::SubmitReview(review), &mut model)

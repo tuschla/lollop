@@ -137,8 +137,8 @@ fn program_card_shows_delivered_sets_per_muscle() {
 #[test]
 fn planner_ramp_equals_plan_ramp() {
     let p = hyp_profile();
-    let ta = individualization::training_age_from_cadence(p.progression_cadence).value;
-    let bw = crate::plan::lift_block_position(&p, 0).block_weeks;
+    let pp = PlanProfile::new(&p);
+    let bw = crate::plan::lift_block_position(&pp, 0).block_weeks;
     let (rows, _, _) = build_hypertrophy_plan(
         &HypertrophyInputView {
             muscle: "chest".into(),
@@ -146,13 +146,13 @@ fn planner_ramp_equals_plan_ramp() {
             not_growing: false,
             recovering_easily: false,
         },
-        Some(&p),
+        Some(&pp),
         None,
     );
-    let days = crate::plan::week_shape(&p).lift_days;
+    let days = pp.shape().lift_days;
     let plan_ramp: Vec<String> = (1..=bw)
         .map(|w| {
-            crate::plan::hypertrophy_week_targets(&p, ta, w, bw, days)
+            crate::plan::hypertrophy_week_targets(&pp, w, bw, days)
                 .iter()
                 .find(|t| t.muscle == "chest")
                 .unwrap()
@@ -186,7 +186,7 @@ fn planner_ramp_equals_plan_ramp() {
 }
 
 fn range_rx(reps: u8, load_kg: f32) -> Recommended<Prescription> {
-    graded(
+    Recommended::new(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Lateral raise".into(),
             sets: 3,
@@ -203,12 +203,15 @@ fn range_rx(reps: u8, load_kg: f32) -> Recommended<Prescription> {
 
 fn last_raise(kg: f64, reps: u32) -> crate::plan::Anchors {
     crate::plan::Anchors {
-        last_working: vec![crate::plan::LastWorking {
-            exercise: "Lateral raise".into(),
-            weight_kg: kg,
-            sets: vec![(reps, 0.0); 3],
-            age_days: 3,
-        }],
+        lift: crate::plan::LiftAnchors {
+            last_working: vec![crate::plan::LastWorking {
+                exercise: "Lateral raise".into(),
+                weight_kg: kg,
+                sets: vec![(reps, 0.0); 3],
+                age_days: 3,
+            }],
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -245,21 +248,24 @@ fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
     // 60 kg × 0.95 floored to 55 kg, one more rep in reserve (RPE 8 → 7), and
     // the card says why and cites AUTOREG-E1RM-GATE-001.
     let anchors = crate::plan::Anchors {
-        lift_e1rm: vec![("Bench Press".into(), 80.0)],
-        last_working: vec![crate::plan::LastWorking {
-            exercise: "Bench Press".into(),
-            weight_kg: 60.0,
-            sets: vec![(8, 9.0); 3],
-            age_days: 2,
-        }],
-        lift_derates: vec![crate::plan::LiftDerate {
-            exercise: "Bench Press".into(),
-            frac: crate::app::anchors::E1RM_DROP_GATE,
-            cause: crate::plan::DerateCause::E1rmDrop,
-        }],
+        lift: crate::plan::LiftAnchors {
+            e1rm: vec![("Bench Press".into(), 80.0)],
+            last_working: vec![crate::plan::LastWorking {
+                exercise: "Bench Press".into(),
+                weight_kg: 60.0,
+                sets: vec![(8, 9.0); 3],
+                age_days: 2,
+            }],
+            derates: vec![crate::plan::LiftDerate {
+                exercise: "Bench Press".into(),
+                frac: crate::autoreg::E1RM_REDUCE_RATIO,
+                cause: crate::plan::DerateCause::E1rmDrop,
+            }],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let rx = graded(
+    let rx = Recommended::new(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Bench Press".into(),
             sets: 3,

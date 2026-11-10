@@ -160,7 +160,7 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
         ..model.runs[0].clone()
     };
     let qc_split = run_card(&short_run).split_pct.expect("qc split");
-    let raw_split = running::track_positive_split_pct(&short, &[]).expect("raw split");
+    let raw_split = crate::gps::track_positive_split_pct(&short, &[]).expect("raw split");
     assert!(
         (raw_split - qc_split).abs() > 3.0,
         "teleport must shift the accuracy-only split vs the qc split (raw {raw_split}, qc {qc_split})"
@@ -223,7 +223,7 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
     assert_eq!(split.evidence.grade, Some(EvidenceGrade::Moderate));
     assert_eq!(
         split.evidence.citation,
-        graded((), claims::FB_PACING_001).reference()
+        Recommended::new((), claims::FB_PACING_001).reference()
     );
     assert!(!split.evidence.safety_critical && !split.evidence.contested);
 }
@@ -270,7 +270,7 @@ fn split_verdict_bands_match_the_single_core_threshold() {
         assert_eq!(v.evidence.grade, Some(EvidenceGrade::Moderate));
         assert_eq!(
             v.evidence.citation,
-            graded((), claims::FB_PACING_001).reference()
+            Recommended::new((), claims::FB_PACING_001).reference()
         );
         assert!(v.evidence.confidence > 0.0);
     }

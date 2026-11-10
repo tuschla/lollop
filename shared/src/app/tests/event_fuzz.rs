@@ -1209,17 +1209,19 @@ impl Gen {
             }
         };
         SessionReview {
-            bone_pain_red_flag: self.rng.chance(0.05),
-            compulsive_flag: self.rng.chance(0.03),
-            reds_signal_reported: self.rng.chance(0.03),
-            overtraining_signal_count: self.u8w(0, 4),
-            overtraining_signal_weeks: self.opt_f(p, 0.0, 6.0),
-            overtraining_signs: self.rng.opt(p, |r| OvertrainingSigns {
-                worse_performance: r.chance(0.5),
-                low_mood: r.chance(0.5),
-                higher_resting_hr: r.chance(0.5),
-                worse_sleep: r.chance(0.5),
-            }),
+            safety: crate::feedback::SafetyScreen {
+                bone_pain_red_flag: self.rng.chance(0.05),
+                compulsive_flag: self.rng.chance(0.03),
+                reds_signal_reported: self.rng.chance(0.03),
+                overtraining_signal_count: self.u8w(0, 4),
+                overtraining_signal_weeks: self.opt_f(p, 0.0, 6.0),
+                overtraining_signs: self.rng.opt(p, |r| crate::feedback::OvertrainingSigns {
+                    worse_performance: r.chance(0.5),
+                    low_mood: r.chance(0.5),
+                    higher_resting_hr: r.chance(0.5),
+                    worse_sleep: r.chance(0.5),
+                }),
+            },
             single_session_spike_frac: self.opt_f(p, 0.0, 1.0),
             lift: self.rng.opt(p, |r| LiftExec {
                 reps_met: r.chance(0.6),

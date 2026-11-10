@@ -4,16 +4,18 @@
 
 use std::borrow::Cow;
 
-use super::latest_input;
+use super::inputs::latest_input;
 use super::pain::{PainVerdict, classify_pain, latest_pain_clear, pain_context, worst_active_pain};
+use super::perf::{E1RM_DELOAD_RATIO, E1RM_DELOAD_STREAK, E1rmOutcome, e1rm_ratio_outcome};
 use super::rules::{
-    DECOUPLING_MIN_EFFORT_MIN, E1RM_DELOAD_RATIO, E1RM_DELOAD_STREAK, E1rmOutcome, HRV_SWC_LOWER_Z,
-    HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE, RPE_DELTA_BELOW, RPE_DELTA_WELL_ABOVE, RPE_DELTA_WELL_BELOW,
-    RhrVerdict, RuleContext, SORENESS_HIGH, WellnessVerdict, dated_today, e1rm_ratio_outcome,
-    rhr_corroborated, rhr_thresholds, rhr_verdict, vl_threshold_pct, wellness_verdict,
+    DECOUPLING_MIN_EFFORT_MIN, HRV_SWC_LOWER_Z, HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE, RPE_DELTA_BELOW,
+    RPE_DELTA_WELL_ABOVE, RPE_DELTA_WELL_BELOW, RhrVerdict, RuleContext, SORENESS_HIGH,
+    WellnessVerdict, dated_today, hrv_saturation_hold, rhr_corroborated, rhr_thresholds,
+    rhr_verdict, vl_threshold_pct, wellness_verdict,
 };
 use crate::evidence::{ClaimId, claims};
-use crate::schema::{Goal, IllnessSeverity, ReadinessInput, ReadinessSignal};
+use crate::schema::{IllnessSeverity, ReadinessInput, ReadinessSignal};
+use crate::strength::LiftGoal;
 
 /// Which picker/summary group a readiness signal belongs to. `RedFlag` is the
 /// medical-referral / hard-stop block (Pain, Illness, RED-S, cardiac, bone
@@ -95,10 +97,16 @@ const OUT_OF_DATE: &str = "out of date";
 /// [`ALL_SIGNALS`] order, judged with the full rule context (individual
 /// resting-HR bands, the shell's today). Pure re-statement of the rule layer:
 /// each state string is decided by the same predicate/threshold that drives the
-/// matching adjustment, and cites the same claim.
+/// matching adjustment, and cites the same claim. `lift_goal` selects the
+/// velocity-loss threshold, `high_load_block` arms the HRV saturation row, and
+/// `wellness_collecting` (the wellness composite is still collecting its
+/// baseline) words a firing wellness row as a very low morning.
 pub fn signal_states_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
+    lift_goal: Option<LiftGoal>,
+    high_load_block: bool,
+    wellness_collecting: bool,
     // Readings routed to `stale` by `derive_readiness` (recency-expired). A row
     // whose displayed reading is one of these is not today's verdict, so it
     // renders "out of date" instead of a stale judgement. Local-day recency
@@ -110,7 +118,15 @@ pub fn signal_states_in(
         .filter_map(|&signal| {
             let input = displayed_input(inputs, signal)?;
             let v = input.value;
-            let (state, claim) = signal_label(signal, input, inputs, ctx);
+            let (state, claim) = signal_label(
+                signal,
+                input,
+                inputs,
+                ctx,
+                lift_goal,
+                high_load_block,
+                wellness_collecting,
+            );
             // A stale row keeps its grade and citation; only the state text
             // admits there is no current reading.
             let stale_row = stale
@@ -161,6 +177,9 @@ fn signal_label(
     input: &ReadinessInput,
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
+    lift_goal: Option<LiftGoal>,
+    high_load_block: bool,
+    wellness_collecting: bool,
 ) -> Label {
     let v = input.value;
     match signal {
@@ -168,9 +187,9 @@ fn signal_label(
         ReadinessSignal::EstimatedOneRm => e1rm_label(v, input.streak),
         // Recorded only: no autoregulation gate exists in the KB yet.
         ReadinessSignal::BarVelocity | ReadinessSignal::HrvCv => ("recorded".into(), None),
-        ReadinessSignal::VelocityLoss => velocity_loss_label(v, ctx.goal),
-        ReadinessSignal::WellnessZ => wellness_label(input, ctx),
-        ReadinessSignal::HrvLnRmssd => hrv_label(input, ctx),
+        ReadinessSignal::VelocityLoss => velocity_loss_label(v, lift_goal),
+        ReadinessSignal::WellnessZ => wellness_label(input, ctx, wellness_collecting),
+        ReadinessSignal::HrvLnRmssd => hrv_label(input, ctx, high_load_block),
         ReadinessSignal::AerobicDecoupling => decoupling_label(input),
         ReadinessSignal::RestingHr => resting_hr_label(input, inputs, ctx),
         ReadinessSignal::Soreness => soreness_label(v),
@@ -228,8 +247,8 @@ fn e1rm_label(ratio: f64, streak: u8) -> Label {
 }
 
 /// autoreg-010: goal-dependent velocity-loss termination band.
-fn velocity_loss_label(vl_pct: f64, goal: Option<&Goal>) -> Label {
-    let s = if vl_pct >= vl_threshold_pct(goal) {
+fn velocity_loss_label(vl_pct: f64, lift_goal: Option<LiftGoal>) -> Label {
+    let s = if vl_pct >= vl_threshold_pct(lift_goal) {
         "over threshold"
     } else {
         "within threshold"
@@ -242,9 +261,9 @@ fn velocity_loss_label(vl_pct: f64, goal: Option<&Goal>) -> Label {
 /// only come from the absolute floor, so the state says the morning was very
 /// low, never that it fell below a normal not yet known; "today" only for a
 /// reading dated today.
-fn wellness_label(input: &ReadinessInput, ctx: &RuleContext) -> Label {
+fn wellness_label(input: &ReadinessInput, ctx: &RuleContext, collecting: bool) -> Label {
     let s = match wellness_verdict(input, ctx) {
-        WellnessVerdict::Lower | WellnessVerdict::Hold if ctx.wellness_collecting => {
+        WellnessVerdict::Lower | WellnessVerdict::Hold if collecting => {
             if dated_today(input, ctx) {
                 "very low today"
             } else {
@@ -262,11 +281,11 @@ fn wellness_label(input: &ReadinessInput, ctx: &RuleContext) -> Label {
 /// autoreg-028 SWC band on the 7-day mean; autoreg-029 saturation in a
 /// high-load block. `streak ≥ 1` means the newest day's own z is below the band
 /// (the channel's streak predicate).
-fn hrv_label(input: &ReadinessInput, ctx: &RuleContext) -> Label {
+fn hrv_label(input: &ReadinessInput, ctx: &RuleContext, high_load_block: bool) -> Label {
     let v = input.value;
     if v < HRV_SWC_LOWER_Z {
         ("below normal".into(), Some(claims::HRV_001))
-    } else if v > HRV_SWC_UPPER_Z && ctx.high_load_block {
+    } else if hrv_saturation_hold(v, high_load_block).value {
         (
             "above normal: no extra weight today".into(),
             Some(claims::AUTOREG_HRV_SAT_001),

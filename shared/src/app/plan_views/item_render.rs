@@ -1,7 +1,15 @@
 //! A plan item's face rendered from its structured fields: the summary line,
 //! the effort wording, the plates and the run amounts.
 
-use super::*;
+use crate::app::evidence_views::why_from;
+use crate::app::format::{fmt_km_or_mi, fmt_weight, round_tenths};
+use crate::app::plan_views::flatten_run::fmt_run_km;
+use crate::app::view_types::{
+    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, RunStructureView, WhyView,
+};
+use crate::autoreg;
+use crate::plates::{plates_per_side, round_load_grid};
+use crate::schema::{Adjustment, Recommended, RunVolume};
 
 /// Rebuild a lift item's one-line summary from its (possibly adjusted) fields.
 pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
@@ -57,7 +65,7 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
     }
     set_named_summary(it, ": ", lead, &parts);
     // The plate breakdown always follows the load actually shown.
-    it.plates_per_side = if crate::plan::is_barbell_lift(&it.exercise) {
+    it.plates_per_side = if crate::exercise::is_barbell_lift(&it.exercise) {
         it.load_kg
             .or(it.suggested_load_kg)
             .map(|kg| plates_per_side(kg, weight_lb))
@@ -217,44 +225,6 @@ fn effort_phrase(it: &PrescriptionView, load_shown: bool) -> String {
     }
 }
 
-/// Plates per side of a standard bar (20 kg, or 45 lb for an lb profile) for
-/// a total `load_kg`, largest first, in the display unit. Greedy over the
-/// common plate set (20/15/10/5/2.5/1.25 kg; 45/35/25/10/5/2.5 lb). Loads are
-/// already on the display-unit grid, so the greedy split is exact for every
-/// grid load; a remainder below the smallest plate is dropped (never an
-/// invented plate). Empty at or below the bar, and for a non-finite or
-/// implausible load (more than `MAX_PLATES_PER_SIDE` plates would be needed —
-/// no real sleeve holds that), so a corrupt wire weight can never blow up the
-/// view. Arithmetic only, no claim.
-pub(in crate::app) fn plates_per_side(load_kg: f64, weight_lb: bool) -> Vec<f64> {
-    const MAX_PLATES_PER_SIDE: f64 = 20.0;
-    let (total, bar, plates): (f64, f64, &[f64]) = if weight_lb {
-        (
-            weight_num(load_kg, true),
-            45.0,
-            &[45.0, 35.0, 25.0, 10.0, 5.0, 2.5],
-        )
-    } else {
-        (load_kg, 20.0, &[20.0, 15.0, 10.0, 5.0, 2.5, 1.25])
-    };
-    // Round the per-side figure to 0.01 so a kg→lb float (e.g. 224.9999) does
-    // not lose its last plate.
-    let mut side = (((total - bar) / 2.0) * 100.0).round() / 100.0;
-    if !side.is_finite() || side <= 0.0 || side / plates[0] > MAX_PLATES_PER_SIDE {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for &p in plates {
-        let n = ((side + 1e-9) / p).floor().max(0.0);
-        out.extend(std::iter::repeat_n(p, n as usize));
-        side -= n * p;
-    }
-    if out.len() as f64 > MAX_PLATES_PER_SIDE {
-        return Vec::new();
-    }
-    out
-}
-
 /// Plain-language reason a lift's working load is scaled (the clause after
 /// "scaled to N%").
 pub(super) fn derate_reason(cause: crate::plan::DerateCause) -> String {
@@ -270,7 +240,7 @@ pub(super) fn derate_reason(cause: crate::plan::DerateCause) -> String {
         ),
         crate::plan::DerateCause::E1rmDrop => format!(
             "because your last session came in more than {:.0}% under your estimate",
-            crate::app::anchors::E1RM_DROP_PCT
+            autoreg::E1RM_NOISE_FRAC * 100.0
         ),
     }
 }
@@ -397,6 +367,13 @@ pub(in crate::app) fn run_planned(it: &PrescriptionView) -> (Option<f64>, Option
         Some(RunAmount::MinutesRange(lo, _)) => (None, Some(f64::from(lo))),
         Some(RunAmount::RunWalk) | None => (None, None),
     }
+}
+
+/// Drop a run item's rep structure ("N × …" and its per-rep amount).
+pub(super) fn clear_run_reps(it: &mut PrescriptionView) {
+    it.rep_count = 0;
+    it.rep_volume.clear();
+    it.rep_amount = None;
 }
 
 /// The intensity label of a run capped to easy.

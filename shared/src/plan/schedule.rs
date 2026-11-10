@@ -5,12 +5,14 @@
 //! minimum, with a fixed lexicographic tie-break. When the free days cannot keep
 //! the hard runs ≥48 h apart, a quality session becomes easy (RUN-QUALITY-001).
 
-use super::DayRegion;
-use super::lift::{HEAVY_PCT_1RM, MovementPattern, movement_pattern};
+use super::regions::DayRegion;
+use crate::exercise::movement_pattern;
+use crate::hybrid;
 use crate::running;
 use crate::schema::{
     LiftIntensity, LiftSessionType, Prescription, RunSessionType, Session, SessionType,
 };
+use crate::strength;
 
 /// One lift day of the week's template before it is placed on a weekday.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,12 +21,13 @@ pub(super) struct LiftSpec {
     pub(super) region: DayRegion,
     /// The DUP emphasis index handed to `lift_session` (`dup_emphasis(.., i)`).
     pub(super) emphasis_index: usize,
-    /// Heavy lower-body work (≥ [`HEAVY_PCT_1RM`]): the CAP-3 spacing anchor.
+    /// Heavy lower-body work (≥ `strength::HEAVY_PCT_1RM`): the CAP-3 spacing
+    /// anchor.
     pub(super) heavy_legs: bool,
 }
 
 /// Where the week's sessions landed. `lifts` is in weekday order, so a lift's
-/// index in it is its `BlockCtx::slot`.
+/// index in it is its `LiftDay::slot`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct Placement {
     pub(super) lifts: Vec<(u16, LiftSpec)>,
@@ -45,7 +48,11 @@ pub(crate) enum DayLoad {
     },
 }
 
-/// Penalty for training the same muscles on consecutive days (~48 h rule).
+/// Hours kept between two sessions that train the same muscles (~48 h rule).
+pub(crate) const SAME_MUSCLE_GAP_H: f64 = 48.0;
+
+/// Penalty for training the same muscles on consecutive days
+/// ([`SAME_MUSCLE_GAP_H`]).
 const SAME_MUSCLE: i32 = 1000;
 /// A hard/long run the day AFTER heavy leg work (CAP-3, the costlier side:
 /// running economy stays impaired for up to 48 h after heavy lifting). Priced
@@ -64,26 +71,48 @@ const HARD_BEFORE_LEGS: i32 = 20;
 /// between sessions where the day count allows.
 const CONSECUTIVE: i32 = 5;
 
-fn is_hard_run(kind: RunSessionType) -> bool {
-    kind == RunSessionType::LongRun || super::run::is_quality(kind)
+/// A spacing rule two sessions on consecutive days break.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpacingRule {
+    /// The same muscles on back-to-back days ([`SAME_MUSCLE_GAP_H`]).
+    SameMuscles,
+    /// A hard or long run the day after heavy leg work (CAP-3,
+    /// `hybrid::HEAVY_LEG_RUN_GAP_H`).
+    HardRunAfterHeavyLegs,
+    /// A hard or long run the day before heavy leg work (CAP-3).
+    HardRunBeforeHeavyLegs,
+    /// Two hard sessions on back-to-back days (RUN-QUALITY-001).
+    HardBackToBack,
+}
+
+impl SpacingRule {
+    /// The hours the rule keeps between the two sessions.
+    pub(crate) fn min_gap_hours(self) -> f64 {
+        match self {
+            SpacingRule::SameMuscles => SAME_MUSCLE_GAP_H,
+            SpacingRule::HardRunAfterHeavyLegs | SpacingRule::HardRunBeforeHeavyLegs => {
+                hybrid::HEAVY_LEG_RUN_GAP_H
+            }
+            SpacingRule::HardBackToBack => {
+                f64::from(running::quality_limits().value.min_spacing_hours)
+            }
+        }
+    }
 }
 
 /// Cost of `first` on one day followed by `second` the next day, plus the
-/// plain-language reason when the pair breaks a spacing rule.
-fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>) {
+/// spacing rule the pair breaks, if any.
+fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<SpacingRule>) {
     use DayLoad::*;
     let spread = if first != Rest && second != Rest {
         CONSECUTIVE
     } else {
         0
     };
-    let (cost, reason) = match (first, second) {
-        (Lift { region: a, .. }, Lift { region: b, .. }) if a.overlaps(b) => (
-            SAME_MUSCLE,
-            Some(
-                "the same muscles would be trained on back-to-back days (keep about 48 hours between them)",
-            ),
-        ),
+    let (cost, rule) = match (first, second) {
+        (Lift { region: a, .. }, Lift { region: b, .. }) if a.overlaps(b) => {
+            (SAME_MUSCLE, Some(SpacingRule::SameMuscles))
+        }
         (
             Lift {
                 heavy_legs: true, ..
@@ -91,9 +120,7 @@ fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>)
             Run { hard: true },
         ) => (
             HARD_AFTER_HEAVY_LEGS,
-            Some(
-                "a hard or long run would come the day after heavy leg work (keep at least 24 hours between them)",
-            ),
+            Some(SpacingRule::HardRunAfterHeavyLegs),
         ),
         (
             Lift {
@@ -109,9 +136,7 @@ fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>)
             },
         ) => (
             HARD_BEFORE_HEAVY_LEGS,
-            Some(
-                "a hard or long run would come the day before heavy leg work (keep at least 24 hours between them)",
-            ),
+            Some(SpacingRule::HardRunBeforeHeavyLegs),
         ),
         (
             Run { hard: true },
@@ -120,15 +145,12 @@ fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>)
                 heavy_legs: false,
             },
         ) if region.has_lower() => (HARD_BEFORE_LEGS, None),
-        (Run { hard: true }, Run { hard: true }) => (
-            HARD_BACK_TO_BACK,
-            Some(
-                "two hard sessions would land on back-to-back days (keep about 48 hours between them)",
-            ),
-        ),
+        (Run { hard: true }, Run { hard: true }) => {
+            (HARD_BACK_TO_BACK, Some(SpacingRule::HardBackToBack))
+        }
         _ => (0, None),
     };
-    (cost + spread, reason)
+    (cost + spread, rule)
 }
 
 /// Whole-week cost of an arrangement (the week repeats, so Sunday→Monday is
@@ -217,7 +239,7 @@ fn trim_kinds(kinds: &[RunSessionType], n: usize) -> Vec<RunSessionType> {
     let mut keep = kinds.to_vec();
     keep.sort_by_key(|k| match k {
         RunSessionType::LongRun => 0,
-        k if super::run::is_quality(*k) => 1,
+        k if running::is_quality_session(*k) => 1,
         _ => 2,
     });
     keep.truncate(n);
@@ -251,7 +273,7 @@ pub(super) fn place_week(
             None => search_week(avail, lifts, &runs, run_before, None),
         }
         .unwrap_or_default();
-        match runs.iter().rposition(|k| super::run::is_quality(*k)) {
+        match runs.iter().rposition(|k| running::is_quality_session(*k)) {
             Some(i) if hard_runs_too_close(&placement.runs) => runs[i] = RunSessionType::Easy,
             _ => return placement,
         }
@@ -263,7 +285,7 @@ fn hard_runs_too_close(runs: &[(u16, RunSessionType)]) -> bool {
     let min_gap = u16::from(running::quality_limits().value.min_spacing_hours / 24);
     let hard: Vec<u16> = runs
         .iter()
-        .filter(|(_, k)| is_hard_run(*k))
+        .filter(|(_, k)| running::is_hard_or_long_session(*k))
         .map(|(d, _)| *d)
         .collect();
     hard.iter().enumerate().any(|(i, a)| {
@@ -324,7 +346,7 @@ fn search_week(
                     let mut long_day = None;
                     for (&d, &k) in run_days.iter().zip(order.iter()) {
                         l[d as usize] = DayLoad::Run {
-                            hard: is_hard_run(k),
+                            hard: running::is_hard_or_long_session(k),
                         };
                         if k == RunSessionType::LongRun {
                             long_day = Some(d);
@@ -356,27 +378,27 @@ fn search_week(
 
 /// Classify a synthesized session's load for the spacing rules: a lift day's
 /// region comes from its exercises' movement patterns, and it is "heavy legs"
-/// when it is a heavy (≥ [`HEAVY_PCT_1RM`]) lower-body day.
+/// when it is a heavy (`strength::is_heavy_pct`) lower-body day.
 pub(crate) fn session_load(s: &Session) -> DayLoad {
     match s.session_type {
         SessionType::Rest => DayLoad::Rest,
         SessionType::Run(k) => DayLoad::Run {
-            hard: is_hard_run(k),
+            hard: running::is_hard_or_long_session(k),
         },
         SessionType::Lift(lt) => {
             let (mut lower, mut upper, mut heavy) = (false, false, false);
             for rx in &s.prescriptions {
                 match &rx.value {
                     Prescription::Lift(l) => match movement_pattern(&l.exercise) {
-                        Some(MovementPattern::Squat | MovementPattern::Hinge) => {
+                        Some(p) if p.is_lower() => {
                             lower = true;
                             if let LiftIntensity::PercentOneRm(p) = l.intensity
-                                && p >= HEAVY_PCT_1RM
+                                && strength::is_heavy_pct(f64::from(p))
                             {
                                 heavy = true;
                             }
                         }
-                        Some(MovementPattern::Push | MovementPattern::Pull) => upper = true,
+                        Some(_) => upper = true,
                         None => {}
                     },
                     // Bodyweight ladders span the whole body; never "heavy".
@@ -400,6 +422,19 @@ pub(crate) fn session_load(s: &Session) -> DayLoad {
     }
 }
 
+/// Why a move cannot be made (see [`move_conflict`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveConflict {
+    /// `from` or `to` lies outside the week, or they are the same day.
+    NotAnotherDay,
+    /// No session on the day to move from.
+    NothingToMove,
+    /// The day to move to already holds a session.
+    DayTaken,
+    /// The moved session would break a spacing rule.
+    Spacing(SpacingRule),
+}
+
 /// Why moving the session on weekday `from` to weekday `to` would break a
 /// spacing rule (ADH-RESCHED-001: the move must leave ~48 h before the next
 /// hard session and keep long/hard runs ≥24 h from heavy leg work), or `None`
@@ -411,15 +446,15 @@ pub(crate) fn move_conflict(
     idle: [bool; 7],
     from: usize,
     to: usize,
-) -> Option<String> {
+) -> Option<MoveConflict> {
     if from > 6 || to > 6 || from == to {
-        return Some("pick a different day in the same week".into());
+        return Some(MoveConflict::NotAnotherDay);
     }
     if loads[from] == DayLoad::Rest {
-        return Some("there is no session on that day to move".into());
+        return Some(MoveConflict::NothingToMove);
     }
     if loads[to] != DayLoad::Rest {
-        return Some("that day already has a session".into());
+        return Some(MoveConflict::DayTaken);
     }
     let mut after = loads;
     after[to] = loads[from];
@@ -436,12 +471,10 @@ pub(crate) fn move_conflict(
     };
     let prev = spaced((to + 6) % 7, to == 0);
     let next = spaced((to + 1) % 7, to == 6);
-    for (a, b) in [(prev, after[to]), (after[to], next)] {
-        if let (_, Some(reason)) = adjacent_cost(a, b) {
-            return Some(reason.into());
-        }
-    }
-    None
+    [(prev, after[to]), (after[to], next)]
+        .into_iter()
+        .find_map(|(a, b)| adjacent_cost(a, b).1)
+        .map(MoveConflict::Spacing)
 }
 
 /// Why a session has no day to move to, so the shell can explain instead of
@@ -454,8 +487,8 @@ pub(crate) enum MoveBlock {
     /// ADH-MISSED-001).
     AllTaken,
     /// Weekday `day` is the first free candidate; moving there breaks the
-    /// spacing rule `reason` names (as do all the other free candidates).
-    Spacing { day: usize, reason: String },
+    /// rule `conflict` names (as do all the other free candidates).
+    Spacing { day: usize, conflict: MoveConflict },
 }
 
 /// Every weekday in `candidates` the session on weekday `from` can move to
@@ -477,8 +510,8 @@ pub(crate) fn move_options(
         any = true;
         match move_conflict(loads, idle, from, to) {
             None => targets.push(to),
-            Some(reason) if loads[to] == DayLoad::Rest && spacing.is_none() => {
-                spacing = Some(MoveBlock::Spacing { day: to, reason });
+            Some(conflict) if loads[to] == DayLoad::Rest && spacing.is_none() => {
+                spacing = Some(MoveBlock::Spacing { day: to, conflict });
             }
             Some(_) => {}
         }
@@ -574,7 +607,7 @@ mod tests {
             .map(|(d, _)| *d)
             .collect();
         for (d, k) in &p.runs {
-            if is_hard_run(*k) {
+            if running::is_hard_or_long_session(*k) {
                 for h in &heavy {
                     assert_ne!(*d, (h + 1) % 7, "{k:?} the day after heavy legs: {p:?}");
                     assert_ne!((*d + 1) % 7, *h, "{k:?} the day before heavy legs: {p:?}");

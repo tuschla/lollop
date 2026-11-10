@@ -1,7 +1,10 @@
-//! Display formatting helpers: weight units, load grid rounding,
-//! local-day/week bucketing, session/goal titles.
+//! Display formatting helpers: weight units, local-day/week bucketing,
+//! weekday names, session/goal titles.
 
-use super::*;
+use crate::day::local_day;
+use crate::plates::LB_PER_KG;
+use crate::running::{self, GoalDistance};
+use crate::schema::Goal;
 
 /// Render an inclusive integer range, collapsing to a single value when the
 /// bounds coincide (e.g. `(3, 3) -> "3"`, `(6, 9) -> "6–9"`). Keeps guidance
@@ -36,6 +39,20 @@ pub(super) fn mon0_weekday(epoch_day: i64) -> i64 {
     (epoch_day.rem_euclid(7) + 3).rem_euclid(7)
 }
 
+/// English weekday name for a local epoch day.
+pub(super) fn weekday_name(epoch_day: i64) -> &'static str {
+    const NAMES: [&str; 7] = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    NAMES[mon0_weekday(epoch_day) as usize]
+}
+
 /// The Monday of local day `day`'s week (saturating, like [`mon0_weekday`]).
 pub(super) fn monday_of(day: i64) -> i64 {
     day.saturating_sub(mon0_weekday(day))
@@ -52,61 +69,6 @@ pub(super) fn local_week(observed_at: i64, offset: i64) -> i64 {
 /// The Monday epoch-day of local week `w`, the inverse of [`local_week`].
 pub(super) fn week_monday(w: i64) -> i64 {
     w.saturating_mul(7).saturating_add(4)
-}
-
-/// Round a working load DOWN onto the profile's display-unit plate grid, then
-/// return it in kg (the wire unit). kg users get the 2.5 kg grid; lb users the
-/// 5 lb grid (2.5 lb below 50 lb, where micro-plates are standard). Rounding
-/// DOWN — never nearest — guarantees the rendered load never exceeds the
-/// prescribed %1RM, and rounding on the DISPLAY grid means a lb user never sees
-/// a fractional-lb load no US plate combination can make (the wire stays kg).
-/// The grade still travels with the underlying %1RM claim.
-///
-/// A load already ON the grid stays put: a lb entry is stored as
-/// `lb / LB_PER_KG` and an e1RM × %1RM product carries float dust, so
-/// `lb / step` can land at 42.99999… and a bare floor would drop a whole plate.
-/// [`LOAD_GRID_EPS`] absorbs that dust; this is the ONE place it lives, so
-/// every caller passes its raw load (an f32-sourced one via [`f32_load_ceil`]).
-pub(crate) fn round_load_grid(kg: f64, weight_lb: bool) -> f64 {
-    let floor_steps = |x: f64, step: f64| (x / step + LOAD_GRID_EPS).floor() * step;
-    let step = grid_step(kg, weight_lb);
-    if weight_lb {
-        floor_steps(kg * LB_PER_KG, step) / LB_PER_KG
-    } else {
-        floor_steps(kg, step)
-    }
-}
-
-/// One step of the plate grid [`round_load_grid`] floors a load of `kg` onto,
-/// in kg: the one plate step for completion tolerance, warm-up matching and
-/// load steps.
-pub(crate) fn load_grid_step_kg(kg: f64, weight_lb: bool) -> f64 {
-    let step = grid_step(kg, weight_lb);
-    if weight_lb { step / LB_PER_KG } else { step }
-}
-
-/// The plate-grid step for a load of `kg`, in the display unit: 2.5 kg; 5 lb,
-/// or 2.5 lb below 50 lb.
-fn grid_step(kg: f64, weight_lb: bool) -> f64 {
-    if weight_lb && kg * LB_PER_KG >= 50.0 {
-        5.0
-    } else {
-        2.5
-    }
-}
-
-/// Float-dust tolerance of [`round_load_grid`], in grid steps: far above the
-/// ~1e-13-step error of an f64 kg↔lb round trip or an e1RM × %1RM × derate
-/// product, far below any load difference (2.5e-10 kg / 5e-10 lb overshoot).
-const LOAD_GRID_EPS: f64 = 1e-10;
-
-/// A kg load that came off an f32 wire field (`LiftPrescription::load_kg`),
-/// raised by its own f32 precision (half an f32 ulp, at most 2^-24 relative;
-/// apply it before any factor) before it is put on the grid: the f32 cast can
-/// leave an on-grid lb load ~2e-6 plate steps under its grid point, beyond
-/// [`LOAD_GRID_EPS`], and the f32 cannot tell the two apart anyway.
-pub(crate) fn f32_load_ceil(kg: f64) -> f64 {
-    kg + kg.abs() * f64::from(f32::EPSILON) / 2.0
 }
 
 /// Format a kg figure: rounded ONCE to 0.1 kg, then printed as an integer when
@@ -141,12 +103,6 @@ pub(super) fn fmt_weight_num(kg: f64, lb: bool) -> String {
         fmt_kg(kg)
     }
 }
-
-/// Pounds per kilogram. NUMERIC wire/view fields stay in kg (see the
-/// `weight_kg`/`e1rm_kg`/`load_kg` field docs and `Profile::weight_lb`); ONLY
-/// human-facing display strings convert, and only through the helpers below so
-/// the factor and the "kg"/"lb" suffix can never drift per call site.
-pub(super) const LB_PER_KG: f64 = 2.2046226218;
 
 /// The weight-unit suffix a profile renders in: "lb" when `lb`, else "kg".
 pub(super) fn weight_suffix(lb: bool) -> &'static str {
@@ -227,29 +183,6 @@ pub(super) fn fmt_whole_km_or_mi(km: f64, mi: bool) -> String {
     }
 }
 
-/// Human title for a session type ("Heavy day", "Long run", "Rest").
-pub(super) fn session_title(st: SessionType) -> String {
-    match st {
-        SessionType::Lift(LiftSessionType::MaxEffort) => "Heavy day",
-        SessionType::Lift(LiftSessionType::DynamicEffort) => "Power day",
-        SessionType::Lift(LiftSessionType::Repetition) => "Volume day",
-        SessionType::Lift(LiftSessionType::Accessory) => "Accessory",
-        SessionType::Lift(LiftSessionType::Calisthenics) => "Calisthenics",
-        SessionType::Lift(LiftSessionType::FullBody) => "Strength day",
-        SessionType::Run(RunSessionType::LongRun) => "Long run",
-        SessionType::Run(RunSessionType::Tempo) => "Tempo run",
-        SessionType::Run(RunSessionType::Interval) => "Intervals",
-        SessionType::Run(RunSessionType::Recovery) => "Recovery run",
-        SessionType::Run(RunSessionType::RacePace) => "Race-pace run",
-        SessionType::Run(RunSessionType::Repetition) => "Repetitions",
-        SessionType::Run(RunSessionType::Strides) => "Strides",
-        SessionType::Run(RunSessionType::Hills) => "Hill repeats",
-        SessionType::Run(RunSessionType::Easy) => "Easy run",
-        SessionType::Rest => "Rest",
-    }
-    .to_string()
-}
-
 /// Human goal label for the program summary.
 pub(super) fn human_goal(goal: &Goal) -> String {
     match goal {
@@ -295,21 +228,14 @@ pub(super) fn fmt_clock(sec: f64) -> String {
     }
 }
 
-/// Plain mid-sentence name for a race distance in km: "marathon",
-/// "half marathon", "10K", "5K", "1K" at their standard distances (within
-/// 50 m, so the common 42.2 / 21.1 roundings match), otherwise "N km" with one
-/// decimal only when the distance is not whole.
+/// Plain mid-sentence name for a race distance in km: the race's name at a
+/// standard race distance ([`GoalDistance::named_at_km`]), "1K" at one
+/// kilometre (the same tolerance), otherwise "N km" with one decimal only when
+/// the distance is not whole.
 pub(super) fn race_distance_label(km: f64) -> String {
-    let near = |x: f64| (km - x).abs() < 0.05;
-    if near(42.195) {
-        "marathon".to_string()
-    } else if near(21.0975) {
-        "half marathon".to_string()
-    } else if near(10.0) {
-        "10K".to_string()
-    } else if near(5.0) {
-        "5K".to_string()
-    } else if near(1.0) {
+    if let Some(name) = GoalDistance::named_at_km(km).and_then(GoalDistance::race_name) {
+        name.to_string()
+    } else if (km - 1.0).abs() < running::NAME_MATCH_TOLERANCE_M / 1000.0 {
         "1K".to_string()
     } else if (km - km.round()).abs() < 0.05 {
         format!("{:.0} km", km.round())

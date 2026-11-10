@@ -4,13 +4,12 @@
 //! reference tracked for under-18 profiles.
 
 use crate::evidence::cite::{CITE_BOSQUET_2013, CITE_GRGIC_2018};
-use crate::evidence::claim;
-use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong};
+use crate::evidence::draft::claim;
+use crate::evidence::grade::EvidenceGrade::{ExpertOpinion, Moderate, Strong};
 
 claim_group! {
     IndividualizationClaim => Individualization;
     DETRAIN_001 => claim(
-        "DETRAIN-001",
         "Fitness fades at different rates when you stop: power within about a week, aerobic max (VO2max) fastest, strength slowest (about 7–12% over 8–12 weeks). You keep most of it if you hold intensity and cut volume. To scale down, drop extra exercises first and main lifts and intensity last, training each muscle at least twice a week; after a break, ramp back based on how long you were off rather than starting over.",
         Moderate,
         &[
@@ -20,7 +19,6 @@ claim_group! {
     )
     .contradicting(&["Re-entry brackets (Table 3.4b) are ExpertOpinion extrapolation"]),
     MASTERS_001 => claim(
-        "MASTERS-001",
         "For adults 65 and over, aim for at least 1.2–1.6 g of protein per kg of bodyweight a day (about 0.4 g/kg per meal), because muscles respond less to protein with age. Include fast power work for everyday function, and allow more recovery when performance hasn't bounced back.",
         Moderate,
         &[
@@ -29,7 +27,6 @@ claim_group! {
         ],
     ),
     TIMECAP_001 => claim(
-        "TIMECAP-001",
         "When short on time, keep how often and how hard you train, and cut extra exercises first. A muscle can be maintained on about one session a week, because keeping muscle takes far less volume than building it.",
         Moderate,
         &[
@@ -38,7 +35,6 @@ claim_group! {
         ],
     ),
     DBLPROG_001 => claim(
-        "DBLPROG-001",
         "Double progression: work within a rep range and add weight (dropping to the bottom of the range) once you hit the top of the range on all sets. By default, beginners add about 2.5 kg (5 lb) on upper-body lifts and 5 kg (10 lb) on lower-body lifts each session while they complete their reps.",
         ExpertOpinion,
         &[
@@ -47,7 +43,6 @@ claim_group! {
         ],
     ),
     SUBST_001 => claim(
-        "SUBST-001",
         "With home or minimal equipment, swap in a lift with the same movement pattern (not the exact lift) and make up for lighter weights with more reps taken closer to failure, which largely preserves muscle growth.",
         ExpertOpinion,
         &[
@@ -56,7 +51,6 @@ claim_group! {
         ],
     ),
     INDIV_TRAGE_001 => claim(
-        "INDIV-TRAGE-001",
         "Your experience level comes from how often you can add weight (beginner: every session; intermediate: week to week; advanced: month to month), not from how you'd label yourself.",
         ExpertOpinion,
         &[
@@ -64,7 +58,6 @@ claim_group! {
         ],
     ),
     SCALE_DOWN_001 => claim(
-        "SCALE-DOWN-001",
         "When cutting back, drop extra and single-joint exercises first, then sets toward the minimum that still makes progress, then sessions (keeping each muscle trained at least twice a week), then your second goal. Keep intensity, weights and main lifts until last.",
         Strong,
         &[
@@ -72,7 +65,6 @@ claim_group! {
         ],
     ),
     SCALE_UP_001 => claim(
-        "SCALE-UP-001",
         "When adding training, first add volume to your main goal (from the minimum toward the productive range), then sessions per week, then extra exercises or variety, then weight; take on a second goal only once the first is progressing.",
         ExpertOpinion,
         &[
@@ -81,7 +73,6 @@ claim_group! {
         ],
     ),
     REENTRY_001 => claim(
-        "REENTRY-001",
         "After a break, the restart depends on time off: 1–2 weeks off, about 90% of your weights; 2–4 weeks, about 80–85%; 4–8 weeks, about 70%; over 8 weeks, start again as a beginner. Intensity holds while sets build back up.",
         ExpertOpinion,
         &[
@@ -90,14 +81,12 @@ claim_group! {
         ],
     ),
     LIFT_DAYS_001 => claim(
-        "LIFT-DAYS-001",
         "Lifting is planned on the number of days you actually have (2–4 or more) by spreading the same weekly volume across them: when volume is matched, how often you train has no significant effect on strength.",
         Moderate,
         &[CITE_GRGIC_2018],
     )
     .contradicting(&["Which session split fits which number of days is coaching convention"]),
     REENTRY_RAMP_001 => claim(
-        "REENTRY-RAMP-001",
         "After a break, lighter starting weights climb back to full over the return period. They apply only to numbers set before the break and replace, rather than add to, the general adjustment for time off. Strength holds up best during a break.",
         ExpertOpinion,
         &[CITE_BOSQUET_2013],
@@ -110,7 +99,6 @@ claim_group! {
     // only for resistance. Past 8 weeks the table gives no fraction, so the
     // restart rests on the running logged since (RUN-START-001).
     RUN_REENTRY_001 => claim(
-        "RUN-REENTRY-001",
         "After a break from running, the restart depends on time off: under a week, run as planned; 1–2 weeks, about 90% of your usual weekly distance; 2–4 weeks, about 70–80%, building the long run up again; 4–8 weeks, about 50–60%, with single runs judged almost as for a beginner; over 8 weeks, rebuild your base from the running you do again, with walk/run intervals if needed. The restart then builds back to your usual distance over the following weeks.",
         ExpertOpinion,
         &[
@@ -125,7 +113,6 @@ claim_group! {
     // File 08 youth-pa-001: information and tracking for under-18 profiles
     // (the plan hold stays); never a program.
     YOUTH_PA_001 => claim(
-        "YOUTH-PA-001",
         "Children and teenagers aged 5 to 17 should average at least 60 minutes a day of moderate-to-vigorous activity across the week, mostly aerobic, with vigorous activity and muscle- and bone-strengthening activity on at least 3 days a week. Moderate means about 5–6 out of 10 effort, vigorous about 7–8 out of 10; running and jumping strengthen bone.",
         Strong,
         &[

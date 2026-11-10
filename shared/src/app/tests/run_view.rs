@@ -561,7 +561,7 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
         naive_run.distance_km,
     );
     assert!(
-        relocation.len() - qc_track(&relocation, &[]).track.len() >= 5,
+        relocation.len() - crate::gps::qc_track(&relocation, &[]).track.len() >= 5,
         "the 5 seg-2 fixes were dropped"
     );
 }

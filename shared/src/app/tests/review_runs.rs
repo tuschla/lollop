@@ -294,11 +294,11 @@ fn splits_sum_to_moving_time_and_distance_on_random_tracks() {
     let mut worst_m = 0.0f64;
     for _ in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
-        let qc = qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
-        let moving_s = moving_duration_min(&qc) * 60.0;
-        let dist_m = running::track_distance_km(&qc.track, &qc.seg_starts) * 1000.0;
+        let qc = crate::gps::qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
+        let moving_s = crate::gps::moving_duration_min(&qc) * 60.0;
+        let dist_m = crate::gps::track_distance_km(&qc.track, &qc.seg_starts) * 1000.0;
         for unit in [running::KM_M, running::MILE_M] {
-            let splits = running::track_splits(&qc.track, unit, &qc.seg_starts);
+            let splits = crate::gps::track_splits(&qc.track, unit, &qc.seg_starts);
             let clock: f64 = splits
                 .iter()
                 .map(|s| {
@@ -351,8 +351,8 @@ fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
     let mut rng = XorShift(0x0DD0_1DE0_9999_0001);
     for i in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
-        let once = qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
-        let twice = qc_track(&once.track, &once.seg_starts);
+        let once = crate::gps::qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
+        let twice = crate::gps::qc_track(&once.track, &once.seg_starts);
         assert_eq!(
             once.track, twice.track,
             "track {i}: QC of the QC'd route changed it"
@@ -365,13 +365,13 @@ fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
 }
 
 /// Every f32 accuracy in [1, 30] m as the export → shell import → core path
-/// turns it: the exported `<hdop>` (`running::gpx_hdop`, written with `{}`),
+/// turns it: the exported `<hdop>` (`gps::gpx_hdop`, written with `{}`),
 /// read as a Double, × 5 (Gpx.kt `hdopToAccuracyM`), deserialized by the core
 /// as f32.
 fn hdop_round_trips() -> impl Iterator<Item = (f32, f32)> {
     let mut a = 1.0f32;
     std::iter::from_fn(move || {
-        if a > running::MAX_GPS_ACCURACY_M {
+        if a > crate::gps::MAX_GPS_ACCURACY_M {
             return None;
         }
         let out = (a, hdop_back(a));
@@ -381,7 +381,7 @@ fn hdop_round_trips() -> impl Iterator<Item = (f32, f32)> {
 }
 
 fn hdop_back(a: f32) -> f32 {
-    let hdop: f64 = format!("{}", running::gpx_hdop(a)).parse().unwrap();
+    let hdop: f64 = format!("{}", crate::gps::gpx_hdop(a)).parse().unwrap();
     (hdop * 5.0) as f32
 }
 
@@ -391,11 +391,11 @@ fn exported_hdop_never_moves_a_fix_across_the_qc_accuracy_gate() {
     // over it (an unmeasurable run's raw fixes, exported for Undo) comes back
     // under it; one at or under it comes back unchanged
     // (`exported_hdop_round_trips_accuracy_bit_exact`).
-    let mut a = f32::from_bits(running::MAX_GPS_ACCURACY_M.to_bits() + 1);
+    let mut a = f32::from_bits(crate::gps::MAX_GPS_ACCURACY_M.to_bits() + 1);
     while a <= 31.0 {
         let back = hdop_back(a);
         assert!(
-            back > running::MAX_GPS_ACCURACY_M,
+            back > crate::gps::MAX_GPS_ACCURACY_M,
             "{a} came back as {back}"
         );
         a = f32::from_bits(a.to_bits() + 1);
@@ -422,7 +422,7 @@ fn exported_coordinates_round_trip_bit_exact() {
     for _ in 0..20_000 {
         let lat = (rng.unit() * 180.0 - 90.0) * if rng.scaled(10) == 0 { 1e-9 } else { 1.0 };
         let lon = rng.unit() * 360.0 - 180.0;
-        let doc = running::export_gpx(
+        let doc = crate::gps::export_gpx(
             &[
                 GpsPoint {
                     lat,

@@ -1,13 +1,16 @@
 use super::derive::*;
+use super::inputs::latest;
 use super::pain::*;
+use super::perf::*;
 use super::prescriptions::*;
 use super::rules::*;
 use super::*;
 use crate::evidence::claims;
 use crate::schema::{
-    Adjustment, CheckinInput, Goal, PainDetail, PainKind, PainTrend, ReadinessInput,
-    ReadinessSignal, Recommended, SafetyTier,
+    Adjustment, CheckinInput, PainDetail, PainKind, PainTrend, ReadinessInput, ReadinessSignal,
+    Recommended, SafetyTier,
 };
+use crate::strength::LiftGoal;
 
 /// The rules with no context beyond the inputs. `pub(crate)` for the app tests.
 pub(crate) fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
@@ -16,56 +19,42 @@ pub(crate) fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustme
 
 fn adjustments_for_goal(
     inputs: &[ReadinessInput],
-    goal: Option<&Goal>,
+    lift_goal: Option<LiftGoal>,
 ) -> Vec<Recommended<Adjustment>> {
-    adjustments_with_context(inputs, goal, false)
+    adjustments_with_context(inputs, lift_goal, false)
 }
 
 /// The rules with goal and block context only; `high_load_block` arms the
 /// autoreg-029 parasympathetic-saturation guard.
 fn adjustments_with_context(
     inputs: &[ReadinessInput],
-    goal: Option<&Goal>,
+    lift_goal: Option<LiftGoal>,
     high_load_block: bool,
 ) -> Vec<Recommended<Adjustment>> {
-    adjustments_in(
-        inputs,
-        &RuleContext {
-            goal,
-            high_load_block,
-            ..RuleContext::default()
-        },
-    )
+    adjustments_in(inputs, &RuleContext::default(), lift_goal, high_load_block)
 }
 
 /// The safety tier with goal context only. `pub(crate)` for the app tests.
 pub(crate) fn resolve_safety_for_goal(
     inputs: &[ReadinessInput],
-    goal: Option<&Goal>,
+    lift_goal: Option<LiftGoal>,
 ) -> Option<SafetyTier> {
-    resolve_safety_in(
-        inputs,
-        &RuleContext {
-            goal,
-            ..RuleContext::default()
-        },
-    )
+    resolve_safety_in(inputs, &RuleContext::default(), lift_goal)
 }
 
 /// [`signal_states_in`] with goal and block context only.
 fn signal_states(
     inputs: &[ReadinessInput],
-    goal: Option<&Goal>,
+    lift_goal: Option<LiftGoal>,
     high_load_block: bool,
     stale: &[ReadinessInput],
 ) -> Vec<SignalState> {
     signal_states_in(
         inputs,
-        &RuleContext {
-            goal,
-            high_load_block,
-            ..RuleContext::default()
-        },
+        &RuleContext::default(),
+        lift_goal,
+        high_load_block,
+        false,
         stale,
     )
 }
@@ -796,20 +785,20 @@ fn velocity_loss_stop_is_goal_dependent() {
     let vl22 = vec![input(ReadinessSignal::VelocityLoss, 22.0)];
     let vl42 = vec![input(ReadinessSignal::VelocityLoss, 42.0)];
 
-    let fires = |inputs: &[ReadinessInput], goal: Option<&Goal>| {
+    let fires = |inputs: &[ReadinessInput], goal: Option<LiftGoal>| {
         adjustments_for_goal(inputs, goal)
             .iter()
             .any(|r| r.value == Adjustment::DowngradeSession)
     };
 
     // Power: threshold 10%, 12% already terminates.
-    assert!(fires(&vl12, Some(&Goal::Power)));
+    assert!(fires(&vl12, Some(LiftGoal::Power)));
     // Strength: 12% is within plan; 22% exceeds the 20% ceiling.
-    assert!(!fires(&vl12, Some(&Goal::Strength)));
-    assert!(fires(&vl22, Some(&Goal::Strength)));
+    assert!(!fires(&vl12, Some(LiftGoal::MaxStrength)));
+    assert!(fires(&vl22, Some(LiftGoal::MaxStrength)));
     // Hypertrophy: 22% within the 25–40 band's ceiling; 42% exceeds it.
-    assert!(!fires(&vl22, Some(&Goal::Hypertrophy)));
-    assert!(fires(&vl42, Some(&Goal::Hypertrophy)));
+    assert!(!fires(&vl22, Some(LiftGoal::Hypertrophy)));
+    assert!(fires(&vl42, Some(LiftGoal::Hypertrophy)));
     // No goal → the conservative 20% default.
     assert!(fires(&vl22, None));
     assert!(!fires(&vl12, None));
@@ -1097,7 +1086,7 @@ fn top_set_scores_its_e1rm_at_rpe_and_an_open_rating_never_drops() {
         weight_kg,
         reps,
         rpe,
-        observed_at: day * crate::DAY_SEC + 3_600,
+        observed_at: day * crate::day::DAY_SEC + 3_600,
     };
     let today = |perf: &[MovementPerf]| {
         perf.iter()

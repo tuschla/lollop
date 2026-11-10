@@ -1,9 +1,15 @@
 use super::*;
-use crate::DAY_SEC as DAY;
-use crate::app::tests::{base_profile, logged_run};
+use crate::app::model::{HrZoneInputView, HypertrophyInputView, LoggedRun, Model};
+use crate::app::tests::logged_run;
+use crate::app::view_ctx::ViewCtx;
+use crate::app::view_types::GuidanceView;
+use crate::day::DAY_SEC as DAY;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::ProgressionCadence;
+use crate::profile::Profile;
+use crate::profile::test_support::base_profile;
 use crate::schema::WorkoutType;
+use crate::strength::LiftGoal;
 
 /// Noon of epoch-day 704, a Monday, so a week anchored here is one clean
 /// Mon–Sun block for the local-week bucketing. Noon, not 00:00: a run stamped

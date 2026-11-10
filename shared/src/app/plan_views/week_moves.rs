@@ -1,7 +1,15 @@
 //! Session moves inside the plan week: the arrangement, the spacing check and
 //! the move options.
 
-use super::*;
+use crate::app::format::weekday_name;
+use crate::app::logged_days::LoggedDays;
+use crate::app::model::Model;
+use crate::app::view_types::{SessionPlanView, SessionStatus};
+use crate::schema::Session;
+
+/// The one wording for "skipping a session is fine" (ADH-MISSED-001), shared
+/// by the missed-session note and the move notes.
+pub(super) const MISSED_SESSION_COSTS_LITTLE: &str = "One missed session costs little.";
 
 /// This week's arrangement after the athlete's session moves
 /// (ADH-RESCHED-001): `source[d]` is the plan-day offset whose session shows on
@@ -32,10 +40,11 @@ pub(super) fn week_arrangement(
                 notes[from] = None;
                 notes[to] = None;
             }
-            Some(reason) => {
+            Some(conflict) => {
                 notes[from] = Some(format!(
-                    "Couldn't move this session to {}: {reason}. Pick another day, or skip it. {MISSED_SESSION_COSTS_LITTLE}",
-                    weekday_name(mv.to_epoch_day)
+                    "Couldn't move this session to {}: {}. Pick another day, or skip it. {MISSED_SESSION_COSTS_LITTLE}",
+                    weekday_name(mv.to_epoch_day),
+                    move_conflict_copy(conflict)
                 ));
             }
         }
@@ -116,9 +125,36 @@ fn move_blocked_copy(block: &crate::plan::MoveBlock, week_monday: i64) -> String
         crate::plan::MoveBlock::AllTaken => format!(
             "Every day left this week already has a session, and the plan never puts two on one day. {skip}"
         ),
-        crate::plan::MoveBlock::Spacing { day, reason } => format!(
-            "No other day this week works. On {}, {reason}. {skip}",
-            weekday_name(week_monday.saturating_add(*day as i64))
+        crate::plan::MoveBlock::Spacing { day, conflict } => format!(
+            "No other day this week works. On {}, {}. {skip}",
+            weekday_name(week_monday.saturating_add(*day as i64)),
+            move_conflict_copy(*conflict)
+        ),
+    }
+}
+
+/// Why a session can't move to a day, as a clause.
+fn move_conflict_copy(conflict: crate::plan::MoveConflict) -> String {
+    use crate::plan::{MoveConflict, SpacingRule};
+    let rule = match conflict {
+        MoveConflict::NotAnotherDay => return "pick a different day in the same week".into(),
+        MoveConflict::NothingToMove => return "there is no session on that day to move".into(),
+        MoveConflict::DayTaken => return "that day already has a session".into(),
+        MoveConflict::Spacing(rule) => rule,
+    };
+    let h = rule.min_gap_hours();
+    match rule {
+        SpacingRule::SameMuscles => format!(
+            "the same muscles would be trained on back-to-back days (keep about {h:.0} hours between them)"
+        ),
+        SpacingRule::HardRunAfterHeavyLegs => format!(
+            "a hard or long run would come the day after heavy leg work (keep at least {h:.0} hours between them)"
+        ),
+        SpacingRule::HardRunBeforeHeavyLegs => format!(
+            "a hard or long run would come the day before heavy leg work (keep at least {h:.0} hours between them)"
+        ),
+        SpacingRule::HardBackToBack => format!(
+            "two hard sessions would land on back-to-back days (keep about {h:.0} hours between them)"
         ),
     }
 }
@@ -126,6 +162,7 @@ fn move_blocked_copy(block: &crate::plan::MoveBlock, week_monday: i64) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::format::mon0_weekday;
 
     #[test]
     fn move_options_include_today_and_a_blocked_row_says_why() {

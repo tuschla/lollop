@@ -17,11 +17,18 @@ fn claim_ids_are_unique() {
 fn contested_question_ids_are_unique() {
     let mut seen = HashSet::new();
     for q in CONTESTED_QUESTIONS {
-        assert!(
-            seen.insert(q.id),
-            "duplicate contested-question id: {}",
-            q.id
-        );
+        let id = q.id.as_str();
+        assert!(seen.insert(id), "duplicate contested-question id: {id}");
+        assert!(std::ptr::eq(q.id.question(), q), "{id} is out of place");
+    }
+}
+
+#[test]
+fn contested_ids_spell_their_kb_ids() {
+    assert_eq!(ContestedId::CQ_01.as_str(), "CQ-01");
+    assert_eq!(ContestedId::CQ_F10_01.as_str(), "CQ-F10-01");
+    for q in CONTESTED_QUESTIONS {
+        assert_eq!(format!("{:?}", q.id), q.id.as_str().replace('-', "_"));
     }
 }
 
@@ -163,11 +170,12 @@ fn every_surfaced_claim_is_cited() {
 fn every_contested_ref_resolves() {
     for c in all_claims() {
         if let Some(cq) = c.contested {
-            assert!(
-                contested_question(cq).is_some(),
+            assert_eq!(
+                cq.question().id,
+                cq,
                 "{} references missing {}",
                 c.claim_id,
-                cq
+                cq.as_str()
             );
         }
     }
@@ -329,24 +337,6 @@ fn myths_are_blocked() {
 }
 
 #[test]
-#[should_panic(expected = "must never back a recommendation")]
-fn surfacing_a_myth_trips_the_choke_point_guard() {
-    // HARD RULE 2: grading a value with a myth claim panics. The guard is
-    // UNCONDITIONAL - this test is deliberately not gated on
-    // `debug_assertions` and must pass under `cargo test --release` too.
-    let _ = graded((), claims::LOAD_ACWR_001);
-}
-
-#[test]
-fn recommended_reads_evidence_off_the_claim() {
-    let r = graded((), claims::RUN_DIST_001);
-    assert_eq!(r.claim_id(), claims::RUN_DIST_001);
-    assert_eq!(r.grade(), EvidenceGrade::Moderate);
-    assert_eq!(r.contested(), Some("CQ-07"));
-    assert!((r.confidence() - 0.65).abs() < f32::EPSILON);
-}
-
-#[test]
 fn fast_moving_topics_review_semiannually() {
     for id in [claims::HYP_VOL_001, claims::HRV_001, claims::LOAD_ACWR_001] {
         assert_eq!(id.entry().review_months, 6, "{id:?} should review at 6mo");
@@ -453,7 +443,7 @@ fn statements_are_plain_language() {
             .flatten()
         {
             if let Some(why) = registry_syntax_in(text) {
-                panic!("{} contested text leaks {why}: {text:?}", q.id);
+                panic!("{} contested text leaks {why}: {text:?}", q.id.as_str());
             }
         }
     }
@@ -464,8 +454,8 @@ fn prilepin_points_at_its_own_contested_question() {
     // File 02's local CQ-03 (Prilepin transfer) is not the global CQ-03
     // (periodization model), so it carries its own namespaced row.
     let c = claims::STR_PRILEPIN_001.entry();
-    assert_eq!(c.contested, Some("CQ-F02-03"));
-    let q = contested_question("CQ-F02-03").expect("row");
+    assert_eq!(c.contested, Some(ContestedId::CQ_F02_03));
+    let q = ContestedId::CQ_F02_03.question();
     assert!(q.question.contains("Prilepin"), "{}", q.question);
 }
 
@@ -474,8 +464,8 @@ fn goal_framing_rule_is_moderate_and_contested() {
     // File 05 feedback-003: Moderate, contested (CQ-goal-specificity).
     let c = claims::FB_PROCESS_GOAL_001.entry();
     assert_eq!(c.grade, EvidenceGrade::Moderate);
-    assert_eq!(c.contested, Some("CQ-F05-01"));
-    assert!(contested_question("CQ-F05-01").is_some_and(|q| q.other_side.is_some()));
+    assert_eq!(c.contested, Some(ContestedId::CQ_F05_01));
+    assert!(ContestedId::CQ_F05_01.question().other_side.is_some());
 }
 
 #[test]
@@ -516,7 +506,7 @@ fn evidence_update_2026_10_regrades_hold() {
     let mode = claims::CONC_MODE_001.entry();
     assert_eq!(mode.grade, EvidenceGrade::Weak);
     assert!(mode.contradicting.len() >= 2);
-    assert_eq!(mode.contested, Some("CQ-F10-01"));
+    assert_eq!(mode.contested, Some(ContestedId::CQ_F10_01));
     // No "polarized beats threshold" overclaim.
     assert!(!claims::RUN_DIST_001.entry().statement.contains("beats"));
 }

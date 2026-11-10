@@ -1,6 +1,18 @@
 //! In-session autoregulation from an item's first logged work set.
 
-use super::*;
+use crate::app::evidence_views::{reps_word, to_view};
+use crate::app::plan_views::adjust_fold::{
+    fold_completion_adjustments, reduce_percent_intensity, safety_easy,
+};
+use crate::app::plan_views::adjustments::{
+    cap_item_effort, percent_effort_rpe, rejudge_at_load, session_effort_cap,
+};
+use crate::app::plan_views::completion::refresh_item_statuses;
+use crate::app::plan_views::item_render::{resync_intensity, round_load_or_drop};
+use crate::app::view_types::{
+    AdjustmentView, PlanIntensity, PrescriptionView, SessionPlanView, SessionStatus,
+};
+use crate::schema::{Adjustment, Recommended};
 
 /// Per-item performance autoregulation on TODAY's session, from the item's own
 /// logged sets (the Strong-graded backbone, AUTOREG-RIR-001):
@@ -138,7 +150,7 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
         .iter()
         .filter(|r| {
             matches!(&r.value, Adjustment::ForItem { exercise, .. }
-                if crate::plan::same_movement(exercise, &it.exercise))
+                if crate::exercise::same_movement(exercise, &it.exercise))
         })
         .cloned()
         .collect();
