@@ -26,6 +26,7 @@ use crate::schema::Recommended;
     serde::Serialize,
     serde::Deserialize,
     crate::sanitize::Sanitize,
+    crate::wire::Wire,
 )]
 pub enum ConcurrentGoal {
     Strength,

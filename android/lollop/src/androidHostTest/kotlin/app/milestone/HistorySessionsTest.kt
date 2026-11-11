@@ -155,7 +155,7 @@ class HistorySessionsTest {
         // core exports for it, never a 0 km manual LogRun with another card.
         val run = RunResultView(
             distance_km = 0.0, observed_at = 2_000L, entry_id = 8L,
-            has_gpx = false, gps_unmeasurable = true, workout_type = "LongRun", session_rpe = 2,
+            has_gpx = false, gps_unmeasurable = true, workout_type = WorkoutType.LongRun, session_rpe = 2,
         )
         assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
         val recorded = listOf(
@@ -194,7 +194,7 @@ class HistorySessionsTest {
                 """"utc_offset_sec":7200,"observed_at":3000,"entry_id":9}""",
         )
         val manual = restoreEventFor(HistoryEntry.Run(run), emptyList()) as Event.LogRun
-        assertEquals(7200, manual.utcOffsetSec)
+        assertEquals(7200L, manual.utcOffsetSec)
         assertEquals(
             7200,
             manual.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"]!!.jsonPrimitive.int,
@@ -202,7 +202,7 @@ class HistorySessionsTest {
         val gps = run.copy(has_gpx = true)
         val route = listOf(listOf(GpxFix(52.0, 13.0, 2_900L, null), GpxFix(52.001, 13.0, 3_000L, null)))
         val track = restoreEventFor(HistoryEntry.Run(gps), route) as Event.LogRunTrack
-        assertEquals(7200, track.utcOffsetSec)
+        assertEquals(7200L, track.utcOffsetSec)
         // A legacy row (no logged offset) stays unstamped.
         val legacy = restoreEventFor(HistoryEntry.Run(run.copy(utc_offset_sec = null)), emptyList()) as Event.LogRun
         assertEquals(null, legacy.utcOffsetSec)

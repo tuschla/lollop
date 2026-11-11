@@ -247,6 +247,7 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> Recommended<bool> {
     serde::Serialize,
     serde::Deserialize,
     crate::sanitize::Sanitize,
+    crate::wire::Wire,
 )]
 pub enum LiftGoal {
     MaxStrength,

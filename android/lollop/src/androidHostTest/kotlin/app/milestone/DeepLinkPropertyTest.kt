@@ -40,44 +40,44 @@ class DeepLinkPropertyTest {
     private fun dayModel(kind: Int, r: Random): Pair<String, ViewModel> {
         val names = listOf("Back squat", "Bench press", "Row", "Deadlift").shuffled(r)
         val items = List(1 + r.nextInt(4)) { i -> lift(names[i]) }
-        val profile = ProfileView()
-        fun session(d: Long, type: String, status: String, its: List<PrescriptionView>) =
+        val profile = Profile()
+        fun session(d: Long, type: SessionType, status: SessionStatus, its: List<PrescriptionView>) =
             SessionPlanView(epoch_day = d, title = "S$d", session_type = type, status = status, items = its)
         return when (kind) {
-            0 -> "lift open" to session(day, "Lift(Strength)", "next", items).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
+            0 -> "lift open" to session(day, SessionType.LiftMaxEffort, SessionStatus.Next, items).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
             1 -> {
                 val k = r.nextInt(1, items.size + 1)
                 val started = items.mapIndexed { i, it -> if (i < k) it.copy(done = i < k - 1 || r.nextBoolean(), sets_done = 1) else it }
-                "lift started" to session(day, "Lift(Strength)", "adjusted", started).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
+                "lift started" to session(day, SessionType.LiftMaxEffort, SessionStatus.Adjusted, started).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
             }
             2 -> {
                 // Finished: the core moves next_session on; today's row says what was done.
                 val done = items.map { it.copy(done = true, sets_done = 3) }
-                val next = session(day + 2, "Run(Easy)", "next", listOf(runItem()))
-                "lift done" to ViewModel(today_epoch_day = day, profile = profile, next_session = next, week_plan = listOf(session(day, "Lift(Strength)", "done", done), next))
+                val next = session(day + 2, SessionType.RunEasy, SessionStatus.Next, listOf(runItem()))
+                "lift done" to ViewModel(today_epoch_day = day, profile = profile, next_session = next, week_plan = listOf(session(day, SessionType.LiftMaxEffort, SessionStatus.Done, done), next))
             }
-            3 -> "run open" to session(day, "Run(Easy)", "next", listOf(runItem())).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
+            3 -> "run open" to session(day, SessionType.RunEasy, SessionStatus.Next, listOf(runItem())).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
             4 -> {
-                val next = session(day + 1, "Lift(Strength)", "next", items)
-                "rest" to ViewModel(today_epoch_day = day, profile = profile, next_session = next, week_plan = listOf(session(day, "Rest", "rest", emptyList()), next))
+                val next = session(day + 1, SessionType.LiftMaxEffort, SessionStatus.Next, items)
+                "rest" to ViewModel(today_epoch_day = day, profile = profile, next_session = next, week_plan = listOf(session(day, SessionType.Rest, SessionStatus.Rest, emptyList()), next))
             }
             5 -> {
                 // Today's lift moved to Thursday: today is a rest day.
-                val moved = session(day + 3, "Lift(Strength)", "next", items).copy(moved_from_epoch_day = day)
-                "moved" to ViewModel(today_epoch_day = day, profile = profile, next_session = moved, week_plan = listOf(session(day, "Rest", "rest", emptyList()), moved))
+                val moved = session(day + 3, SessionType.LiftMaxEffort, SessionStatus.Next, items).copy(moved_from_epoch_day = day)
+                "moved" to ViewModel(today_epoch_day = day, profile = profile, next_session = moved, week_plan = listOf(session(day, SessionType.Rest, SessionStatus.Rest, emptyList()), moved))
             }
             6 -> {
-                val blank = session(day, "Lift(Strength)", "blocked", emptyList())
-                "hold" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = "pain", next_session = blank, week_plan = listOf(blank))
+                val blank = session(day, SessionType.LiftMaxEffort, SessionStatus.Blocked, emptyList())
+                "hold" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = HoldReason.Pain, next_session = blank, week_plan = listOf(blank))
             }
             7 -> {
-                val blank = session(day, "Lift(Strength)", "blocked", emptyList())
-                "under 18" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = "youth", next_session = blank, week_plan = listOf(blank))
+                val blank = session(day, SessionType.LiftMaxEffort, SessionStatus.Blocked, emptyList())
+                "under 18" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = HoldReason.Youth, next_session = blank, week_plan = listOf(blank))
             }
-            8 -> "no plan" to ViewModel(today_epoch_day = day, profile = profile, plan_withheld = listOf(null, "nothing_to_plan").random(r))
+            8 -> "no plan" to ViewModel(today_epoch_day = day, profile = profile, plan_withheld = listOf(null, PlanWithheld.NothingToPlan).random(r))
             9 -> "no profile" to ViewModel(today_epoch_day = day)
-            else -> "missed yesterday, lift today" to session(day, "Lift(Strength)", "next", items).let {
-                ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(session(day - 1, "Run(Easy)", "missed", listOf(runItem())), it))
+            else -> "missed yesterday, lift today" to session(day, SessionType.LiftMaxEffort, SessionStatus.Next, items).let {
+                ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(session(day - 1, SessionType.RunEasy, SessionStatus.Missed, listOf(runItem())), it))
             }
         }
     }
@@ -85,8 +85,8 @@ class DeepLinkPropertyTest {
     /** The lift items of today's session the set editor may prefill from: the hero
      *  when it is today's actionable lift, else today's week row with logged work. */
     private fun todaysLiftItems(m: ViewModel): List<PrescriptionView> {
-        val ns = m.next_session?.takeIf { it.epoch_day == day && it.items.isNotEmpty() && sessionDiscipline(it.session_type) == "Lift" }
-        val row = m.week_plan.firstOrNull { it.epoch_day == day && sessionDiscipline(it.session_type) == "Lift" }
+        val ns = m.next_session?.takeIf { it.epoch_day == day && it.items.isNotEmpty() && it.session_type.discipline == SessionDiscipline.Lift }
+        val row = m.week_plan.firstOrNull { it.epoch_day == day && it.session_type.discipline == SessionDiscipline.Lift }
         return (ns?.items ?: emptyList()) + (row?.items ?: emptyList())
     }
 

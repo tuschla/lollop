@@ -149,11 +149,11 @@ class ScreenshotRunsTest {
                         else -> 11.0 + w % 4
                     }
                     val at = QaHarness.daysAgoAtMidday(7 * (w - 1) + off)
-                    add(at to Event.LogRun(km, km * 5.8, 0.0, at, at * 1000))
+                    add(at to Event.LogRun(km, km * 5.8, 0.0, observedAt = at, entryId = at * 1000))
                 }
             }
             val half = QaHarness.daysAgoAtMidday(33) + 600
-            add(half to Event.LogRun(21.2, 115.0, 0.0, half, half * 1000))
+            add(half to Event.LogRun(21.2, 115.0, 0.0, observedAt = half, entryId = half * 1000))
             var t = QaHarness.daysAgoAtMidday(3)
             repeat(3) {
                 t += 180

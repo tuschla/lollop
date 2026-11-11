@@ -152,7 +152,7 @@ private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event)
                 TextAction(
                     stringResource(Res.string.main_delete),
                     onClick = {
-                        onEvent(Event.DeleteEntry(Event.EntryKind.Activity, a.entry_id, observedAtFallback = a.observed_at))
+                        onEvent(Event.DeleteEntry(EntryKind.Activity, a.entry_id, observedAtFallback = a.observed_at))
                         postUndoable(res.getString(Res.string.activity_removed), res.getString(Res.string.log_undo), listOf(restoreActivityEvent(a)))
                     },
                     description = stringResource(Res.string.activity_remove_cd, line),

@@ -35,7 +35,7 @@ class EvidenceCardUiTest {
 
     private fun setCard(
         summary: String = DEFAULT_SUMMARY,
-        grade: String = "Moderate",
+        grade: EvidenceGrade? = EvidenceGrade.Moderate,
         citation: String = "STR-PROG-001",
         confidence: Float = 0.72f,
         safetyCritical: Boolean = false,
@@ -64,7 +64,7 @@ class EvidenceCardUiTest {
     @Test
     fun summaryOnFaceGradeBehindDisclosure() {
         val summary = "Deload week: cut volume 40%"
-        setCard(summary = summary, grade = "Strong")
+        setCard(summary = summary, grade = EvidenceGrade.Strong)
         rule.onNodeWithText(summary).assertIsDisplayed()
         rule.onNodeWithText(badge(R.string.main_grade_strong)).assertDoesNotExist()
         openDetails(summary)
@@ -86,7 +86,7 @@ class EvidenceCardUiTest {
 
     @Test
     fun gradeAndCitationHiddenUntilDisclosureTap() {
-        setCard(citation = "STR-PROG-001", confidence = 0.72f, grade = "Moderate")
+        setCard(citation = "STR-PROG-001", confidence = 0.72f, grade = EvidenceGrade.Moderate)
         rule.onNodeWithText(badge(R.string.main_grade_moderate)).assertDoesNotExist()
         rule.onNodeWithText("STR-PROG-001").assertDoesNotExist()
 

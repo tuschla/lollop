@@ -27,6 +27,7 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.ReadinessSignal
+import app.milestone.SessionStatus
 import app.milestone.planDateLabel
 import java.util.Locale
 import org.junit.After
@@ -204,7 +205,7 @@ class TodayCoachingTest {
         assertTrue(
             "today's plan day reads rest after the move",
             EventDispatcher.model.value?.week_plan?.any {
-                it.epoch_day == EventDispatcher.model.value?.today_epoch_day && it.status == "rest"
+                it.epoch_day == EventDispatcher.model.value?.today_epoch_day && it.status == SessionStatus.Rest
             } == true,
         )
         // The move confirms with its day, and Undo puts the session back on today.

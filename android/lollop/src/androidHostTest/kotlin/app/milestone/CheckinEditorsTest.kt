@@ -30,7 +30,7 @@ class CheckinEditorsTest {
 
     @Test
     fun theWeeklyAllClearStatesEveryAnswer() {
-        val payload = (Event.SubmitWeeklyCheckin(weeklyAllClear(1_700_000_000L)).toJson() as JsonObject)
+        val payload = (weeklyAllClear(1_700_000_000L).toJson() as JsonObject)
             .getValue("SubmitWeeklyCheckin").jsonObject
         assertEquals(0, payload.getValue("failed_key_sessions").jsonPrimitive.content.toInt())
         assertEquals(0, payload.getValue("rpe_load_gap_sessions").jsonPrimitive.content.toInt())

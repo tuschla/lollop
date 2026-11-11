@@ -95,11 +95,11 @@ class FinishSheetStateTest {
     fun runTypeIsPreselectedFromThePlannedSession() {
         // A long run's band is "easy", so the band alone would read Steady: the
         // planned session type wins when it names a chip.
-        assertEquals(WorkoutType.LongRun, workoutTypeForPlan("Run(LongRun)", "easy"))
-        assertEquals(WorkoutType.Recovery, workoutTypeForPlan("Run(Recovery)", "recovery"))
-        assertEquals(WorkoutType.Tempo, workoutTypeForPlan("Run(Tempo)", "threshold"))
-        assertEquals(WorkoutType.Interval, workoutTypeForPlan("Run(Hills)", "hill effort"))
-        assertEquals(WorkoutType.Easy, workoutTypeForPlan("Run(Easy)", "easy"))
+        assertEquals(WorkoutType.LongRun, workoutTypeForPlan(SessionType.RunLongRun, "easy"))
+        assertEquals(WorkoutType.Recovery, workoutTypeForPlan(SessionType.RunRecovery, "recovery"))
+        assertEquals(WorkoutType.Tempo, workoutTypeForPlan(SessionType.RunTempo, "threshold"))
+        assertEquals(WorkoutType.Interval, workoutTypeForPlan(SessionType.RunHills, "hill effort"))
+        assertEquals(WorkoutType.Easy, workoutTypeForPlan(SessionType.RunEasy, "easy"))
         assertEquals(WorkoutType.Easy, workoutTypeForPlan(null, "easy"))
         assertEquals(WorkoutType.Steady, workoutTypeForPlan(null, "marathon pace"))
         // Otherwise the band decides; no band = a free run, left untagged.

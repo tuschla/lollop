@@ -38,6 +38,7 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.ReadinessSignal
+import app.milestone.SessionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -301,7 +302,7 @@ class UxInvariantTest {
         )
         rule.launchApp()
         val ns = EventDispatcher.model.value!!.next_session!!
-        assertEquals("adjusted", ns.status)
+        assertEquals(SessionStatus.Adjusted, ns.status)
         rule.onAllNodesWithText(ns.adjustment!!.summary).assertCountEquals(1)
         assertNoViolations(UxInvariants.check(rule, rule.density), "duplicate-summary-on-screen", "forbidden-text")
     }

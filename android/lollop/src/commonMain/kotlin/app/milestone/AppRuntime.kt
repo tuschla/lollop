@@ -71,14 +71,13 @@ internal object AppRuntime : BootLedger {
         // restore) and every feature's collectors. Made on first use: a plain-JVM
         // test reads the clock with no main dispatcher.
         val scope: Lazy<CoroutineScope> = lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
-        val engine: Lazy<DurableCore> = lazy { engine ?: checkNotNull(platformCoreEngine()) { "the app's core engine is not installed" } }
+        val engine: Lazy<DurableCore> = lazy { engine ?: platformCoreEngine() }
         val locals = HashMap<ProcessLocal<*>, Any?>()
         var started = false
         var bootHandled = false
-        @Volatile var lastToday: Pair<Long, Int>? = null
+        @Volatile var lastToday: Pair<Long, Long>? = null
         @Volatile var debuggable = false
         val generation = MutableStateFlow(0)
-        var pendingBeforeRestore: (() -> Unit)? = null
     }
 
     @Volatile private var process = Process(null, null, DeviceClock)
@@ -138,7 +137,7 @@ internal object AppRuntime : BootLedger {
             process.bootHandled = value
         }
 
-    override var lastToday: Pair<Long, Int>?
+    override var lastToday: Pair<Long, Long>?
         get() = process.lastToday
         set(value) {
             process.lastToday = value
@@ -152,23 +151,18 @@ internal object AppRuntime : BootLedger {
     val bootGeneration: StateFlow<Int> get() = process.generation.asStateFlow()
 
     /**
-     * Boot again in this process, as a fresh process would: the next turn probes the
-     * core, restores the log and makes the once-per-process decisions again. For a
-     * platform without a process restart (iOS) after the event log was replaced.
-     * [beforeRestore] (emptying the engine, so the restore replays the new log) runs on
-     * [CoreDispatcher] inside that same exclusive turn, so no queued event lands
-     * between it and the restore. Main thread only.
+     * Boot again in this process, as a fresh process would, after the event log was
+     * replaced (a data import): the next boot turn probes the core, empties it
+     * ([DurableCore.resetForReboot]), replays the new log and makes the
+     * once-per-process decisions again, all in one exclusive turn, so no queued
+     * event lands between the reset and the replay. Main thread only.
      */
-    fun requestReboot(beforeRestore: () -> Unit = {}) {
+    fun requestReboot() {
         val p = process
-        p.pendingBeforeRestore = beforeRestore
         p.bootHandled = false
         p.lastToday = null
         p.generation.value++
     }
-
-    /** The pending reboot's engine reset, taken once (null on a plain boot). Main thread only. */
-    fun takeBeforeRestore(): (() -> Unit)? = process.pendingBeforeRestore.also { process.pendingBeforeRestore = null }
 
     /**
      * A fresh process for the next test, as Robolectric runs every test in one JVM:

@@ -1,7 +1,13 @@
 package app.milestone.widget
 
 import app.milestone.DistanceUnit
+import app.milestone.HoldReason
+import app.milestone.PlanWithheld
 import app.milestone.PrescriptionView
+import app.milestone.SessionDiscipline
+import app.milestone.SessionPlanView
+import app.milestone.SessionStatus
+import app.milestone.SessionType
 import app.milestone.ViewModel
 import app.milestone.actionable
 import app.milestone.isDone
@@ -9,9 +15,8 @@ import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
 import app.milestone.paceLabel
 import app.milestone.runFaceHead
-import app.milestone.sessionDiscipline
 import app.milestone.today
-import app.milestone.SessionPlanView
+import app.milestone.train_blocked
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.Serializable
 
@@ -101,9 +106,9 @@ internal data class WidgetSnapshot(
     val weekPlanned: Int = 0,
     /** [WidgetDayKind.Paused]: the core's hold reason. The widget shows only that
      *  training is paused; the reason stays in the app. */
-    val holdReason: String? = null,
-    /** [WidgetDayKind.NoPlan]: the core's plan_withheld (health_hold | nothing_to_plan), or null. */
-    val planWithheld: String? = null,
+    val holdReason: HoldReason? = null,
+    /** [WidgetDayKind.NoPlan]: the core's plan_withheld, or null. */
+    val planWithheld: PlanWithheld? = null,
     /** The plan's session days after [epochDay] that the model knows (this and
      *  next week's plan and the next session), for the session reminder when the
      *  app has not run since; empty while paused, without a plan or a profile. */
@@ -144,10 +149,10 @@ internal data class WidgetWeekDay(val epochDay: Long, val mark: WidgetWeekMark)
 
 private fun weekMarkOf(s: SessionPlanView): WidgetWeekMark = when {
     s.isDone -> WidgetWeekMark.Done
-    s.status == "next" || s.status == "adjusted" -> WidgetWeekMark.Next
-    s.status == "missed" || s.status == "partial" -> WidgetWeekMark.Missed
-    s.status == "rest" -> WidgetWeekMark.Rest
-    s.status == "before_plan" -> WidgetWeekMark.None
+    s.status == SessionStatus.Next || s.status == SessionStatus.Adjusted -> WidgetWeekMark.Next
+    s.status == SessionStatus.Missed || s.status == SessionStatus.Partial -> WidgetWeekMark.Missed
+    s.status == SessionStatus.Rest -> WidgetWeekMark.Rest
+    s.status == SessionStatus.BeforePlan -> WidgetWeekMark.None
     else -> WidgetWeekMark.Planned
 }
 
@@ -190,15 +195,15 @@ internal fun widgetSnapshotOf(
     val session = ns.takeIf { it.epoch_day == today } ?: doneToday
         ?: return base.copy(
             kind = WidgetDayKind.Rest,
-            restDay = model.week_plan.any { it.epoch_day == today && it.status == "rest" },
+            restDay = model.week_plan.any { it.epoch_day == today && it.status == SessionStatus.Rest },
             next = WidgetNext(ns.epoch_day, ns.title),
             ahead = ahead,
         )
-    val discipline = sessionDiscipline(session.session_type)
+    val isRun = session.session_type.discipline == SessionDiscipline.Run
     val items = session.items.map { widgetItemOf(it, session.session_type, distanceUnit) }
     val done = session === doneToday
     return base.copy(
-        kind = if (discipline == "Run") WidgetDayKind.Run else WidgetDayKind.Lift,
+        kind = if (isRun) WidgetDayKind.Run else WidgetDayKind.Lift,
         title = session.title,
         items = items,
         sessionDone = done,
@@ -212,20 +217,19 @@ internal fun widgetSnapshotOf(
  *  next week's plan and [ns], by day. */
 private fun aheadDays(model: ViewModel, ns: SessionPlanView, today: Long, unit: DistanceUnit): List<WidgetAheadDay> =
     (model.week_plan + model.next_week_plan + ns)
-        .filter { it.epoch_day > today && it.items.isNotEmpty() && (it.actionable || it.status == "planned") }
+        .filter { it.epoch_day > today && it.items.isNotEmpty() && (it.actionable || it.status == SessionStatus.Planned) }
         .distinctBy { it.epoch_day }
         .sortedBy { it.epoch_day }
         .mapNotNull { s ->
-            val discipline = sessionDiscipline(s.session_type)
-            val kind = when (discipline) {
-                "Run" -> WidgetDayKind.Run
-                "Lift" -> WidgetDayKind.Lift
-                else -> return@mapNotNull null
+            val kind = when (s.session_type.discipline) {
+                SessionDiscipline.Run -> WidgetDayKind.Run
+                SessionDiscipline.Lift -> WidgetDayKind.Lift
+                SessionDiscipline.Rest -> return@mapNotNull null
             }
             WidgetAheadDay(s.epoch_day, kind, s.title, s.items.map { widgetItemOf(it, s.session_type, unit) })
         }
 
-private fun widgetItemOf(item: PrescriptionView, sessionType: String, unit: DistanceUnit): WidgetItem {
+private fun widgetItemOf(item: PrescriptionView, sessionType: SessionType, unit: DistanceUnit): WidgetItem {
     val check = isReturnCheckItem(item, sessionType)
     val run = isRunItem(item, sessionType)
     val runHead = if (run) runFaceHead(item, unit) else null

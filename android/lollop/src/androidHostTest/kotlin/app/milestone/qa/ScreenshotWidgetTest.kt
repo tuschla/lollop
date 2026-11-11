@@ -13,6 +13,7 @@ import androidx.glance.appwidget.GlanceRemoteViews
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppTheme
 import app.milestone.DarkMode
+import app.milestone.HoldReason
 import app.milestone.widget.TodayWidgetContent
 import app.milestone.widget.WidgetAheadDay
 import app.milestone.widget.WidgetDayKind
@@ -100,7 +101,7 @@ class ScreenshotWidgetTest {
             "recording" to f(base.copy(kind = WidgetDayKind.Run, title = "Easy run", items = runItems, trackable = true), recording = true),
             "rest" to f(base.copy(kind = WidgetDayKind.Rest, restDay = true, next = next, ahead = ahead, week = week.map { if (it.epochDay == day) it.copy(mark = WidgetWeekMark.Rest) else it })),
             "done" to f(base.copy(kind = WidgetDayKind.Run, title = "Easy run", items = runItems.map { it.copy(done = true) }, sessionDone = true, next = next, ahead = ahead, weekDone = 2, week = week.map { if (it.epochDay == day) it.copy(mark = WidgetWeekMark.Done) else it })),
-            "hold" to f(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Paused, holdReason = "pain")),
+            "hold" to f(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Paused, holdReason = HoldReason.Pain)),
             "noplan" to f(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.NoPlan)),
             "stale" to f(base.copy(stale = true)),
             "preview" to f(previewSnapshot(res, day)),

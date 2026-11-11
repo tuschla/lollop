@@ -243,7 +243,7 @@ internal fun ProteinResult(model: ViewModel, onClear: () -> Unit) {
     CalculatorResultCard(
         overline = stringResource(Res.string.main_calc_protein_overline),
         headlines = figures.map { f ->
-            val context = stringResource(if (f.kind == "masters") Res.string.main_calc_protein_masters else Res.string.main_calc_protein_deficit)
+            val context = stringResource(if (f.kind == ProteinTargetKind.Masters) Res.string.main_calc_protein_masters else Res.string.main_calc_protein_deficit)
             CalcHeadline(
                 value = wholeRange(f.low_g_per_day, f.high_g_per_day),
                 caption = stringResource(Res.string.main_calc_protein_caption),
@@ -264,16 +264,16 @@ internal fun ProteinResult(model: ViewModel, onClear: () -> Unit) {
     )
 }
 
-/** Swatch colour of a Daniels band, keyed by its core [HrZoneBandView.kind]: the
- *  History HR bar's three zone colours (Easy; Marathon and Threshold; Interval and
+/** Swatch colour of a Daniels band ([HrZoneBandView.kind]): the History HR
+ *  bar's three zone colours (Easy; Marathon and Threshold; Interval and
  *  Repetition). */
 @Composable
-private fun bandSwatch(kind: String): Color {
+private fun bandSwatch(kind: VdotBand): Color {
     val status = LocalStatusColors.current
     return when (kind) {
-        "Easy" -> status.hrZone1
-        "Marathon", "Threshold" -> status.hrZone2
-        else -> status.hrZone3
+        VdotBand.Easy -> status.hrZone1
+        VdotBand.Marathon, VdotBand.Threshold -> status.hrZone2
+        VdotBand.Interval, VdotBand.Repetition -> status.hrZone3
     }
 }
 

@@ -1,42 +1,33 @@
 package app.milestone
 
-import kotlinx.serialization.json.Json
-
-// The core's JSON wire as the shell reads it: the ViewModel decoder, the
-// panic-firewall envelopes, the replay with reset recovery, and what one send
-// reports. Platform-free; the engine that drives the native core ([DurableCore])
-// builds on it.
-
-/** The production ViewModel decoder (decode only). Top-level so the JVM wire tests
- *  decode with exactly this configuration without loading the native library. */
-internal val coreJson = Json { ignoreUnknownKeys = true }
+// The core's JSON wire as the shell reads it: the bridge's error envelope, the
+// replay with reset recovery, and what one send reports. Platform-free; the
+// engine that drives the native core ([DurableCore]) builds on it. The wire
+// types and `coreJson` are generated (WireTypes.kt).
 
 /** How many log lines a replay may skip for resetting the core before it gives up
  *  and leaves the core with what replayed. */
 internal const val MAX_REPLAY_RESETS = 16
 
-/** A stand-in for the native core's two round trips ([Core.faultForTest]): the raw
- *  `update` response bytes for one event's wire JSON, and the raw `view` bytes. */
-internal interface CoreFault {
-    fun update(event: ByteArray): ByteArray?
-    fun view(): ByteArray?
+/** How an [ErrorEnvelope] starts: its one key opens the object, so a view or an op's
+ *  payload is told apart without tree-parsing it. */
+private val ENVELOPE_PREFIX = "{\"${ErrorEnvelope.serializer().descriptor.getElementName(0)}\""
+
+/** The error an op answered, or null when [text] is not an [ErrorEnvelope]. */
+internal fun coreErrorOf(text: String): CoreError? {
+    if (!text.trimStart().startsWith(ENVELOPE_PREFIX)) return null
+    return runCatching { coreJson.decodeFromString(ErrorEnvelope.serializer(), text).error }.getOrNull()
 }
 
-/** Whether [text] is the FFI panic-firewall error envelope (`{"error":…}`). A cheap
- *  prefix check avoids tree-parsing a possibly large view blob on every read.
- *  Top-level (not a [Core] member) so it is JVM-unit-testable without loading the
- *  native library. */
-internal fun isCoreErrorEnvelope(text: String): Boolean =
-    text.trimStart().startsWith("{\"error\"")
+/** Whether [text] is an [ErrorEnvelope]. */
+internal fun isCoreErrorEnvelope(text: String): Boolean = coreErrorOf(text) != null
 
-/** Whether [text] is specifically a `panic_reset` envelope: the FFI caught a panic
- *  AND swapped in a fresh (empty) core bridge, so the shell must rebuild the
- *  core from the persisted log. The plain `panic` kind (bridge NOT reset) is a
- *  generic error envelope handled by keeping the last good view. */
-internal fun isCorePanicReset(text: String): Boolean =
-    isCoreErrorEnvelope(text) && text.contains("\"kind\":\"panic_reset\"")
+/** Whether [text] is a [ErrorKind.PanicReset] envelope: the core panicked AND was
+ *  replaced with an empty one, so the shell must rebuild it from the persisted
+ *  log. Any other kind leaves the core intact; the shell keeps its last good view. */
+internal fun isCorePanicReset(text: String): Boolean = coreErrorOf(text)?.kind == ErrorKind.PanicReset
 
-/** Whether a raw JNI `update` response is a `panic_reset` envelope. An accepted
+/** Whether a raw `update` response is a [ErrorKind.PanicReset] envelope. An accepted
  *  event's response is an effect array (`[`), so only a response opening with `{`
  *  is decoded to text. */
 internal fun isPanicResetResponse(response: ByteArray?): Boolean =

@@ -150,7 +150,7 @@ impl<T, K: Copy> Recommended<T, K> {
 // ---------------------------------------------------------------------------
 
 /// Top-level training goal.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq)]
 pub enum Goal {
     Strength,
     Hypertrophy,
@@ -171,7 +171,7 @@ pub struct Program {
 }
 
 /// Mesocycle phase (File 02 block model; File 04 base/build/peak/taper).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MesoPhase {
     /// Volume-dominant accumulation / aerobic base.
     Base,
@@ -194,7 +194,7 @@ pub struct Mesocycle {
 }
 
 /// Lifting session types (File 02 §6).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiftSessionType {
     MaxEffort,
     DynamicEffort,
@@ -212,7 +212,7 @@ pub enum LiftSessionType {
 }
 
 /// Running session types (File 04 §3).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunSessionType {
     /// A true recovery run (running-014: <76 %HRmax, 20–40 min), placed the
     /// day after a hard session or long run.
@@ -229,7 +229,7 @@ pub enum RunSessionType {
     Easy,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SessionType {
     Lift(LiftSessionType),
     Run(RunSessionType),
@@ -385,7 +385,7 @@ pub enum RunIntensity {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreeZone {
     Z1,
     Z2,
@@ -393,7 +393,7 @@ pub enum ThreeZone {
 }
 
 /// Daniels VDOT bands: E 59–74 %VO2max, M 80–84, T 83–88, I 95–100, R >100.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VdotBand {
     Easy,
     Marathon,
@@ -490,7 +490,17 @@ pub enum RepRecovery {
 /// Identifies one calisthenics leverage ladder (see `crate::calisthenics`
 /// `LADDERS`). A plain data enum: `schema` owns the shared wire types so it need
 /// not depend on `evidence`/`calisthenics`; `calisthenics.rs` re-exports this.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 pub enum LadderId {
     // dynamic resistance ladders (calis-progression.md §3.1-3.8)
     HorizontalPush,
@@ -643,7 +653,17 @@ impl RxBasis {
 // ---------------------------------------------------------------------------
 
 /// Normalized readiness signals the engine consumes (File 06 §2).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 pub enum ReadinessSignal {
     /// Session RPE vs. target.
     Rpe,
@@ -688,12 +708,22 @@ pub enum ReadinessSignal {
 }
 
 /// One observed readiness data point.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq, crate::sanitize::Sanitize,
+)]
 pub struct ReadinessInput {
     pub signal: ReadinessSignal,
     pub value: f64,
     /// Unix seconds.
     pub observed_at: i64,
+    /// Duration in minutes of the continuous effort backing this observation,
+    /// for signals derived from one effort. File 06 signal spec: aerobic
+    /// decoupling is *valid only for efforts >20 min*, so the downgrade fires
+    /// only when duration is KNOWN valid. `None`, the wire default, means
+    /// "duration not tracked": it is not known-valid, so the decoupling signal
+    /// is discarded (no downgrade), as is an explicitly short effort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_min: Option<f64>,
     /// Consecutive days/sessions (including this one) the signal's condition
     /// has held, shell-tallied. `0` (the wire default for shells that predate
     /// the field) means "not tracked" and is treated like a single observation.
@@ -705,16 +735,8 @@ pub struct ReadinessInput {
     /// Pain characterization for `signal == Pain` (File 08 Table 4.1,
     /// safety-038/039). `None`, the wire default, keeps the conservative
     /// pre-existing behavior: any pain report is a hard stop.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pain: Option<PainDetail>,
-    /// Duration in minutes of the continuous effort backing this observation,
-    /// for signals derived from one effort. File 06 signal spec: aerobic
-    /// decoupling is *valid only for efforts >20 min*, so the downgrade fires
-    /// only when duration is KNOWN valid. `None`, the wire default, means
-    /// "duration not tracked": it is not known-valid, so the decoupling signal
-    /// is discarded (no downgrade), as is an explicitly short effort.
-    #[serde(default)]
-    pub effort_min: Option<f64>,
 }
 
 /// One morning (or pre-session) check-in: raw *human* observations only. Every
@@ -729,45 +751,64 @@ pub struct ReadinessInput {
 /// is deliberately 1–5 (not the Hooper 1–7 index) to match the check-in UI's
 /// identical scale rows. Additive on the wire: every field is `#[serde(default)]`
 /// so a check-in written by any app version replays byte-for-byte.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    crate::sanitize::Sanitize,
+)]
 pub struct CheckinInput {
     /// Unix seconds, shell-supplied (the core holds no clock). Day-buckets the
     /// rolling baseline; `<= 0` readings are ignored by the derivation.
     #[serde(default)]
     pub observed_at: i64,
     /// Sleep quality, 1–5 (5 = slept great). Higher = better.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sleep_quality: Option<u8>,
     /// Muscle soreness today, 1–5 (5 = very sore). Higher = worse, the core
     /// reverse-scores it into the "higher = better" wellness composite.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub soreness: Option<u8>,
     /// Mood / motivation, 1–5 (5 = great mood). Higher = better. Perceived stress
     /// is a SEPARATE item (`stress`), not folded in here.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mood: Option<u8>,
     /// Fatigue today, 1–5 (5 = utterly wiped). Higher = worse (same direction as
     /// soreness); the core reverse-scores it into the "higher = better" wellness
     /// composite. KB 5-item short-form item (autoreg WellnessZ).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fatigue: Option<u8>,
     /// Perceived stress today, 1–5 (5 = extremely stressed). Higher = worse; the
     /// core reverse-scores it. Distinct from `mood` (affect/motivation, scored in
     /// the good direction). KB 5-item short-form item (autoreg WellnessZ).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stress: Option<u8>,
     /// Morning resting HR, bpm (from a watch/manual pulse). The core computes
     /// the vs-baseline delta the RHR rules read (autoreg-040/041).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resting_hr_bpm: Option<f64>,
     /// Morning HRV as raw rMSSD in ms (from a watch/app). The core takes
     /// `ln(rmssd)` and the rolling-baseline z the HRV rule reads (autoreg-028).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hrv_rmssd_ms: Option<f64>,
 }
 
 /// Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 pub enum PainKind {
     /// Sharp, localized, or joint-line pain; alters movement/gait; or occurs
     /// with swelling → possible structural injury (safety-038). Hard stop.
@@ -783,7 +824,17 @@ pub enum PainKind {
 }
 
 /// Week-to-week / post-session pain trajectory (File 08 Table 4.1).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 pub enum PainTrend {
     /// Stable during & 24 h after; returns to baseline next morning.
     Stable,
@@ -795,13 +846,22 @@ pub enum PainTrend {
 }
 
 /// A characterized pain report attached to a `Pain` readiness input.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, crate::sanitize::Sanitize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 pub struct PainDetail {
     pub kind: PainKind,
     /// 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
     /// `None` = the user gave no rating; graded conservatively (outside the
     /// tolerable band). Old logs carrying a bare number decode to `Some`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<u8>,
     pub trend: PainTrend,
     /// True when the pain has persisted across sessions despite modification -
@@ -815,7 +875,7 @@ pub struct PainDetail {
     /// "STOP that exercise"); anything unmapped keeps the
     /// whole-day stop. `None`, the wire default, keeps every existing log
     /// replaying unchanged (whole-day stop, no body part on the sub-line).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 }
 
@@ -859,7 +919,15 @@ impl IllnessSeverity {
 /// (safety-044/048), hence plain flags, no thresholds. The seven PAR-Q+ items
 /// themselves come from File 12 (onboard-051/052; [`HealthScreen::parq_yes`]).
 #[derive(
-    Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, crate::sanitize::Sanitize,
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    crate::sanitize::Sanitize,
 )]
 pub struct HealthScreen {
     /// Child/adolescent user (File 08 safety-011). No autonomous maximal
@@ -985,7 +1053,9 @@ impl HealthScreen {
 }
 
 /// Safety priority ladder (File 06 §5). Higher tier always overrides lower.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub enum SafetyTier {
     SingleDayMarker,
     HrvTrend,
@@ -1222,7 +1292,16 @@ pub enum PainRegion {
 /// Serializes to its bare variant name (external form), so the Kotlin shell can
 /// mirror the strings by `WorkoutType.name`; renaming a variant is a wire break.
 #[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, crate::sanitize::Sanitize,
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    crate::sanitize::Sanitize,
 )]
 pub enum WorkoutType {
     /// Continuous even-effort run.

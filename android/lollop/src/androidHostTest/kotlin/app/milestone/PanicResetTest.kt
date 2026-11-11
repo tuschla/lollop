@@ -6,22 +6,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The shell must distinguish the FFI `panic_reset` envelope (the core bridge
- * was replaced with a fresh Engine → the persisted log must be replayed into it)
- * from a plain `panic` envelope (bridge intact → keep the last good view) and from
- * an ordinary view. These classifiers gate that recovery, so a drift in the FFI
- * envelope shape would either strand a bricked session or needlessly rebuild the
- * core. They are top-level (not [Core] members), so they run on the JVM without the
- * native library.
+ * The shell must distinguish the `panic_reset` envelope (the core was replaced
+ * with a fresh one → the persisted log must be replayed into it) from a plain
+ * `panic` envelope (core intact → keep the last good view) and from an ordinary
+ * view. These classifiers gate that recovery. They are top-level (not [Core]
+ * members), so they run on the JVM without the native library.
  */
 class PanicResetTest {
-    // Exact bytes ffi.rs emits after catch_panic replaces the bridge.
-    private val panicReset =
-        """{"error":{"kind":"panic_reset","context":"update","message":"Model RwLock was poisoned."}}"""
+    private fun envelope(kind: ErrorKind, context: String, message: String) =
+        coreJson.encodeToString(ErrorEnvelope.serializer(), ErrorEnvelope(CoreError(kind, context, message)))
 
-    // A panic that did NOT reset the bridge (the `view` path's "panic" kind).
-    private val plainPanic =
-        """{"error":{"kind":"panic","context":"view","message":"boom"}}"""
+    private val panicReset = envelope(ErrorKind.PanicReset, "update", "Model RwLock was poisoned.")
+
+    // A panic that did NOT reset the core (the `view` path's "panic" kind).
+    private val plainPanic = envelope(ErrorKind.Panic, "view", "boom")
 
     @Test
     fun panicResetEnvelopeIsDetectedAsBothErrorAndReset() {
@@ -39,7 +37,7 @@ class PanicResetTest {
 
     @Test
     fun anOrdinaryViewIsNeitherErrorNorReset() {
-        val view = """{"train_blocked":false,"safety_tier":null,"kind":"day"}"""
+        val view = coreJson.encodeToString(ViewModel.serializer(), ViewModel())
         assertFalse(isCoreErrorEnvelope(view))
         assertFalse(isCorePanicReset(view))
         // A crux effect array (the accepted-event response) is not an error either.
@@ -61,15 +59,15 @@ class PanicResetTest {
     }
 
     /** A stand-in for the native core: applies lines into [state]; a line in
-     *  [poison] panics it, which swaps in an EMPTY core, like ffi.rs does. */
-    private class FakeCore(private val poison: Set<String>) {
+     *  [poison] panics it, which swaps in an EMPTY core, as the bridge does. */
+    private inner class FakeCore(private val poison: Set<String>) {
         val state = mutableListOf<String>()
         var applies = 0
         fun apply(line: String): ByteArray {
             applies++
             if (line in poison) {
                 state.clear()
-                return """{"error":{"kind":"panic_reset","context":"update","message":"boom"}}""".toByteArray()
+                return envelope(ErrorKind.PanicReset, "update", "boom").toByteArray()
             }
             state += line
             return """[{"Render":[]}]""".toByteArray()

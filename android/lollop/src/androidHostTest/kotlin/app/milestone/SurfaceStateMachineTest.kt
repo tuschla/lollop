@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.core.JniCore
 import app.milestone.qa.QaHarness
 import app.milestone.widget.TileFace
 import app.milestone.widget.AndroidWidgets
@@ -136,14 +137,14 @@ class SurfaceStateMachineTest {
             try {
                 seededWalk("core seed=$seed", "SURFACE_SM_SEED=$seed SURFACE_CORE_SEEDS=1", keep = 20) { note -> coreWalk(seed, days, note) }
             } finally {
-                Core.resetForTest()
+                JniCore.reset()
             }
         }
     }
 
     private fun coreWalk(seed: Long, days: Int, note: (String) -> Unit) {
         val rng = Random(seed)
-        Core.resetForTest()
+        JniCore.reset()
         val base = QaHarness.strengthProfile()
         val (name, profile) = when (Math.floorMod(seed, 4L).toInt()) {
             0 -> "lifter" to base
@@ -238,7 +239,7 @@ class SurfaceStateMachineTest {
         }
         if (tile == TileFace.StartRun || reminder?.kind == WidgetDayKind.Run) {
             assertNotNull("$at: Start run with no session today", today)
-            assertEquals("$at: Start run on a ${today!!.session_type} day", "Run", sessionDiscipline(today.session_type))
+            assertEquals("$at: Start run on a ${today!!.session_type} day", SessionDiscipline.Run, today.session_type.discipline)
             assertTrue("$at: Start run with no open run", today.items.any { isRunItem(it, today.session_type) && !it.done })
         }
     }
@@ -270,7 +271,7 @@ class SurfaceStateMachineTest {
         var hold = false
         var youth = false
         var plan = PlanState.Plan
-        var withheld: String? = null
+        var withheld: PlanWithheld? = null
 
         fun session(day: Long): Session = sessions.getOrPut(day) {
             val r = Random(seed * 1_000_003 + day)
@@ -326,33 +327,33 @@ class SurfaceStateMachineTest {
 
         private fun row(d: Long, today: Long, next: Boolean): SessionPlanView {
             val s = session(d)
-            if (s.kind == K.Rest) return SessionPlanView(d, "Rest", "Rest", "rest")
+            if (s.kind == K.Rest) return SessionPlanView(d, "Rest", SessionType.Rest, SessionStatus.Rest)
             val items = items(d)
             val all = items.all { it.done }
             val status = when {
-                next -> "next"
-                d < today -> if (all) "done" else if (items.any { it.done }) "partial" else "missed"
-                d == today && all -> "done"
-                else -> "planned"
+                next -> SessionStatus.Next
+                d < today -> if (all) SessionStatus.Done else if (items.any { it.done }) SessionStatus.Partial else SessionStatus.Missed
+                d == today && all -> SessionStatus.Done
+                else -> SessionStatus.Planned
             }
-            val type = if (s.kind == K.Run) "Run(Easy)" else "Lift(Strength)"
+            val type = if (s.kind == K.Run) SessionType.RunEasy else SessionType.LiftMaxEffort
             return SessionPlanView(d, s.title, type, status, items, moved_from_epoch_day = movedFrom[d])
         }
 
         /** The model the core would publish with [today] as its day. */
         fun model(today: Long): ViewModel {
             if (plan == PlanState.Setup) return ViewModel(today_epoch_day = today)
-            val profile = ProfileView()
+            val profile = Profile()
             val noPlan = plan == PlanState.NoPlan
             val nsDay = if (noPlan) null else (today..today + 13).firstOrNull { session(it).kind != K.Rest && (it > today || open(it)) }
             val ns = nsDay?.let { row(it, today, next = true) }
             val week = if (noPlan) emptyList() else weekOf(today).map { d -> if (d == nsDay) ns!! else row(d, today, next = false) }
             // A hold (or the under-18 pause) wins over the plan, as in the core.
             if (hold || youth) {
-                fun blank(s: SessionPlanView) = s.copy(status = "blocked", items = emptyList())
+                fun blank(s: SessionPlanView) = s.copy(status = SessionStatus.Blocked, items = emptyList())
                 return ViewModel(
                     today_epoch_day = today, profile = profile,
-                    hold_reason = if (youth) "youth" else "pain", next_session = ns?.let(::blank), week_plan = week.map(::blank),
+                    hold_reason = if (youth) HoldReason.Youth else HoldReason.Pain, next_session = ns?.let(::blank), week_plan = week.map(::blank),
                 )
             }
             if (noPlan) return ViewModel(today_epoch_day = today, profile = profile, plan_withheld = withheld)
@@ -603,7 +604,7 @@ class SurfaceStateMachineTest {
                 PlanState.Plan -> if (rng.nextInt(4) == 0) PlanState.Setup else PlanState.NoPlan
                 else -> PlanState.Plan
             }
-            world.withheld = if (rng.nextBoolean()) null else "nothing_to_plan"
+            world.withheld = if (rng.nextBoolean()) null else PlanWithheld.NothingToPlan
             publish()
             return "plan=${world.plan}"
         }
@@ -758,7 +759,7 @@ class SurfaceStateMachineTest {
                 world.plan == PlanState.Setup -> res.getString(R.string.widget_setup_title)
                 world.hold || world.youth -> res.getString(R.string.main_status_on_hold)
                 world.plan == PlanState.NoPlan ->
-                    res.getString(if (world.withheld == "nothing_to_plan") R.string.main_plan_withheld_empty_title else R.string.widget_no_plan)
+                    res.getString(if (world.withheld == PlanWithheld.NothingToPlan) R.string.main_plan_withheld_empty_title else R.string.widget_no_plan)
                 truth.kind == K.Rest -> res.getString(R.string.widget_rest_day)
                 else -> truth.title
             }

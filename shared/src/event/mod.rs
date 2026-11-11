@@ -31,7 +31,9 @@ pub const RETIRED_TAGS: [&str; 6] = [
 
 /// Which logged history a [`Event::DeleteEntry`] targets: the model's
 /// `sets`, `runs` or `activities`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Sanitize)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, Sanitize,
+)]
 pub enum EntryKind {
     Set,
     Run,
@@ -40,7 +42,9 @@ pub enum EntryKind {
 
 /// What kind of other activity a [`Event::LogActivity`] records (wire:
 /// the variant name).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize,
+)]
 pub enum ActivityKind {
     /// Sport, games, PE.
     Sport,
@@ -55,7 +59,7 @@ pub enum ActivityKind {
     Other,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Sanitize)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq, Sanitize)]
 pub enum Event {
     /// Record one readiness observation, then recompute adjustments.
     SubmitReadiness(ReadinessInput),
@@ -117,6 +121,7 @@ pub enum Event {
         entry_id: u64,
         /// Timed-hold duration, seconds — `Some` for a static/hold set (a
         /// calisthenics lever/plank/dead-hang rung), `None` for a reps×load set.
+        #[serde(skip_serializing_if = "Option::is_none")]
         hold_sec: Option<u16>,
     },
     /// Drop all logged sets.
@@ -147,16 +152,15 @@ pub enum Event {
         /// Log time, unix seconds; shell-supplied, 0 = undated.
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id; see [`Event::LogSet`].
-        #[serde(default)]
-        entry_id: u64,
         /// User-declared run-intent label. USER DATA with no evidence of its
         /// own: the weekly report's hard-session checks honor it as the
         /// session's declared goal (running-012/023). `None` = untagged.
+        #[serde(skip_serializing_if = "Option::is_none")]
         workout_type: Option<WorkoutType>,
         /// Whole-session effort on the CR-10 scale (0–10), rated ~30 min after
         /// the run (LOAD-SRPE-001). `None` = unrated; values above 10 clamp to
         /// 10 at ingest.
+        #[serde(skip_serializing_if = "Option::is_none")]
         #[sanitize_with = "crate::sanitize::cr10"]
         session_rpe: Option<u8>,
         /// Average heart rate in bpm as the user's watch shows it (UXL-12). When
@@ -164,7 +168,11 @@ pub enum Event {
         /// measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001), of the
         /// profile in force at the run's instant (re-derived when the profile
         /// history changes); with neither known the sent `hr_pct_max` stands.
+        #[serde(skip_serializing_if = "Option::is_none")]
         avg_hr_bpm: Option<f64>,
+        /// Stable per-entry id; see [`Event::LogSet`].
+        #[serde(default)]
+        entry_id: u64,
         /// The device's UTC offset, seconds east, when the run was logged. The
         /// bpm conversion reads the run's local day with it, so a later
         /// time-zone change never re-converts the run. `None` (omitted from the
@@ -181,10 +189,6 @@ pub enum Event {
         hr_pct_max: f64,
         #[sanitize_with = "crate::sanitize::non_negative"]
         longest_recent_km: f64,
-        /// Indices into `points` that begin a new recording segment: the shell's
-        /// pause/relocation boundaries. Empty = one continuous segment.
-        #[serde(default)]
-        segment_starts: Vec<u32>,
         /// Log time, unix seconds; shell-supplied, 0 = undated. The GPS fixes
         /// carry their own per-point `observed_at`; this is the session's
         /// logged-at stamp for history display.
@@ -194,11 +198,18 @@ pub enum Event {
         #[serde(default)]
         entry_id: u64,
         /// User-declared run-intent label; see [`Event::LogRun`].
+        #[serde(skip_serializing_if = "Option::is_none")]
         workout_type: Option<WorkoutType>,
+        /// Indices into `points` that begin a new recording segment: the shell's
+        /// pause/relocation boundaries. Empty = one continuous segment.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        segment_starts: Vec<u32>,
         /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
+        #[serde(skip_serializing_if = "Option::is_none")]
         #[sanitize_with = "crate::sanitize::cr10"]
         session_rpe: Option<u8>,
         /// Average heart rate the athlete entered, bpm; see [`Event::LogRun`].
+        #[serde(skip_serializing_if = "Option::is_none")]
         avg_hr_bpm: Option<f64>,
         /// The device's UTC offset when the run was logged; see [`Event::LogRun`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +271,7 @@ pub enum Event {
         #[serde(default)]
         observed_at_fallback: i64,
         /// Timed-hold duration, seconds (see [`Event::LogSet`]).
+        #[serde(skip_serializing_if = "Option::is_none")]
         hold_sec: Option<u16>,
     },
     /// Edit one hand-entered run's fields. GPS-tracked runs are delete-only for
@@ -281,16 +293,19 @@ pub enum Event {
         /// The NEW timestamp for the amended entry.
         #[serde(default)]
         observed_at: i64,
-        /// The OLD `observed_at` of the row being amended; see [`Event::AmendSet`].
-        #[serde(default)]
-        observed_at_fallback: i64,
         /// User-declared run-intent label; see [`Event::LogRun`].
+        #[serde(skip_serializing_if = "Option::is_none")]
         workout_type: Option<WorkoutType>,
         /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
+        #[serde(skip_serializing_if = "Option::is_none")]
         #[sanitize_with = "crate::sanitize::cr10"]
         session_rpe: Option<u8>,
         /// Average heart rate in bpm, converted like [`Event::LogRun`]'s.
+        #[serde(skip_serializing_if = "Option::is_none")]
         avg_hr_bpm: Option<f64>,
+        /// The OLD `observed_at` of the row being amended; see [`Event::AmendSet`].
+        #[serde(default)]
+        observed_at_fallback: i64,
     },
     /// Trim a GPS run's recorded head/tail: keep only the fixes whose per-point
     /// `observed_at` lies in `[keep_from_sec, keep_until_sec]` (inclusive,
@@ -349,6 +364,7 @@ pub enum Event {
         goal_distance_m: f64,
         weekly_km: f64,
         /// Weeks since the input race (running-041 freshness).
+        #[serde(skip_serializing_if = "Option::is_none")]
         weeks_since_race: Option<u8>,
     },
     /// Drop the race prediction (clears the prediction section).
@@ -360,9 +376,9 @@ pub enum Event {
     PlanHypertrophyMeso {
         muscle: String,
         weeks: u8,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         not_growing: bool,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         recovering_easily: bool,
     },
     /// Drop the hypertrophy volume plan (clears the planner section).
@@ -384,6 +400,7 @@ pub enum Event {
     /// Karvonen preference + band targets.
     ComputeHrZones {
         age_years: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
         resting_hr_bpm: Option<f64>,
     },
     /// Drop the heart-rate-zone table (clears the zone section).

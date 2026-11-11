@@ -10,12 +10,13 @@ use crate::schema::{
     CheckinInput, MesoPhase, ReadinessSignal, Recommended, SafetyTier, SessionType, ThreeZone,
     WorkoutType,
 };
+use crate::wire::Wire;
 
 /// The evidence chrome every graded row carries, flattened onto its parent
 /// view so the wire keys stay `grade`/`citation`/`confidence`/
 /// `safety_critical`/`contested`. `Default` is the factual row with no claim:
 /// empty grade and citation.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 pub struct EvidenceTagView {
     /// Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim.
@@ -62,6 +63,14 @@ pub(crate) mod grade_or_empty {
         }
         EvidenceGrade::deserialize(s.into_deserializer()).map(Some)
     }
+
+    pub fn wire_shape(reg: &mut crate::wire::Registry) -> crate::wire::Shape {
+        use crate::wire::{Shape, Wire};
+        Shape::OptionAs {
+            inner: Box::new(EvidenceGrade::shape(reg)),
+            none: "",
+        }
+    }
 }
 
 /// Wire form of a planned day's [`SessionType`]: its stable
@@ -79,6 +88,27 @@ pub(crate) mod session_type_wire {
         let name = String::deserialize(d)?;
         SessionType::from_wire_name(&name)
             .ok_or_else(|| D::Error::custom(format!("unknown session type {name:?}")))
+    }
+
+    pub fn wire_shape(reg: &mut crate::wire::Registry) -> crate::wire::Shape {
+        use crate::wire::{Body, Strings};
+        reg.define::<SessionType>("SessionType", "A planned day's session type.", |_| {
+            Body::Strings(Strings {
+                entries: SessionType::ALL
+                    .into_iter()
+                    .map(|t| {
+                        let group = match t {
+                            SessionType::Lift(_) => "Lift",
+                            SessionType::Run(_) => "Run",
+                            SessionType::Rest => "Rest",
+                        };
+                        (t.wire_name(), group)
+                    })
+                    .collect(),
+                group_type: "SessionDiscipline",
+                group_property: "discipline",
+            })
+        })
     }
 }
 
@@ -98,6 +128,19 @@ pub(crate) mod zone_or_dash {
             .into_iter()
             .find(|&z| super::zone_label(Some(z)) == label))
     }
+
+    /// # Panics
+    /// When a zone's label is not its serde name, which this shape claims.
+    pub fn wire_shape(reg: &mut crate::wire::Registry) -> crate::wire::Shape {
+        use crate::wire::{Shape, Wire};
+        for z in [ThreeZone::Z1, ThreeZone::Z2, ThreeZone::Z3] {
+            assert_eq!(crate::wire::json(&z), super::zone_label(Some(z)));
+        }
+        Shape::OptionAs {
+            inner: Box::new(ThreeZone::shape(reg)),
+            none: super::zone_label(None),
+        }
+    }
 }
 
 /// A run's zone as card text: `"Z1"`..`"Z3"`, or `"-"` when none is shown.
@@ -111,7 +154,7 @@ pub(crate) fn zone_label(zone: Option<ThreeZone>) -> &'static str {
 }
 
 /// One adjustment flattened for shells: human summary + its evidence tag.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct AdjustmentView {
     pub summary: String,
     #[serde(flatten)]
@@ -132,7 +175,7 @@ pub struct AdjustmentView {
 }
 
 /// One logged set with its derived strength metrics, flattened for shells.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct LiftResultView {
     pub exercise: String,
     /// The set as logged, the raw input a shell shows alongside the derived
@@ -183,7 +226,7 @@ pub struct LiftResultView {
 }
 
 /// The strength-006 multi-formula e1RM cross-check, flattened for shells.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct E1rmRangeView {
     /// Lowest estimate across the formulas, kg (0.1-rounded).
     pub low_kg: f64,
@@ -201,7 +244,7 @@ pub struct E1rmRangeView {
 /// string states exactly what was counted so the shell never has to guess.
 /// Bookkeeping only: TSB is NOT a validated performance predictor (the claim
 /// statement carries that caveat).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct TrainingLoadView {
     /// Chronic Training Load (fitness): EWMA τ=42 d of daily load. This and
     /// `atl`/`tsb` are the figures behind `summary`, kept as test oracles; not
@@ -235,7 +278,7 @@ pub struct TrainingLoadView {
 /// LOAD-SRPE-001): the sensor-free load measure for runs without heart rate,
 /// kept as its OWN weekly series because it is not interchangeable with the
 /// heart-rate load. Derived from the run-progress weekly series.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct SrpeLoadView {
     pub method: String,
     pub summary: String,
@@ -243,7 +286,7 @@ pub struct SrpeLoadView {
     pub evidence: EvidenceTagView,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct ViewModel {
     /// Highest safety tier triggered, e.g. `"Pain"`; `None` when all clear.
     pub safety_tier: Option<SafetyTier>,
@@ -455,7 +498,7 @@ pub struct ViewModel {
 }
 
 /// One logged other activity ([`ViewModel::activities`]).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct ActivityResultView {
     pub entry_id: u64,
     pub observed_at: i64,
@@ -467,7 +510,7 @@ pub struct ActivityResultView {
 
 /// This local Mon–Sun week's activity against the WHO 5-17 reference
 /// (YOUTH-PA-001; counting rules in `extracted/08` youth-pa-001).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct YouthActivityView {
     /// The local epoch day of this week's Monday.
     pub week_monday_epoch_day: i64,
@@ -496,7 +539,7 @@ pub struct YouthActivityView {
 }
 
 /// Planned vs done for the active plan (ADH-SELFMON-001).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct ConsistencyView {
     /// Sessions done (or done lighter) so far in the current plan week.
     pub this_week_done: u8,
@@ -519,7 +562,7 @@ pub struct ConsistencyView {
 }
 
 /// One finished plan week's done/planned counts.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct ConsistencyWeekView {
     pub week_monday_epoch_day: i64,
     pub done: u8,
@@ -527,7 +570,7 @@ pub struct ConsistencyWeekView {
 }
 
 /// The resolve action for one active pain / illness hold.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct HoldResolutionView {
     /// The signal `Event::ResolveHold` targets: `"Pain"` or `"Illness"`.
     pub signal: ReadinessSignal,
@@ -546,7 +589,7 @@ pub struct HoldResolutionView {
 }
 
 /// One calisthenics ladder for pickers.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct CalisLadderView {
     /// Ladder id, the `ladder` of `Event::SetCalisthenicsRung`.
     pub ladder: crate::schema::LadderId,
@@ -576,7 +619,7 @@ pub struct CalisLadderView {
 }
 
 /// One rung of a calisthenics ladder.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct CalisRungView {
     /// Rung index, the `rung` of `Event::SetCalisthenicsRung`.
     pub rung: u8,
@@ -594,7 +637,7 @@ pub struct CalisRungView {
 }
 
 /// Calisthenics-only data on a plan item.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct CalisItemView {
     pub ladder: crate::schema::LadderId,
     /// Prescribed rung index.
@@ -619,7 +662,7 @@ pub struct CalisItemView {
 /// Today's completed plan session: what was done, per item.
 /// Purely descriptive (a summary of logs), so it carries no evidence tag; the
 /// coaching call lives in `ViewModel::feedback`.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 pub struct SessionDoneView {
     pub epoch_day: i64,
@@ -629,7 +672,7 @@ pub struct SessionDoneView {
 }
 
 /// One exercise (or the run) of a completed session.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 pub struct SessionDoneItemView {
     /// Exercise name, or "Run".
@@ -661,7 +704,7 @@ pub struct SessionDoneItemView {
 /// an honest progress row shown in place of a derived signal until enough
 /// history exists. Carries NO evidence tag: it asserts no training claim, it
 /// states the absence of one (HARD RULE 2 is about recommendations).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct BaselineStatusView {
     /// The signal this baseline feeds, e.g. `"WellnessZ"`.
     pub signal: ReadinessSignal,
@@ -682,7 +725,7 @@ pub struct BaselineStatusView {
 /// drives the matching adjustment rule (`autoreg::signal_states_in`). The
 /// evidence fields cite that rule; they are empty (grade `""`) for the plain
 /// factual rows ("recorded"/"clear") that judge nothing.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct ReadinessSignalView {
     /// The signal, e.g. `"HrvLnRmssd"`.
     pub signal: ReadinessSignal,
@@ -710,7 +753,7 @@ pub struct ReadinessSignalView {
 }
 
 /// Why training is on hold ([`ViewModel::hold_reason`]), most specific first.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HoldReason {
     /// PAR-Q+ follow-up answer not yet cleared by a doctor.
@@ -736,7 +779,7 @@ pub enum HoldReason {
 }
 
 /// Which rung of the Today ranking produced the headline (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HeadlineKind {
     /// A train-blocking safety hold.
@@ -756,7 +799,7 @@ pub enum HeadlineKind {
 /// ranking. `kind` is the priority bucket that won; the rank order is on
 /// `readiness::build_headline`. The all-clear default makes no evidence-bearing
 /// claim, so its evidence fields are empty.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct TodayHeadlineView {
     pub kind: HeadlineKind,
     pub summary: String,
@@ -774,7 +817,7 @@ pub struct TodayHeadlineView {
 /// appended when relevant), and `improves` (what data would sharpen the call).
 /// `basis` and `improves` describe the engine's own reasoning and data needs,
 /// never new training advice, so they invent no claim (HARD RULE 1).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct WhyView {
     pub basis: String,
     pub grade_note: String,
@@ -785,7 +828,7 @@ pub struct WhyView {
 /// shells. Both the qualifying sets (counted toward `sets_done`) and the
 /// non-qualifying ones (warm-ups / below target) are listed so the shell can
 /// show the whole session. `summary` is display-ready and unit-aware.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct ItemSetView {
     pub entry_id: u64,
     pub observed_at: i64,
@@ -814,7 +857,7 @@ pub struct ItemSetView {
 /// The concrete "do X" contract: sets/reps + either a load (from the user's
 /// logged e1RM) or a proximity-to-failure target when no anchor exists, plus the
 /// same evidence block every action-bearing view carries (HARD RULE 2).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct PrescriptionView {
     /// The full human line, e.g. `"Back squat: 5×3 @ 85 kg · ~2 reps left"`.
     pub summary: String,
@@ -1064,7 +1107,7 @@ pub(crate) enum RunAmount {
 /// Numeric structure of a prescribed run, every field 0/empty when it
 /// does not apply. Built from the core's `RunPrescription`, never parsed from
 /// the summary text.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 pub struct RunStructureView {
     /// Rep count of an interval/repetition set (0 = continuous).
@@ -1093,7 +1136,7 @@ pub struct RunStructureView {
 }
 
 /// One run/walk bout: run `run_sec`, then walk `walk_sec` (0 on the last).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunWalkStepView {
     pub run_sec: u32,
     pub walk_sec: u32,
@@ -1102,7 +1145,7 @@ pub struct RunWalkStepView {
 /// The machine-readable intensity target behind [`PrescriptionView::intensity_label`].
 /// Readiness adjustments apply against THIS (never by re-parsing the display
 /// string) and the label is rendered from it. Defaults to `Prose`.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub enum PlanIntensity {
     /// A single reps-in-reserve target (barbell `LiftIntensity::Rir`), e.g.
     /// "RIR 3".
@@ -1122,8 +1165,9 @@ pub enum PlanIntensity {
 }
 
 /// Where a planned day stands (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[wire(predicates(is_done))]
 pub enum SessionStatus {
     /// The hero: today's (or the next) session to train.
     Next,
@@ -1156,7 +1200,7 @@ impl SessionStatus {
 /// One planned day in the week, flattened for shells.
 /// The plan renders strictly downstream of the safety gates: a training
 /// hold empties `items` and sets `status = "blocked"` (HARD RULE 3).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct SessionPlanView {
     /// Calendar day of this session, unix epoch-day (days since 1970-01-01).
     pub epoch_day: i64,
@@ -1192,8 +1236,9 @@ pub struct SessionPlanView {
 }
 
 /// How one plan item stands on its session day (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[wire(predicates(is_settled, is_skipped))]
 pub enum ItemStatus {
     /// Nothing logged yet.
     #[default]
@@ -1216,9 +1261,25 @@ pub enum ItemStatus {
     StoppedPain,
 }
 
+impl ItemStatus {
+    /// Settled for its day: finished, short, lighter, skipped or stopped.
+    pub fn is_settled(self) -> bool {
+        !matches!(self, ItemStatus::Open | ItemStatus::InProgress)
+    }
+
+    /// Skipped or stopped for pain: the item reads as a skip and is no
+    /// execution result.
+    pub fn is_skipped(self) -> bool {
+        matches!(
+            self,
+            ItemStatus::Skipped | ItemStatus::SkippedPain | ItemStatus::StoppedPain
+        )
+    }
+}
+
 /// The program summary card: what the plan IS, plus its
 /// representative evidence chip.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct ProgramSummaryView {
     pub name: String,
     /// Human goal, e.g. `"Strength"`, `"Hybrid"`, `"10K race"`.
@@ -1244,7 +1305,7 @@ pub struct ProgramSummaryView {
 }
 
 /// One muscle's weekly volume on the program card.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct MuscleVolumeView {
     /// Plain muscle name, e.g. `"Side delts"`.
     pub muscle: String,
@@ -1261,7 +1322,7 @@ pub struct MuscleVolumeView {
 /// exported from core data so the shell renders the KB definitions rather than
 /// hardcoding them. Carries no per-claim evidence;
 /// it defines the grading scale itself (File 09).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct GradeDefView {
     /// Wire name matching the grade strings on every card, e.g. `"Strong"`.
     pub grade: EvidenceGrade,
@@ -1274,7 +1335,7 @@ pub struct GradeDefView {
 }
 
 /// Signal→group row for the static readiness-picker metadata (`signal_groups`).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct SignalGroupView {
     pub signal: ReadinessSignal,
     /// `"metric"` or `"red_flag"`.
@@ -1285,7 +1346,7 @@ pub struct SignalGroupView {
 /// projection with a Riegel one (running-039): when the two agree within ~2% a
 /// single `predicted` time is shown; otherwise a low–high range, so a single
 /// method's false precision is never presented alone.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RacePredictionView {
     /// Human label for the goal distance, e.g. `"10K"`, `"Half marathon"` or `"15 km"`.
     pub goal_label: String,
@@ -1325,7 +1386,7 @@ pub struct RacePredictionView {
 
 /// Structured form of the HRmax figure, so a shell never regex-scrapes it out
 /// of the `hr_zones` summary rows (incl. the "208 − 0.7 × age" Tanaka split).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct HrMaxView {
     /// Resolved max heart rate, bpm, the measured value when available, else the
     /// age-based Tanaka estimate. Drives the %HRmax band targets in `hr_zones`.
@@ -1345,7 +1406,7 @@ pub struct HrMaxView {
 /// Structured form of a protein target, so a shell never regex-scrapes it out
 /// of the `protein_targets` summary rows. One per emitted row (masters and/or
 /// deficit).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct ProteinFigureView {
     /// Which target this is: `"masters"` or `"deficit"`.
     pub kind: ProteinTargetKind,
@@ -1369,7 +1430,7 @@ pub struct ProteinFigureView {
 
 /// One Daniels training band of the HR-zone table, structured so a shell draws
 /// the table from numbers instead of the `hr_zones` prose.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct HrZoneBandView {
     /// Which Daniels band this is (`"Easy"` … `"Repetition"`), the typed key a
     /// shell colours the band by, never its position in the list.
@@ -1397,7 +1458,7 @@ pub struct HrZoneBandView {
 /// numbers (landmarks, reps-left schedule, frequency, rest, block shape) without
 /// scraping `hypertrophy_plan`. `face_rows` lists the rows these figures stand
 /// for.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct HypertrophyFiguresView {
     /// Weekly-set landmarks: productive range (MAV) and max (MRV). MEV is
     /// stated in the rows.
@@ -1425,7 +1486,7 @@ pub struct HypertrophyFiguresView {
 }
 
 /// Which protein target a [`ProteinFigureView`] is (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProteinTargetKind {
     Masters,
@@ -1434,7 +1495,7 @@ pub enum ProteinTargetKind {
 
 /// The one resolved coaching message for a session, flattened for shells.
 /// Safety concerns short-circuit and suppress competing praise (HARD RULE 3).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct FeedbackView {
     /// Category name, e.g. `"ConcernInjury"`.
     pub category: crate::feedback::FeedbackCategory,
@@ -1459,7 +1520,7 @@ pub struct FeedbackView {
 
 /// One evidence-cited programming recommendation, flattened for shells.
 /// `MarketingMyth`-graded claims are never emitted here.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct GuidanceView {
     /// Grouping label, e.g. `"Strength"`, `"Running"`, `"Hybrid"`.
     pub section: String,
@@ -1484,7 +1545,7 @@ pub struct GuidanceView {
 /// FB-PACING-001). Carries everything a shell needs to render the chip -
 /// verdict, label, coaching copy, and the full evidence tag, so the ~3%
 /// threshold (`feedback::POSITIVE_SPLIT_FLAG_PCT`) never leaks into shell code.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct SplitVerdictView {
     /// `"fade"` (back half >3% slower), `"even"` (within ±3%), or
     /// `"negative"` (back half >3% faster).
@@ -1499,7 +1560,7 @@ pub struct SplitVerdictView {
 }
 
 /// How a run's back half compared with its front half (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitVerdict {
     Fade,
@@ -1511,7 +1572,7 @@ pub enum SplitVerdict {
 /// Built from the track's variability index (normalized speed ÷ average speed);
 /// lets the shell render why two runs of the *same average pace* rate
 /// differently, with the same evidence chrome as any other recommendation.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct IntervalVerdictView {
     /// `"interval"` (variability index ≥ threshold) or `"steady"`. Wire string
     /// the shell matches on, never re-derives the threshold.
@@ -1525,7 +1586,7 @@ pub struct IntervalVerdictView {
 }
 
 /// Whether a GPS run was paced as intervals or steadily (wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PaceVariability {
     Interval,
@@ -1536,7 +1597,7 @@ pub enum PaceVariability {
 /// Purely descriptive, a measurement of the run, not a recommendation, so it
 /// carries no evidence chrome. Built from [`gps::track_splits`]; the core
 /// owns the pace formatting so a shell renders `pace` verbatim.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunSplitView {
     /// 1-based split index (1 = first km/mile).
     pub index: u32,
@@ -1558,7 +1619,7 @@ pub struct RunSplitView {
 }
 
 /// One logged run with derived zone / pace / spike flag, flattened for shells.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunResultView {
     /// 3-zone lactate classification from % HRmax, e.g. `"Z2"`. `"-"` (`None`)
     /// when the run has no HR sample, or when the athlete rated the session at
@@ -1630,11 +1691,11 @@ pub struct RunResultView {
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// Whether this run has an exportable GPS route (≥2 QC-passing fixes). The
-    /// GPX document itself is fetched on demand via the `exportGpx` FFI query.
+    /// GPX document itself is fetched on demand through the `ExportGpx` bridge op.
     #[serde(default)]
     pub has_gpx: bool,
     /// A GPS run whose fixes all fail the QC gates: no route (`has_gpx` false),
-    /// but `exportGpx` returns its recorded fixes so an undone delete re-logs it
+    /// but `ExportGpx` answers its recorded fixes so an undone delete re-logs it
     /// as tracked. Omitted when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gps_unmeasurable: bool,
@@ -1685,7 +1746,7 @@ pub struct RunResultView {
 /// ADH-SELFMON-001): 16-week weekly volume, the longest run, and best efforts.
 /// Factual aggregates of logged runs only; best efforts are never fed into
 /// training paces (a training-run segment is not a race effort).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunProgressView {
     /// The last 16 Monday-start local weeks, oldest first, ending with the
     /// current week (empty weeks included as zeros).
@@ -1707,7 +1768,7 @@ pub struct RunProgressView {
 }
 
 /// One Monday-start local week of running.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunWeekView {
     /// Local epoch day of the week's Monday.
     pub week_start_epoch_day: i64,
@@ -1723,7 +1784,7 @@ pub struct RunWeekView {
 }
 
 /// The fastest known effort over one standard distance.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct BestEffortView {
     /// Standard distance in metres: 1000, 5000, 10000 or 21097.
     pub distance_m: u32,
@@ -1740,7 +1801,7 @@ pub struct BestEffortView {
 /// Numeric execution targets for one run prescription: a pace range
 /// from the athlete's current race fitness, a heart-rate range when HRmax is
 /// known, and an effort cue (RPE, plus the talk test when nothing is measured).
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunTargetView {
     /// Training band, plain word: `"easy"`, `"recovery"`, `"marathon pace"`,
     /// `"threshold"`, `"interval"`, `"repetition"`, `"hill effort"`.

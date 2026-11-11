@@ -585,7 +585,7 @@ fun LogSetEditor(
                     stringResource(if (undoIsWarmUp) Res.string.log_warmup_logged else Res.string.log_undo_logged, undoLine),
                     stringResource(Res.string.log_undo_cd, undoLine),
                 ) {
-                    onSave(Event.DeleteEntry(Event.EntryKind.Set, id))
+                    onSave(Event.DeleteEntry(EntryKind.Set, id))
                     if (undoRestScheduled) RestAlarm.cancel(ctx)
                     undoEntryId = null
                     pendingQualifyId = null

@@ -54,7 +54,7 @@ class CoachSummaryTest {
                 minutes = 45.0, vigorous = true, strengthening = true,
             ),
         ),
-        profile = ProfileView(weight_lb = true),
+        profile = Profile(weight_lb = true),
     )
 
     private fun summary(weeks: Int = 2) =

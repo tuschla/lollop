@@ -61,7 +61,7 @@ class EventLogTest {
         // The core-unavailable boot still exports the raw log.
         val file = tempLog()
         file.writeText(listOf(set("a"), line(Event.ClearSets), torn, run(5.0)).joinToString("\n", postfix = "\n"))
-        val dead = BridgeCore(
+        val dead = DurableCore(
             FaultBridge(
                 object : CoreFault {
                     override fun update(event: ByteArray): ByteArray? = null

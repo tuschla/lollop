@@ -540,9 +540,9 @@ class GuidedSetupDraftTest {
         val seed = seedAnswers(null, 20_000L, null, DistanceUnit.Km, null)
         val events = placementEvents(seed.copy(pushPlace = CalisPlacement.PushKnee, pullPlace = CalisPlacement.PullMany), seed, 1_759_700_000L)
         assertEquals(2, events.size)
-        val pull = events.first { it.ladder == CalisLadder.VerticalPull }
+        val pull = events.first { it.ladder == LadderId.VerticalPull }
         assertTrue(pull.rung >= 4) // at least Full pull-up
-        assertEquals(3, events.first { it.ladder == CalisLadder.HorizontalPush }.rung)
+        assertEquals(3, events.first { it.ladder == LadderId.HorizontalPush }.rung)
         // "Not sure, start easy" sends nothing: the ladder starts at its easiest rung.
         assertTrue(placementEvents(seed, seed, 0L).isEmpty())
     }
@@ -564,14 +564,14 @@ class GuidedSetupDraftTest {
         )
         val rungs = currentPlacementRungs(
             listOf(
-                CalisLadderView(ladder = CalisLadder.HorizontalPush, current_rung = 3, placed_rung = 3),
+                CalisLadderView(ladder = LadderId.HorizontalPush, current_rung = 3, placed_rung = 3),
                 // Incline push-ups and the like: no placement answer sits on rung 1.
-                CalisLadderView(ladder = CalisLadder.VerticalPull, current_rung = 1),
-                CalisLadderView(ladder = CalisLadder.Squat, current_rung = 1, placed_rung = 1),
-                CalisLadderView(ladder = CalisLadder.Dip, current_rung = 2),
+                CalisLadderView(ladder = LadderId.VerticalPull, current_rung = 1),
+                CalisLadderView(ladder = LadderId.Squat, current_rung = 1, placed_rung = 1),
+                CalisLadderView(ladder = LadderId.Dip, current_rung = 2),
             ),
         )
-        assertEquals(setOf(CalisLadder.HorizontalPush, CalisLadder.VerticalPull, CalisLadder.Squat), rungs.keys)
+        assertEquals(setOf(LadderId.HorizontalPush, LadderId.VerticalPull, LadderId.Squat), rungs.keys)
         val seed = seedAnswers(calis, today = 20_000L, recordedRunLevel = null, distanceUnit = DistanceUnit.Km, runStash = null, currentRungs = rungs)
         assertEquals(CalisPlacement.PushKnee, seed.pushPlace)
         assertNull(seed.pullPlace)
@@ -579,11 +579,11 @@ class GuidedSetupDraftTest {
         // An untouched re-run re-places nothing; a changed answer is the only event.
         assertTrue(placementEvents(seed, seed, 0L).isEmpty())
         val changed = placementEvents(seed.copy(pushPlace = CalisPlacement.PushFull), seed, 0L)
-        assertEquals(listOf(CalisLadder.HorizontalPush to 4), changed.map { it.ladder to it.rung })
+        assertEquals(listOf(LadderId.HorizontalPush to 4), changed.map { it.ladder to it.rung })
         // Without anything to hang from, no pull-up placement is seeded.
         val noBar = seedAnswers(
             calis.copy(calisEquipment = CalisEquipment()), 20_000L, null, DistanceUnit.Km, null,
-            mapOf(CalisLadder.VerticalPull to 4),
+            mapOf(LadderId.VerticalPull to 4),
         )
         assertNull(noBar.pullPlace)
         // A Weights profile seeds no placement.

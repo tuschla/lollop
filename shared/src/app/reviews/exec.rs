@@ -138,13 +138,7 @@ pub(in crate::app) fn derive_session_exec(
     let lifts: Vec<LiftOutcome> = day
         .items
         .iter()
-        .filter(|it| {
-            !it.is_run()
-                && !matches!(
-                    it.status,
-                    ItemStatus::Skipped | ItemStatus::SkippedPain | ItemStatus::StoppedPain
-                )
-        })
+        .filter(|it| !it.is_run() && !it.status.is_skipped())
         .map(|it| LiftOutcome {
             day: Some(day.epoch_day),
             ..lift_outcome(it)

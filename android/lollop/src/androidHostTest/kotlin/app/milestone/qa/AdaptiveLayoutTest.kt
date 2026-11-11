@@ -459,7 +459,7 @@ class AdaptiveLayoutTest {
 
     private fun seedRuns(run: Event.LogRunTrack) {
         val older = QaHarness.daysAgoAtMidday(3)
-        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile(), Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), run))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile(), Event.LogRun(6.0, 33.0, 0.0, observedAt = older, entryId = older * 1000), run))
     }
 
     @Test
@@ -504,8 +504,8 @@ class AdaptiveLayoutTest {
         QaHarness.seedLog(
             ctx,
             listOf(
-                QaHarness.hybridFiveKProfile(), Event.LogRun(5.0, 28.0, 0.0, oldest, oldest * 1000),
-                Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), Event.LogSet(SQUAT, 120.0, 3, 8.0, at, at * 1000),
+                QaHarness.hybridFiveKProfile(), Event.LogRun(5.0, 28.0, 0.0, observedAt = oldest, entryId = oldest * 1000),
+                Event.LogRun(6.0, 33.0, 0.0, observedAt = older, entryId = older * 1000), Event.LogSet(SQUAT, 120.0, 3, 8.0, at, at * 1000),
             ),
         )
         rule.launchApp()

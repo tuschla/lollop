@@ -19,6 +19,7 @@ import app.milestone.ResistanceModality
 import app.milestone.RunSession
 import app.milestone.RecentRace
 import app.milestone.SendResult
+import app.milestone.SessionType
 import app.milestone.TestClock
 import app.milestone.TestSink
 import app.milestone.ViewModel
@@ -26,6 +27,7 @@ import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
 import app.milestone.setupPrefs
 import app.milestone.todayEpochDay
+import app.milestone.toJson
 import app.milestone.utcOffsetSec
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.ComposeTestRule
@@ -195,7 +197,7 @@ object QaHarness {
      */
     fun logPlanItems(
         day: Long,
-        sessionType: String,
+        sessionType: SessionType,
         items: List<PrescriptionView>,
         firstId: Long,
         onModel: (ViewModel, PrescriptionView) -> Unit = { _, _ -> },

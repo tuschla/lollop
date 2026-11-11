@@ -1367,6 +1367,7 @@ pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
     serde::Serialize,
     serde::Deserialize,
     crate::sanitize::Sanitize,
+    crate::wire::Wire,
 )]
 pub enum GoalDistance {
     General,

@@ -34,7 +34,7 @@ fn the_import_gate_refuses_a_fragment_and_keeps_a_real_run() {
         ],
     };
     assert_eq!(import_gate(&split), Ok(()));
-    assert_eq!(FitError::TooShort.context(), "too_short");
+    assert_eq!(FitError::TooShort.context(), "");
 }
 
 #[test]

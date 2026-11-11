@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.core.JniCore
 import app.milestone.qa.QaHarness
 import app.milestone.widget.AndroidWidgets
 import app.milestone.widget.WidgetAheadDay
@@ -261,8 +262,8 @@ class SessionReminderTest {
         SessionReminder.setEnabled(app, true)
         val cases = listOf(
             "rest day" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Rest, restDay = true, zone = zone),
-            "hold" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = "pain", zone = zone),
-            "under 18" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = "youth", zone = zone),
+            "hold" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = HoldReason.Pain, zone = zone),
+            "under 18" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = HoldReason.Youth, zone = zone),
             "no plan" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.NoPlan, zone = zone),
             "no profile" to WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Setup, zone = zone),
             "done" to liftDay(done = true),
@@ -357,12 +358,12 @@ class SessionReminderTest {
         val lift = PrescriptionView(exercise = "Back squat", face_lead = "3 × 5 @ 100 kg")
         val run = PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"))
         val week = listOf(
-            SessionPlanView(day, "Upper body", "Lift(Strength)", "next", listOf(lift)),
-            SessionPlanView(day + 1, "", "Rest", "rest"),
-            SessionPlanView(day + 2, "Easy run 8 km", "Run(Easy)", "planned", listOf(run)),
-            SessionPlanView(day + 3, "Lower body", "Lift(Strength)", "planned", listOf(lift)),
+            SessionPlanView(day, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift)),
+            SessionPlanView(day + 1, "", SessionType.Rest, SessionStatus.Rest),
+            SessionPlanView(day + 2, "Easy run 8 km", SessionType.RunEasy, SessionStatus.Planned, listOf(run)),
+            SessionPlanView(day + 3, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Planned, listOf(lift)),
         )
-        val model = ViewModel(today_epoch_day = day, profile = ProfileView(), next_session = week[0], week_plan = week)
+        val model = ViewModel(today_epoch_day = day, profile = Profile(), next_session = week[0], week_plan = week)
         val s = widgetSnapshotOf(model, DistanceUnit.Km, zone = "Europe/Berlin")
         assertEquals("Europe/Berlin", s.zone)
         assertEquals(listOf(day + 2, day + 3), s.ahead.map { it.epochDay })
@@ -370,7 +371,7 @@ class SessionReminderTest {
         assertEquals(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km"), s.ahead[0].items.single())
         assertEquals(WidgetDayKind.Lift, s.ahead[1].kind)
         // Paused: nothing ahead.
-        val held = widgetSnapshotOf(model.copy(hold_reason = "pain"), DistanceUnit.Km, zone = "Europe/Berlin")
+        val held = widgetSnapshotOf(model.copy(hold_reason = HoldReason.Pain), DistanceUnit.Km, zone = "Europe/Berlin")
         assertTrue(held.ahead.isEmpty())
     }
 
@@ -395,7 +396,7 @@ class SessionReminderTest {
         store(runDay())
         forgetRemindedDays()
         fire()
-        store(WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = "pain", zone = zone))
+        store(WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = HoldReason.Pain, zone = zone))
         assertNull("training paused", posted())
     }
 
@@ -614,7 +615,7 @@ class SessionReminderTest {
     @Test
     fun aSundaySnapshotNeverRemindsOnTheNextWeeksRestDay() {
         val sun = LocalDate.parse("2025-11-09").toEpochDay()
-        Core.resetForTest()
+        JniCore.reset()
         try {
             Core.send(Event.SetToday(sun))
             Core.send(QaHarness.calisthenicsProfile())
@@ -630,12 +631,12 @@ class SessionReminderTest {
                 "Sunday's next session is a session day in its own week",
                 tuesday.week_plan.first { it.epoch_day == next.epoch_day }.items.isNotEmpty(),
             )
-            assertEquals("in its own week Tuesday is a rest day", "rest", tuesday.week_plan.first { it.epoch_day == tue }.status)
+            assertEquals("in its own week Tuesday is a rest day", SessionStatus.Rest, tuesday.week_plan.first { it.epoch_day == tue }.status)
             assertNull(reminderOf(widgetSnapshotOf(tuesday, DistanceUnit.Km, "UTC"), tue, "UTC"))
             fireOn(tue, snapshot)
             assertNull("a reminder on a rest day: '${title(posted())}'", posted())
         } finally {
-            Core.resetForTest()
+            JniCore.reset()
         }
     }
 
@@ -646,7 +647,7 @@ class SessionReminderTest {
     @Test
     fun mondaysSessionIsRemindedWhenTheAppWasLastOpenedOnSunday() {
         val fri = LocalDate.parse("2025-11-14").toEpochDay()
-        Core.resetForTest()
+        JniCore.reset()
         try {
             Core.send(Event.SetToday(fri))
             Core.send(QaHarness.hybridTenKProfile())
@@ -661,7 +662,7 @@ class SessionReminderTest {
             fireOn(mon, snapshot)
             assertEquals("Monday's reminder", monday.title, title(posted()))
         } finally {
-            Core.resetForTest()
+            JniCore.reset()
         }
     }
 }

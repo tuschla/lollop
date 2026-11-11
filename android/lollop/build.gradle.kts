@@ -53,10 +53,11 @@ kotlin {
     }
 
     // iOS klibs: Kotlin compiles them on any host (`compileKotlinIosArm64` runs on
-    // Linux CI). The framework the Xcode app links is :lollop-ios's, which adds the
-    // Rust core; this module's iOS code reaches the core only through CoreBridge.
-    iosArm64()
-    iosSimulatorArm64()
+    // Linux CI). Their binaries (the tests; the app's framework is :lollop-ios's)
+    // link the Rust core's C ABI, which :core-bridge binds.
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.all { rustCore.link(target, this) }
+    }
 
     compilerOptions {
         // expect/actual classes (JvmSerializable) are Beta; this acknowledges it.
@@ -65,6 +66,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // The Rust core's bridge: JNI on Android, the C ABI on iOS.
+            api(project(":core-bridge"))
             implementation(libs.compose.runtime)
             implementation(libs.compose.runtime.saveable)
             implementation(libs.compose.ui)

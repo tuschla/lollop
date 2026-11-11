@@ -85,11 +85,9 @@ pub use view_types::{
     TrainingLoadView, ViewModel, WhyView, YouthActivityView,
 };
 
-// `ffi.rs` drives these across the shell boundary as `crate::app::export_run_gpx`
-// / `crate::app::preview_track_figures`; like the ffi glue they feed, they are
-// compiled only where the bridge exists (Android, or the `ffi` feature).
-#[cfg(any(ffi_surface, test))]
-use crate::app::run_views::refresh_gpx_registry;
+// The bridge (`crate::ffi`) answers its GPX export and track-figures ops with
+// these; like the bridge, they are compiled only where it exists (Android, or
+// the `ffi` feature).
 #[cfg(any(ffi_surface, test))]
 pub(crate) use ingest::preview_track_figures;
 #[cfg(any(ffi_surface, test))]
@@ -740,11 +738,6 @@ fn history_section(cx: &ViewCtx, planned_run_km: f64, weight_lb: bool) -> Histor
     // memoized per-run views.
     let run_progress = build_run_progress(model, &cx.runs, planned_run_km);
     annotate_run_views(&mut runs, run_progress.as_ref());
-    // Keep the on-demand GPX registry in step with the current run history
-    // so `exportGpx(entry_id, observed_at)` can build any inspected run's GPX
-    // without that ~0.5 MB string ever riding the ViewModel.
-    #[cfg(any(ffi_surface, test))]
-    refresh_gpx_registry(&model.runs, &cx.runs);
     crate::memo::retain_runs(&cx.runs.keys);
     HistorySection {
         lifts: lift_views(&model.sets, cx.sets_fp, weight_lb),

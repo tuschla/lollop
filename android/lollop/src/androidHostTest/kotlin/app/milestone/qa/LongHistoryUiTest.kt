@@ -38,6 +38,7 @@ import app.milestone.ViewModel
 import app.milestone.formatLogDate
 import app.milestone.groupedFigure
 import app.milestone.kgToLb
+import app.milestone.train_blocked
 import app.milestone.trimDecimal
 import java.time.LocalDate
 import java.time.ZoneOffset

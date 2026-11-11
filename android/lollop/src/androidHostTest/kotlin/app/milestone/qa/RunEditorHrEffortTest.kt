@@ -20,10 +20,11 @@ import app.milestone.EventDispatcher
 import app.milestone.LocalEditorPinnedActions
 import app.milestone.LogRunEditor
 import app.milestone.MilestoneTheme
-import app.milestone.ProfileView
+import app.milestone.Profile
 import app.milestone.RunResultView
 import app.milestone.R
 import app.milestone.ViewModel
+import app.milestone.toJson
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,7 +52,7 @@ class RunEditorHrEffortTest {
     private fun key(k: String) =
         rule.onNode(hasText(k) and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
 
-    private fun show(profile: ProfileView?, initial: RunResultView? = null, onSave: (Event) -> Unit) {
+    private fun show(profile: Profile?, initial: RunResultView? = null, onSave: (Event) -> Unit) {
         java.util.Locale.setDefault(java.util.Locale.US)
         EventDispatcher.model.value = ViewModel(profile = profile)
         // Hosted the way the Log sheet hosts it: a bounded column with the pinned
@@ -70,7 +71,7 @@ class RunEditorHrEffortTest {
     @Test
     fun bpmAndEffort_areSentOnTheLogRun() {
         var sent: Event? = null
-        show(ProfileView(age_years = 30.0)) { sent = it }
+        show(Profile(age_years = 30.0)) { sent = it }
         key("5")
         rule.onNode(hasContentDescription(str(R.string.log_field_duration))).performScrollTo().performClick()
         listOf("3", "0", "0", "0").forEach { key(it) }
@@ -99,7 +100,7 @@ class RunEditorHrEffortTest {
     @Test
     fun withoutAnAgeOrMeasuredMax_onlyPercentOfMaxIsOffered() {
         var sent: Event? = null
-        show(ProfileView()) { sent = it }
+        show(Profile()) { sent = it }
         rule.waitForIdle()
         // One average-HR field, in % of max: no bpm unit and no unit swap offered.
         rule.onNode(hasContentDescription(str(R.string.track_log_hr_avg))).performScrollTo()
@@ -112,7 +113,7 @@ class RunEditorHrEffortTest {
     @Test
     fun anEmptyHeartRateIsSentAsNotRecorded() {
         var sent: Event? = null
-        show(ProfileView(age_years = 30.0)) { sent = it }
+        show(Profile(age_years = 30.0)) { sent = it }
         key("5")
         rule.onNode(hasContentDescription(str(R.string.log_field_duration))).performScrollTo().performClick()
         listOf("3", "0", "0", "0").forEach { key(it) }
@@ -133,7 +134,7 @@ class RunEditorHrEffortTest {
             hr_pct_max = 82.5, avg_hr_bpm = 152.0,
         )
         var sent: Event? = null
-        show(ProfileView(age_years = 30.0), initial = logged) { sent = it }
+        show(Profile(age_years = 30.0), initial = logged) { sent = it }
         // Reopens on the entered bpm, not the derived 82.5 %.
         rule.onNode(
             hasContentDescription("${str(R.string.track_log_hr_avg)}, 152 ${str(R.string.track_log_hr_bpm)}"),
@@ -159,7 +160,7 @@ class RunEditorHrEffortTest {
             hr_pct_max = 78.0,
         )
         var sent: Event? = null
-        show(ProfileView(age_years = 30.0), initial = logged) { sent = it }
+        show(Profile(age_years = 30.0), initial = logged) { sent = it }
         rule.onNode(
             hasContentDescription("${str(R.string.track_log_hr_avg)}, 78 ${str(R.string.log_hr_pct_max)}"),
         ).performScrollTo()
@@ -176,7 +177,7 @@ class RunEditorHrEffortTest {
     @Test
     fun systemBack_foldsTheKeypadBeforeAskingToDiscard() {
         val logged = RunResultView(entry_id = 9L, observed_at = 1_700_000_000L, distance_km = 8.0, duration_min = 45.0)
-        show(ProfileView(age_years = 30.0), initial = logged) {}
+        show(Profile(age_years = 30.0), initial = logged) {}
         rule.onNode(hasContentDescription("${str(R.string.log_field_distance)}, ", substring = true)).performScrollTo().performClick()
         key("6")
         val keypad = hasTestTag("numeric-keypad")

@@ -1,6 +1,5 @@
 package app.milestone
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -127,11 +126,3 @@ internal fun streamValidateImport(input: InputStream, max: Long, maxLine: Long =
 
 internal actual fun Throwable.isFatalToVm(): Boolean =
     this is VirtualMachineError && this !is OutOfMemoryError && this !is StackOverflowError
-
-internal actual suspend fun restartForImport(ctx: Context) {
-    val app = ctx.applicationContext
-    val component = app.packageManager.getLaunchIntentForPackage(app.packageName)?.component
-        ?: ComponentName(app, MainActivity::class.java)
-    app.startActivity(Intent.makeRestartActivityTask(component))
-    Runtime.getRuntime().exit(0)
-}

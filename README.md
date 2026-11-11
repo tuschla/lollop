@@ -6,7 +6,7 @@ recommendation shows its evidence grade and citation.
 - `shared/`: Rust core (crux). Deterministic: the same event log always gives the same view.
 - `android/`: the app's Gradle build. `android/lollop` is the app (Compose Multiplatform, for Android and iOS),
   `android/app` the Android shell, `android/lollop-ios` the iOS framework, `android/core-bridge` the core's
-  C ABI binding for Kotlin/Native. Android talks to the core over JNI (`shared/src/ffi.rs`).
+  bridge (`CoreBridge`: JNI on Android, the C ABI on iOS). Bridge ops are declared once in `shared/src/ffi/ops.rs`.
 - `iosApp/`: the iOS app around that framework. See `ios/README.md`.
 
 ## Build

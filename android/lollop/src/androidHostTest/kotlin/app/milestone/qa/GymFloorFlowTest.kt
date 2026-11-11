@@ -34,6 +34,7 @@ import app.milestone.LiftResultView
 import app.milestone.R
 import app.milestone.TestClock
 import app.milestone.repsLeftText
+import app.milestone.train_blocked
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonObject

@@ -1,6 +1,8 @@
 package app.milestone.widget
 
+import app.milestone.HoldReason
 import app.milestone.OpenDest
+import app.milestone.PlanWithheld
 import app.milestone.PlatformResources
 import app.milestone.Reminder
 import app.milestone.WeekdayWidth
@@ -125,7 +127,7 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
         WidgetDayKind.Paused -> res.getString(Res.string.widget_paused_body).let { body ->
             base.copy(
                 title = res.getString(Res.string.main_status_on_hold),
-                tone = if (current.holdReason == "youth") WidgetTone.Normal else WidgetTone.Paused,
+                tone = if (current.holdReason == HoldReason.Youth) WidgetTone.Normal else WidgetTone.Paused,
                 status = body,
                 brief = body,
                 lead = listOf(body),
@@ -136,9 +138,9 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
         }
         WidgetDayKind.NoPlan -> {
             val (title, body) = when (current.planWithheld) {
-                "health_hold" -> Res.string.main_plan_withheld_health_title to Res.string.main_plan_withheld_health_body
-                "nothing_to_plan" -> Res.string.main_plan_withheld_empty_title to Res.string.widget_setup_body
-                else -> Res.string.widget_no_plan to Res.string.widget_no_plan_body
+                PlanWithheld.HealthHold -> Res.string.main_plan_withheld_health_title to Res.string.main_plan_withheld_health_body
+                PlanWithheld.NothingToPlan -> Res.string.main_plan_withheld_empty_title to Res.string.widget_setup_body
+                null -> Res.string.widget_no_plan to Res.string.widget_no_plan_body
             }
             res.getString(body).let { b -> base.copy(title = res.getString(title), status = b, brief = b, lead = listOf(b)) }
         }

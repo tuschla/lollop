@@ -10,11 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the serde wire form between the shell and the Rust core: events encode as
- * the core expects (unit variants as a bare string, struct variants as a
- * single-key object with snake_case fields) and the view JSON decodes into the
- * Kotlin view classes. A drift here means the FFI silently rejects or mis-reads
- * data, so these guard the contract without the native library.
+ * The shell's side of the wire on the generated types: the events the
+ * editors build encode the way the core reads them, and core view JSON decodes
+ * into the fields the screens read. The byte-level contract over every variant
+ * is [WireConformanceTest]'s.
  */
 class EventJsonTest {
 
@@ -25,16 +24,6 @@ class EventJsonTest {
         ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
         ConcurrentGoal.Strength, 12, 4, 45.0, false,
     )
-
-    @Test
-    fun everyUnitEventIsItsBareVariantName() {
-        // Each `data object` Event encodes as the bare Rust variant name.
-        val units = Event::class.java.declaredClasses.mapNotNull { c ->
-            runCatching { c.getField("INSTANCE").get(null) }.getOrNull() as? Event
-        }
-        assertTrue("found ${units.size} unit events", units.size >= 13)
-        for (u in units) assertEquals("\"${u.javaClass.simpleName}\"", u.toJson().toString())
-    }
 
     @Test
     fun logSetHasSnakeCaseFields() {
@@ -91,7 +80,7 @@ class EventJsonTest {
         assertEquals(2, health["parq_yes"]!!.jsonPrimitive.content.toInt())
         assertFalse(fields.containsKey("endurance_intensity_pct_vo2max"))
 
-        val rung = obj(Event.SetCalisthenicsRung(CalisLadder.VerticalPull, 4, 1_759_700_000L))["SetCalisthenicsRung"]!!.jsonObject
+        val rung = obj(Event.SetCalisthenicsRung(LadderId.VerticalPull, 4, 1_759_700_000L))["SetCalisthenicsRung"]!!.jsonObject
         assertEquals("VerticalPull", rung["ladder"]!!.jsonPrimitive.content)
         assertEquals(4, rung["rung"]!!.jsonPrimitive.content.toInt())
         assertEquals(1_759_700_000L, rung["observed_at"]!!.jsonPrimitive.content.toLong())
@@ -115,7 +104,7 @@ class EventJsonTest {
 
     @Test
     fun setProfileEmitsTheBirthdayAndTheDraftRoundTripsIt() {
-        val view = ProfileView(progression_cadence = "WeekToWeek", lift_goal = "MaxStrength", goal_distance = "TenK", concurrent_goal = "Strength", weekly_sets = 12, birth_epoch_day = 7_740L, age_years = 35.0)
+        val view = Profile(progression_cadence = ProgressionCadence.WeekToWeek, lift_goal = LiftGoal.MaxStrength, goal_distance = GoalDistance.TenK, concurrent_goal = ConcurrentGoal.Strength, weekly_sets = 12, birth_epoch_day = 7_740L, age_years = 35.0)
         val draft = Event.SetProfile.from(view)
         assertEquals(7_740L, draft.birthEpochDay)
         val fields = obj(draft)["SetProfile"]!!.jsonObject
@@ -303,7 +292,7 @@ class EventJsonTest {
         // the shell renders it purely from the wire, no local thresholds.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":2,
                 "lifts":[
                   {"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.0,
@@ -325,9 +314,9 @@ class EventJsonTest {
                 "guidance":[],"feedback":null,"reference":[]}"""
         )
         val split = vm.runs[0].split!!
-        assertEquals("fade", split.verdict)
+        assertEquals(SplitVerdict.Fade, split.verdict)
         assertEquals("FADE +5%", split.label)
-        assertEquals("Moderate", split.grade)
+        assertEquals(EvidenceGrade.Moderate, split.grade)
         assertEquals("feedback-016", split.citation)
         assertEquals(null, vm.runs[1].split)
     }
@@ -338,7 +327,7 @@ class EventJsonTest {
         // JSON must decode inside Kotlin's Int/Long range (no wire overflow).
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":1,
                 "lifts":[
                   {"exercise":"Leg Press","weight_kg":200.0,"reps":10000,"rpe":8.0,
@@ -368,7 +357,7 @@ class EventJsonTest {
         // headline, and the static signal→group fence metadata all decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":1,"lifts":[],"runs":[],
                 "guidance":[],"feedback":null,"reference":[],
                 "readiness_summary":[
@@ -386,10 +375,10 @@ class EventJsonTest {
                   {"signal":"Pain","group":"red_flag"}]}"""
         )
         assertEquals("suppressed", vm.readiness_summary[0].state)
-        assertEquals("metric", vm.readiness_summary[0].group)
+        assertEquals(SignalGroup.Metric, vm.readiness_summary[0].group)
         assertTrue(vm.readiness_summary[1].safety_critical)
-        assertEquals("safety_hold", vm.today_headline!!.kind)
-        assertEquals("red_flag", vm.signal_groups.first { it.signal == "Pain" }.group)
+        assertEquals(HeadlineKind.SafetyHold, vm.today_headline.kind)
+        assertEquals(SignalGroup.RedFlag, vm.signal_groups.first { it.signal == ReadinessSignal.Pain }.group)
     }
 
     @Test
@@ -398,7 +387,7 @@ class EventJsonTest {
         // core-provided evidence-grade legend decode from the wire.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,
+            """{"safety_tier":null,
                 "adjustments":[
                   {"summary":"Downgrade to an easier session","grade":"Moderate",
                    "citation":"Plews 2013","confidence":0.65,"safety_critical":false,
@@ -430,11 +419,11 @@ class EventJsonTest {
         assertTrue(vm.adjustments[0].why.improves.contains("check-ins"))
         assertTrue(vm.guidance[0].why.basis.contains("Tanaka"))
         assertTrue(vm.guidance[0].why.improves.contains("measured max HR"))
-        assertEquals("adjustment", vm.today_headline!!.kind)
+        assertEquals(HeadlineKind.Adjustment, vm.today_headline.kind)
         assertTrue(vm.today_headline.why.grade_note.contains("Moderate"))
         // Grade legend from core data.
         assertEquals(2, vm.grade_definitions.size)
-        val strong = vm.grade_definitions.first { it.grade == "Strong" }
+        val strong = vm.grade_definitions.first { it.grade == EvidenceGrade.Strong }
         assertTrue(strong.definition.contains("meta-analyses"))
         assertEquals(0.9f, strong.confidence, 1e-6f)
     }
@@ -447,7 +436,7 @@ class EventJsonTest {
         // (strength-006 multi-formula e1RM range) decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":3,
                 "lifts":[
                   {"exercise":"Back Squat","weight_kg":140.0,"reps":3,"rpe":8.0,
@@ -528,7 +517,7 @@ class EventJsonTest {
         // The echoed check-in (rehydration) and the "collecting baseline" rows decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
                 "guidance":[],"feedback":null,"reference":[],
                 "latest_checkin":{"observed_at":1700000000,"sleep_quality":2,
@@ -539,14 +528,14 @@ class EventJsonTest {
         assertEquals(2, vm.latest_checkin!!.sleep_quality)
         assertEquals(4, vm.latest_checkin.soreness)
         assertEquals(null, vm.latest_checkin.hrv_rmssd_ms)
-        assertEquals("WellnessZ", vm.baseline_status[0].signal)
+        assertEquals(ReadinessSignal.WellnessZ, vm.baseline_status[0].signal)
         assertEquals(1, vm.baseline_status[0].have)
     }
 
     @Test
     fun logRunTrackNestsPointsWithSnakeCaseFields() {
         val fields = obj(
-            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, 1_700_000_500L)
+            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, observedAt = 1_700_000_500L)
         )["LogRunTrack"]!!.jsonObject
         val pt = fields["points"]!!.let { (it as kotlinx.serialization.json.JsonArray)[0] }.jsonObject
         assertEquals(52.5, pt["lat"]!!.jsonPrimitive.content.toDouble(), 1e-9)
@@ -607,47 +596,38 @@ class EventJsonTest {
         // Untagged (null) → the key is ABSENT on the wire, so the event matches
         // serde's `#[serde(default)]` shape and old logs/replay are unaffected.
         val untagged = obj(
-            Event.LogRun(8.0, 48.0, 70.0, 1_700_000_000L)
+            Event.LogRun(8.0, 48.0, 70.0, observedAt = 1_700_000_000L)
         )["LogRun"]!!.jsonObject
         assertFalse(untagged.containsKey("workout_type"))
 
         // Tagged → the field carries the EXACT serde variant string (the Rust
         // `WorkoutType` deserializes external-form, so it must be the bare name).
         val tagged = obj(
-            Event.LogRun(8.0, 48.0, 70.0, 1_700_000_000L, workoutType = WorkoutType.Interval)
+            Event.LogRun(8.0, 48.0, 70.0, observedAt = 1_700_000_000L, workoutType = WorkoutType.Interval)
         )["LogRun"]!!.jsonObject
         assertEquals("Interval", tagged["workout_type"]!!.jsonPrimitive.content)
 
         // Same contract on the GPS + amend events.
         val track = obj(
-            Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), 0.0, 0L, workoutType = WorkoutType.LongRun)
+            Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), 0.0, observedAt = 0L, workoutType = WorkoutType.LongRun)
         )["LogRunTrack"]!!.jsonObject
         assertEquals("LongRun", track["workout_type"]!!.jsonPrimitive.content)
         val amend = obj(
-            Event.AmendRun(9L, 5.0, 30.0, 0.0, 1_700_000_000L, workoutType = WorkoutType.Recovery)
+            Event.AmendRun(9L, 5.0, 30.0, 0.0, observedAt = 1_700_000_000L, workoutType = WorkoutType.Recovery)
         )["AmendRun"]!!.jsonObject
         assertEquals("Recovery", amend["workout_type"]!!.jsonPrimitive.content)
     }
 
     @Test
     fun runResultViewMapsItsWorkoutTypeLabel() {
-        val json = coreJson
-        // A tagged run row echoes the label, and fromWire maps it back to the enum.
-        val tagged = json.decodeFromString<RunResultView>(
+        val tagged = coreJson.decodeFromString<RunResultView>(
             """{"zone":"Z2","pace":"5:00/km","distance_km":10.0,"summary":"","citation":"",
-                "observed_at":0,"workout_type":"Tempo"}"""
+                "observed_at":0,"workout_type":"LongRun"}"""
         )
-        assertEquals("Tempo", tagged.workout_type)
-        assertEquals(WorkoutType.Tempo, WorkoutType.fromWire(tagged.workout_type))
-
-        // Decode-safe: an unknown/future variant string still decodes (raw String)
-        // and maps to null rather than throwing: the run just renders untagged.
-        val future = json.decodeFromString<RunResultView>(
-            """{"zone":"Z2","pace":"5:00/km","distance_km":10.0,"summary":"","citation":"",
-                "observed_at":0,"workout_type":"Fartlek"}"""
-        )
-        assertEquals("Fartlek", future.workout_type)
-        assertEquals(null, WorkoutType.fromWire(future.workout_type))
+        assertEquals(WorkoutType.LongRun, tagged.workout_type)
+        assertEquals(ThreeZone.Z2, tagged.zone)
+        assertEquals("Long run", tagged.workout_type?.label)
+        assertEquals("Tempo", WorkoutType.Tempo.label)
     }
 
     @Test
@@ -702,7 +682,7 @@ class EventJsonTest {
         // core's serde names.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+            """{"safety_tier":null,"adjustments":[],
                 "review_adjustments":[],"input_count":1,
                 "runs":[
                   {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
@@ -723,7 +703,7 @@ class EventJsonTest {
         assertEquals(0.7, hm.tanaka_slope, 1e-9)
         // The tile reads the first non-refused figure as "120–140".
         val figure = vm.protein_figures.first { !it.refused }
-        assertEquals("masters", figure.kind)
+        assertEquals(ProteinTargetKind.Masters, figure.kind)
         assertEquals(120, figure.low_g_per_day.toInt())
         assertEquals(140, figure.high_g_per_day.toInt())
         assertTrue(vm.protein_figures.last().refused)
@@ -746,7 +726,7 @@ class EventJsonTest {
     fun deleteEntryTargetsAnActivity() {
         assertEquals(
             """{"DeleteEntry":{"kind":"Activity","entry_id":123,"observed_at_fallback":1760000000}}""",
-            Event.DeleteEntry(Event.EntryKind.Activity, 123L, observedAtFallback = 1_760_000_000L).toJson().toString(),
+            Event.DeleteEntry(EntryKind.Activity, 123L, observedAtFallback = 1_760_000_000L).toJson().toString(),
         )
     }
 
@@ -766,7 +746,7 @@ class EventJsonTest {
         assertEquals(95, y.minutes)
         assertEquals(420, y.weekly_target_minutes)
         assertEquals(3, y.target_days)
-        assertEquals("Strong", y.grade)
+        assertEquals(EvidenceGrade.Strong, y.grade)
         assertEquals("WHO 2020", y.why.basis)
     }
 
@@ -786,7 +766,7 @@ class EventJsonTest {
                   {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
                    "spike_note":"","summary":"","citation":"","observed_at":4}]}""",
         )
-        assertEquals(null, vm.today_headline)
+        assertEquals(HeadlineKind.AllClear, vm.today_headline.kind)
         assertTrue(vm.readiness_summary.isEmpty())
         assertTrue(vm.signal_groups.isEmpty())
         assertTrue(vm.grade_definitions.isEmpty())
@@ -809,7 +789,6 @@ class EventJsonTest {
         assertTrue(run.spike_flag)
         assertFalse(run.spike_has_baseline)
         assertEquals(null, run.workout_type)
-        assertEquals(null, WorkoutType.fromWire(run.workout_type))
     }
 
     @Test

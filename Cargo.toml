@@ -1,5 +1,5 @@
 [workspace]
-members = ["shared", "shared/derive"]
+members = ["shared", "shared/derive", "shared/wiregen"]
 resolver = "3"
 
 [workspace.package]
@@ -22,9 +22,9 @@ manual_is_multiple_of = "warn"
 # Shipped .so size: fitparser's generated FIT-profile tables roughly doubled the
 # cdylib, so the release profile is size-optimized. Measured `opt-level = "s"`
 # against "z": "s" grew arm64 libshared.so from 1.91 MB to 2.32 MB (+21.5%), over
-# the 20% budget, so "z" is retained. NO `panic="abort"`: the JNI bridge's
-# catch_unwind panic firewall (shared/src/ffi.rs) needs unwinding to turn core
-# panics into JSON error payloads.
+# the 20% budget, so "z" is retained. NO `panic="abort"`: the bridge's
+# catch_unwind panic firewall (shared/src/ffi/bridge.rs) needs unwinding to turn
+# core panics into JSON error payloads.
 [profile.release]
 opt-level = "z"
 lto = true

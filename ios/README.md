@@ -23,14 +23,18 @@ Activities").
 
 ```
 shared/ (Rust core, pure update/view)
-  └─ shared/src/ffi.rs            platform-neutral bridge API (one implementation)
-       ├─ android module          JNI exports Java_app_milestone_Core_*  → libshared.so (Android)
-       └─ ffi/c_abi.rs            C ABI lollop_*  (feature c-abi)        → libshared.a  (iOS)
-                                    header: shared/include/lollop.h (cbindgen)
+  ├─ shared/src/ffi/ops.rs        every bridge op declared once (`Op`)
+  ├─ shared/src/ffi/bridge.rs     answers an op on the core's own thread (one implementation)
+  │    ├─ ffi/jni.rs              JNI exports Java_app_milestone_core_JniCore_{call,callLines} → libshared.so (Android)
+  │    └─ ffi/c_abi.rs            C ABI lollop_call, lollop_call_lines (feature c-abi)     → libshared.a  (iOS)
+  │                                header: shared/include/lollop.h (cbindgen)
+  └─ shared/wiregen/              generates the Kotlin wire types (lollop's WireTypes.kt) and
+                                  CoreBridge from the Rust types and the op table
 android/ (the Gradle build of the app, both platforms)
   ├─ core-bridge/
-  │    ├─ commonMain  CoreBridge: the calls the core engine makes (update, view,
-  │    │              parseFit, exportGpx, trackFigures, compactLog, reset), same JSON wire
+  │    ├─ commonMain  CoreBridge (generated): one method per op (update, view, parseFit,
+  │    │              trackFigures, exportGpx, compactLog, reset), same JSON wire
+  │    ├─ jvmMain     JniCore: CoreBridge over the JNI entry points
   │    ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
   │    └─ nativeTest  bridge tests against the core's own golden fixtures (linuxX64 + iOS)
   ├─ build-logic/ RustCore: every cargo build of the core (profiles and triples
@@ -82,10 +86,10 @@ iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, extension, Info.plists, asset
 through a `CoreBridge`, appends the accepted ones to the event log, replays the
 log at boot (`restore`, with compaction and torn-tail repair in `EventLog`),
 rebuilds the core after a `panic_reset`, and keeps the last good view when a
-view fails. Android's engine is `object Core : DurableCore` with the JNI
-natives; iOS's is a `BridgeCore` over `android/core-bridge`'s `NativeCore`, which
-`LollopApp.start()` installs (`startIosApp`). The event queue sends to
-it on `CoreDispatcher` (one dedicated thread, `newSingleThreadContext`).
+view fails. Android's engine is `object Core : DurableCore(JniCore)`; iOS's is
+`DurableCore(NativeCore)` (`platformCoreEngine` in `CoreEngine.ios.kt`). The
+event queue sends to it on `CoreDispatcher` (one dedicated thread,
+`newSingleThreadContext`).
 
 `AppRuntime` (commonMain) is the app's process: its coroutine scope, the engine,
 the clock (`AppClock`), the boot ledger and every singleton's process state
@@ -96,10 +100,10 @@ widget sync). Android calls it from every component the system may start the
 process for; iOS from `LollopApp.start()`. Host tests start each scenario from
 `AppRuntime.resetForTest()`.
 
-`:lollop` doesn't depend on the cinterop module. Its commonMain declares
-`CoreBridge` with the same calls as `android/core-bridge`'s, and `:lollop-ios`
-adapts one to the other. So `:lollop`'s iOS klibs compile on Linux; only
-`:lollop-ios`, which pulls in the cinterop module, needs macOS.
+`:lollop` depends on `:core-bridge` on every target: its Android code runs on
+`JniCore`, its iOS code on `NativeCore`. Kotlin compiles the iOS klibs,
+cinterop included, on Linux; linking an iOS binary (the tests, `:lollop-ios`'s
+framework) needs macOS and the core's staticlib.
 
 The other seams (`expect` in commonMain, actual per platform):
 
@@ -112,7 +116,7 @@ The other seams (`expect` in commonMain, actual per platform):
 | `is24HourClock` | `DateFormat.is24HourFormat` | the locale's `j` hour pattern has no `a` |
 | `KeyValueStore`, `PlatformContext` | `SharedPreferences`, `Context` | `NSUserDefaults(suiteName)`, one process-wide context |
 | `toRadians` | `Math.toRadians` | multiply by π/180 |
-| `platformCoreEngine` (read through `AppRuntime.engine`) | `Core` | the `BridgeCore` `startIosApp` made |
+| `platformCoreEngine` (read through `AppRuntime.engine`) | `Core` | `DurableCore(NativeCore)` |
 | `AppPath`, `AppFiles` (the app's files) | `java.io.File`: `appendText`, a buffered read, `FileOutputStream` + `fd.sync()`, `renameTo` | POSIX `open`/`read`/`write`/`rename`; the rewrite is flushed with `fcntl(F_FULLFSYNC)` (plain `fsync` leaves it in the drive cache on Apple hardware), `fsync` where that's unsupported |
 | `eventLogPath`, `isDebuggable` | `filesDir/event-log.ndjson`, `FLAG_DEBUGGABLE` | `Application Support/event-log.ndjson`, `Platform.isDebugBinary` |
 | `PlatformResources`, `getString` / `getQuantityString` / `getStringArray` (`Res` handles outside composition) | `android.content.res.Resources`, read through the `R` id of the same name (generated map) | CMP resources read synchronously in the system resource environment |
@@ -136,38 +140,37 @@ CI job, in an iOS simulator, where the engine runs on the POSIX file seam.
 simulator (restart replay, torn tail, the core's compaction, a real
 `panic_reset`).
 
-Both bindings call the same Rust functions in `shared::ffi` (`process_event`,
-`current_view`, `parse_fit_json`, `track_figures_json`, `export_gpx`,
-`compact_log_json`). Neither binding has logic of its own: they convert
-pointers or JNI arrays to byte slices and back. The panic firewall (a core
-panic becomes an `{"error":{"kind":"panic_reset",...}}` object and the core is
-replaced) lives in `shared::ffi`, so both platforms get it.
+Every bridge op is declared once, in `shared/src/ffi/ops.rs` (`Op`), and
+answered by `shared/src/ffi/bridge.rs` on the core's own thread
+(`lollop-core`), so the core's view memos stay on one thread and any shell
+thread may call. The two bindings take an op's code with its input and have no
+logic of their own: they convert pointers or JNI arrays to bytes and back.
+`shared/wiregen` generates the Kotlin `CoreBridge` (one method per op) and
+`CoreCalls` (each method calls its op's code) from the same table, so adding an
+op is one `Op` entry, its arm in `bridge.rs`, a regeneration and its callers;
+the header and the JNI exports stay the same. The panic firewall and the one
+error envelope (`{"error":{"kind":…,"context":…,"message":…}}`; a core panic in
+`update` answers `panic_reset` and replaces the core) live in the bridge, so
+both platforms get them.
 
 The C ABI:
 
 | C function | Android JNI equivalent | Answer |
 |---|---|---|
-| `lollop_update(event, len)` | `Core.update` | effect-request array, empty for a dropped event, or an error object |
-| `lollop_view()` | `Core.view` | `ViewModel` JSON or an error object |
-| `lollop_parse_fit(data, len)` | `Core.parseFit` | tracker-import JSON or `{"error":…}` |
-| `lollop_track_figures(event, len)` | `Core.trackFigures` | `{"distance_km":…,"duration_min":…}` or `{"error":…}` |
-| `lollop_export_gpx(entry_id, observed_at)` | `Core.exportGpx` | GPX text, empty when the run has no route |
-| `lollop_compact_log(lines, count)` | `Core.compactLog` | compaction verdict JSON, empty when the core can't answer |
+| `lollop_call(op, input, len)` | `JniCore.call(op, input)` | op `op`'s answer to the input bytes (none for `view` and `reset`): its payload, no bytes, or the error envelope |
+| `lollop_call_lines(op, lines, count)` | `JniCore.callLines(op, lines)` | the same for an op that takes lines (`compactLog`, the event log); a line that is not UTF-8 fails the op |
 | `lollop_bytes_free(bytes)` | (JVM GC) | releases any buffer above |
-| `lollop_reset()` | (process restart) | empties the core for the in-process data import |
 | `lollop_panic_for_test(reset)` | — | test builds only (feature `test-hooks`) |
 
 Every answer is a `LollopBytes {data, len}` the caller owns and frees once;
-`{NULL, 0}` is the empty answer. All calls are safe from any thread. The core's
-derived-view memos are per thread, so the shell keeps `update`/`view` on one
-thread, as Android does with its `core-jni` dispatcher.
+`{NULL, 0}` is the empty answer. All calls are safe from any thread.
 
 ### Why a C ABI and not UniFFI
 
 - The JSON wire stays the single contract. Kotlin on Android already decodes
   the `ViewModel` JSON (`DurableCore`); the iOS app runs the same Kotlin, so typed
   bindings would only add a second model of the same data.
-- No new crate dependencies: the C ABI is about 200 lines over `shared::ffi`.
+- No new crate dependencies: the C ABI is about 130 lines over `shared::ffi`.
   UniFFI would add its runtime crate and proc-macros to the core, and its
   Kotlin output targets the JVM (JNA), not Kotlin/Native.
 - Kotlin/Native reads a C header directly through cinterop.
@@ -381,7 +384,7 @@ Apple offers no other API (extensions).
 
 | Android (file) | iOS |
 |---|---|
-| JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `android/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
+| JNI core, `Core.kt` (`DurableCore(JniCore)`) on the `core-jni` thread | `DurableCore(NativeCore)` over `android/core-bridge`'s C ABI binding, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
 | Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `AppFiles` seam (POSIX) |
 | GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`RunActivity`). |
@@ -392,7 +395,7 @@ Apple offers no other API (extensions).
 | Quick Settings tile (`QuickTileService.kt`) | Done: Control Center control (`ControlWidget`, iOS 18) in the widget extension |
 | Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | Done: URL scheme `lollop://open/<dest>` (widget links, activities) and `OpenLollopIntent` (control, small widget's button) |
 | Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LollopIosOpen` |
-| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`DurableCore.resetForReboot` over `lollop_reset`); a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
+| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`AppRuntime.requestReboot`; the boot turn resets the core through the `reset` op), as on Android; a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
 | Battery optimisation exemption prompt | None needed |
 | Paper theme with the system (Material You) accent | iOS has no wallpaper palette: Paper uses its own accent (`platformAccent` is null) and Profile hides the "Use system accent" row (`platformHasDynamicAccent` = false, `ProfilePlatform.kt`), as on Android < 12. Profile's Live Updates notice is hidden too. |
 | Per-app language (`AppLocale.kt`) | Per-app language in iOS Settings (`CFBundleLocalizations`) |

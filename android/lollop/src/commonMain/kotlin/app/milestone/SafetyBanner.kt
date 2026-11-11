@@ -102,20 +102,20 @@ import org.jetbrains.compose.resources.stringResource
 internal enum class HoldAction { RemovePain, RemoveIllness, EndIllness, CheckAge, ReviewHealth, ClearReadiness }
 
 /** Profile health answers that hold training until a doctor's OK. */
-private val DoctorHoldReasons = setOf("parq", "pregnancy", "reds", "injury_rehab", "symptomatic")
+private val DoctorHoldReasons = setOf(HoldReason.Parq, HoldReason.Pregnancy, HoldReason.Reds, HoldReason.InjuryRehab, HoldReason.Symptomatic)
 
-/** [HoldAction] for the core's `hold_reason` (snake_case) or, without one, its tier. */
-internal fun holdAction(holdReason: String?, tier: String?): HoldAction = when (holdReason) {
-    "pain" -> HoldAction.RemovePain
-    "illness" -> HoldAction.RemoveIllness
-    "acute_illness_profile" -> HoldAction.EndIllness
-    "youth" -> HoldAction.CheckAge
+/** [HoldAction] for the core's `hold_reason` or, without one, its tier. */
+internal fun holdAction(holdReason: HoldReason?, tier: SafetyTier?): HoldAction = when (holdReason) {
+    HoldReason.Pain -> HoldAction.RemovePain
+    HoldReason.Illness -> HoldAction.RemoveIllness
+    HoldReason.AcuteIllnessProfile -> HoldAction.EndIllness
+    HoldReason.Youth -> HoldAction.CheckAge
     in DoctorHoldReasons -> HoldAction.ReviewHealth
-    "medical_signal" -> HoldAction.ClearReadiness
+    HoldReason.MedicalSignal -> HoldAction.ClearReadiness
     else -> when (tier) {
-        "Pain" -> HoldAction.RemovePain
-        "Illness" -> HoldAction.RemoveIllness
-        "MedicalReferral" -> HoldAction.ReviewHealth
+        SafetyTier.Pain -> HoldAction.RemovePain
+        SafetyTier.Illness -> HoldAction.RemoveIllness
+        SafetyTier.MedicalReferral -> HoldAction.ReviewHealth
         else -> HoldAction.ClearReadiness
     }
 }
@@ -126,15 +126,15 @@ internal fun holdAction(holdReason: String?, tier: String?): HoldAction = when (
  * while the cause sits elsewhere. [health] (the profile's answers) picks between
  * rows of one reason; a reason without its own row opens the health questions.
  */
-internal fun holdProfileRow(holdReason: String?, health: HealthScreen?): ProfileRowId = when (holdReason) {
-    "youth" -> ProfileRowId.Age
-    "pregnancy" -> if (health?.pregnancy_warning_sign == true) ProfileRowId.PregnancyWarning else ProfileRowId.Pregnant
-    "symptomatic" -> ProfileRowId.ParqSymptom
-    "injury_rehab" -> ProfileRowId.ParqInjury
-    "parq" -> ProfileRowId.ParqClearance
+internal fun holdProfileRow(holdReason: HoldReason?, health: HealthScreen?): ProfileRowId = when (holdReason) {
+    HoldReason.Youth -> ProfileRowId.Age
+    HoldReason.Pregnancy -> if (health?.pregnancy_warning_sign == true) ProfileRowId.PregnancyWarning else ProfileRowId.Pregnant
+    HoldReason.Symptomatic -> ProfileRowId.ParqSymptom
+    HoldReason.InjuryRehab -> ProfileRowId.ParqInjury
+    HoldReason.Parq -> ProfileRowId.ParqClearance
     // A RED-S hold may come from a weekly check-in answer, not the profile row.
-    "reds" -> if (health?.reds_signal == true) ProfileRowId.Reds else ProfileRowId.HealthQuestions
-    "acute_illness_profile" -> ProfileRowId.Ill
+    HoldReason.Reds -> if (health?.reds_signal == true) ProfileRowId.Reds else ProfileRowId.HealthQuestions
+    HoldReason.AcuteIllnessProfile -> ProfileRowId.Ill
     else -> ProfileRowId.HealthQuestions
 }
 
@@ -145,32 +145,32 @@ internal fun holdProfileRow(holdReason: String?, health: HealthScreen?): Profile
  *  under-18 pause ([YouthHoldCard] carries its reason and evidence). A
  *  plain pregnancy's card carries the reference the banner leaves out, and the
  *  other health answers' cards name the answer behind the banner's generic line. */
-internal fun bannerStatesHold(holdReason: String?, tier: String?, pregnancyWarning: Boolean): Boolean =
-    tier == "Pain" || tier == "Illness" ||
+internal fun bannerStatesHold(holdReason: HoldReason?, tier: SafetyTier?, pregnancyWarning: Boolean): Boolean =
+    tier == SafetyTier.Pain || tier == SafetyTier.Illness ||
         holdAction(holdReason, tier).let { it == HoldAction.EndIllness || it == HoldAction.CheckAge } ||
-        (holdReason == "pregnancy" && pregnancyWarning)
+        (holdReason == HoldReason.Pregnancy && pregnancyWarning)
 
 /** The banner's plain reason line ("You reported pain today."), never engine
- *  vocabulary like "red flag" or "tier"; an unknown reason gets the generic line.
- *  A pregnancy reads like its own Profile row; [pregnancyWarning] (a warning
- *  sign is on) says to stop and seek care. */
-internal fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarning: Boolean): StringResource = when (holdReason) {
-    "pain" -> Res.string.main_hold_reason_pain
-    "illness" -> Res.string.main_hold_reason_illness
-    "acute_illness_profile" -> Res.string.main_hold_reason_ill_profile
-    "youth" -> Res.string.main_hold_reason_youth
-    "pregnancy" -> if (pregnancyWarning) Res.string.main_hold_reason_pregnancy_warning else Res.string.main_hold_reason_pregnancy
-    in DoctorHoldReasons -> Res.string.main_hold_reason_doctor
-    "medical_signal" -> Res.string.main_hold_reason_medical_signal
-    else -> when (tier) {
-        "MedicalReferral" -> Res.string.main_hold_reason_doctor
-        "Pain" -> Res.string.main_hold_reason_pain
-        "Illness" -> Res.string.main_hold_reason_illness
-        "ObjectivePerformance" -> Res.string.main_hold_reason_performance
-        "SubjectiveMultiDay" -> Res.string.main_hold_reason_checkins
-        "HrvTrend" -> Res.string.main_hold_reason_hrv
-        "SingleDayMarker" -> Res.string.main_hold_reason_single_day
-        else -> Res.string.main_hold_reason_generic
+ *  vocabulary like "red flag" or "tier". A pregnancy reads like its own
+ *  Profile row; [pregnancyWarning] (a warning sign is on) says to stop and
+ *  seek care. */
+internal fun holdReasonLineRes(holdReason: HoldReason?, tier: SafetyTier?, pregnancyWarning: Boolean): StringResource = when (holdReason) {
+    HoldReason.Pain -> Res.string.main_hold_reason_pain
+    HoldReason.Illness -> Res.string.main_hold_reason_illness
+    HoldReason.AcuteIllnessProfile -> Res.string.main_hold_reason_ill_profile
+    HoldReason.Youth -> Res.string.main_hold_reason_youth
+    HoldReason.Pregnancy -> if (pregnancyWarning) Res.string.main_hold_reason_pregnancy_warning else Res.string.main_hold_reason_pregnancy
+    HoldReason.Parq, HoldReason.Reds, HoldReason.InjuryRehab, HoldReason.Symptomatic -> Res.string.main_hold_reason_doctor
+    HoldReason.MedicalSignal -> Res.string.main_hold_reason_medical_signal
+    null -> when (tier) {
+        SafetyTier.MedicalReferral -> Res.string.main_hold_reason_doctor
+        SafetyTier.Pain -> Res.string.main_hold_reason_pain
+        SafetyTier.Illness -> Res.string.main_hold_reason_illness
+        SafetyTier.ObjectivePerformance -> Res.string.main_hold_reason_performance
+        SafetyTier.SubjectiveMultiDay -> Res.string.main_hold_reason_checkins
+        SafetyTier.HrvTrend -> Res.string.main_hold_reason_hrv
+        SafetyTier.SingleDayMarker -> Res.string.main_hold_reason_single_day
+        null -> Res.string.main_hold_reason_generic
     }
 }
 
@@ -191,7 +191,7 @@ internal fun SafetyBannerHost(
 ) {
     var confirmReadiness by rememberSaveable { mutableStateOf(false) }
     var removeReport by rememberSaveable { mutableStateOf<ReadinessSignal?>(null) }
-    var resolveHoldSignal by rememberSaveable { mutableStateOf<String?>(null) }
+    var resolveHoldSignal by rememberSaveable { mutableStateOf<ReadinessSignal?>(null) }
     val action = holdAction(model.hold_reason, model.safety_tier)
     val onAction: (() -> Unit)? = when (action) {
         HoldAction.RemovePain -> { { removeReport = ReadinessSignal.Pain } }
@@ -256,7 +256,7 @@ internal fun RemoveReportDialog(
         confirmLabel = stringResource(Res.string.main_delete),
         onDismiss = onDismiss,
         onClear = {
-            val row = model.readiness_summary.firstOrNull { it.signal == signal.name }
+            val row = model.readiness_summary.firstOrNull { it.signal == signal }
             val restore: Event? = when {
                 illness && row != null -> Event.SubmitReadiness(signal, row.value, AppClock.nowSec())
                 !illness && lastPain != null -> Event.SubmitReadiness(signal, 1.0, AppClock.nowSec(), pain = lastPain)
@@ -324,7 +324,7 @@ private fun SafetyBanner(
     // A profile health answer (or a reported warning sign) is not a readiness
     // report, so the "?" fallback copy must not call it one.
     val profileHold = action == HoldAction.ReviewHealth ||
-        action == HoldAction.EndIllness || model.hold_reason == "medical_signal"
+        action == HoldAction.EndIllness || model.hold_reason == HoldReason.MedicalSignal
     // Sub-line: the characterized pain detail when we have it ("right
     // knee · sharp · 6/10"), else the reason the hold applies.
     val pregnancyWarning = model.profile?.health?.pregnancy_warning_sign == true
@@ -379,7 +379,7 @@ private fun SafetyBanner(
         val paused: @Composable () -> Unit = {
             Text(
                 pausedText ?: stringResource(
-                    if (model.hold_reason == "pregnancy" && !pregnancyWarning) {
+                    if (model.hold_reason == HoldReason.Pregnancy && !pregnancyWarning) {
                         Res.string.main_hold_paused_pregnancy
                     } else {
                         Res.string.main_programming_paused
@@ -618,11 +618,11 @@ internal fun HoldResolveDialog(
     )
 }
 
-/** The evidence behind the active hold: the headline's "safety_hold" rung (it
+/** The evidence behind the active hold: the headline's safety-hold rung (it
  *  also covers a gates-only medical referral, which emits no adjustment row),
  *  else the top safety-critical adjustment. */
 internal fun holdEvidence(model: ViewModel): AdjustmentView? =
-    model.today_headline?.takeIf { it.kind == "safety_hold" && it.summary.isNotBlank() }
+    model.today_headline.takeIf { it.kind == HeadlineKind.SafetyHold && it.summary.isNotBlank() }
         ?.let { AdjustmentView(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.why) }
         ?: dominantSafetyAdjustment(model)
 
@@ -634,20 +634,14 @@ internal fun holdEvidence(model: ViewModel): AdjustmentView? =
  */
 internal fun holdResolutionEvents(
     resolution: HoldResolutionView,
-    profile: ProfileView?,
+    profile: Profile?,
     today: Long,
     nowSec: Long,
-): List<Event> {
-    val signal = ReadinessSignal.entries.firstOrNull { it.name == resolution.signal } ?: run {
-        PlatformLog.w("SafetyBanner", "unknown hold signal \"${resolution.signal}\", nothing to resolve")
-        return emptyList()
-    }
-    return buildList {
-        add(Event.ResolveHold(signal, nowSec))
-        if (resolution.ends_profile_illness && profile != null) {
-            val draft = Event.SetProfile.from(profile)
-            add(draft.copy(health = draft.health.copy(acute_illness = false)).effectiveFrom(today))
-        }
+): List<Event> = buildList {
+    add(Event.ResolveHold(resolution.signal, nowSec))
+    if (resolution.ends_profile_illness && profile != null) {
+        val draft = Event.SetProfile.from(profile)
+        add(draft.copy(health = draft.health.copy(acute_illness = false)).effectiveFrom(today))
     }
 }
 
@@ -660,7 +654,7 @@ internal fun holdResolutionEvents(
  */
 // l10n: needs context plumbing (pure display helper, no Context; builds a joined phrase)
 internal fun painSubline(model: ViewModel, echo: PainDetail?): String? {
-    val coreDetail = model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail
+    val coreDetail = model.readiness_summary.firstOrNull { it.signal == ReadinessSignal.Pain }?.detail
     if (!coreDetail.isNullOrBlank()) return coreDetail
     if (echo == null) return null
     val parts = buildList {

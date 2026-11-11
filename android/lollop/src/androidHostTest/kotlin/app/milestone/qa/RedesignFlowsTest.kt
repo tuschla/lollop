@@ -37,7 +37,9 @@ import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.TestClock
 import app.milestone.TestSink
+import app.milestone.WorkoutType
 import app.milestone.setupPrefs
+import app.milestone.train_blocked
 import java.io.File
 import java.util.Locale
 import org.junit.After
@@ -348,7 +350,7 @@ class RedesignFlowsTest {
         rule.onAllNodes(hasText(str(R.string.log_report_pain)) and hasClickAction())[0].performClick()
         // The log gets the report before the core builds its view: wait for the
         // published model too, or the card below may not exist yet.
-        waitForState { painReports().size == 1 && EventDispatcher.model.value!!.readiness_summary.any { it.signal == "Pain" } }
+        waitForState { painReports().size == 1 && EventDispatcher.model.value!!.readiness_summary.any { it.signal == ReadinessSignal.Pain } }
         val sent = painReports().single()["pain"]!!.toString()
         assertTrue(sent, sent.contains("Left knee") && sent.contains("TendonLoadRelated") && sent.contains("\"severity\":3"))
         val vm = EventDispatcher.model.value!!
@@ -362,14 +364,14 @@ class RedesignFlowsTest {
         tapDialogButton(R.string.main_cancel)
         rule.waitForIdle()
         assertFalse("Cancel deletes nothing", loggedVariants().contains("RemoveReadiness"))
-        assertTrue(EventDispatcher.model.value!!.readiness_summary.any { it.signal == "Pain" })
+        assertTrue(EventDispatcher.model.value!!.readiness_summary.any { it.signal == ReadinessSignal.Pain })
 
         rule.onNode(delete).performScrollTo().performClick()
         tapDialogButton(R.string.main_delete)
-        waitForState { EventDispatcher.model.value!!.readiness_summary.none { it.signal == "Pain" } }
+        waitForState { EventDispatcher.model.value!!.readiness_summary.none { it.signal == ReadinessSignal.Pain } }
         waitForAny(hasText(str(R.string.main_report_removed)))
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value!!.readiness_summary.any { it.signal == "Pain" } }
+        waitForState { EventDispatcher.model.value!!.readiness_summary.any { it.signal == ReadinessSignal.Pain } }
         val restored = painReports().last()["pain"]!!.toString()
         assertTrue("Undo restores the area, kind and severity: $restored",
             restored.contains("Left knee") && restored.contains("TendonLoadRelated") && restored.contains("\"severity\":3"))
@@ -502,7 +504,7 @@ class RedesignFlowsTest {
         rule.onNode(hasTestTag("run-type-Tempo")).performScrollTo().performClick()
         rule.onNode(hasTestTag("run-rate-save")).performScrollTo().performClick()
         waitForState { ratedRun().session_rpe == 7 }
-        assertEquals("Tempo", ratedRun().workout_type)
+        assertEquals(WorkoutType.Tempo, ratedRun().workout_type)
         assertEquals(1, amendMetas().size)
         rule.onNodeWithTagScrolled("run-log-effort")
             .assert(hasText(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7)), substring = true))
@@ -522,7 +524,7 @@ class RedesignFlowsTest {
         )
         rule.onNode(hasTestTag("run-rate-save")).performScrollTo().performClick()
         waitForState { ratedRun().session_rpe == null }
-        assertEquals("clearing the effort keeps the type", "Tempo", ratedRun().workout_type)
+        assertEquals("clearing the effort keeps the type", WorkoutType.Tempo, ratedRun().workout_type)
         rule.onNodeWithTagScrolled("run-log-effort").assert(hasText(str(R.string.run_rate_title), substring = true))
         val last = amendMetas().last()
         assertTrue("the clear is sent as null: $last", last["session_rpe"].toString() == "null")
@@ -677,7 +679,7 @@ class RedesignFlowsTest {
         val back = ratedRun()
         assertEquals(at * 1000, back.entry_id)
         assertEquals("Undo keeps the rating", 6, back.session_rpe)
-        assertEquals("Undo keeps the type", "LongRun", back.workout_type)
+        assertEquals("Undo keeps the type", WorkoutType.LongRun, back.workout_type)
         assertEquals(5.0, back.distance_km, 1e-6)
     }
 

@@ -2094,13 +2094,12 @@ fn parse_gpx(doc: &str) -> Vec<Vec<GpsPoint>> {
 }
 
 /// `restoreEventFor` for a GPS run (a route, or a track QC left unmeasurable):
-/// the fixes rebuilt from the core's own GPX export (the registry the last
-/// `view()` on this thread refreshed); `None` when fewer than two fixes come
-/// back, where the shell offers no Undo.
-fn restore_gps_run(v: &RunResultView) -> Option<Event> {
+/// the fixes rebuilt from the core's own GPX export of `model`'s run; `None`
+/// when fewer than two fixes come back, where the shell offers no Undo.
+fn restore_gps_run(model: &Model, v: &RunResultView) -> Option<Event> {
     let mut points = Vec::new();
     let mut segment_starts = Vec::new();
-    for seg in parse_gpx(&export_run_gpx(v.entry_id, v.observed_at)) {
+    for seg in parse_gpx(&export_run_gpx(model, v.entry_id, v.observed_at)) {
         if seg.is_empty() {
             continue;
         }
@@ -2200,7 +2199,7 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let row = rows.swap_remove(g.rng.below(rows.len() as u64) as usize);
         let restore = match &row {
             Row::Lift(v) => Some(restore_lift(v)),
-            Row::Run(v) if gps || v.gps_unmeasurable => restore_gps_run(v),
+            Row::Run(v) if gps || v.gps_unmeasurable => restore_gps_run(&model, v),
             Row::Run(v) => Some(restore_manual_run(v)),
             Row::Activity(a) => Some(restore_activity(a)),
         };
@@ -2983,7 +2982,7 @@ fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
     let before = app.view(&model);
     let row = before.runs[0].clone();
     assert!(row.gps_unmeasurable && !row.has_gpx, "{}", row.summary);
-    let restore = restore_gps_run(&row).expect("the recorded fixes export for Undo");
+    let restore = restore_gps_run(&model, &row).expect("the recorded fixes export for Undo");
     let _ = app.update(delete_of(EntryKind::Run, 31, at), &mut model);
     let _ = app.update(restore, &mut model);
     assert_eq!(vm_json(&before), vm_json(&app.view(&model)));

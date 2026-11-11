@@ -16,7 +16,7 @@ internal interface BootLedger {
     var bootHandled: Boolean
 
     /** The (epoch day, UTC offset) the core was last told by SetToday, or null. */
-    var lastToday: Pair<Long, Int>?
+    var lastToday: Pair<Long, Long>?
 
     /** The model the queue last published, or null before the first. */
     val published: ViewModel?
@@ -48,7 +48,7 @@ internal suspend fun bootTurn(
     store: KeyValueStore,
     ledger: BootLedger,
     restore: () -> Boolean,
-    today: Pair<Long, Int> = todayEpochDay() to utcOffsetSec(),
+    today: Pair<Long, Long> = todayEpochDay() to utcOffsetSec(),
     planDay: () -> Long = ::todayEpochDay,
 ): BootTurn? {
     if (!ledger.bootHandled && !withContext(CoreDispatcher) { engine.probe() }) return null

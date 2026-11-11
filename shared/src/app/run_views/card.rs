@@ -190,8 +190,8 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         // The ~0.5 MB GPX document never rides the list payload. A GPS run
         // reaching here has ≥2 usable fixes (the degenerate case returned
         // above), so it HAS an exportable route; the shell fetches the document
-        // on demand via the `exportGpx` FFI query (see [`export_run_gpx`]) only
-        // for the one run it inspects.
+        // on demand through the bridge's `ExportGpx` op ([`export_run_gpx`])
+        // only for the one run it inspects.
         has_gpx: track.len() >= 2,
         gps_unmeasurable: false,
         observed_at: r.observed_at,

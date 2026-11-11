@@ -325,20 +325,14 @@ internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqItem? 
  *  is made (a run logged earlier that day stays on the profile it was logged
  *  under). An undated SetProfile replaces the whole profile history (tests only). */
 internal fun Event.SetProfile.effectiveFrom(today: Long): Event.SetProfile =
-    copy(effectiveFromEpochDay = today, editedAtSec = AppClock.nowSec())
+    copy(effectiveFromEpochDay = today, editedAt = AppClock.nowSec())
 
-/**
- * Rebuild a draft from the core-echoed profile (post log-replay hydration).
- * Runs on the first frame, so an unknown enum name (a forward-incompatible
- * log line, or a future core/shell variant divergence) must fall back to a
- * SEED default rather than throwing `valueOf` into a launch crash: the same
- * drop-don't-crash stance the FFI layer takes on replay.
- */
-internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
-    progressionCadence = enumOr(p.progression_cadence, SEED.progressionCadence),
-    liftGoal = enumOr(p.lift_goal, SEED.liftGoal),
-    goalDistance = enumOr(p.goal_distance, SEED.goalDistance),
-    concurrentGoal = enumOr(p.concurrent_goal, SEED.concurrentGoal),
+/** Rebuild a draft from the core-echoed profile (post log-replay hydration). */
+internal fun Event.SetProfile.Companion.from(p: Profile) = Event.SetProfile(
+    progressionCadence = p.progression_cadence,
+    liftGoal = p.lift_goal,
+    goalDistance = p.goal_distance,
+    concurrentGoal = p.concurrent_goal,
     weeklySets = p.weekly_sets,
     runningDaysPerWeek = p.running_days_per_week,
     runningKmPerWeek = p.running_km_per_week,
@@ -353,12 +347,9 @@ internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
     // Drop the core-DERIVED youth flag from the editable draft so a later
     // edit never re-asserts it (youth is owned by the core, keyed off age).
     health = p.health.copy(youth = false),
-    // Values are "Weights"|"Calisthenics", matching the enum names exactly.
-    resistanceModality = enumOr(p.resistance_modality, SEED.resistanceModality),
+    resistanceModality = p.resistance_modality,
     highLoadBlock = p.high_load_block,
-    // Bare Rust variant name → enum; absent stays unset, an unknown value falls
-    // back to unset (same drop-don't-crash stance as enumOr below).
-    environment = p.environment?.let { enumOrNull<Environment>(it) },
+    environment = p.environment,
     envTempC = p.env_temp_c,
     envAltitudeM = p.env_altitude_m,
     weeksOff = p.weeks_off,
@@ -374,16 +365,6 @@ internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
     runnerStrength = p.runner_strength,
     birthEpochDay = p.birth_epoch_day,
 )
-
-/** The [T] named [name], or null (logged) when the core sent a name this shell doesn't know. */
-private inline fun <reified T : Enum<T>> enumOrNull(name: String): T? =
-    enumValues<T>().firstOrNull { it.name == name }
-        ?: run {
-            PlatformLog.w("ProfileEditor", "unknown ${T::class.simpleName} \"$name\"")
-            null
-        }
-
-private inline fun <reified T : Enum<T>> enumOr(name: String, default: T): T = enumOrNull(name) ?: default
 
 /**
  * Weekly running-volume SCALE in the user's distance unit (ProfileEditor

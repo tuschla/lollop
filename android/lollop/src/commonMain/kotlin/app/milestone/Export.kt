@@ -16,7 +16,7 @@ import kotlinx.serialization.json.longOrNull
 /**
  * Write a core-produced GPX document to a share-temp file and open the platform
  * share sheet so the user can hand it to Strava/Garmin/Komoot/Drive/etc. The GPX
- * string itself is built on demand in the Rust core ([CoreBridge.exportGpx]); the
+ * string itself is built on demand in the Rust core ([DurableCore.runGpx]); the
  * shell only persists + shares.
  *
  * The filename the user sees in the share target / saves to Drive is the run's own
@@ -38,7 +38,7 @@ private fun Int.twoDigits(): String = toString().padStart(2, '0')
 // ---------------------------------------------------------------------------
 // Full-data export / import: the whole event log is the source of truth, so a
 // backup is just the compacted NDJSON, and a restore replaces the log wholesale
-// and lets the core replay it ([restartForImport]). Kept out of the OS auto-backup
+// and lets the core replay it ([AppRuntime.requestReboot]). Kept out of the OS auto-backup
 // (see res/xml/backup_rules.xml) so the user moves it deliberately.
 // ---------------------------------------------------------------------------
 
@@ -226,9 +226,9 @@ enum class DataImportResult { Replaced, RunInProgress, Failed }
  * imported file (it would replay on top of it), and a cancel can't strand the old
  * in-memory model over the new file. A failed write (an OutOfMemoryError
  * included: see [isFatalToVm]) re-attaches the original log and reports
- * [DataImportResult.Failed]. Refused while a run is recording or armed,
- * because the restart that must follow ends the tracking service. On
- * [DataImportResult.Replaced] the caller restarts with [restartForImport].
+ * [DataImportResult.Failed]. Refused while a run is recording or armed: the
+ * reboot that must follow replaces the model the run would be saved into. On
+ * [DataImportResult.Replaced] the caller reboots with [AppRuntime.requestReboot].
  *
  * The "plan removed" marker ([KEY_PLAN_CLEARED]) describes the log, so it is set
  * from the imported one (its last plan line is a `ClearPlan`, see [readDataExport]):
@@ -301,11 +301,3 @@ private fun renameOverViaBackup(tmp: AppPath, log: AppPath): Boolean {
     if (moved) AppFiles.rename(bak, log)
     return false
 }
-
-/** Boot into the replaced log after [replaceEventLog] (with [KEY_RESTORED_ENTRIES]
- *  committed, so the boot confirms what it restored). Android: start the launcher
- *  activity as a fresh task from this FOREGROUND [ctx] (a start from a backgrounded,
- *  exiting process can be blocked), then end the process so the core rebuilds from
- *  the imported log. iOS, which can't restart its process: empty the core
- *  ([DurableCore.resetForReboot]) and re-run the boot ([requestReboot]) in process. */
-internal expect suspend fun restartForImport(ctx: PlatformContext)

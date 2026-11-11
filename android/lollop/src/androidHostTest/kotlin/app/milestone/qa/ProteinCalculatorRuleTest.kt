@@ -14,10 +14,11 @@ import app.milestone.CoachTool
 import app.milestone.CoachToolSheet
 import app.milestone.Event
 import app.milestone.MilestoneTheme
-import app.milestone.ProfileView
+import app.milestone.Profile
 import app.milestone.ProteinInputView
 import app.milestone.R
 import app.milestone.ViewModel
+import app.milestone.toJson
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -37,7 +38,7 @@ class ProteinCalculatorRuleTest {
     val rule = createAndroidComposeRule<ComponentActivity>()
 
     private fun model(age: Double?, input: ProteinInputView? = null) =
-        ViewModel(profile = ProfileView(age_years = age, bodyweight_kg = 80.0), protein_input = input)
+        ViewModel(profile = Profile(age_years = age, bodyweight_kg = 80.0), protein_input = input)
 
     private fun showRowAndSheet(vm: ViewModel, onEvent: (Event) -> Unit = {}) {
         rule.setContent {

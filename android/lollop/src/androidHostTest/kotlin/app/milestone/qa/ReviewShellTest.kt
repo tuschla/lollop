@@ -652,9 +652,11 @@ class ReviewShellComponentTest {
 
     /** With the clock and zone pinned (Monday 2026-09-21 10:00:37, UTC), so the day
      *  before is in the picker's month. The seconds past the minute are what a real
-     *  clock has and a date-only pick drops, so "same day" can't pass as "same instant". */
+     *  clock has and a date-only pick drops, so "same day" can't pass as "same instant".
+     *  The process starts on [TestClock], which this class has no other reset to install. */
     private fun pinnedClock(body: () -> Unit) {
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        AppRuntime.resetForTest(clock = TestClock)
         TestClock.offsetMillis = QaHarness.PINNED_NOW_MILLIS + 37_000L - System.currentTimeMillis()
         try {
             body()

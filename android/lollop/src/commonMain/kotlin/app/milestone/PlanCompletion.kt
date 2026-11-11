@@ -657,7 +657,7 @@ private fun lastLine(item: PrescriptionView): String? = when {
 private fun CalisControls(
     calis: CalisItemView,
     unplaced: Boolean,
-    onSetRung: ((CalisLadder, Int) -> Unit)?,
+    onSetRung: ((LadderId, Int) -> Unit)?,
 ) {
     if (calis.needs_effort_rating) FaceLine(stringResource(Res.string.plan_calis_rate_effort))
     val setRung = onSetRung ?: return
@@ -759,7 +759,7 @@ internal fun SessionItemList(
     onReopen: (PrescriptionView) -> Unit,
     // The hero's extras for its current card (see [OpenPlanItemCard]).
     unplaced: (PrescriptionView) -> Boolean = { false },
-    onSetRung: ((CalisLadder, Int) -> Unit)? = null,
+    onSetRung: ((LadderId, Int) -> Unit)? = null,
     guide: @Composable (PrescriptionView) -> List<String> = { emptyList() },
 ) {
     val (openItems, doneItems) = items.partition { !it.done }
@@ -822,7 +822,7 @@ internal fun OpenPlanItemCard(
     // Calisthenics: the athlete has no placement on this item's ladder yet.
     unplaced: Boolean = false,
     // Calisthenics Easier/Harder: null hides the chips (past days).
-    onSetRung: ((CalisLadder, Int) -> Unit)? = null,
+    onSetRung: ((LadderId, Int) -> Unit)? = null,
     // Plain-language lines for a newcomer (what the prescription means, how to
     // pick a first weight), shown under the prescription. Empty once the athlete
     // has a few sessions behind them.
@@ -1047,8 +1047,8 @@ internal fun DonePlanItemRow(
     painArea: String?,
 ) {
     val tag = planItemTag(item, isRun, isCheck)
-    val stopped = !isCheck && item.status == "stopped_pain"
-    val skipped = !isCheck && item.status in SkippedItemStatuses
+    val stopped = !isCheck && item.status == ItemStatus.StoppedPain
+    val skipped = !isCheck && item.status.isSkipped
     val progress = when {
         isCheck -> ""
         isRun -> runProgressText(currentResources(), item, rememberDistanceUnit())
@@ -1085,22 +1085,19 @@ internal fun DonePlanItemRow(
     }
 }
 
-/** Item statuses that read as a skip (a neutral dash, never the done ✓). */
-internal val SkippedItemStatuses = setOf("stopped_pain", "skipped_pain", "skipped")
-
 /** What a settled item's [status] reads after its [progress] (sets "k/N", a
  *  run's totals or a done row's summary): a skip or pain stop names the reported
  *  [painArea]; a short or lighter result says so; anything else is [progress]. */
 @Composable
-internal fun settledLabel(status: String, progress: String, painArea: String?): String = when {
-    status == "stopped_pain" -> stoppedLabel(painArea)
-    status == "skipped_pain" -> painArea
+internal fun settledLabel(status: ItemStatus, progress: String, painArea: String?): String = when {
+    status == ItemStatus.StoppedPain -> stoppedLabel(painArea)
+    status == ItemStatus.SkippedPain -> painArea
         ?.let { stringResource(Res.string.plan_skipped_pain_area, it.lowercase()) }
         ?: stringResource(Res.string.plan_skipped_pain)
-    status == "skipped" -> stringResource(Res.string.plan_skipped)
+    status == ItemStatus.Skipped -> stringResource(Res.string.plan_skipped)
     progress.isBlank() -> progress
-    status == "done_short" -> stringResource(Res.string.plan_done_short, progress)
-    status == "done_lighter" -> stringResource(Res.string.plan_done_lighter, progress)
+    status == ItemStatus.DoneShort -> stringResource(Res.string.plan_done_short, progress)
+    status == ItemStatus.DoneLighter -> stringResource(Res.string.plan_done_lighter, progress)
     else -> progress
 }
 

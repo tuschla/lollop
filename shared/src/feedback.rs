@@ -18,7 +18,9 @@ use crate::schema::Recommended;
 // ---------------------------------------------------------------------------
 
 /// The message category the engine emits for a session (File 05 decision tree).
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq,
+)]
 pub enum FeedbackCategory {
     /// Bone-stress red flag: stop + refer (feedback-032/033/034). Suppresses praise.
     ConcernInjury,
@@ -86,6 +88,7 @@ pub enum CorrectiveTrigger {
 #[derive(
     serde::Serialize,
     serde::Deserialize,
+    crate::wire::Wire,
     Debug,
     Clone,
     Copy,
@@ -100,13 +103,6 @@ pub struct SafetyScreen {
     /// Compulsive pattern: training through pain, distress at missed sessions,
     /// rapidly escalating volume (feedback-039).
     pub compulsive_flag: bool,
-    /// Weekly RED-S screen positive (File 13 ready-upd-005, REDS-SCREEN-001):
-    /// missed or longer cycles over the last 3 months (not explained by
-    /// pregnancy or contraception), or noticeably lower sex drive / fewer
-    /// morning erections for several weeks. Routes to the RED-S referral
-    /// feedback and the deficit refusal, never a programming variable.
-    #[serde(default)]
-    pub reds_signal_reported: bool,
     /// Count of co-occurring NFOR signals (feedback-036; >=2 fires); the legacy
     /// wire count, overridden by `overtraining_signs` when present.
     pub overtraining_signal_count: u8,
@@ -115,10 +111,19 @@ pub struct SafetyScreen {
     /// single noisy night"). `None` = duration untracked by the shell, the
     /// gate then errs protective and still fires on count alone; `Some(w)`
     /// requires w >= 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub overtraining_signal_weeks: Option<f64>,
     /// Which of the four listed overtraining signs were ticked. `Some` → the
     /// effective signal count is the ticked count.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub overtraining_signs: Option<OvertrainingSigns>,
+    /// Weekly RED-S screen positive (File 13 ready-upd-005, REDS-SCREEN-001):
+    /// missed or longer cycles over the last 3 months (not explained by
+    /// pregnancy or contraception), or noticeably lower sex drive / fewer
+    /// morning erections for several weeks. Routes to the RED-S referral
+    /// feedback and the deficit refusal, never a programming variable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reds_signal_reported: bool,
 }
 
 impl SafetyScreen {
@@ -144,6 +149,7 @@ impl SafetyScreen {
 #[derive(
     serde::Serialize,
     serde::Deserialize,
+    crate::wire::Wire,
     Debug,
     Clone,
     Copy,
@@ -476,6 +482,7 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
 #[derive(
     serde::Serialize,
     serde::Deserialize,
+    crate::wire::Wire,
     Debug,
     Clone,
     Copy,

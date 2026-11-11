@@ -221,7 +221,7 @@ private fun RunLogSection(
 ) {
     var loadOpen by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(false) }
     val rpe = run.session_rpe
-    val type = WorkoutType.fromWire(run.workout_type)
+    val type = run.workout_type
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         TileOverline(stringResource(Res.string.run_your_log))
         PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
@@ -254,7 +254,7 @@ private fun RunLogSection(
                     Text(stringResource(Res.string.history_training_load_explain), color = OnBgMuted, style = Type.Caption)
                     srpeLoad?.let { sl ->
                         ClaimMarkers(
-                            grades = listOfNotNull(sl.grade.takeIf { it.isNotBlank() }),
+                            grades = listOfNotNull(sl.grade),
                             contested = false,
                             citations = listOfNotNull(sl.citation.takeIf { it.isNotBlank() }),
                         )
@@ -382,7 +382,7 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
 @Composable
 private fun RateRunSheet(run: RunResultView, onDismiss: () -> Unit, onSave: (Int?, WorkoutType?) -> Unit) {
     var rpe by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(run.session_rpe) }
-    var type by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(WorkoutType.fromWire(run.workout_type)) }
+    var type by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(run.workout_type) }
     AppSheet(onDismiss = onDismiss) {
         Column(
             modifier = Modifier.sheetBody(rememberScrollState()),

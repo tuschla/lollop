@@ -1,20 +1,32 @@
-//! Each test drives its own [`CoreBridge`], so tests never see each other's
-//! events. The view memos and the GPX registry the core keeps are
-//! thread-local under `cfg(test)`, and the test harness runs each test on its
-//! own thread.
+//! Each test drives its own [`CoreBridge`] (its own core on its own thread),
+//! so tests never see each other's events.
+
+use std::borrow::Cow;
 
 use serde_json::{Value, json};
 
-use super::{CoreBridge, ErrorKind};
+use super::bridge::{CoreBridge, Input, answer};
+use super::ops::Op;
+use crate::envelope::ErrorKind;
+
+/// Op `op`'s answer to `input`.
+fn call(core: &CoreBridge, op: Op, input: &[u8]) -> Vec<u8> {
+    core.call(op.code(), Input::Bytes(Cow::Borrowed(input)))
+}
+
+/// An op that reads no core state, answered by a fresh core.
+fn pure(op: Op, input: &[u8]) -> Value {
+    serde_json::from_slice(&call(&CoreBridge::new(), op, input)).unwrap()
+}
 
 /// Send one event's wire JSON; the answer, parsed.
 fn send(core: &CoreBridge, event: &Value) -> Value {
-    serde_json::from_slice(&core.process_event(event.to_string().as_bytes())).unwrap()
+    serde_json::from_slice(&call(core, Op::Update, event.to_string().as_bytes())).unwrap()
 }
 
 /// The current view, parsed.
 fn view(core: &CoreBridge) -> Value {
-    serde_json::from_slice(&core.view()).unwrap()
+    serde_json::from_slice(&call(core, Op::View, b"")).unwrap()
 }
 
 fn profile() -> Value {
@@ -43,6 +55,7 @@ fn error_kinds_serialise_to_the_names_the_shell_reads() {
         (ErrorKind::NotFit, "not_fit"),
         (ErrorKind::Damaged, "damaged"),
         (ErrorKind::NoTrack, "no_track"),
+        (ErrorKind::TooShort, "too_short"),
         (ErrorKind::NotARun, "not_a_run"),
     ];
     for (kind, name) in kinds {
@@ -58,7 +71,7 @@ fn fit_errors_map_to_their_shell_kinds() {
         (FitError::NotFit, "not_fit"),
         (FitError::Damaged, "damaged"),
         (FitError::NoTrack, "no_track"),
-        (FitError::TooShort, "no_track"),
+        (FitError::TooShort, "too_short"),
         (FitError::NotARun("cycling".to_owned()), "not_a_run"),
     ];
     for (err, kind) in cases {
@@ -339,7 +352,7 @@ fn core_panic_resets_the_bridge_and_the_next_event_is_processed() {
     // inner model RwLock would otherwise re-panic every later update/view for
     // the process lifetime. Panicking while HOLDING the bridge lock exercises
     // the poison path; the reset must leave a working bridge behind.
-    let out = core.update_with(|_| panic!("boom: \"quoted\" payload"));
+    let out = answer(core.on_core(Op::Update, |_| panic!("boom: \"quoted\" payload")));
     let v: Value = serde_json::from_slice(&out).expect("error JSON parses");
     assert_eq!(v["error"]["kind"], "panic_reset");
     assert_eq!(v["error"]["context"], "update");
@@ -369,15 +382,19 @@ fn core_panic_resets_the_bridge_and_the_next_event_is_processed() {
 fn a_view_path_panic_reports_panic_without_resetting_the_bridge() {
     let core = CoreBridge::new();
     send(&core, &profile());
-    let before = core.view();
+    let before = call(&core, Op::View, b"");
     // `view` only takes crux's model READ guard, which a panic cannot poison,
     // so a caught view panic must return the NON-resetting `panic` kind and
     // leave the model intact (the shell keeps its last good view).
-    let out = core.view_with(|_| panic!("view boom"));
+    let out = answer(core.on_core(Op::View, |_| panic!("view boom")));
     let v: Value = serde_json::from_slice(&out).expect("error JSON parses");
     assert_eq!(v["error"]["kind"], "panic");
     assert_eq!(v["error"]["context"], "view");
-    assert_eq!(core.view(), before, "the core survives a view panic");
+    assert_eq!(
+        call(&core, Op::View, b""),
+        before,
+        "the core survives a view panic"
+    );
 }
 
 #[test]
@@ -791,8 +808,7 @@ fn parse_fit_json_reports_a_plain_error_for_garbage_bytes() {
     // No model or event log: the firewalled wrapper around
     // `crate::fit::parse_fit` shapes an `{"error":{...}}` object rather than
     // propagating a Rust `Result` or panicking across the FFI boundary.
-    let out = super::parse_fit_json(b"not a fit file");
-    let v: Value = serde_json::from_slice(&out).expect("error JSON parses");
+    let v = pure(Op::ParseFit, b"not a fit file");
     assert_eq!(v["error"]["kind"], "not_fit", "{v}");
     assert_eq!(v["error"]["context"], "", "{v}");
 }
@@ -806,8 +822,7 @@ fn parse_fit_json_reports_a_bike_ride_as_not_a_run() {
         env!("CARGO_MANIFEST_DIR")
     );
     let bytes = std::fs::read(&path).expect("fixture should read");
-    let out = super::parse_fit_json(&bytes);
-    let v: Value = serde_json::from_slice(&out).expect("error JSON parses");
+    let v = pure(Op::ParseFit, &bytes);
     assert_eq!(v["error"]["kind"], "not_a_run", "{v}");
     assert_eq!(v["error"]["context"], "cycling", "{v}");
 }
@@ -815,14 +830,13 @@ fn parse_fit_json_reports_a_bike_ride_as_not_a_run() {
 #[test]
 fn parse_fit_json_refuses_a_fragment_too_short_to_be_a_run() {
     // The real `Activity.fit` running file holds a 13 s, ~3 m fragment: it
-    // parses, but the import gate reports it as `no_track` / `too_short`
-    // instead of handing the shell a "run".
+    // parses, but the import gate reports it as `too_short` instead of
+    // handing the shell a "run".
     let path = format!("{}/tests/fixtures/Activity.fit", env!("CARGO_MANIFEST_DIR"));
     let bytes = std::fs::read(&path).expect("fixture should read");
-    let out = super::parse_fit_json(&bytes);
-    let v: Value = serde_json::from_slice(&out).expect("error JSON parses");
-    assert_eq!(v["error"]["kind"], "no_track", "{v}");
-    assert_eq!(v["error"]["context"], "too_short", "{v}");
+    let v = pure(Op::ParseFit, &bytes);
+    assert_eq!(v["error"]["kind"], "too_short", "{v}");
+    assert_eq!(v["error"]["context"], "", "{v}");
 }
 
 #[test]
@@ -831,7 +845,7 @@ fn malformed_event_is_dropped_without_panicking() {
     // Simulates a stale/forward-incompatible log line hitting replay: an
     // unknown variant must not unwind across the FFI boundary, and the view
     // must still serialize cleanly afterwards.
-    let out = core.process_event(br#"{"NoSuchEventVariant":{}}"#);
+    let out = call(&core, Op::Update, br#"{"NoSuchEventVariant":{}}"#);
     assert!(out.is_empty(), "a rejected event yields no effect requests");
 
     assert!(
@@ -841,20 +855,22 @@ fn malformed_event_is_dropped_without_panicking() {
 }
 
 #[test]
-fn compact_log_json_answers_none_when_a_line_cannot_be_read() {
-    // The shell decodes any JSON answer as a verdict, so a failed read is
-    // None, never an error envelope.
-    assert_eq!(super::compact_log_json(|| Err(())), None);
-    let empty: Value = serde_json::from_str(
-        &super::compact_log_json(|| Ok::<_, ()>(Vec::new())).expect("a verdict"),
-    )
-    .unwrap();
+fn compact_log_answers_an_error_when_a_line_cannot_be_read() {
+    let core = CoreBridge::new();
+    let mut unreadable = std::iter::once(Err("unreadable".to_owned()));
+    let failed: Value =
+        serde_json::from_slice(&core.call(Op::CompactLog.code(), Input::Lines(&mut unreadable)))
+            .unwrap();
+    assert_eq!(failed["error"]["kind"], "bad_input", "{failed}");
+    assert_eq!(failed["error"]["context"], "compact_log", "{failed}");
+    let mut none = std::iter::empty::<Result<Cow<'_, str>, String>>();
+    let empty: Value =
+        serde_json::from_slice(&core.call(Op::CompactLog.code(), Input::Lines(&mut none))).unwrap();
     assert_eq!(empty["dropped"], json!([]));
 }
 
-#[test]
-fn track_figures_json_previews_a_log_run_track_and_refuses_other_events() {
-    // A 3 m/s runner for 100 s, sent as the very LogRunTrack wire JSON Save uses.
+/// A 3 m/s runner for 100 s, as the LogRunTrack wire JSON Save sends.
+fn run_track(entry_id: u64) -> Value {
     let points: Vec<Value> = (0..=100)
         .map(|t| {
             json!({
@@ -865,24 +881,122 @@ fn track_figures_json_previews_a_log_run_track_and_refuses_other_events() {
             })
         })
         .collect();
-    let event = json!({
+    json!({
         "LogRunTrack": {
             "points": points,
             "hr_pct_max": 0.0,
             "longest_recent_km": 0.0,
             "observed_at": 1_100,
-            "entry_id": 1
+            "entry_id": entry_id
         }
-    });
-    let out: Value =
-        serde_json::from_slice(&super::track_figures_json(event.to_string().as_bytes())).unwrap();
+    })
+}
+
+#[test]
+fn track_figures_previews_a_log_run_track_and_refuses_other_events() {
+    let out = pure(Op::TrackFigures, run_track(1).to_string().as_bytes());
     let km = out["distance_km"].as_f64().unwrap();
     let min = out["duration_min"].as_f64().unwrap();
     assert!((km - 0.3).abs() < 1e-3, "{out}");
     assert!((min * 60.0 - 100.0).abs() < 1e-9, "{out}");
 
-    let other: Value =
-        serde_json::from_slice(&super::track_figures_json(br#""ClearRuns""#)).unwrap();
+    let other = pure(Op::TrackFigures, br#""ClearRuns""#);
     assert_eq!(other["error"]["kind"], "bad_input", "{other}");
     assert_eq!(other["error"]["context"], "track_figures", "{other}");
+}
+
+#[test]
+fn export_gpx_reads_the_logged_run_without_a_prior_view() {
+    let core = CoreBridge::new();
+    assert!(send(&core, &run_track(7)).is_array());
+    let gpx = call(
+        &core,
+        Op::ExportGpx,
+        br#"{"entry_id":7,"observed_at":1100}"#,
+    );
+    let gpx = String::from_utf8(gpx).unwrap();
+    assert!(gpx.starts_with("<?xml") && gpx.contains("<trkpt"), "{gpx}");
+    assert!(
+        call(
+            &core,
+            Op::ExportGpx,
+            br#"{"entry_id":8,"observed_at":1100}"#
+        )
+        .is_empty()
+    );
+    let bad: Value = serde_json::from_slice(&call(
+        &core,
+        Op::ExportGpx,
+        br#"{"entry_id":-1,"observed_at":0}"#,
+    ))
+    .unwrap();
+    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
+    assert_eq!(bad["error"]["context"], "export_gpx", "{bad}");
+}
+
+#[test]
+fn reset_empties_the_core_as_a_fresh_process_has_it() {
+    let core = CoreBridge::new();
+    let empty = call(&core, Op::View, b"");
+    send(&core, &profile());
+    assert_ne!(
+        call(&core, Op::View, b""),
+        empty,
+        "the profile reached the core"
+    );
+    assert!(call(&core, Op::Reset, b"").is_empty());
+    assert_eq!(
+        call(&core, Op::View, b""),
+        empty,
+        "reset leaves the empty core"
+    );
+}
+
+#[test]
+fn the_core_runs_on_the_bridges_thread_whichever_thread_calls() {
+    let core = CoreBridge::new();
+    let core_thread = || {
+        core.on_core(Op::View, |_| {
+            Ok(std::thread::current()
+                .name()
+                .unwrap_or("")
+                .as_bytes()
+                .to_vec())
+        })
+        .unwrap()
+    };
+    let here = core_thread();
+    let there = std::thread::scope(|s| s.spawn(core_thread).join().unwrap());
+    assert_eq!(here, b"lollop-core");
+    assert_eq!(there, here);
+}
+
+#[test]
+fn an_unknown_op_or_mismatched_input_is_bad_input() {
+    let core = CoreBridge::new();
+    let unknown: Value =
+        serde_json::from_slice(&core.call(u32::MAX, Input::Bytes(Cow::Borrowed(b"")))).unwrap();
+    assert_eq!(unknown["error"]["kind"], "bad_input", "{unknown}");
+    assert_eq!(unknown["error"]["context"], "call", "{unknown}");
+    let mut lines = std::iter::empty::<Result<Cow<'_, str>, String>>();
+    let mismatched: Value =
+        serde_json::from_slice(&core.call(Op::Update.code(), Input::Lines(&mut lines))).unwrap();
+    assert_eq!(mismatched["error"]["context"], "update", "{mismatched}");
+}
+
+#[test]
+fn op_contexts_are_the_snake_case_names_the_shell_reads() {
+    let names: Vec<String> = Op::ALL.iter().map(|op| op.context()).collect();
+    assert_eq!(
+        names,
+        [
+            "update",
+            "view",
+            "parse_fit",
+            "track_figures",
+            "export_gpx",
+            "compact_log",
+            "reset"
+        ]
+    );
 }

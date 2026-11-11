@@ -62,7 +62,7 @@ internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
         Event.AmendRun(
             entryId = v.entry_id, distanceKm = v.distance_km, durationMin = v.duration_min,
             hrPctMax = loggedHrPctMax(v), observedAt = v.observed_at, observedAtFallback = saved.observedAt,
-            workoutType = WorkoutType.fromWire(v.workout_type), sessionRpe = v.session_rpe,
+            workoutType = v.workout_type, sessionRpe = v.session_rpe,
             avgHrBpm = v.avg_hr_bpm,
         )
     }
@@ -86,7 +86,7 @@ internal fun EntryActionSheets(
     holdExercises: Set<String>,
     weightUnit: WeightUnit,
     // The athlete's profile, for the run editor's bpm entry.
-    profile: ProfileView?,
+    profile: Profile?,
     // The caller's ticking wall clock, so a sheet left open across midnight
     // re-labels "Today" instead of freezing at its composition time.
     nowMillis: Long,

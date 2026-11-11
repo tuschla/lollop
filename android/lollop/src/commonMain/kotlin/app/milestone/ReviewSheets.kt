@@ -185,7 +185,7 @@ private fun HalfPercentField(label: StringResource, value: Double, onPick: (Doub
 internal fun reviewAsksRun(model: ViewModel, zone: TimeZone = TimeZone.currentSystemDefault()): Boolean {
     val today = model.today()
     val plannedRun = model.week_plan.firstOrNull { it.epoch_day == today }?.let { s ->
-        sessionDiscipline(s.session_type) == "Run" ||
+        s.session_type.discipline == SessionDiscipline.Run ||
             s.items.any { it.exercise.isEmpty() && !isReturnCheckItem(it, s.session_type) }
     } == true
     return plannedRun || model.runs.any { localEpochDay(it.observed_at, zone) == today }
@@ -198,7 +198,7 @@ private val OvertrainingWeeks = listOf(0.5, 1.5, 3.0)
 /** The explicit "Nothing to report this week" check-in: every count stated as
  *  0, no sign ticked, every clinical screen answered no. Only ever sent by that
  *  button, never by Save on an untouched form. Pure. */
-internal fun weeklyAllClear(observedAt: Long): Event.SubmitReview = Event.SubmitReview(
+internal fun weeklyAllClear(observedAt: Long): Event.SubmitWeeklyCheckin = Event.SubmitWeeklyCheckin(
     bonePainRedFlag = false,
     compulsiveFlag = false,
     redsSignalReported = false,
@@ -272,8 +272,8 @@ fun WeeklyCheckinSheet(
     val dirty = answered || dateEdited
     ReportDirty(dirty, onDirtyChange)
     val savedMessage = stringResource(Res.string.log_weekly_saved)
-    fun submit(review: Event.SubmitReview) {
-        onSubmit(Event.SubmitWeeklyCheckin(review))
+    fun submit(checkin: Event.SubmitWeeklyCheckin) {
+        onSubmit(checkin)
         UiMessages.post(UiMessage(savedMessage))
     }
 
@@ -286,7 +286,7 @@ fun WeeklyCheckinSheet(
         onClose = onClose,
         onSave = {
             submit(
-                Event.SubmitReview(
+                Event.SubmitWeeklyCheckin(
                     // An unanswered screen reports nothing (the wire's "no").
                     bonePainRedFlag = bonePain == true,
                     compulsiveFlag = compulsive == true,
@@ -297,7 +297,7 @@ fun WeeklyCheckinSheet(
                     // unanswered count is omitted, never sent as 0.
                     failedKeySessions = failedKeySessions,
                     rpeLoadGapSessions = rpeLoadGapSessions,
-                    weeklyVelocityDropMs = if (velocityText.isEmpty()) null else velocityParsed,
+                    weeklyVelocityDropMS = if (velocityText.isEmpty()) null else velocityParsed,
                     observedAt = observedAt,
                 ),
             )

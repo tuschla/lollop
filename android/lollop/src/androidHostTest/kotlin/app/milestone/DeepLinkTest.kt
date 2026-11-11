@@ -97,8 +97,8 @@ class DeepLinkTest {
     // ── Routing (pure) ────────────────────────────────────────────────────
 
     private val day = 20_000L
-    private fun lift(vararg items: PrescriptionView, status: String = "next", epochDay: Long = day) =
-        SessionPlanView(epoch_day = epochDay, title = "Lower", session_type = "LiftStrength", status = status, items = items.toList())
+    private fun lift(vararg items: PrescriptionView, status: SessionStatus = SessionStatus.Next, epochDay: Long = day) =
+        SessionPlanView(epoch_day = epochDay, title = "Lower", session_type = SessionType.LiftMaxEffort, status = status, items = items.toList())
 
     private val squat = PrescriptionView(exercise = "Back Squat", sets = 3)
     private val bench = PrescriptionView(exercise = "Bench Press", sets = 3)
@@ -114,10 +114,10 @@ class DeepLinkTest {
         assertEquals("Bench Press", logSetTarget(finished))
         // A future session, a run day, no plan and a hold open the blank editor.
         assertNull(logSetTarget(liftDay.copy(next_session = lift(squat, epochDay = day + 1), week_plan = emptyList())))
-        val run = SessionPlanView(epoch_day = day, session_type = "RunEasy", status = "next", items = listOf(PrescriptionView()))
+        val run = SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, status = SessionStatus.Next, items = listOf(PrescriptionView()))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day, next_session = run, week_plan = listOf(run))))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day)))
-        assertNull(logSetTarget(liftDay.copy(hold_reason = "pain")))
+        assertNull(logSetTarget(liftDay.copy(hold_reason = HoldReason.Pain)))
     }
 
     // ── The real app ──────────────────────────────────────────────────────

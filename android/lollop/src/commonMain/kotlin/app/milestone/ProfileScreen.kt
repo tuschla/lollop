@@ -648,10 +648,9 @@ private fun restoreData(ctx: PlatformContext, res: PlatformResources, lines: Lis
     AppRuntime.scope.launch {
         when (replaceEventLog(ctx, lines)) {
             DataImportResult.Replaced -> {
-                // commit, not apply: the process ends right after (Android).
                 ctx.setupStore().edit(commit = true) { putInt(KEY_RESTORED_ENTRIES, entries) }
-                restartForImport(ctx)
-                // Only an in-process reboot (iOS) returns; its boot screen takes over.
+                // The boot screen takes over until the imported log is replayed.
+                AppRuntime.requestReboot()
                 dataRestoreRunning.value = false
             }
             DataImportResult.RunInProgress -> {

@@ -21,10 +21,14 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
+import app.milestone.HeadlineKind
 import app.milestone.HealthScreen
+import app.milestone.HoldReason
 import app.milestone.ParqItem
 import app.milestone.R
 import app.milestone.epochDayLabel
+import app.milestone.train_blocked
+import app.milestone.withParqAnswer
 import java.time.LocalDate
 import java.util.Locale
 import org.junit.After
@@ -135,7 +139,7 @@ class OwnerProfileJourneysTest {
         // The calm Today card, never the red DO NOT TRAIN banner.
         rule.assertTextCountEventually(str(R.string.main_hold_youth_title).uppercase(Locale.US), 1)
         rule.assertTextCountEventually(doNotTrain, 0)
-        assertEquals("youth", EventDispatcher.model.value!!.hold_reason)
+        assertEquals(HoldReason.Youth, EventDispatcher.model.value!!.hold_reason)
 
         rule.onNode(hasText(str(R.string.main_hold_check_age)) and hasClickAction()).performClick()
 
@@ -213,7 +217,7 @@ class OwnerProfileJourneysTest {
         assertEquals(0, rule.onAllNodes(hasText(str(R.string.main_chip_safety))).fetchSemanticsNodes().size)
         // The core's own warning instruction stays behind the banner's closed "?":
         // no card on Today restates what the banner already says.
-        val coreHold = EventDispatcher.model.value!!.today_headline?.takeIf { it.kind == "safety_hold" }?.summary.orEmpty()
+        val coreHold = EventDispatcher.model.value!!.today_headline.takeIf { it.kind == HeadlineKind.SafetyHold }?.summary.orEmpty()
         assertTrue("the core states the warning hold", coreHold.isNotBlank())
         assertEquals(0, rule.onAllNodes(hasText(coreHold, substring = true)).fetchSemanticsNodes().size)
     }
@@ -271,7 +275,7 @@ class OwnerProfileJourneysTest {
         val change = str(R.string.setup_birthday_change)
         assertTrue("the picker took the date", rule.pickBirthday(change, youthDigits))
 
-        rule.waitForState { EventDispatcher.model.value?.hold_reason == "youth" }
+        rule.waitForState { EventDispatcher.model.value?.hold_reason == HoldReason.Youth }
         // The under-18 pause pins nothing over Profile: no DO NOT TRAIN banner.
         rule.assertTextCountEventually(doNotTrain, 0)
         assertTrue(EventDispatcher.model.value!!.train_blocked)

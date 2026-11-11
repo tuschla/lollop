@@ -1,0 +1,17 @@
+[package]
+name = "wiregen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Generates the shells' wire code from the core's Rust types (README.md).
+# Depends on plain `shared` (no features): a member that enabled `ffi` would
+# unify it into every `cargo test --workspace` build.
+[dependencies]
+shared = { path = ".." }
+serde_json = "1"
+
+[lints]
+workspace = true

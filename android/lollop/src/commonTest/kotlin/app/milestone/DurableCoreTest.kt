@@ -1,5 +1,6 @@
 package app.milestone
 
+import app.milestone.core.CoreBridge
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,8 +17,8 @@ import kotlinx.serialization.json.putJsonArray
  * A stand-in for the Rust core with the parts of its contract the engine relies on:
  * an event naming a known variant ([EventLog.variantOf]) is accepted (`[]`), any
  * other line is dropped (no bytes); a [poison] line answers `panic_reset` and
- * empties the core, as the FFI firewall does; the view is `{"safety_tier":"<n>"}`
- * with n the events applied, so a test can tell a fresh view from a stand-in;
+ * empties the core, as the FFI firewall does; the view's `input_count` is the
+ * number of events applied, so a test can tell a fresh view from a stand-in;
  * compaction drops every `LogSet` a later `ClearSets` supersedes and reports
  * non-JSON lines as torn.
  */
@@ -26,11 +27,14 @@ internal class ScriptedCore : CoreBridge {
     var poison: Set<String> = emptySet()
     var viewFails = false
 
+    private fun error(kind: ErrorKind, context: String) =
+        coreJson.encodeToString(ErrorEnvelope.serializer(), ErrorEnvelope(CoreError(kind, context))).encodeToByteArray()
+
     override fun update(event: ByteArray): ByteArray {
         val line = event.decodeToString()
         if (line in poison) {
             applied.clear()
-            return """{"error":{"kind":"panic_reset","context":"update"}}""".encodeToByteArray()
+            return error(ErrorKind.PanicReset, "update")
         }
         if (EventLog.variantOf(line) == null) return ByteArray(0)
         applied += line
@@ -39,18 +43,23 @@ internal class ScriptedCore : CoreBridge {
 
     override fun view(): ByteArray =
         if (viewFails) {
-            """{"error":{"kind":"panic","context":"view"}}""".encodeToByteArray()
+            error(ErrorKind.Panic, "view")
         } else {
-            """{"safety_tier":"${applied.size}"}""".encodeToByteArray()
+            coreJson.encodeToString(ViewModel.serializer(), ViewModel(input_count = applied.size)).encodeToByteArray()
         }
 
-    override fun parseFit(bytes: ByteArray): String? = null
+    override fun parseFit(fit: ByteArray): ByteArray? = null
 
-    override fun exportGpx(entryId: Long, observedAt: Long): String = ""
+    override fun exportGpx(run: ByteArray): ByteArray = ByteArray(0)
 
-    override fun trackFigures(event: ByteArray): String? = null
+    override fun trackFigures(event: ByteArray): ByteArray? = null
 
-    override fun compactLog(lines: Array<String>): String {
+    override fun reset(): ByteArray {
+        applied.clear()
+        return ByteArray(0)
+    }
+
+    override fun compactLog(lines: Array<String>): ByteArray {
         val lastClear = lines.indexOfLast { EventLog.variantOf(it) == "ClearSets" }
         val entryId = Regex("\"entry_id\":(\\d+)")
         return buildJsonObject {
@@ -62,7 +71,7 @@ internal class ScriptedCore : CoreBridge {
             }
             put("max_entry_id", lines.maxOfOrNull { entryId.find(it)?.groupValues?.get(1)?.toLong() ?: 0L } ?: 0L)
             put("plan_removed", false)
-        }.toString()
+        }.toString().encodeToByteArray()
     }
 }
 
@@ -79,7 +88,7 @@ class DurableCoreTest {
     private val dir = newTempDir()
     private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
 
-    private fun core(script: ScriptedCore = ScriptedCore()) = script to BridgeCore(script)
+    private fun core(script: ScriptedCore = ScriptedCore()) = script to DurableCore(script)
 
     private fun set(id: Long) = Event.LogSet("Back Squat", 100.0, 5, 8.0, observedAt = 1_725_904_800, entryId = id)
 
@@ -101,7 +110,7 @@ class DurableCoreTest {
         assertTrue(first.restoreFrom(log), "no log yet: a fresh install")
         val sent = first.sendAll(listOf(set(1), set(2), Event.SetToday(20_000)))
         assertTrue(sent.accepted && sent.persisted && !sent.stale)
-        assertEquals("3", sent.view.safety_tier, "the view reflects every applied event")
+        assertEquals(3, sent.view.input_count, "the view reflects every applied event")
         assertEquals(listOf(wire(set(1)), wire(set(2))), lines(), "persisted events only, one per line")
 
         val (script, second) = core()
@@ -210,7 +219,7 @@ class DurableCoreTest {
         val r = engine.send(poison)
         assertFalse(r.accepted, "the event that reset the core is not saved")
         assertEquals(listOf(wire(set(1)), wire(today)), script.applied, "log replayed, then the clock re-sent")
-        assertEquals("2", r.view.safety_tier, "a real view of the rebuilt core, not a blank")
+        assertEquals(2, r.view.input_count, "a real view of the rebuilt core, not a blank")
         assertFalse(r.stale)
         assertEquals(listOf(wire(set(1))), lines(), "nothing appended")
     }
@@ -241,16 +250,16 @@ class DurableCoreTest {
     fun aFailingViewKeepsTheLastGoodOneAndIsStale() {
         val (script, engine) = core()
         engine.restoreFrom(log)
-        assertEquals("1", engine.send(set(1)).view.safety_tier)
+        assertEquals(1, engine.send(set(1)).view.input_count)
         script.viewFails = true
         val r = engine.send(set(2))
         assertTrue(r.accepted && r.persisted)
         assertTrue(r.stale)
-        assertEquals("1", r.view.safety_tier, "the last good view, not a blank one")
+        assertEquals(1, r.view.input_count, "the last good view, not a blank one")
         script.viewFails = false
         val fresh = engine.send(set(3))
         assertFalse(fresh.stale)
-        assertEquals("3", fresh.view.safety_tier)
+        assertEquals(3, fresh.view.input_count)
     }
 
     @Test

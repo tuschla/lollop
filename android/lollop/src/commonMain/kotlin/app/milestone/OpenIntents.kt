@@ -102,7 +102,7 @@ internal fun routeOpen(
 internal fun logSetTarget(model: ViewModel): String? {
     if (model.train_blocked) return null
     val plan = model.todaysPlan()
-    val item = if (plan != null && sessionDiscipline(plan.session_type) == "Lift") {
+    val item = if (plan != null && plan.session_type.discipline == SessionDiscipline.Lift) {
         firstOpenItem(plan.items) ?: plan.items.first()
     } else {
         val started = model.resumableLiftDay() ?: return null

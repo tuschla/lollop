@@ -8,8 +8,8 @@
 use fitparser::{FitDataRecord, Value, profile::MesgNum};
 
 /// One GPS+HR fix extracted from a FIT `record` message. Its serialization is
-/// the per-fix wire shape of the shell's `parseFit` payload (`ffi.rs`).
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+/// the per-fix wire shape of the `ParseFit` bridge op's payload.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, crate::wire::Wire)]
 pub struct FitFix {
     pub lat: f64,
     pub lon: f64,
@@ -26,7 +26,7 @@ pub struct FitFix {
 
 /// A parsed FIT activity: fixes grouped into segments by the recorder's
 /// timer stop_all/start events (see [`parse_fit`] for the exact split rule).
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, crate::wire::Wire)]
 pub struct FitTrack {
     pub segments: Vec<Vec<FitFix>>,
 }
@@ -43,7 +43,7 @@ pub enum FitError {
     NoTrack,
     /// A track too short to keep as a run: under [`MIN_IMPORT_M`] of GPS
     /// distance or [`MIN_IMPORT_SEC`] of recorded time, the shell tracker's
-    /// accidental-recording thresholds. Reported as `no_track` / `too_short`.
+    /// accidental-recording thresholds.
     TooShort,
     /// The file records a non-running activity. Carries the FIT sport name in
     /// plain lowercase words (e.g. `"cycling"`, `"cross country skiing"`).
@@ -58,13 +58,11 @@ pub const MIN_IMPORT_M: f64 = 500.0;
 pub const MIN_IMPORT_SEC: i64 = 180;
 
 impl FitError {
-    /// Detail for the kind: the sport for [`FitError::NotARun`], `"too_short"`
-    /// for [`FitError::TooShort`], else empty.
+    /// Detail for the kind: the sport for [`FitError::NotARun`], else empty.
     pub fn context(&self) -> &str {
         match self {
             FitError::NotARun(sport) => sport.as_str(),
-            FitError::TooShort => "too_short",
-            FitError::NotFit | FitError::Damaged | FitError::NoTrack => "",
+            FitError::NotFit | FitError::Damaged | FitError::NoTrack | FitError::TooShort => "",
         }
     }
 }

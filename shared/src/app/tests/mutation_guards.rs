@@ -282,7 +282,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
     );
     let vm = Engine.view(&m);
     assert!(vm.runs[0].has_gpx);
-    let gpx = export_run_gpx(7_340_001, logged_at);
+    let gpx = export_run_gpx(&m, 7_340_001, logged_at);
     assert!(
         gpx.contains("<lollop:logged_at>2023-11-16T02:11:20Z</lollop:logged_at>"),
         "{gpx}"

@@ -366,7 +366,7 @@ class RestoreRoundtripTest {
      *  the way the app's own "View" action does. */
     private fun openRunDetail(run: Event.LogRunTrack) {
         val older = QaHarness.daysAgoAtMidday(3)
-        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile(), Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), run))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile(), Event.LogRun(6.0, 33.0, 0.0, observedAt = older, entryId = older * 1000), run))
         rule.launchApp()
         HistoryFocus.request(run.entryId, run.observedAt)
         rule.waitForNode(hasTestTag("run-trim"))
@@ -519,7 +519,7 @@ class RestoreRoundtripTest {
         val p = checkNotNull(model.profile)
         assertEquals("the 5K in 26:15 typed before the process death", 26 * 60 + 15, p.recent_race?.time_sec)
         assertEquals(5.0, p.recent_race!!.distance_km, 1e-9)
-        assertEquals(GoalDistance.TenK.name, p.goal_distance)
+        assertEquals(GoalDistance.TenK, p.goal_distance)
         assertEquals("five ticked weekdays", 5, Integer.bitCount(checkNotNull(p.training_weekdays)))
         assertEquals(java.time.LocalDate.of(1991, 3, 12).toEpochDay(), p.birth_epoch_day)
 
@@ -637,7 +637,7 @@ class RestoreRoundtripTest {
                 profile,
                 Event.GeneratePlan(todayEpochDay() - 10),
                 QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(3)),
-                Event.LogRun(8.0, 44.0, 0.0, runAt, runAt * 1000),
+                Event.LogRun(8.0, 44.0, 0.0, observedAt = runAt, entryId = runAt * 1000),
             ),
         )
         rule.launchApp()
@@ -667,12 +667,15 @@ class RestoreRoundtripTest {
         rule.selectHistoryFilter(str(R.string.main_segment_runs))
         rule.scrollToText(runDistLabel(8.0, DistanceUnit.Mi))
 
-        // Back to kg: the profile is the one the user had, field for field; the plan
-        // and every logged number are untouched by the two unit flips.
+        // Back to kg: the profile is the one the user had, field for field (each flip
+        // is a dated edit, so only its stamps differ); the plan and every logged
+        // number are untouched by the two unit flips.
         rule.selectTab(str(R.string.main_dest_profile))
         tapProfileOption(segment(app.milestone.weightSuffix(app.milestone.WeightUnit.Kg)))
         rule.waitForState { model.profile?.weight_lb == false }
-        assertEquals(beforeProfile, model.profile)
+        val after = checkNotNull(model.profile)
+        assertEquals(model.today_epoch_day, after.effective_from_epoch_day)
+        assertEquals(beforeProfile, after.copy(effective_from_epoch_day = null, edited_at = null))
         assertEquals(before.program, model.program)
         assertEquals(before.week_plan, model.week_plan)
         assertEquals(before.lifts, model.lifts)

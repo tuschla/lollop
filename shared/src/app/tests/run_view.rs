@@ -117,8 +117,6 @@ fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
 
     // ~1.11 km along the equator (0 → 0.01° lon) over 400 s.
     let points = vec![gps(0.0, 0), gps(0.005, 200), gps(0.01, 400)];
-    // Distinctive (entry_id, observed_at) so the process-global GPX registry
-    // this test reads back can't be clobbered by a parallel test's run.
     app.update(
         log_run_track(points, 70.0, 12.0, 9_090_001, 9_090_001),
         &mut model,
@@ -141,13 +139,13 @@ fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
     assert!(!vm.runs[0].spike_flag);
     // The ~0.5 MB GPX string never rides the list payload. The run
     // advertises an exportable route via `has_gpx`, and the shell
-    // fetches the document ON DEMAND via `export_run_gpx` (the `exportGpx`
-    // FFI query, populated by the `view()` above). Prove both.
+    // fetches the document ON DEMAND via `export_run_gpx` (the bridge's
+    // `ExportGpx` op). Prove both.
     assert!(
         vm.runs[0].has_gpx,
         "a GPS run advertises an exportable route"
     );
-    let gpx = export_run_gpx(9_090_001, 9_090_001);
+    let gpx = export_run_gpx(&model, 9_090_001, 9_090_001);
     assert!(
         gpx.contains("<trkpt "),
         "on-demand GPX carries the fixes: {gpx}"
@@ -173,8 +171,6 @@ fn gps_run_of_only_noise_fixes_offers_no_route() {
             ..gps(0.01, 400)
         },
     ];
-    // Distinctive (entry_id, observed_at) so the global GPX registry read
-    // below is this test's own, not a parallel test's.
     app.update(
         log_run_track(points, 70.0, 12.0, 9_115_001, 9_115_001),
         &mut model,
@@ -193,7 +189,7 @@ fn gps_run_of_only_noise_fixes_offers_no_route() {
         "has_gpx should be false for a noise-only track"
     );
     assert!(vm.runs[0].gps_unmeasurable);
-    let gpx = export_run_gpx(9_115_001, 9_115_001);
+    let gpx = export_run_gpx(&model, 9_115_001, 9_115_001);
     assert_eq!(
         gpx.matches("<trkpt ").count(),
         2,
@@ -253,11 +249,11 @@ fn run_view_derivation_is_memoized_and_gpx_built_once() {
     // The run advertises an exportable route (memoization did not drop it),
     // and the on-demand export still builds a valid two-fix-plus GPX.
     assert!(first.has_gpx, "an exportable route is still advertised");
-    refresh_gpx_registry(
-        std::slice::from_ref(&run),
-        &RunFacts::new(std::slice::from_ref(&run)),
-    );
-    let gpx = export_run_gpx(918_273, 1_000);
+    let model = Model {
+        runs: vec![run.clone()],
+        ..Model::default()
+    };
+    let gpx = export_run_gpx(&model, 918_273, 1_000);
     assert!(gpx.contains("<trkseg>"), "on-demand GPX builds: {gpx}");
 
     // A content change (an amend) must MISS the cache and rebuild.
@@ -309,50 +305,40 @@ fn retain_runs_trims_every_per_run_memo_to_the_live_runs() {
 }
 
 #[test]
-fn refresh_gpx_registry_drops_a_run_no_longer_live() {
-    // The registry is pruned against the live history on every refresh, the
-    // same path shipping builds run: a deleted run stops being exportable.
+fn gpx_export_reads_only_the_runs_the_model_holds() {
     let kept = probe_run(700_020);
     let deleted = probe_run(700_021);
-    let both = [kept.clone(), deleted];
-    refresh_gpx_registry(&both, &RunFacts::new(&both));
-    assert!(export_run_gpx(700_021, 1_000).contains("<trkseg>"));
+    let both = Model {
+        runs: vec![kept.clone(), deleted],
+        ..Model::default()
+    };
+    assert!(export_run_gpx(&both, 700_021, 1_000).contains("<trkseg>"));
 
-    let live = [kept];
-    refresh_gpx_registry(&live, &RunFacts::new(&live));
+    let live = Model {
+        runs: vec![kept],
+        ..Model::default()
+    };
     assert!(
-        export_run_gpx(700_021, 1_000).is_empty(),
+        export_run_gpx(&live, 700_021, 1_000).is_empty(),
         "the deleted run's route is gone"
     );
     assert!(
-        export_run_gpx(700_020, 1_000).contains("<trkseg>"),
+        export_run_gpx(&live, 700_020, 1_000).contains("<trkseg>"),
         "the live run's route survives"
     );
 }
 
 #[test]
-fn refresh_gpx_registry_evicts_key_when_run_loses_its_track() {
+fn gpx_export_of_a_run_that_lost_its_track_is_empty() {
     // A same-identity run (a GPS→manual amend keeps (entry_id, observed_at))
-    // that later carries an empty track must EVICT any stale positive entry,
-    // so a subsequent export never serves the pre-amend route.
-    let run = probe_run(700_010);
-    refresh_gpx_registry(
-        std::slice::from_ref(&run),
-        &RunFacts::new(std::slice::from_ref(&run)),
-    );
-    assert!(
-        export_run_gpx(700_010, 1_000).contains("<trkseg>"),
-        "the >=2-fix run is registered and exportable"
-    );
-
-    let mut emptied = run.clone();
+    // that carries an empty track exports nothing, never the pre-amend route.
+    let mut emptied = probe_run(700_010);
     emptied.track = Vec::new();
-    let emptied = [emptied];
-    refresh_gpx_registry(&emptied, &RunFacts::new(&emptied));
-    assert!(
-        export_run_gpx(700_010, 1_000).is_empty(),
-        "the same-identity empty-track run evicts the stale registry key"
-    );
+    let model = Model {
+        runs: vec![emptied],
+        ..Model::default()
+    };
+    assert!(export_run_gpx(&model, 700_010, 1_000).is_empty());
 }
 
 #[test]
@@ -508,8 +494,7 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
 
     // With the boundary: distance is the two ~445 m segments (~0.89 km), NOT
     // the ~111 km bridge, and the on-demand GPX opens two <trkseg>s at the
-    // TRUE coords. Distinctive (entry_id, observed_at) so the process-global
-    // GPX registry read back is this test's own, not a parallel test's.
+    // TRUE coords.
     let app = Engine;
     let mut model = Model::default();
     app.update(
@@ -539,9 +524,8 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
         run.has_gpx,
         "an exportable route survives the pause boundary"
     );
-    // The two-segment GPX is pinned on the on-demand export (populated by
-    // the `view()` above).
-    let gpx = export_run_gpx(11_203_001, 11_203_001);
+    // The two-segment GPX is pinned on the on-demand export.
+    let gpx = export_run_gpx(&model, 11_203_001, 11_203_001);
     assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments in GPX");
     assert!(gpx.contains("lon=\"1\""), "true seg-2 coord kept");
 

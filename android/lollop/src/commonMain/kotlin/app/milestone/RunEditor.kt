@@ -43,10 +43,10 @@ private fun runEditEvent(
     // was given as % of max or not at all.
     avgHrBpm: Double?,
 ): Event = when {
-    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
+    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt = observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
     // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate. A row
     // without an entry id (entry_id 0) keeps its original stamp.
-    else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, if (initial.entry_id != 0L) observedAt else initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+    else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = if (initial.entry_id != 0L) observedAt else initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
 /** Which numeric field the run editor's shared keypad currently edits. */
@@ -97,7 +97,7 @@ fun LogRunEditor(
     // rule, [workoutTypeForPlan]); preselected, still the user's to change.
     plannedType: WorkoutType? = null,
     // The athlete's profile: whether the core can turn an average bpm into %HRmax.
-    profile: ProfileView?,
+    profile: Profile?,
     onClose: () -> Unit = {},
     // Report unsaved-edits state so a host sheet's swipe-down can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
@@ -176,11 +176,10 @@ fun LogRunEditor(
     // so its date can't be changed without orphaning it; lock the date chip.
     val dateEditable = initial == null || initial.entry_id != 0L
     // User-declared run-intent label. Optional; null = untagged, which the
-    // editor never fabricates. Prefilled from the row when editing (decode-safe:
-    // an unknown wire string maps to null via WorkoutType.fromWire), and from the
-    // planned run a new entry logs.
+    // editor never fabricates. Prefilled from the row when editing, and from
+    // the planned run a new entry logs.
     var workoutType by rememberSaveable {
-        mutableStateOf(if (initial != null) WorkoutType.fromWire(initial.workout_type) else plannedType)
+        mutableStateOf(if (initial != null) initial.workout_type else plannedType)
     }
 
     val distParsed = parseKeypadNumber(distText)

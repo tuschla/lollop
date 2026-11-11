@@ -2,11 +2,12 @@
 
 # --- JNI bridge -------------------------------------------------------------
 # libshared.so exports JNI functions bound by their fully-qualified symbol name
-# (Java_app_milestone_Core_update). Renaming or removing the Core class or its
-# native methods breaks that binding → UnsatisfiedLinkError. The core makes no
-# native→Kotlin calls, so nothing else needs keeping for JNI. (The default R8
-# config already keeps native method names; this also pins the class name.)
--keep class app.milestone.Core {
+# (Java_app_milestone_core_JniCore_call). Renaming or removing the JniCore class
+# or its native methods breaks that binding → UnsatisfiedLinkError. The core
+# makes no native→Kotlin calls, so nothing else needs keeping for JNI. (The
+# default R8 config already keeps native method names; this also pins the class
+# name.)
+-keep class app.milestone.core.JniCore {
     native <methods>;
 }
 

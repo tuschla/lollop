@@ -17,7 +17,6 @@ import app.milestone.AppClock
 import app.milestone.AppFileNames
 import app.milestone.AppRuntime
 import app.milestone.AppSettings
-import app.milestone.BridgeCore
 import app.milestone.Core
 import app.milestone.CoreFault
 import app.milestone.FaultBridge
@@ -29,6 +28,7 @@ import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.TestClock
 import app.milestone.exportDataTo
+import app.milestone.toJson
 import java.io.File
 import kotlinx.coroutines.launch
 import org.junit.After
@@ -186,7 +186,7 @@ class BootResilienceTest {
         QaHarness.seedLog(ctx, seeded)
         val before = logFile.readBytes()
         val bridge = FaultBridge(fault)
-        val engine = BridgeCore(bridge)
+        val engine = DurableCore(bridge)
         QaHarness.freshProcess(engine)
         lastScenario = launchMain()
         rule.waitForNode(hasText(str(R.string.main_core_unavailable_title), substring = true), 30_000)

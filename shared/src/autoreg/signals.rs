@@ -21,7 +21,9 @@ use crate::strength::LiftGoal;
 /// medical-referral / hard-stop block (Pain, Illness, RED-S, cardiac, bone
 /// stress) that shells must visually fence off from the routine `Metric`
 /// signals, the fence is data-driven from here, not a shell-side predicate.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalGroup {
     Metric,

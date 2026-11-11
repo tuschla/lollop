@@ -1,28 +1,20 @@
-//! C ABI over the platform-neutral bridge API ([`crate::ffi`]), feature
-//! `c-abi`; the header is `shared/include/lollop.h` (cbindgen,
-//! `shared/cbindgen.toml`).
+//! The C entry points, feature `c-abi`; the header is
+//! `shared/include/lollop.h` (cbindgen, `shared/cbindgen.toml`).
 //!
 //! The iOS app links the `staticlib` build of this crate (`libshared.a`,
 //! scripts/build-ios-core.sh) and calls it from Kotlin/Native through cinterop
-//! (`android/core-bridge`). Every function here is a thin wrapper: it turns C
-//! pointers into slices, calls the `ffi` function the Android JNI export
-//! calls, and hands the answer back as a core-owned byte buffer. The wire is
-//! the JNI one: UTF-8 JSON in, UTF-8 JSON out (GPX text for
-//! [`lollop_export_gpx`]).
+//! (`android/core-bridge`). [`lollop_call`] and [`lollop_call_lines`] take an
+//! op's code (`shared::ffi::ops::Op`) and its input and answer it as a
+//! core-owned byte buffer: UTF-8 JSON (GPX text for the GPX export).
 //!
 //! Memory: every [`LollopBytes`] a function returns is owned by the caller and
 //! released with exactly one [`lollop_bytes_free`]. An empty answer is
 //! `{NULL, 0}`; freeing it is a no-op. Input pointers are borrowed for the
 //! call only.
-//!
-//! Panics: the `ffi` functions catch core panics and return an `{"error":…}`
-//! object or an empty answer, so nothing unwinds into the caller. This module
-//! itself calls nothing that panics.
-//!
-//! Threading: callable from any thread; see the `ffi` note on keeping
-//! view-producing calls on one thread.
 
-use crate::ffi;
+use std::borrow::Cow;
+
+use super::bridge::{self, Input};
 
 /// A byte buffer the core allocated and the caller now owns. Release it with
 /// [`lollop_bytes_free`]. `{NULL, 0}` is the empty answer.
@@ -32,24 +24,21 @@ pub struct LollopBytes {
     pub len: usize,
 }
 
-/// A byte slice the caller owns, borrowed for one call (one event-log line for
-/// [`lollop_compact_log`]).
+/// A byte slice the caller owns, borrowed for one call (one line for
+/// [`lollop_call_lines`]).
 #[repr(C)]
 pub struct LollopSlice {
     pub data: *const u8,
     pub len: usize,
 }
 
-/// The `{NULL, 0}` empty answer.
-const EMPTY: LollopBytes = LollopBytes {
-    data: std::ptr::null_mut(),
-    len: 0,
-};
-
 impl LollopBytes {
     fn from_vec(bytes: Vec<u8>) -> Self {
         if bytes.is_empty() {
-            return EMPTY;
+            return Self {
+                data: std::ptr::null_mut(),
+                len: 0,
+            };
         }
         let boxed = bytes.into_boxed_slice();
         let len = boxed.len();
@@ -74,67 +63,26 @@ unsafe fn borrow<'a>(data: *const u8, len: usize) -> &'a [u8] {
     }
 }
 
-/// Process one event's wire JSON (`Core.update`). Returns the effect-request
-/// array, the empty answer for a dropped (malformed or unknown) event, or a
-/// `{"error":{"kind":"panic_reset",…}}` object after a caught core panic, in
-/// which case the core was replaced and the shell replays its log.
+/// Answer op `op` on the `len` bytes at `input`.
 ///
 /// # Safety
-/// `event` must point to `len` readable bytes (or be null with `len` 0).
+/// `input` must point to `len` readable bytes (or be null with `len` 0).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_update(event: *const u8, len: usize) -> LollopBytes {
+pub unsafe extern "C" fn lollop_call(op: u32, input: *const u8, len: usize) -> LollopBytes {
     // SAFETY: forwarded caller contract.
-    LollopBytes::from_vec(ffi::process_event(unsafe { borrow(event, len) }))
+    let input = unsafe { borrow(input, len) };
+    LollopBytes::from_vec(bridge::call(op, Input::Bytes(Cow::Borrowed(input))))
 }
 
-/// The current `ViewModel` JSON (`Core.view`), or a non-resetting
-/// `{"error":{"kind":"panic",…}}` object.
-#[unsafe(no_mangle)]
-pub extern "C" fn lollop_view() -> LollopBytes {
-    LollopBytes::from_vec(ffi::current_view())
-}
-
-/// Parse a `.fit` file's bytes into the tracker-import JSON or an `{"error":…}`
-/// object (`Core.parseFit`).
-///
-/// # Safety
-/// `data` must point to `len` readable bytes (or be null with `len` 0).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_parse_fit(data: *const u8, len: usize) -> LollopBytes {
-    // SAFETY: forwarded caller contract.
-    LollopBytes::from_vec(ffi::parse_fit_json(unsafe { borrow(data, len) }))
-}
-
-/// The figures a `LogRunTrack` event will be saved with,
-/// `{"distance_km":D,"duration_min":M}`, or an `{"error":…}` object
-/// (`Core.trackFigures`).
-///
-/// # Safety
-/// `event` must point to `len` readable bytes (or be null with `len` 0).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_track_figures(event: *const u8, len: usize) -> LollopBytes {
-    // SAFETY: forwarded caller contract.
-    LollopBytes::from_vec(ffi::track_figures_json(unsafe { borrow(event, len) }))
-}
-
-/// The GPX document for one logged run, by its `(entry_id, observed_at)`
-/// identity (`Core.exportGpx`); empty when the run has no exportable route.
-/// `entry_id` is the shell's signed 64-bit id, bit-cast like the JNI export.
-#[unsafe(no_mangle)]
-pub extern "C" fn lollop_export_gpx(entry_id: i64, observed_at: i64) -> LollopBytes {
-    LollopBytes::from_vec(ffi::export_gpx(entry_id as u64, observed_at).into_bytes())
-}
-
-/// The compaction verdict JSON for the event log's `count` lines
-/// (`Core.compactLog`); empty when the core can't answer, and the shell then
-/// keeps every line. A line that is not UTF-8 is read lossily (invalid bytes
-/// become U+FFFD).
+/// Answer op `op` on the `count` lines at `lines`. A line that is not UTF-8
+/// fails the op.
 ///
 /// # Safety
 /// `lines` must point to `count` [`LollopSlice`]s (or be null with `count` 0),
 /// each pointing to its `len` readable bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_compact_log(
+pub unsafe extern "C" fn lollop_call_lines(
+    op: u32,
     lines: *const LollopSlice,
     count: usize,
 ) -> LollopBytes {
@@ -144,17 +92,14 @@ pub unsafe extern "C" fn lollop_compact_log(
         // SAFETY: the caller's contract above.
         unsafe { std::slice::from_raw_parts(lines, count) }
     };
-    let verdict = ffi::compact_log_json(|| -> Result<_, std::convert::Infallible> {
-        Ok(lines
-            .iter()
-            .map(|line| {
-                // SAFETY: the caller's contract above.
-                let bytes = unsafe { borrow(line.data, line.len) };
-                crate::log::LineFacts::parse(&String::from_utf8_lossy(bytes))
-            })
-            .collect())
+    let mut read = lines.iter().map(|line| {
+        // SAFETY: the caller's contract above.
+        let bytes = unsafe { borrow(line.data, line.len) };
+        std::str::from_utf8(bytes)
+            .map(Cow::Borrowed)
+            .map_err(|err| err.to_string())
     });
-    verdict.map_or(EMPTY, |json| LollopBytes::from_vec(json.into_bytes()))
+    LollopBytes::from_vec(bridge::call(op, Input::Lines(&mut read)))
 }
 
 /// Release a buffer a `lollop_*` function returned. A `{NULL, 0}` buffer is a
@@ -172,21 +117,13 @@ pub unsafe extern "C" fn lollop_bytes_free(bytes: LollopBytes) {
     drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(bytes.data, bytes.len)) });
 }
 
-/// Replace the core with an empty one (`Core::default()`), as a fresh process
-/// starts. The iOS app calls it before replaying an imported event log in
-/// process (Android restarts its process instead).
-#[unsafe(no_mangle)]
-pub extern "C" fn lollop_reset() {
-    ffi::reset_bridge();
-}
-
-/// Run a core call that panics while holding the core lock and return the
-/// firewall's answer: `reset` true takes the `update` path (`panic_reset`,
-/// core replaced), false the `view` path (`panic`, core kept).
+/// Panic while holding the core and return the firewall's answer: `reset`
+/// true takes the update path (`panic_reset`, core replaced), false the view
+/// path (`panic`, core kept).
 #[cfg(feature = "test-hooks")]
 #[unsafe(no_mangle)]
 pub extern "C" fn lollop_panic_for_test(reset: bool) -> LollopBytes {
-    LollopBytes::from_vec(ffi::panic_for_test(reset))
+    LollopBytes::from_vec(bridge::panic_for_test(reset))
 }
 
 #[cfg(test)]

@@ -570,7 +570,7 @@ private fun ReferenceItem(content: @Composable () -> Unit) {
 @Composable
 private fun ReferenceEvidenceCard(
     summary: String,
-    grade: String,
+    grade: EvidenceGrade?,
     citation: String,
     confidence: Float,
     safetyCritical: Boolean,

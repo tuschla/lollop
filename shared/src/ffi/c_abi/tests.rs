@@ -1,13 +1,10 @@
-//! The C ABI wraps `ffi` without changing its answers: these drive the
-//! `extern "C"` functions exactly as a C caller would (raw pointers in, owned
-//! buffers out, one free each).
+//! The C entry points pass the bridge's answers through unchanged: these drive
+//! them exactly as a C caller would (raw pointers in, owned buffers out, one
+//! free each). They share the process's core, so none of them reads state
+//! another could change.
 
 use super::*;
-
-/// The `lollop_*` functions drive the one process-wide core, which only these
-/// tests touch. The reset test empties it, so it runs alone (write) while the
-/// others share it (read).
-static GLOBAL_CORE: std::sync::RwLock<()> = std::sync::RwLock::new(());
+use crate::ffi::ops::Op;
 
 /// Copy a returned buffer out and free it, as a shell does.
 fn take(bytes: LollopBytes) -> Vec<u8> {
@@ -20,27 +17,25 @@ fn take(bytes: LollopBytes) -> Vec<u8> {
     out
 }
 
-fn update(event: &str) -> Vec<u8> {
-    take(unsafe { lollop_update(event.as_ptr(), event.len()) })
+fn call(op: Op, input: &[u8]) -> Vec<u8> {
+    take(unsafe { lollop_call(op.code(), input.as_ptr(), input.len()) })
 }
 
-const PROFILE: &str = r#"{"SetProfile":{"progression_cadence":"EverySession","lift_goal":"MaxStrength","goal_distance":"FiveK","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":3,"running_km_per_week":30.0,"advanced":false}}"#;
+fn json(bytes: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(bytes).unwrap()
+}
 
 #[test]
-fn update_and_view_answer_over_the_c_abi() {
-    let _bridge = GLOBAL_CORE.read().unwrap_or_else(|e| e.into_inner());
-    let requests = update(PROFILE);
-    assert_eq!(requests.first(), Some(&b'['), "an effect-request array");
-    let view: serde_json::Value = serde_json::from_slice(&take(lollop_view())).unwrap();
-    assert!(!view["guidance"].as_array().unwrap().is_empty());
+fn the_view_answers_over_the_c_abi() {
+    let view = json(&call(Op::View, b""));
+    assert!(view["guidance"].is_array(), "{view}");
 }
 
 #[test]
 fn a_dropped_or_null_event_is_the_empty_answer() {
-    let _bridge = GLOBAL_CORE.read().unwrap_or_else(|e| e.into_inner());
-    let dropped = unsafe { lollop_update(b"{\"NoSuchEvent\":1}".as_ptr(), 17) };
+    let dropped = unsafe { lollop_call(Op::Update.code(), b"{\"NoSuchEvent\":1}".as_ptr(), 17) };
     assert!(dropped.data.is_null() && dropped.len == 0);
-    let null = unsafe { lollop_update(std::ptr::null(), 0) };
+    let null = unsafe { lollop_call(Op::Update.code(), std::ptr::null(), 0) };
     assert!(null.data.is_null() && null.len == 0);
     // Freeing the empty answer is a no-op.
     unsafe { lollop_bytes_free(null) };
@@ -56,36 +51,47 @@ fn compact_log_reports_a_torn_tail_by_line_index() {
             len: l.len(),
         })
         .collect();
-    let verdict = take(unsafe { lollop_compact_log(slices.as_ptr(), slices.len()) });
-    let verdict: serde_json::Value = serde_json::from_slice(&verdict).unwrap();
+    let code = Op::CompactLog.code();
+    let verdict = json(&take(unsafe {
+        lollop_call_lines(code, slices.as_ptr(), slices.len())
+    }));
     assert_eq!(verdict["torn"], serde_json::json!([1]));
     // An empty log still gets a verdict (nothing dropped).
-    let empty = take(unsafe { lollop_compact_log(std::ptr::null(), 0) });
-    let empty: serde_json::Value = serde_json::from_slice(&empty).unwrap();
+    let empty = json(&take(unsafe {
+        lollop_call_lines(code, std::ptr::null(), 0)
+    }));
     assert_eq!(empty["dropped"], serde_json::json!([]));
+    // A line that is not UTF-8 fails the op.
+    let bad = [LollopSlice {
+        data: [0xff_u8].as_ptr(),
+        len: 1,
+    }];
+    let failed = json(&take(unsafe { lollop_call_lines(code, bad.as_ptr(), 1) }));
+    assert_eq!(failed["error"]["kind"], "bad_input", "{failed}");
 }
 
 #[test]
-fn pure_helpers_answer_errors_and_empties() {
-    let fit = take(unsafe { lollop_parse_fit(b"not a fit file".as_ptr(), 14) });
+fn ops_answer_errors_and_empties() {
+    let fit = call(Op::ParseFit, b"not a fit file");
     assert!(
         fit.starts_with(b"{\"error\""),
         "{}",
         String::from_utf8_lossy(&fit)
     );
-    let figures = take(unsafe { lollop_track_figures(b"\"ClearSets\"".as_ptr(), 11) });
+    let figures = call(Op::TrackFigures, b"\"ClearSets\"");
     assert!(figures.starts_with(b"{\"error\""));
-    assert!(take(lollop_export_gpx(42, 1_700_000_000)).is_empty());
-}
-
-#[test]
-fn reset_empties_the_core_as_a_fresh_process_has_it() {
-    let _bridge = GLOBAL_CORE.write().unwrap_or_else(|e| e.into_inner());
-    // Other tests leave their events in the shared core: start from a reset one.
-    lollop_reset();
-    let empty = take(lollop_view());
-    update(PROFILE);
-    assert_ne!(take(lollop_view()), empty, "the profile reached the core");
-    lollop_reset();
-    assert_eq!(take(lollop_view()), empty, "reset leaves the empty core");
+    assert!(
+        call(
+            Op::ExportGpx,
+            br#"{"entry_id":42,"observed_at":1700000000}"#
+        )
+        .is_empty()
+    );
+    let unknown = json(&take(unsafe { lollop_call(u32::MAX, std::ptr::null(), 0) }));
+    assert_eq!(unknown["error"]["kind"], "bad_input", "{unknown}");
+    let lines_as_bytes = json(&call(Op::CompactLog, b"\"ClearSets\""));
+    assert_eq!(
+        lines_as_bytes["error"]["context"], "compact_log",
+        "{lines_as_bytes}"
+    );
 }

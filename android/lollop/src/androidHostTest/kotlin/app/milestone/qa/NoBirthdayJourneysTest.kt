@@ -17,6 +17,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.epochDayLabel
+import app.milestone.train_blocked
 import java.time.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals

@@ -13,7 +13,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 
 // Minimal GPX 1.0/1.1 track reader for two shell jobs: rendering a saved run's
-// route (parsing the core-produced GPX from [CoreBridge.exportGpx] back into points) and
+// route (parsing the core-produced GPX from [DurableCore.runGpx] back into points) and
 // importing a run recorded elsewhere (Garmin/Strava/Komoot exports). Reads only
 // `<trk>/<trkseg>/<trkpt>`, lat/lon attributes, the optional `<time>`, an
 // optional heart-rate sample from the common Garmin TrackPointExtension
@@ -451,10 +451,10 @@ fun isFitFile(bytes: ByteArray): Boolean =
  *
  * Error envelopes: the object form `{"error":{"kind":…,"context":…}}` names why
  * (`not_a_run` with the lowercase sport as context: a cycling file is refused, never
- * logged as running volume; `no_track` with context `too_short`: a fragment under the
- * keep threshold, [MIN_RUN_KM] or [MIN_RUN_SEC]); the legacy plain-string form and the
- * panic firewall's object read as a damaged file. A null [json] (the JNI returns null
- * when it cannot allocate the result string) reads as damaged too.
+ * logged as running volume; `too_short`: a fragment under the keep threshold,
+ * [MIN_RUN_KM] or [MIN_RUN_SEC]); the legacy plain-string form, an unknown kind and
+ * the panic firewall's object read as a damaged file. A null [json] (the platform
+ * couldn't allocate the answer) reads as damaged too.
  */
 internal fun fitSegments(json: String?): List<List<GpxFix>> {
     val root = Json
@@ -463,11 +463,13 @@ internal fun fitSegments(json: String?): List<List<GpxFix>> {
     root["error"]?.let { err ->
         val obj = err as? JsonObject
         val kind = obj?.get("kind")?.jsonPrimitive?.contentOrNull
+            ?.let { wire -> ErrorKind.entries.firstOrNull { it.wire == wire } }
         val context = obj?.get("context")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         throw when (kind) {
-            "not_a_run" -> ImportException(ImportFailure.NotARun, context)
-            "no_track" -> ImportException(if (context == "too_short") ImportFailure.TooShort else ImportFailure.NoTrack)
-            "not_fit" -> ImportException(ImportFailure.WrongType)
+            ErrorKind.NotARun -> ImportException(ImportFailure.NotARun, context)
+            ErrorKind.NoTrack -> ImportException(ImportFailure.NoTrack)
+            ErrorKind.TooShort -> ImportException(ImportFailure.TooShort)
+            ErrorKind.NotFit -> ImportException(ImportFailure.WrongType)
             else -> ImportException(ImportFailure.Damaged)
         }
     }

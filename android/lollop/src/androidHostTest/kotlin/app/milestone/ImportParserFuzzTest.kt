@@ -2,6 +2,7 @@ package app.milestone
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.core.JniCore
 import app.milestone.qa.QaHarness
 import app.milestone.qa.QaHarness.fixture
 import java.io.File
@@ -32,8 +33,8 @@ import org.robolectric.RobolectricTestRunner
 /**
  * Seeded mutation fuzzing of the shell's run-import parsers ([parseRunFileSegments] →
  * [parseGpxRuns] / [parseTcxActivities] / [fitSegments] over the REAL core's
- * [Core.parseFit], then [importedRunEvent]) and of the JNI byte entry points
- * (`update`, `view`, `parseFit`, `trackFigures`, `exportGpx`) with malformed input.
+ * [Core.parseFitFile], then [importedRunEvent]) and of the core's byte ops over
+ * JNI (`update`, `view`, `parseFit`, `trackFigures`, `exportGpx`) with malformed input.
  *
  * Seeds: generated GPX / TCX / FIT files, the core's own GPX export and the real
  * device FIT fixtures (`shared/tests/fixtures`, on the test classpath). Mutations:
@@ -96,7 +97,7 @@ class ImportParserFuzzTest {
     /** What the import pipeline makes of one file; any exception that is not a named
      *  [ImportException] is a shell bug (it surfaces as [ImportFailure.Unknown]). */
     private fun parse(bytes: ByteArray): Out = try {
-        Out.Runs(parseRunFileSegments(bytes, Core::parseFit))
+        Out.Runs(parseRunFileSegments(bytes, Core::parseFitFile))
     } catch (e: ImportException) {
         Out.Failed(e.reason, e.detail)
     }
@@ -257,7 +258,7 @@ class ImportParserFuzzTest {
     private fun coreGpx(points: List<GpsPoint>, starts: List<Int> = emptyList(), entryId: Long = 99L): String {
         val ev = Event.LogRunTrack(points, 0.0, observedAt = points.last().observedAt, entryId = entryId, segmentStarts = starts)
         assertTrue("core accepts the seed run", Core.send(ev).accepted)
-        return Core.exportGpx(entryId, points.last().observedAt).orEmpty()
+        return Core.runGpx(entryId, points.last().observedAt)
     }
 
     private fun Fix.point() = GpsPoint(lat, lon, t, 5.0)
@@ -379,7 +380,7 @@ class ImportParserFuzzTest {
                 val bytes = mutateBytes(rnd, seed)
                 // Keep the FIT magic half the time so the core, not the sniff, judges it.
                 if (rnd.nextBoolean() && bytes.size >= 12) ".FIT".toByteArray().copyInto(bytes, 8)
-                val json = bounded("parseFit $name $case") { Core.parseFit(bytes) }
+                val json = bounded("parseFit $name $case") { Core.parseFitFile(bytes) }
                 assertNotNull("parseFit $name $case returned null", json)
                 val root = Json.parseToJsonElement(json!!).jsonObject
                 assertTrue("$name $case: $json", root.keys == setOf("segments") || root.keys == setOf("error"))
@@ -423,7 +424,7 @@ class ImportParserFuzzTest {
     /** What [parseRunFileSegments] makes of [bytes] with the reader [xml]; any other
      *  exception by its type. */
     private fun parseWith(bytes: ByteArray, xml: (String) -> ImportXmlReader): Any = try {
-        Out.Runs(parseRunFileSegments(bytes, Core::parseFit, xml))
+        Out.Runs(parseRunFileSegments(bytes, Core::parseFitFile, xml))
     } catch (e: ImportException) {
         Out.Failed(e.reason, e.detail)
     } catch (e: Exception) {
@@ -455,7 +456,7 @@ class ImportParserFuzzTest {
         val diffs = mutableListOf<String>()
         fun brief(out: Any) = if (out is Out.Runs) "${out.runs.size} run(s), ${out.runs.sumOf { r -> r.segments.sumOf { it.size } }} fixes" else "$out"
         fun why(bytes: ByteArray, xml: (String) -> ImportXmlReader) =
-            runCatching { parseRunFileSegments(bytes, Core::parseFit, xml) }.exceptionOrNull()?.let { it.cause?.message ?: it.message }
+            runCatching { parseRunFileSegments(bytes, Core::parseFitFile, xml) }.exceptionOrNull()?.let { it.cause?.message ?: it.message }
         fun compare(what: String, bytes: ByteArray, mutant: Boolean) {
             val platform = bounded(what) { parseWith(bytes, ::importXmlReader) }
             val xmlutil = bounded("$what (xmlutil)") { parseWith(bytes, ::XmlUtilImportReader) }
@@ -724,21 +725,17 @@ class ImportParserFuzzTest {
         assertTrue("java.time names the year with its sign", doc.contains("<time>+10000-"))
         val ev = importedEvent(doc.toByteArray())
         assertTrue("the core accepts the run", Core.send(ev).accepted)
-        val export = Core.exportGpx(ev.entryId, ev.observedAt).orEmpty()
+        val export = Core.runGpx(ev.entryId, ev.observedAt)
         assertTrue("exported", export.contains("<trkpt"))
         val back = parseGpx(export).flatten()
         assertEquals("times read back from ${Regex("<time>[^<]*</time>").find(export)?.value}",
             ev.points.map { it.observedAt }, back.map { it.timeSec })
     }
 
-    // ═══ JNI byte entry points ═════════════════════════════════════════════════
+    // ═══ The core's byte ops over JNI ═════════════════════════════════════════
 
-    private val nativeUpdate = Core.javaClass.getDeclaredMethod("update", ByteArray::class.java).apply { isAccessible = true }
-    private val nativeView = Core.javaClass.getDeclaredMethod("view").apply { isAccessible = true }
-    private val nativeTrackFigures = Core.javaClass.getDeclaredMethod("trackFigures", ByteArray::class.java).apply { isAccessible = true }
-
-    private fun update(bytes: ByteArray) = nativeUpdate.invoke(Core, bytes) as ByteArray?
-    private fun view() = nativeView.invoke(Core) as ByteArray?
+    private fun update(bytes: ByteArray) = JniCore.update(bytes)
+    private fun view() = JniCore.view()
 
     private fun malformed(rnd: Random, seeds: List<String>): ByteArray = when (rnd.nextInt(6)) {
         0 -> ByteArray(rnd.nextInt(64)) { rnd.nextInt(256).toByte() }
@@ -750,7 +747,7 @@ class ImportParserFuzzTest {
     private val eventSeeds by lazy {
         listOf(
             Event.SetToday(20_300L, 3600).toJson().toString(),
-            Event.LogRunTrack(run(60).map { it.point() }, 0.0, 1_750_000_060L, 5L).toJson().toString(),
+            Event.LogRunTrack(run(60).map { it.point() }, 0.0, observedAt = 1_750_000_060L, entryId = 5L).toJson().toString(),
             Event.ClearRuns.toJson().toString(),
             QaHarness.loggedRun(1_750_000_000L).toJson().toString(),
         )
@@ -786,7 +783,7 @@ class ImportParserFuzzTest {
         for (case in 0 until iters * 2) {
             val rnd = Random(0x6500_0000L + case)
             val bytes = malformed(rnd, eventSeeds)
-            val text = bounded("trackFigures $case") { nativeTrackFigures.invoke(Core, bytes) as String? }
+            val text = bounded("trackFigures $case") { JniCore.trackFigures(bytes)?.decodeToString() }
             assertNotNull(text)
             if (!isCoreErrorEnvelope(text!!)) {
                 val o = Json.parseToJsonElement(text).jsonObject
@@ -795,11 +792,10 @@ class ImportParserFuzzTest {
                 assertTrue("trackFigures $case: $text", km != null && min != null && km.isFinite() && min.isFinite() && km >= 0 && min >= 0)
             }
         }
-        assertTrue(Core.send(Event.LogRunTrack(run(300).map { it.point() }, 0.0, 1_750_000_300L, 42L)).accepted)
+        assertTrue(Core.send(Event.LogRunTrack(run(300).map { it.point() }, 0.0, observedAt = 1_750_000_300L, entryId = 42L)).accepted)
         for (id in listOf(0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE, 42L)) for (at in listOf(0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE, 1_750_000_300L)) {
-            val gpx = Core.exportGpx(id, at)
-            assertNotNull(gpx)
-            if (id == 42L && at == 1_750_000_300L) assertTrue(gpx!!.contains("<trkpt")) else assertEquals("exportGpx($id, $at)", "", gpx)
+            val gpx = Core.runGpx(id, at)
+            if (id == 42L && at == 1_750_000_300L) assertTrue(gpx.contains("<trkpt")) else assertEquals("exportGpx($id, $at)", "", gpx)
         }
     }
 
@@ -810,13 +806,13 @@ class ImportParserFuzzTest {
             val bytes = ByteArray(12 + rnd.nextInt(600)) { rnd.nextInt(256).toByte() }
             ".FIT".toByteArray().copyInto(bytes, 8)
             bytes[0] = if (rnd.nextBoolean()) 14 else 12
-            val json = bounded("parseFit $case") { Core.parseFit(bytes) }
+            val json = bounded("parseFit $case") { Core.parseFitFile(bytes) }
             assertNotNull(json)
             val root = Json.parseToJsonElement(json!!).jsonObject
             val err = root["error"]
             if (err != null) {
                 val kind = (err as? JsonObject)?.get("kind")?.jsonPrimitive?.contentOrNull
-                assertTrue("parseFit $case: $json", kind in setOf("not_fit", "damaged", "no_track", "not_a_run") || err !is JsonObject)
+                assertTrue("parseFit $case: $json", kind in setOf("not_fit", "damaged", "no_track", "too_short", "not_a_run") || err !is JsonObject)
             } else {
                 assertTrue(root["segments"] is JsonArray)
             }

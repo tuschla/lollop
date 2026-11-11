@@ -12,6 +12,6 @@ internal fun PlatformContext.setupStore(): KeyValueStore = keyValueStore(AppFile
 internal const val KEY_PLAN_CLEARED = "plan_cleared"
 
 /** [setupStore] key: how many entries a data import restored, written just
- *  before the reboot into the imported log ([restartForImport]) so that boot can
+ *  before the reboot into the imported log ([AppRuntime.requestReboot]) so that boot can
  *  confirm it, then removed. */
 internal const val KEY_RESTORED_ENTRIES = "restored_entries"

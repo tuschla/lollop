@@ -503,26 +503,26 @@ internal fun recentRaceOf(distance: RaceDistance?, digits: String): RecentRace? 
  *  (calisthenics::LadderId rung indices, 0-based). "Not sure" sends nothing, so
  *  that ladder starts at its easiest rung; 1–4 and 5+ pull-ups both start at Full
  *  pull-up and the coach skips ahead from logged reps. */
-internal enum class CalisPlacement(val ladder: CalisLadder, val rung: Int, val labelRes: StringResource) {
-    PushWall(CalisLadder.HorizontalPush, 0, Res.string.setup_place_push_wall),
-    PushKnee(CalisLadder.HorizontalPush, 3, Res.string.setup_place_push_knee),
-    PushFull(CalisLadder.HorizontalPush, 4, Res.string.setup_place_push_full),
-    PushHard(CalisLadder.HorizontalPush, 5, Res.string.setup_place_push_hard),
-    PullHang(CalisLadder.VerticalPull, 0, Res.string.setup_place_pull_hang),
-    PullNegative(CalisLadder.VerticalPull, 3, Res.string.setup_place_pull_negative),
-    PullFew(CalisLadder.VerticalPull, 4, Res.string.setup_place_pull_few),
-    PullMany(CalisLadder.VerticalPull, 4, Res.string.setup_place_pull_many),
-    SquatAssisted(CalisLadder.Squat, 0, Res.string.setup_place_squat_assisted),
-    SquatBodyweight(CalisLadder.Squat, 1, Res.string.setup_place_squat_bodyweight),
-    SquatSplit(CalisLadder.Squat, 2, Res.string.setup_place_squat_split),
-    SquatPistol(CalisLadder.Squat, 4, Res.string.setup_place_squat_pistol),
+internal enum class CalisPlacement(val ladder: LadderId, val rung: Int, val labelRes: StringResource) {
+    PushWall(LadderId.HorizontalPush, 0, Res.string.setup_place_push_wall),
+    PushKnee(LadderId.HorizontalPush, 3, Res.string.setup_place_push_knee),
+    PushFull(LadderId.HorizontalPush, 4, Res.string.setup_place_push_full),
+    PushHard(LadderId.HorizontalPush, 5, Res.string.setup_place_push_hard),
+    PullHang(LadderId.VerticalPull, 0, Res.string.setup_place_pull_hang),
+    PullNegative(LadderId.VerticalPull, 3, Res.string.setup_place_pull_negative),
+    PullFew(LadderId.VerticalPull, 4, Res.string.setup_place_pull_few),
+    PullMany(LadderId.VerticalPull, 4, Res.string.setup_place_pull_many),
+    SquatAssisted(LadderId.Squat, 0, Res.string.setup_place_squat_assisted),
+    SquatBodyweight(LadderId.Squat, 1, Res.string.setup_place_squat_bodyweight),
+    SquatSplit(LadderId.Squat, 2, Res.string.setup_place_squat_split),
+    SquatPistol(LadderId.Squat, 4, Res.string.setup_place_squat_pistol),
 }
 
 /** The three placement questions, in screen order. */
 internal val PLACEMENT_LADDERS = listOf(
-    CalisLadder.HorizontalPush to Res.string.setup_place_push_q,
-    CalisLadder.VerticalPull to Res.string.setup_place_pull_q,
-    CalisLadder.Squat to Res.string.setup_place_squat_q,
+    LadderId.HorizontalPush to Res.string.setup_place_push_q,
+    LadderId.VerticalPull to Res.string.setup_place_pull_q,
+    LadderId.Squat to Res.string.setup_place_squat_q,
 )
 
 /** The rung events a finished setup sends: one per answered placement whose rung
@@ -535,12 +535,12 @@ internal fun placementEvents(answers: SetupAnswers, seed: SetupAnswers, observed
 
 /** The placement answer naming [rung] on [ladder] exactly, or null when no answer
  *  sits on that rung (Few and Many pull-ups share Full pull-up: the first wins). */
-internal fun placementAt(ladder: CalisLadder, rung: Int?): CalisPlacement? =
+internal fun placementAt(ladder: LadderId, rung: Int?): CalisPlacement? =
     rung?.let { r -> CalisPlacement.entries.firstOrNull { it.ladder == ladder && it.rung == r } }
 
 /** Each placement ladder's rung the athlete holds now (the placed rung, before the
  *  kit check), from the model's ladder views; empty for a Weights profile. */
-internal fun currentPlacementRungs(ladders: List<CalisLadderView>): Map<CalisLadder, Int> =
+internal fun currentPlacementRungs(ladders: List<CalisLadderView>): Map<LadderId, Int> =
     ladders.filter { v -> PLACEMENT_LADDERS.any { it.first == v.ladder } }
         .mapNotNull { v -> (v.placed_rung ?: v.current_rung)?.let { v.ladder to it } }
         .toMap()
@@ -810,15 +810,15 @@ internal data class SetupAnswers(
     val path: ReviewReturn get() = ReviewReturn(modality, calisthenics, goalDistance?.isRace == true)
 
     /** The answer to one calisthenics placement question. */
-    fun placement(ladder: CalisLadder): CalisPlacement? = when (ladder) {
-        CalisLadder.HorizontalPush -> pushPlace
-        CalisLadder.VerticalPull -> pullPlace
+    fun placement(ladder: LadderId): CalisPlacement? = when (ladder) {
+        LadderId.HorizontalPush -> pushPlace
+        LadderId.VerticalPull -> pullPlace
         else -> squatPlace
     }
 
-    fun withPlacement(ladder: CalisLadder, answer: CalisPlacement?): SetupAnswers = when (ladder) {
-        CalisLadder.HorizontalPush -> copy(pushPlace = answer)
-        CalisLadder.VerticalPull -> copy(pullPlace = answer)
+    fun withPlacement(ladder: LadderId, answer: CalisPlacement?): SetupAnswers = when (ladder) {
+        LadderId.HorizontalPush -> copy(pushPlace = answer)
+        LadderId.VerticalPull -> copy(pullPlace = answer)
         else -> copy(squatPlace = answer)
     }
 
@@ -864,7 +864,7 @@ internal fun seedAnswers(
     recordedRunLevel: SetupLevel?,
     distanceUnit: DistanceUnit,
     runStash: StashedRun?,
-    currentRungs: Map<CalisLadder, Int> = emptyMap(),
+    currentRungs: Map<LadderId, Int> = emptyMap(),
 ): SetupAnswers {
     val modality = initial?.let(::modalityOf)
     val both = modality == Modality.Both
@@ -872,7 +872,7 @@ internal fun seedAnswers(
     val weightUnit = seedWeightUnit(initial)
     val recentDistance = initial?.recentRace?.let { RaceDistance.of(it.distance_km) }
     val calis = initial != null && modality != Modality.Run && initial.resistanceModality == ResistanceModality.Calisthenics
-    fun seededPlace(ladder: CalisLadder) = if (calis) placementAt(ladder, currentRungs[ladder]) else null
+    fun seededPlace(ladder: LadderId) = if (calis) placementAt(ladder, currentRungs[ladder]) else null
     return SetupAnswers(
         modality = modality,
         // A side the profile doesn't train has no real goal answer (the stored value
@@ -891,9 +891,9 @@ internal fun seedAnswers(
         recentDistance = recentDistance,
         raceDigits = initial?.recentRace?.takeIf { recentDistance != null }?.let { secondsToHmsDigits(it.time_sec) } ?: "",
         equipment = initial?.calisEquipment,
-        pushPlace = seededPlace(CalisLadder.HorizontalPush),
-        pullPlace = seededPlace(CalisLadder.VerticalPull)?.takeIf { initial?.calisEquipment?.canHang != false },
-        squatPlace = seededPlace(CalisLadder.Squat),
+        pushPlace = seededPlace(LadderId.HorizontalPush),
+        pullPlace = seededPlace(LadderId.VerticalPull)?.takeIf { initial?.calisEquipment?.canHang != false },
+        squatPlace = seededPlace(LadderId.Squat),
         // A first run defaults to Weights, which keeps the legacy wire.
         resistanceModality = initial?.resistanceModality ?: ResistanceModality.Weights,
         weightUnit = weightUnit,

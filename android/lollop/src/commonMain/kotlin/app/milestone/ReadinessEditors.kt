@@ -135,7 +135,7 @@ private val HrvMsRange = 1.0..300.0
 fun ReadinessEditor(
     // Core-exported signal→group map (ViewModel.signal_groups): picker order and
     // the red-flag fence come from it, not from a shell-side predicate.
-    signalGroups: Map<String, String>,
+    signalGroups: Map<ReadinessSignal, SignalGroup>,
     onClose: () -> Unit,
     // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
@@ -153,8 +153,7 @@ fun ReadinessEditor(
     // First red-flag signal in wire order, so the fence lands before the first
     // medical flag as displayed.
     val firstRedFlag = remember(signalGroups) {
-        signalGroups.entries.firstOrNull { it.value == "red_flag" }
-            ?.let { e -> ReadinessSignal.entries.firstOrNull { it.name == e.key } }
+        signalGroups.entries.firstOrNull { it.value == SignalGroup.RedFlag }?.key
     }
 
     EditorScaffold(
@@ -184,9 +183,7 @@ fun ReadinessEditor(
             // Picker order comes from the core's signal_groups metadata (ALL_SIGNALS
             // order on the wire), so routine metrics, Soreness included, render
             // together above the medical red-flag fence.
-            val ordered = remember(signalGroups) {
-                signalGroups.keys.mapNotNull { name -> ReadinessSignal.entries.firstOrNull { it.name == name } }
-            }
+            val ordered = remember(signalGroups) { signalGroups.keys.toList() }
             val signalLabels = ordered.associateWith { stringResource(it.labelRes) }
             EnumRow(
                 stringResource(Res.string.log_field_signal),
@@ -289,7 +286,7 @@ internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: TimeZo
 @Composable
 fun MorningCheckinSheet(
     // The core's most recent check-in echo, if any.
-    echo: CheckinEchoView? = null,
+    echo: CheckinInput? = null,
     onClose: () -> Unit = {},
     // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
     onDirtyChange: (Boolean) -> Unit = {},

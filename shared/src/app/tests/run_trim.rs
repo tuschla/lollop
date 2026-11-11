@@ -94,8 +94,7 @@ fn trim_run_track_remaps_segment_starts_across_a_cut() {
         "boundary remapped to the slice"
     );
     // The two-segment route still exports as two <trkseg>s.
-    let _ = app.view(&model);
-    let gpx = export_run_gpx(6_100_002, 6_100_002);
+    let gpx = export_run_gpx(&model, 6_100_002, 6_100_002);
     assert_eq!(
         gpx.matches("<trkseg>").count(),
         2,

@@ -62,7 +62,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun runTitle(r: RunResultView): String {
-    val tagged = when (WorkoutType.fromWire(r.workout_type)) {
+    val tagged = when (r.workout_type) {
         WorkoutType.Steady -> Res.string.history_run_steady
         WorkoutType.Interval -> Res.string.history_run_interval
         WorkoutType.Tempo -> Res.string.history_run_tempo

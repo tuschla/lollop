@@ -17,7 +17,9 @@ use crate::strength::LiftGoal;
 /// bodyweight leverage (calisthenics). A calisthenics user's plan is built from
 /// leverage ladders instead of %1RM; they may still log arbitrary barbell sets
 /// (those stay plain logged lifts). Default `Weights`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize,
+)]
 pub enum ResistanceModality {
     #[default]
     Weights,
@@ -26,7 +28,51 @@ pub enum ResistanceModality {
 
 /// The athlete's programming profile: drives the evidence-cited guidance
 /// section. Shell-supplied; no logged data required.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Sanitize)]
+///
+/// Serialized it is the view's `profile` echo; as `SetProfile`'s payload the
+/// shell writes the required eight first and omits every field at its
+/// default, so an unanswered profile keeps its original eight-field line.
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq, Sanitize)]
+#[wire(
+    payload_omits_defaults,
+    payload_order(
+        progression_cadence,
+        lift_goal,
+        goal_distance,
+        concurrent_goal,
+        weekly_sets,
+        running_days_per_week,
+        running_km_per_week,
+        advanced,
+        running_km_per_week_set,
+        female,
+        bodyweight_kg,
+        age_years,
+        resting_hr_bpm,
+        measured_hr_max,
+        weight_lb,
+        resistance_modality,
+        high_load_block,
+        environment,
+        env_temp_c,
+        env_altitude_m,
+        weeks_off,
+        lift_days_per_week,
+        training_weekdays,
+        goal_race_epoch_day,
+        recent_race,
+        stated_longest_recent_km,
+        layoff_returned_epoch_day,
+        meet_epoch_day,
+        calis_equipment,
+        specialization_muscle,
+        runner_strength,
+        effective_from_epoch_day,
+        birth_epoch_day,
+        edited_at,
+        health,
+    )
+)]
 pub struct Profile {
     /// Cadence at which load can still be added → training age.
     pub progression_cadence: ProgressionCadence,
@@ -222,18 +268,21 @@ fn serde_true() -> bool {
 }
 
 /// A race result the athlete reports on their profile.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Sanitize)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq, Sanitize)]
 pub struct RecentRace {
     /// Race distance, km.
     pub distance_km: f64,
     /// Finish time, seconds.
     pub time_sec: u32,
     /// Race date, local epoch day. `None` = undated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch_day: Option<i64>,
 }
 
 /// Calisthenics equipment the athlete has access to.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize,
+)]
 pub struct CalisEquipment {
     pub pull_up_bar: bool,
     pub dip_bars: bool,
@@ -241,7 +290,7 @@ pub struct CalisEquipment {
 }
 
 /// Why no plan can be built (`ViewModel::plan_withheld`, wire: snake_case).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanWithheld {
     /// A profile health answer holds training (illness, a doctor's OK, age…).

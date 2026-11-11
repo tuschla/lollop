@@ -57,15 +57,15 @@ internal fun ViewModel.todaysPlan(): SessionPlanView? =
 /** Today's lift session once something of it is logged. After Finish the core moves
  *  next_session off today, so this is how the day is resumed. */
 internal fun ViewModel.resumableLiftDay(): SessionPlanView? = week_plan.firstOrNull {
-    it.epoch_day == today() && it.items.isNotEmpty() && sessionDiscipline(it.session_type) == "Lift" &&
+    it.epoch_day == today() && it.items.isNotEmpty() && it.session_type.discipline == SessionDiscipline.Lift &&
         it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
 }
 
 /** The device's current UTC offset in SECONDS east of UTC, so the core can
  *  bucket a logged session's UTC `observed_at` into the correct local day. Uses
  *  the offset at "now" (DST-correct for the current instant). */
-internal fun utcOffsetSec(): Int =
-    TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochMilliseconds(AppClock.nowMillis())).totalSeconds
+internal fun utcOffsetSec(): Long =
+    TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochMilliseconds(AppClock.nowMillis())).totalSeconds.toLong()
 
 /**
  * Friendly log date for a history card from a unix-seconds stamp, in whole local

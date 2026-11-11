@@ -245,7 +245,7 @@ private fun InlineDisclosureLink(description: String, onClick: () -> Unit) {
 @Composable
 internal fun EvidenceCard(
     summary: String,
-    grade: String,
+    grade: EvidenceGrade?,
     citation: String,
     confidence: Float,
     safetyCritical: Boolean,
@@ -484,7 +484,7 @@ internal val DisclosureEdgeInset = (ActionMinHeight - DisclosureDiscSize) / 2
 @Composable
 internal fun WhyDetail(
     why: WhyView?,
-    grade: String,
+    grade: EvidenceGrade?,
     citation: String,
     confidence: Float,
     contested: Boolean,
@@ -587,9 +587,8 @@ val LocalEvidenceLegend = staticCompositionLocalOf<() -> Unit> { {} }
  * spoken label ("Moderate. How evidence grading works").
  */
 @Composable
-internal fun GradeChip(grade: String) {
-    // Unmapped/future grades have no human label; hide the whole badge rather
-    // than leak a raw Debug string.
+internal fun GradeChip(grade: EvidenceGrade?) {
+    // A row that asserts no claim has no grade, and no badge.
     val label = gradeLabel(grade)?.uppercase() ?: return
     val status = LocalStatusColors.current
     val openLegend = LocalEvidenceLegend.current
@@ -637,7 +636,7 @@ private fun OutlinedChip(text: String, border: Color) {
  *  for, marked the same way as [WhyDetail]. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-internal fun ClaimMarkers(grades: List<String>, contested: Boolean, citations: List<String>) {
+internal fun ClaimMarkers(grades: List<EvidenceGrade>, contested: Boolean, citations: List<String>) {
     if (grades.isNotEmpty() || contested) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
             grades.forEach { GradeChip(it) }
@@ -897,22 +896,19 @@ private fun LegendRow(label: String, chipColor: Color, body: String) {
     }
 }
 
-/**
- * Human label for an evidence grade's wire name, or null for an unmapped grade
- * (callers hide the chip/row rather than leak a raw Debug string). Display-only -
- * badges, sorting, and colors still key off the raw wire value.
- */
+/** Human label for an evidence grade, or null for none (callers hide the
+ *  chip/row). */
 @Composable
-internal fun gradeLabel(grade: String): String? = gradeLabelRes(grade)?.let { stringResource(it) }
+internal fun gradeLabel(grade: EvidenceGrade?): String? = gradeLabelRes(grade)?.let { stringResource(it) }
 
 /** String resource of [gradeLabel]: the same labels the legend rows use. */
-private fun gradeLabelRes(grade: String): StringResource? = when (grade) {
-    "Strong" -> Res.string.main_grade_strong
-    "Moderate" -> Res.string.main_grade_moderate
-    "Weak" -> Res.string.main_grade_weak
-    "ExpertOpinion" -> Res.string.main_grade_expert
-    "MarketingMyth" -> Res.string.main_grade_myth
-    else -> null
+private fun gradeLabelRes(grade: EvidenceGrade?): StringResource? = when (grade) {
+    EvidenceGrade.Strong -> Res.string.main_grade_strong
+    EvidenceGrade.Moderate -> Res.string.main_grade_moderate
+    EvidenceGrade.Weak -> Res.string.main_grade_weak
+    EvidenceGrade.ExpertOpinion -> Res.string.main_grade_expert
+    EvidenceGrade.MarketingMyth -> Res.string.main_grade_myth
+    null -> null
 }
 
 /** The core's citation verbatim; "-" when blank. */

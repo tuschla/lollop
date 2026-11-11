@@ -6,9 +6,9 @@
 # UnsatisfiedLinkError).
 #
 # Checks on the R8 output dex (dexdump) and the merged release manifest:
-#   jni        app.milestone.Core keeps its name and a NATIVE method for every
-#              Java_app_milestone_Core_* export in shared/src/ffi.rs (resetForTest
-#              is test-only and may be stripped)
+#   jni        app.milestone.core.JniCore keeps its name and a NATIVE method for
+#              every Java_app_milestone_core_JniCore_* export in
+#              shared/src/ffi/jni.rs
 #   manifest   every activity / service / receiver / provider and every
 #              androidx.startup initializer of the merged manifest exists under
 #              its manifest name with a public no-arg constructor
@@ -54,7 +54,7 @@ mkdir -p "$OUT"
 "$DEXDUMP" "${DEX[@]}" >"$OUT/dexdump.txt" 2>/dev/null
 echo "==> checking ${#DEX[@]} dex file(s) against $MANIFEST"
 
-python3 - "$OUT/dexdump.txt" "$MANIFEST" "$REPO_ROOT/shared/src/ffi.rs" "$MAPPING" <<'PY'
+python3 - "$OUT/dexdump.txt" "$MANIFEST" "$REPO_ROOT/shared/src/ffi/jni.rs" "$MAPPING" <<'PY'
 import re, sys
 import xml.etree.ElementTree as ET
 
@@ -139,14 +139,15 @@ def extends(cls, base):
             return True
     return False
 
-# jni: every Rust export has a NATIVE method on the unrenamed Core class.
-exports = sorted(set(re.findall(r"fn Java_app_milestone_Core_(\w+)", open(ffi).read())) - {"resetForTest"})
-found("jni", exports, "Java_app_milestone_Core_* export in shared/src/ffi.rs")
-check("app.milestone.Core" in classes, "jni: class app.milestone.Core kept under its JNI name")
-core = classes.get("app.milestone.Core", {"methods": []})
+# jni: every Rust export has a NATIVE method on the unrenamed JniCore class.
+JNI_CLASS = "app.milestone.core.JniCore"
+exports = sorted(set(re.findall(r"fn Java_app_milestone_core_JniCore_(\w+)", open(ffi).read())))
+found("jni", exports, "Java_app_milestone_core_JniCore_* export in shared/src/ffi/jni.rs")
+check(JNI_CLASS in classes, f"jni: class {JNI_CLASS} kept under its JNI name")
+core = classes.get(JNI_CLASS, {"methods": []})
 for name in exports:
     check(any(n == name and "NATIVE" in a for n, _, a in core["methods"]),
-          f"jni: app.milestone.Core.{name} is a kept native method (Java_app_milestone_Core_{name})")
+          f"jni: {JNI_CLASS}.{name} is a kept native method (Java_app_milestone_core_JniCore_{name})")
 
 # manifest: components and androidx.startup initializers.
 root = ET.parse(manifest).getroot()

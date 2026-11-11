@@ -101,7 +101,7 @@ class PersistenceTortureTest {
         Event.LogSet("Bench Press", 80.0, 5, 8.0, observedAt = at(3, 300), entryId = at(3, 300) * 1000),
         Event.LogRun(5.0, 27.5, 0.0, observedAt = at(2), entryId = at(2) * 1000),
         Event.SubmitCheckin(observedAt = at(1), sleepQuality = 4, soreness = 2, mood = 4, fatigue = 2, stress = 2),
-        Event.DeleteEntry(Event.EntryKind.Set, at(3, 300) * 1000),
+        Event.DeleteEntry(EntryKind.Set, at(3, 300) * 1000),
         track(at(1, 3600), at(1, 3600) * 1000),
     )
 

@@ -18,7 +18,9 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
+import app.milestone.HoldReason
 import app.milestone.R
+import app.milestone.train_blocked
 import java.time.LocalDate
 import java.util.Locale
 import org.junit.After
@@ -73,7 +75,7 @@ class YouthJourneysTest {
         // and no SAFETY card repeating it below.
         rule.assertTextCountEventually(str(R.string.main_hold_youth_title).uppercase(Locale.US), 1)
         rule.assertTextCountEventually(str(R.string.main_do_not_train), 0)
-        assertEquals("youth", EventDispatcher.model.value!!.hold_reason)
+        assertEquals(HoldReason.Youth, EventDispatcher.model.value!!.hold_reason)
         assertTrue(EventDispatcher.model.value!!.train_blocked)
         rule.assertTextCountEventually(str(R.string.main_hold_reason_youth), 1)
         rule.assertTextCountEventually(str(R.string.main_chip_safety), 0)

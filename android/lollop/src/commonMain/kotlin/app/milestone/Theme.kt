@@ -307,12 +307,12 @@ object RouteMarker {
 }
 
 /** Grade badge color from the theme-fixed status palette. See design spec §2. */
-fun StatusColors.gradeColor(grade: String): Color = when (grade) {
-    "Strong" -> evidenceStrong
-    "Moderate" -> evidenceModerate
-    "Weak" -> evidenceWeak
-    "ExpertOpinion" -> evidenceExpert
-    else -> evidenceUnknown
+fun StatusColors.gradeColor(grade: EvidenceGrade?): Color = when (grade) {
+    EvidenceGrade.Strong -> evidenceStrong
+    EvidenceGrade.Moderate -> evidenceModerate
+    EvidenceGrade.Weak -> evidenceWeak
+    EvidenceGrade.ExpertOpinion -> evidenceExpert
+    EvidenceGrade.MarketingMyth, null -> evidenceUnknown
 }
 
 /**

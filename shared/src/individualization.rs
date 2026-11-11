@@ -40,6 +40,7 @@ pub enum TrainingAge {
     serde::Serialize,
     serde::Deserialize,
     crate::sanitize::Sanitize,
+    crate::wire::Wire,
 )]
 pub enum ProgressionCadence {
     EverySession,
@@ -578,6 +579,7 @@ pub struct EnvironmentModifier {
     serde::Serialize,
     serde::Deserialize,
     crate::sanitize::Sanitize,
+    crate::wire::Wire,
 )]
 pub enum Environment {
     Heat,

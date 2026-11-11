@@ -14,10 +14,10 @@ internal sealed interface HistoryEntry {
  *  the legacy fallback the core uses when the id is 0. */
 internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
     is HistoryEntry.Lift -> Event.DeleteEntry(
-        Event.EntryKind.Set, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
+        EntryKind.Set, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
     )
     is HistoryEntry.Run -> Event.DeleteEntry(
-        Event.EntryKind.Run, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
+        EntryKind.Run, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
     )
 }
 
@@ -42,7 +42,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
             Event.LogRun(
                 distanceKm = v.distance_km, durationMin = v.duration_min, hrPctMax = loggedHrPctMax(v),
                 observedAt = v.observed_at, entryId = v.entry_id,
-                workoutType = WorkoutType.fromWire(v.workout_type), sessionRpe = v.session_rpe,
+                workoutType = v.workout_type, sessionRpe = v.session_rpe,
                 avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
             )
         } else {
@@ -61,7 +61,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
                 Event.LogRunTrack(
                     points = points, hrPctMax = loggedHrPctMax(v),
                     observedAt = v.observed_at, entryId = v.entry_id,
-                    workoutType = WorkoutType.fromWire(v.workout_type), segmentStarts = starts,
+                    workoutType = v.workout_type, segmentStarts = starts,
                     sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
                 )
             }

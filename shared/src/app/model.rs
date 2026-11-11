@@ -375,7 +375,7 @@ pub(super) struct RaceQuery {
 
 /// The heart-rate-zone query, stored on the model and echoed back so a shell
 /// rehydrates its form. Sibling to the `hr_zones` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Default, Clone, PartialEq)]
 pub struct HrZoneInputView {
     pub age_years: f64,
     /// Resting HR, bpm: arms the running-005 %HRmax-vs-Karvonen method
@@ -385,7 +385,7 @@ pub struct HrZoneInputView {
 
 /// The absolute-protein-target query, stored on the model and echoed back so a
 /// shell rehydrates its form. Sibling to the `protein_targets` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Default, Clone, PartialEq)]
 pub struct ProteinInputView {
     pub bodyweight_kg: f64,
     pub masters: bool,
@@ -394,7 +394,7 @@ pub struct ProteinInputView {
 
 /// The hypertrophy-plan query, stored on the model and echoed back so a shell
 /// rehydrates its form. Sibling to the `hypertrophy_plan` result rows.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Default, Clone, PartialEq)]
 pub struct HypertrophyInputView {
     pub muscle: String,
     pub weeks: u8,

@@ -98,19 +98,22 @@ private fun weekdayFull(epochDay: Long): String =
 
 /** Plain-language week-strip day status for the accessibility description. */
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
-private fun weekDayStatusPhrase(status: String): String = when (status) {
-    "next" -> "next session"
-    "adjusted" -> "adjusted"
-    "blocked" -> "paused"
-    "done" -> "done"
-    "done_lighter" -> "done, lighter than planned"
-    "before_plan" -> "before your plan started"
-    "missed" -> "not logged"
-    "partial" -> "partly done"
-    "rest" -> "rest day"
-    else -> "planned"
+private fun weekDayStatusPhrase(status: SessionStatus): String = when (status) {
+    SessionStatus.Next -> "next session"
+    SessionStatus.Adjusted -> "adjusted"
+    SessionStatus.Blocked -> "paused"
+    SessionStatus.Done -> "done"
+    SessionStatus.DoneLighter -> "done, lighter than planned"
+    SessionStatus.BeforePlan -> "before your plan started"
+    SessionStatus.Missed -> "not logged"
+    SessionStatus.Partial -> "partly done"
+    SessionStatus.Rest -> "rest day"
+    SessionStatus.Planned -> "planned"
 }
 
+/** A week-strip day's type token: "Lift", "Run" or "Rest". */
+// l10n: needs context plumbing (pure display helper, no Context)
+private fun disciplineLabel(s: SessionPlanView): String = s.session_type.discipline.name
 
 /** What a week day's sessions can do: log an item or a run dated to that day,
  *  end or reopen an exercise, move a session. */
@@ -451,12 +454,11 @@ private fun MuscleVolumeSection(prog: ProgramSummaryView) {
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
 private fun planPlainLabel(prog: ProgramSummaryView): String {
     val phaseWord = when (prog.phase) {
-        "Base" -> "building a base"
-        "Build" -> "building up"
-        "Peak" -> "hardest weeks"
-        "Taper" -> "easing off"
-        "Deload" -> "lighter week"
-        else -> prog.phase.lowercase()
+        MesoPhase.Base -> "building a base"
+        MesoPhase.Build -> "building up"
+        MesoPhase.Peak -> "hardest weeks"
+        MesoPhase.Taper -> "easing off"
+        MesoPhase.Deload -> "lighter week"
     }
     return "${prog.name} · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
 }
@@ -490,7 +492,7 @@ private fun WeekStrip(
     // The widest word a day column shows (bold, as today's weekday is), so the
     // strip can tell when seven columns no longer fit them whole.
     val dayLabels = week.flatMap { s ->
-        listOf(weekdayShort(s.epoch_day), if (s.status == "before_plan") "\u2014" else sessionDiscipline(s.session_type))
+        listOf(weekdayShort(s.epoch_day), if (s.status == SessionStatus.BeforePlan) "\u2014" else disciplineLabel(s))
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -547,11 +549,11 @@ private fun WeekStrip(
                         val creditedFrom = s.credited_from_epoch_day
                             ?.takeIf { s.isDone && it != s.epoch_day }
                         val statusLine = when {
-                            creditedFrom != null && s.status == "done_lighter" ->
+                            creditedFrom != null && s.status == SessionStatus.DoneLighter ->
                                 stringResource(Res.string.main_week_done_on_lighter, planDateLabel(creditedFrom))
                             creditedFrom != null -> stringResource(Res.string.main_week_done_on, planDateLabel(creditedFrom))
-                            s.status == "done_lighter" -> stringResource(Res.string.main_week_day_lighter)
-                            s.status == "partial" -> stringResource(Res.string.main_week_day_partial)
+                            s.status == SessionStatus.DoneLighter -> stringResource(Res.string.main_week_day_lighter)
+                            s.status == SessionStatus.Partial -> stringResource(Res.string.main_week_day_partial)
                             else -> null
                         }
                         statusLine?.let { Text(it, color = OnBgMuted, style = Type.Caption) }
@@ -572,8 +574,8 @@ private fun WeekStrip(
                 if (s.items.isEmpty()) {
                     Text(
                         when (s.status) {
-                            "rest" -> stringResource(Res.string.main_rest_day)
-                            "before_plan" -> stringResource(Res.string.main_week_before_plan)
+                            SessionStatus.Rest -> stringResource(Res.string.main_rest_day)
+                            SessionStatus.BeforePlan -> stringResource(Res.string.main_week_before_plan)
                             else -> EmptyValuePlaceholder
                         },
                         color = OnBgMuted,
@@ -591,7 +593,7 @@ private fun WeekStrip(
                         items = s.items,
                         isRun = isRun,
                         isCheck = isCheck,
-                        actionable = actions != null && s.epoch_day < today && s.status == "missed",
+                        actionable = actions != null && s.epoch_day < today && s.status == SessionStatus.Missed,
                         reopenable = actions != null && s.epoch_day <= today,
                         runActionLabel = stringResource(Res.string.main_log_run_title),
                         weightUnit = weightUnit,
@@ -621,17 +623,17 @@ private fun WeekStripDay(
     val status = LocalStatusColors.current
     // Filled = settled; hollow = open; red only for blocked.
     val (dotColor, dotFilled) = when (s.status) {
-        "next" -> Accent to true
-        "adjusted" -> status.warn to true
-        "blocked" -> status.danger to true
-        "missed", "partial" -> OnBgMuted to false
+        SessionStatus.Next -> Accent to true
+        SessionStatus.Adjusted -> status.warn to true
+        SessionStatus.Blocked -> status.danger to true
+        SessionStatus.Missed, SessionStatus.Partial -> OnBgMuted to false
         else -> OnBgFaint to false // planned
     }
     val isToday = s.epoch_day == today
     val sel = selectedDay == s.epoch_day
     // A day before the plan started is neither planned nor missed: a
     // neutral dash, no dot, nothing to count.
-    val beforePlan = s.status == "before_plan"
+    val beforePlan = s.status == SessionStatus.BeforePlan
     // Done by a same-discipline session on another day ("Done Tue").
     val creditedFrom = s.credited_from_epoch_day?.takeIf { s.isDone && it != s.epoch_day }
     // One spoken description per day column: the weekday, its discipline,
@@ -642,7 +644,7 @@ private fun WeekStripDay(
         append(weekdayFull(s.epoch_day))
         append(", ")
         if (!beforePlan) {
-            append(sessionDiscipline(s.session_type))
+            append(disciplineLabel(s))
             append(", ")
         }
         append(weekDayStatusPhrase(s.status))
@@ -683,7 +685,7 @@ private fun WeekStripDay(
         )
         // Day-type/label token, from the core's session_type.
         Text(
-            if (beforePlan) "\u2014" else sessionDiscipline(s.session_type),
+            if (beforePlan) "\u2014" else disciplineLabel(s),
             color = OnBgMuted,
             style = Type.Chip,
             maxLines = 1,
@@ -691,7 +693,7 @@ private fun WeekStripDay(
         // One glyph slot of the strip's height, so every column keeps one height.
         Box(Modifier.height(glyphSlot), contentAlignment = Alignment.Center) {
             when {
-                s.status == "rest" || beforePlan -> Unit
+                s.status == SessionStatus.Rest || beforePlan -> Unit
                 // Non-colour done cue (a11y): a ✓ glyph, not hue alone, so
                 // a colour-blind user can answer "did I finish?" at a glance.
                 s.isDone -> Text(
@@ -712,9 +714,9 @@ private fun WeekStripDay(
                                 Modifier.border(1.5.dp, dotColor, RoundedCornerShape(DayDotSize / 2))
                             },
                         )
-                        .then(if (s.status == "partial") Modifier.testTag("week-partial-mark") else Modifier),
+                        .then(if (s.status == SessionStatus.Partial) Modifier.testTag("week-partial-mark") else Modifier),
                 ) {
-                    if (s.status == "partial") {
+                    if (s.status == SessionStatus.Partial) {
                         Box(Modifier.fillMaxHeight().width(DayDotSize / 2).background(dotColor))
                     }
                 }

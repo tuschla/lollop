@@ -150,7 +150,7 @@ internal fun RunHrRow(r: RunResultView, explain: Boolean) {
     ) {
         Text(
             r.hr_label,
-            color = if (r.zone.startsWith("Z")) OnBgMuted else OnBgFaint,
+            color = if (r.zone != null) OnBgMuted else OnBgFaint,
             style = Type.Caption.merge(TabularFigures),
         )
         HrZoneBar(r.zone, Modifier.weight(1f))
@@ -160,10 +160,10 @@ internal fun RunHrRow(r: RunResultView, explain: Boolean) {
 
 /** The three HR zones as one bar, the run's [zone] at full strength (History card and run detail). */
 @Composable
-internal fun HrZoneBar(zone: String, modifier: Modifier = Modifier) {
+internal fun HrZoneBar(zone: ThreeZone?, modifier: Modifier = Modifier) {
     val status = LocalStatusColors.current
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-        listOf("Z1" to status.hrZone1, "Z2" to status.hrZone2, "Z3" to status.hrZone3).forEach { (z, c) ->
+        listOf(ThreeZone.Z1 to status.hrZone1, ThreeZone.Z2 to status.hrZone2, ThreeZone.Z3 to status.hrZone3).forEach { (z, c) ->
             Box(
                 Modifier
                     .weight(1f)
@@ -200,18 +200,15 @@ internal fun RunFindings(r: RunResultView, face: Boolean, showSplit: Boolean = t
     val isBaseline = r.spike_flag && !r.spike_has_baseline
     val showSpike = r.spike_flag && (r.spike_has_baseline || !face)
     val splitSafety = split?.safety_critical == true
-    val shownSplit = split?.takeIf { showSplit && (!face || splitSafety || it.verdict == "fade") }
+    val shownSplit = split?.takeIf { showSplit && (!face || splitSafety || it.verdict == SplitVerdict.Fade) }
     // Only the interval-LIKE case is a finding; a steady run is the default
     // expectation, so labelling it adds noise.
-    val shownInterval = interval?.takeIf { !face && it.kind == "interval" }
+    val shownInterval = interval?.takeIf { !face && it.kind == PaceVariability.Interval }
     if (!showSpike && shownSplit == null && shownInterval == null) return
     // The split verdict reads once: when the core sends its sentence, the sentence
     // alone carries it (no label chip echoing it above). SAFETY stays regardless.
     val splitChip = shownSplit != null && shownSplit.message.isBlank()
-    val grades = listOfNotNull(
-        shownSplit?.grade?.takeIf { it.isNotBlank() },
-        shownInterval?.grade?.takeIf { it.isNotBlank() },
-    )
+    val grades = listOfNotNull(shownSplit?.grade, shownInterval?.grade)
     val citations = listOfNotNull(
         r.citation.takeIf { showSpike && it.isNotBlank() },
         shownSplit?.citation?.takeIf { it.isNotBlank() },
@@ -235,7 +232,7 @@ internal fun RunFindings(r: RunResultView, face: Boolean, showSplit: Boolean = t
                             }
                         }
                         if (shownSplit != null) {
-                            if (splitChip) Chip(shownSplit.label, if (shownSplit.verdict == "fade") status.warn else ChipNeutral)
+                            if (splitChip) Chip(shownSplit.label, if (shownSplit.verdict == SplitVerdict.Fade) status.warn else ChipNeutral)
                             if (splitSafety) Chip(stringResource(Res.string.main_chip_safety), status.danger)
                         }
                         if (shownInterval != null) {
@@ -506,7 +503,7 @@ private fun splitSpoken(res: PlatformResources, s: RunSplitView, bar: SplitBar, 
 @Composable
 private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
     val status = LocalStatusColors.current
-    val hasWhy = split.grade.isNotBlank() || split.citation.isNotBlank() || split.contested
+    val hasWhy = split.grade != null || split.citation.isNotBlank() || split.contested
     var open by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -520,7 +517,7 @@ private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
         }
         if (hasWhy && open) {
             ClaimMarkers(
-                grades = listOfNotNull(split.grade.takeIf { it.isNotBlank() }),
+                grades = listOfNotNull(split.grade),
                 contested = split.contested,
                 citations = listOfNotNull(split.citation.takeIf { it.isNotBlank() }),
             )

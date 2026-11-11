@@ -15,6 +15,7 @@ import androidx.glance.unit.ColorProvider
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppTheme
 import app.milestone.DarkMode
+import app.milestone.HoldReason
 import app.milestone.OpenDest
 import app.milestone.Palette
 import app.milestone.R
@@ -299,7 +300,7 @@ class TodayWidgetContentTest {
         assertFalse(layoutAt(cells4x3).bigTitle)
     }
 
-    private fun hold() = widgetFace(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Paused, holdReason = "pain"), day, res)
+    private fun hold() = widgetFace(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Paused, holdReason = HoldReason.Pain), day, res)
 
     @Test
     fun largerFontDropsPartsInsteadOfClipping() {

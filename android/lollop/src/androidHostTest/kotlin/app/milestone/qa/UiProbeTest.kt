@@ -24,6 +24,7 @@ import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.ViewModel
+import app.milestone.train_blocked
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -144,7 +145,7 @@ abstract class UiProbeTest {
 
     protected fun runs(vararg daysAgo: Int): List<Event> = daysAgo.mapIndexed { i, d ->
         val at = QaHarness.daysAgoAtMidday(d) + 3_600L
-        Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, at, at * 1000)
+        Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, observedAt = at, entryId = at * 1000)
     }
 
     // ── Starting states ─────────────────────────────────────────────────────

@@ -1,13 +1,14 @@
-//! Seeded mutation fuzzing of the byte-level paths the shell drives over JNI:
+//! Seeded mutation fuzzing of the byte-level paths the shell drives through
+//! the bridge (`crate::ffi`):
 //!
-//! - the FIT import (`fit::parse_fit` + `fit::import_gate`, the body of
-//!   `ffi::parse_fit_json`, serialized exactly as it does);
-//! - the GPX export (`export_run_gpx` → `crate::gps::export_gpx`, what
-//!   `Core.exportGpx` returns);
+//! - the FIT import (`fit::parse_fit` + `fit::import_gate`, the body of the
+//!   `ParseFit` op, serialized exactly as it does);
+//! - the GPX export (`export_run_gpx` → `crate::gps::export_gpx`, what the
+//!   `ExportGpx` op answers);
 //! - the track-figures preview (`Event` decode + `preview_track_figures`, the
-//!   body of `ffi::track_figures_json`);
+//!   body of the `TrackFigures` op);
 //! - the JSON bridge (`Bridge<Engine, JsonFfiFormat>` update/view, the bodies of
-//!   `ffi::process_event` / `ffi::current_view` minus their panic firewall).
+//!   the `Update` / `View` ops minus their panic firewall).
 //!
 //! Seeds: the real device fixtures in `shared/tests/fixtures` plus generated
 //! FIT files (little/big endian, 12/14-byte headers, compressed timestamps,
@@ -371,9 +372,9 @@ fn fit_seeds() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-// ── The parse_fit_json body and its invariants ──────────────────────────────
+// ── The ParseFit op's body and its invariants ───────────────────────────────
 
-/// What `ffi::parse_fit_json` decides for some bytes, before serialization.
+/// What the bridge's `ParseFit` op decides for some bytes, before serialization.
 #[derive(Debug, Clone, PartialEq)]
 enum FitOutcome {
     Track(FitTrack),
@@ -392,7 +393,7 @@ fn payload(out: &FitOutcome) -> serde_json::Value {
     match out {
         FitOutcome::Track(t) => serde_json::to_value(t).expect("a track serializes"),
         FitOutcome::Fail(e) => serde_json::json!({
-            "error": {"kind": crate::ffi::ErrorKind::from(e), "context": e.context(), "message": ""}
+            "error": {"kind": crate::envelope::ErrorKind::from(e), "context": e.context(), "message": ""}
         }),
     }
 }
@@ -436,7 +437,6 @@ fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
         FitOutcome::Fail(e) => {
             let ok_ctx = match e {
                 FitError::NotARun(s) => !s.is_empty() && !s.contains('_'),
-                FitError::TooShort => e.context() == "too_short",
                 _ => e.context().is_empty(),
             };
             if !ok_ctx {
@@ -566,14 +566,14 @@ fn every_seed_parses_to_its_known_outcome() {
             let kind = match &out {
                 FitOutcome::Track(t) => format!("track {} segs", t.segments.len()),
                 FitOutcome::Fail(e) => {
-                    format!("{} {}", crate::ffi::ErrorKind::from(e), e.context())
+                    format!("{} {}", crate::envelope::ErrorKind::from(e), e.context())
                 }
             };
             (name, kind)
         })
         .collect();
     let expected = [
-        ("Activity.fit", "no_track too_short"),
+        ("Activity.fit", "too_short "),
         ("garmin-fenix-5-bike.fit", "not_a_run cycling"),
         ("gen run", "track 1 segs"),
         ("gen big-endian 12-byte header compressed", "track 1 segs"),
@@ -978,8 +978,7 @@ fn walk(n: usize, t0: i64) -> Vec<GpsPoint> {
         .collect()
 }
 
-/// Log `points` as a GPS run in a fresh model, view it (fills the export
-/// registry) and return its GPX document.
+/// Log `points` as a GPS run in a fresh model and return its GPX document.
 fn export_logged(points: Vec<GpsPoint>, segment_starts: Vec<u32>, observed_at: i64) -> String {
     let app = Engine;
     let mut model = Model::default();
@@ -990,7 +989,7 @@ fn export_logged(points: Vec<GpsPoint>, segment_starts: Vec<u32>, observed_at: i
     let vm = app.view(&model);
     vm.runs
         .first()
-        .map(|r| export_run_gpx(r.entry_id, r.observed_at))
+        .map(|r| export_run_gpx(&model, r.entry_id, r.observed_at))
         .unwrap_or_default()
 }
 
@@ -1100,8 +1099,7 @@ fn a_logged_track_survives_the_event_wire_bit_for_bit() {
     let app = Engine;
     let mut model = Model::default();
     let _ = app.update(log_run_track(pts, 0.0, 0.0, 1_750_000_400, 77), &mut model);
-    let _ = app.view(&model);
-    let doc = export_run_gpx(77, 1_750_000_400);
+    let doc = export_run_gpx(&model, 77, 1_750_000_400);
     // The exact value each exported decimal denotes (Rust's `str::parse` and
     // kotlinx are correctly rounded), and what the core's decode makes of it.
     let mut exact = Vec::new();
@@ -1153,7 +1151,7 @@ fn a_logged_track_survives_the_event_wire_bit_for_bit() {
 
 // ── trackFigures body ───────────────────────────────────────────────────────
 
-/// `ffi::track_figures_json`'s body: decode the event, preview the figures.
+/// The bridge's `TrackFigures` op body: decode the event, preview the figures.
 fn track_figures(bytes: &[u8]) -> Result<(f64, f64), String> {
     match serde_json::from_slice::<Event>(bytes) {
         Ok(Event::LogRunTrack {

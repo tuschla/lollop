@@ -22,6 +22,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
+import app.milestone.ItemStatus
+import app.milestone.MesoPhase
 import app.milestone.MilestoneTheme
 import app.milestone.R
 import app.milestone.ConsistencyView
@@ -29,8 +31,11 @@ import app.milestone.GuidanceView
 import app.milestone.MuscleVolumeView
 import app.milestone.PrescriptionView
 import app.milestone.ProgramSummaryView
+import app.milestone.ReadinessSignal
 import app.milestone.ReadinessSignalView
 import app.milestone.SessionPlanView
+import app.milestone.SessionStatus
+import app.milestone.SessionType
 import app.milestone.ThisWeekCard
 import app.milestone.TodayDestination
 import app.milestone.ViewModel
@@ -56,9 +61,9 @@ class ThisWeekCardTest {
         java.util.Locale.setDefault(java.util.Locale.US)
         // Mon 2026-09-21 … Sun: done, partly done, missed, today, then planned and rest.
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
-        val statuses = listOf("done", "partial", "missed", "next", "planned", "rest", "planned")
+        val statuses = listOf(SessionStatus.Done, SessionStatus.Partial, SessionStatus.Missed, SessionStatus.Next, SessionStatus.Planned, SessionStatus.Rest, SessionStatus.Planned)
         val week = statuses.mapIndexed { i, status ->
-            SessionPlanView(epoch_day = monday + i, title = "Day $i", session_type = "Strength", status = status)
+            SessionPlanView(epoch_day = monday + i, title = "Day $i", session_type = SessionType.Rest, status = status)
         }
         var selected by mutableStateOf(-1L)
         rule.setContent {
@@ -89,7 +94,7 @@ class ThisWeekCardTest {
     @Test
     fun theStripFillsTheCardInSevenEqualColumns() {
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
-        val week = (0 until 7).map { SessionPlanView(epoch_day = monday + it, title = "Day $it", session_type = "Run", status = "planned") }
+        val week = (0 until 7).map { SessionPlanView(epoch_day = monday + it, title = "Day $it", session_type = SessionType.RunEasy, status = SessionStatus.Planned) }
         rule.setContent {
             MilestoneTheme {
                 ThisWeekCard(
@@ -117,8 +122,10 @@ class ThisWeekCardTest {
     @Test
     fun aMissedRowWithoutItsNoteKeepsTheRepeatingWeekNoteOffTheFace() {
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
-        val week = listOf("missed", "blocked", "planned", "planned", "rest", "planned", "rest").mapIndexed { i, status ->
-            SessionPlanView(epoch_day = monday + i, title = "Day $i", session_type = "Lift(MaxEffort)", status = status)
+        val week = listOf(
+            SessionStatus.Missed, SessionStatus.Blocked, SessionStatus.Planned, SessionStatus.Planned, SessionStatus.Rest, SessionStatus.Planned, SessionStatus.Rest,
+        ).mapIndexed { i, status ->
+            SessionPlanView(epoch_day = monday + i, title = "Day $i", session_type = SessionType.LiftMaxEffort, status = status)
         }
         val consistency = ConsistencyView(
             this_week_done = 0,
@@ -153,11 +160,11 @@ class ThisWeekCardTest {
         val day = java.time.LocalDate.of(2026, 9, 24).toEpochDay()
         val stopped = PrescriptionView(
             summary = "Back Squat 3×5", exercise = "Back Squat", sets = 3, sets_done = 1,
-            done = true, status = "stopped_pain",
+            done = true, status = ItemStatus.StoppedPain,
         )
         val open = PrescriptionView(summary = "Bench Press 3×5", exercise = "Bench Press", sets = 3)
         val session = SessionPlanView(
-            epoch_day = day, title = "Strength A", session_type = "Lift(MaxEffort)", status = "next",
+            epoch_day = day, title = "Strength A", session_type = SessionType.LiftMaxEffort, status = SessionStatus.Next,
             items = listOf(stopped, open),
         )
         val model = ViewModel(
@@ -165,7 +172,7 @@ class ThisWeekCardTest {
             next_session = session,
             week_plan = listOf(session),
             readiness_summary = listOf(
-                ReadinessSignalView(signal = "Pain", state = "reported", detail = "Left knee · sharp/joint · 6/10"),
+                ReadinessSignalView(signal = ReadinessSignal.Pain, state = "reported", detail = "Left knee · sharp/joint · 6/10"),
             ),
         )
         rule.setContent {
@@ -193,7 +200,7 @@ class ThisWeekCardTest {
     @Test
     fun theMuscleVolumeToggleSpeaksItsState() {
         val program = ProgramSummaryView(
-            name = "Hypertrophy", phase = "Build", week = 1, weeks_total = 6,
+            name = "Hypertrophy", phase = MesoPhase.Build, week = 1, weeks_total = 6,
             muscle_volume = listOf(MuscleVolumeView(muscle = "Chest", target_sets = 10, delivered_sets = 10f, label = "Chest 10 of 10")),
         )
         rule.setContent {

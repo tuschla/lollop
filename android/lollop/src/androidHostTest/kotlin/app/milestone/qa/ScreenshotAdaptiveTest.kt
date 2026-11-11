@@ -225,7 +225,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
                         else -> 11.0 + w % 4
                     }
                     val at = QaHarness.daysAgoAtMidday(7 * (w - 1) + off)
-                    add(at to Event.LogRun(km, km * 5.8, 0.0, at, at * 1000))
+                    add(at to Event.LogRun(km, km * 5.8, 0.0, observedAt = at, entryId = at * 1000))
                 }
             }
             var t = QaHarness.daysAgoAtMidday(3)

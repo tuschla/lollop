@@ -1,5 +1,6 @@
 package app.milestone
 
+import app.milestone.core.CoreBridge
 import kotlin.concurrent.Volatile
 
 /** The app clock the host tests run on ([AppRuntime.resetForTest]): the device
@@ -37,6 +38,13 @@ internal object TestSink : EventSink {
     }
 }
 
+/** A stand-in for the native core's two round trips: the raw `update` response
+ *  bytes for one event's wire JSON, and the raw `view` bytes. */
+internal interface CoreFault {
+    fun update(event: ByteArray): ByteArray?
+    fun view(): ByteArray?
+}
+
 /** A [CoreBridge] whose two round trips are [fault]'s (a core that answers null,
  *  an error envelope, or never loaded) and that answers nothing else. */
 internal class FaultBridge(@Volatile var fault: CoreFault) : CoreBridge {
@@ -44,11 +52,13 @@ internal class FaultBridge(@Volatile var fault: CoreFault) : CoreBridge {
 
     override fun view(): ByteArray? = fault.view()
 
-    override fun parseFit(bytes: ByteArray): String? = null
+    override fun parseFit(fit: ByteArray): ByteArray? = null
 
-    override fun exportGpx(entryId: Long, observedAt: Long): String? = null
+    override fun exportGpx(run: ByteArray): ByteArray? = null
 
-    override fun trackFigures(event: ByteArray): String? = null
+    override fun trackFigures(event: ByteArray): ByteArray? = null
 
-    override fun compactLog(lines: Array<String>): String? = null
+    override fun compactLog(lines: Array<String>): ByteArray? = null
+
+    override fun reset(): ByteArray? = null
 }

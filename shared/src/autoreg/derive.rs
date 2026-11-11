@@ -148,7 +148,9 @@ enum EmitValue {
 
 /// Whether a [`BaselineStatus`] row is still gathering its first baseline or is
 /// a temporary sparse-week gap in an otherwise-established channel.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq,
+)]
 pub enum BaselineKind {
     Collecting,
     SparseWeek,

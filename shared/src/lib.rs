@@ -31,11 +31,11 @@ pub mod app;
 pub mod autoreg;
 pub mod calisthenics;
 pub(crate) mod day;
+pub mod envelope;
 pub mod event;
 pub mod evidence;
 pub mod exercise;
 pub mod feedback;
-#[cfg(any(ffi_surface, test))]
 pub mod ffi;
 pub mod fit;
 pub mod gps;
@@ -53,6 +53,7 @@ pub mod running;
 pub(crate) mod sanitize;
 pub mod schema;
 pub mod strength;
+pub mod wire;
 
 pub use app::{
     ActivityResultView, AdjustmentView, BaselineStatusView, E1rmRangeView, Effect, Engine,

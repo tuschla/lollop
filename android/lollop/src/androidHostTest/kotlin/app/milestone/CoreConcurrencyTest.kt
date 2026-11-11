@@ -2,6 +2,8 @@ package app.milestone
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.core.CoreBridge
+import app.milestone.core.JniCore
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.widget.WidgetSnapshotStore
@@ -35,7 +37,7 @@ import org.robolectric.RobolectricTestRunner
  * The REAL core (host `libshared.so`) driven over JNI from many threads at once, the
  * way production can reach it: queued sends from the UI ([EventDispatcher] on the
  * `core-jni` executor), the tracker's run save, a multi-activity import
- * ([Core.sendAll]), GPX exports ([Core.exportGpx], from IO), the Finish-review
+ * ([Core.sendAll]), GPX exports ([Core.runGpx], from IO), the Finish-review
  * preview ([Core.savedFigures], main), boot compaction ([Core.compaction]),
  * widget/tile reads of the published view, a data export reading the log
  * ([EventLog.read]) while it grows, and rapid Undo/redo.
@@ -43,8 +45,7 @@ import org.robolectric.RobolectricTestRunner
  * Invariants: no crash, error envelope or panic reset; every send accepted,
  * persisted and fresh; no event lost or duplicated (each entry id is in the view and
  * the log exactly as the last write left it); every thread's view at a quiet point
- * equals a fresh thread's (the Rust view memos are thread-local, so each thread's
- * caches hold states the others moved past); the live view equals a cold reboot's
+ * equals a fresh thread's; the live view equals a cold reboot's
  * replay of the log; nothing waits past [STALL_SEC] (a deadlock fails, not hangs).
  * `CORE_STRESS_ROUNDS` scales the main stress (default 3).
  */
@@ -90,7 +91,7 @@ class CoreConcurrencyTest {
         return Event.LogRunTrack(pts, 0.0, observedAt = end, entryId = entryId, utcOffsetSec = utcOffsetSec())
     }
 
-    /** The view a brand-new thread reads: every Rust thread-local view memo is cold. */
+    /** The view a brand-new thread reads. */
     private fun coldView(): ViewModel {
         val out = AtomicReference<Any?>(null)
         thread(name = "cold-view") { out.set(runCatching { AppRuntime.engine.currentView() }.getOrElse { it }) }
@@ -187,7 +188,7 @@ class CoreConcurrencyTest {
                         3 -> mine.randomOrNull(rng)?.let { sid ->
                             // Delete, then the snackbar's Undo re-logs the row with its own id and stamp.
                             val row = sets.getValue(sid)
-                            val gone = sendOk(Event.DeleteEntry(Event.EntryKind.Set, sid, row.at), "t$t delete").view
+                            val gone = sendOk(Event.DeleteEntry(EntryKind.Set, sid, row.at), "t$t delete").view
                             assertTrue("t$t: deleted set $sid still shown", gone.lifts.none { it.entry_id == sid })
                             sendOk(row.log(), "t$t undo delete")
                         }
@@ -211,7 +212,7 @@ class CoreConcurrencyTest {
                             assertTrue("t$t: saved GPS run has no route", card.has_gpx)
                             gpsRuns[ev.entryId] = ev
                             myGps += ev.entryId
-                            val gpx = Core.exportGpx(ev.entryId, ev.observedAt)
+                            val gpx = Core.runGpx(ev.entryId, ev.observedAt)
                             assertTrue("t$t: export of run ${ev.entryId} right after its save is empty", !gpx.isNullOrBlank() && "<trkpt" in gpx)
                         }
                         6 -> myGps.randomOrNull(rng)?.let { rid ->
@@ -222,10 +223,10 @@ class CoreConcurrencyTest {
                                 sendOk(Event.TrimRunTrack(rid, ev.observedAt, keep.first, keep.last), "t$t trim")
                                 gpsRuns[rid] = ev.copy(points = pts.filter { it.observedAt in keep })
                             } else {
-                                sendOk(Event.DeleteEntry(Event.EntryKind.Run, rid, ev.observedAt), "t$t delete run")
+                                sendOk(Event.DeleteEntry(EntryKind.Run, rid, ev.observedAt), "t$t delete run")
                                 sendOk(ev, "t$t undo delete run")
                             }
-                            val gpx = Core.exportGpx(rid, ev.observedAt)
+                            val gpx = Core.runGpx(rid, ev.observedAt)
                             assertTrue("t$t: export of live run $rid is empty", !gpx.isNullOrBlank())
                         }
                         7 -> {
@@ -289,7 +290,7 @@ class CoreConcurrencyTest {
             assertEquals("import batch $batch interleaved: lines $idx", idx.first() + 1, idx[1])
             assertEquals("import batch $batch interleaved: lines $idx", idx.first() + 2, idx[2])
         }
-        val exports = gpsRuns.values.associate { it.entryId to Core.exportGpx(it.entryId, it.observedAt) }
+        val exports = gpsRuns.values.associate { it.entryId to Core.runGpx(it.entryId, it.observedAt) }
         exports.forEach { (rid, g) -> assertTrue("run $rid: empty export", !g.isNullOrBlank()) }
 
         // A cold boot of the durable log renders the live view and the same routes.
@@ -297,7 +298,7 @@ class CoreConcurrencyTest {
         assertTrue("replayed view is stale", !replayed.stale)
         assertTrue("reboot view differs from the live view", replayed.view == live)
         for ((rid, g) in exports) {
-            assertEquals("run $rid: export after reboot", g, Core.exportGpx(rid, gpsRuns.getValue(rid).observedAt))
+            assertEquals("run $rid: export after reboot", g, Core.runGpx(rid, gpsRuns.getValue(rid).observedAt))
         }
     }
 
@@ -320,7 +321,7 @@ class CoreConcurrencyTest {
                 val row = base.copy(kg = 100.0 + t * 10 + i % 5, reps = 1 + (i + t) % 9)
                 when (rng.nextInt(3)) {
                     0 -> sendOk(row.amend(), "t$t amend")
-                    1 -> sendOk(Event.DeleteEntry(Event.EntryKind.Set, base.id, base.at), "t$t delete")
+                    1 -> sendOk(Event.DeleteEntry(EntryKind.Set, base.id, base.at), "t$t delete")
                     else -> sendOk(row.log(), "t$t re-log")
                 }
             }
@@ -346,43 +347,33 @@ class CoreConcurrencyTest {
 
     // ── 3. A panic reset in the middle of the stress ─────────────────────────────
 
-    /** One thread's event panics the core (the FFI swaps in an EMPTY bridge and
-     *  answers `panic_reset`) while five others keep logging. [Core.apply] rebuilds
-     *  the fresh core from the durable log under the same monitor, so no other
-     *  thread's accepted entry is lost, the poisoned event is refused and never
+    /** One thread's event panics the core (the bridge swaps in an EMPTY core and
+     *  answers `panic_reset`) while five others keep logging. [DurableCore.send]
+     *  rebuilds the fresh core from the durable log under the same monitor, so no
+     *  other thread's accepted entry is lost, the poisoned event is refused and never
      *  persisted, and every later view (on any thread) is the full model. */
     @Test
     fun aPanicResetMidStressRebuildsFromTheLogAndLosesNothingElse() {
-        val nativeUpdate = Core::class.java.getDeclaredMethod("update", ByteArray::class.java).apply { isAccessible = true }
-        val nativeView = Core::class.java.getDeclaredMethod("view").apply { isAccessible = true }
-        val nativeCompact = Core::class.java.getDeclaredMethod("compactLog", Array<String>::class.java).apply { isAccessible = true }
         val resets = AtomicInteger()
-        // Core's natives; while [poisoning], a poisoned event resets the native core
-        // as ffi.rs catch_panic(reset = true) does, and compaction is off.
+        // The real core; while [poisoning], a poisoned event resets it as the
+        // bridge's panic firewall does, and compaction is off.
         var poisoning = false
-        val bridge = object : CoreBridge {
+        val bridge = object : CoreBridge by JniCore {
             override fun update(event: ByteArray): ByteArray? {
                 if (poisoning && POISON in String(event, Charsets.UTF_8)) {
-                    Core.resetForTest()
+                    JniCore.reset()
                     resets.incrementAndGet()
-                    return """{"error":{"kind":"panic_reset","context":"update","message":"injected"}}""".toByteArray()
+                    return coreJson.encodeToString(
+                        ErrorEnvelope.serializer(),
+                        ErrorEnvelope(CoreError(ErrorKind.PanicReset, "update", "injected")),
+                    ).toByteArray()
                 }
-                return nativeUpdate.invoke(Core, event) as ByteArray?
+                return JniCore.update(event)
             }
 
-            override fun view(): ByteArray? = nativeView.invoke(Core) as ByteArray?
-            override fun parseFit(bytes: ByteArray): String? = null
-            override fun exportGpx(entryId: Long, observedAt: Long): String? = null
-            override fun trackFigures(event: ByteArray): String? = null
-            override fun compactLog(lines: Array<String>): String? =
-                if (poisoning) null else nativeCompact.invoke(Core, lines) as String?
-
-            override fun reset(): Boolean {
-                Core.resetForTest()
-                return true
-            }
+            override fun compactLog(lines: Array<String>): ByteArray? = if (poisoning) null else JniCore.compactLog(lines)
         }
-        QaHarness.freshProcess(BridgeCore(bridge))
+        QaHarness.freshProcess(DurableCore(bridge))
         boot(listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7)))
         poisoning = true
         val accepted = ConcurrentHashMap.newKeySet<Long>()

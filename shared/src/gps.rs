@@ -73,7 +73,16 @@ fn accurate(p: &GpsPoint) -> bool {
 /// enters only as `observed_at` (unix seconds), never a live clock. Lat/lon in
 /// decimal degrees; `accuracy_m` is the shell provider's reported horizontal
 /// error, used to drop noisy fixes before summing distance.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, crate::sanitize::Sanitize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    crate::sanitize::Sanitize,
+    crate::wire::Wire,
+)]
 pub struct GpsPoint {
     pub lat: f64,
     pub lon: f64,

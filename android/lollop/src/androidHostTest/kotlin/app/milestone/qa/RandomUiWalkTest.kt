@@ -28,6 +28,7 @@ import app.milestone.ViewModel
 import app.milestone.groupLiftSessions
 import app.milestone.showLifting
 import app.milestone.showRunning
+import app.milestone.train_blocked
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith

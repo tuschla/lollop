@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Canonical evidence grading scale (File 09).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub enum EvidenceGrade {
     /// Contradicted or retracted claims; must be hard-blocked, never programmed.
     MarketingMyth,

@@ -709,7 +709,7 @@ private fun LiftGoalStep(a: SetupAnswers, today: Long, update: UpdateAnswers) {
 /** "Where are you now?": the equipment on hand, then one placement per ladder.
  *  On a [kept] ladder (a re-run's, already holding a rung) no answer keeps that rung. */
 @Composable
-private fun PlacementStep(a: SetupAnswers, kept: Set<CalisLadder>, update: UpdateAnswers) {
+private fun PlacementStep(a: SetupAnswers, kept: Set<LadderId>, update: UpdateAnswers) {
     StepHeader(stringResource(Res.string.setup_step_place_q), stringResource(Res.string.setup_step_place_sub))
     // Equipment first: it decides which pull-up answers are possible.
     SubHeading(stringResource(Res.string.setup_equip_q))
@@ -723,7 +723,7 @@ private fun PlacementStep(a: SetupAnswers, kept: Set<CalisLadder>, update: Updat
         val answer = a.placement(ladder)
         // Pull-up rungs need something to hang from (the core's rung_available);
         // unanswered equipment means "everything".
-        val rungsOff = ladder == CalisLadder.VerticalPull && a.equipment?.canHang == false
+        val rungsOff = ladder == LadderId.VerticalPull && a.equipment?.canHang == false
         // null = "Not sure, start easy" (the first rung), or on a kept ladder "Keep
         // my current level". One full-width row per rung, easy → hard top to
         // bottom, so the ladder's order survives every screen width.
@@ -992,7 +992,7 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
 /** The review rows for [draft] (what Finish sends): each answer once, unanswered
  *  optional fields left out. [today] dates the birthday's age. */
 @Composable
-private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile, distanceUnit: DistanceUnit, kept: Set<CalisLadder>, today: Long): List<ReviewEntry> {
+private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile, distanceUnit: DistanceUnit, kept: Set<LadderId>, today: Long): List<ReviewEntry> {
     val unit = distanceUnit.distanceLabel
     return buildList {
         add(ReviewEntry(stringResource(Res.string.setup_review_train), stringResource(m.titleRes), SetupStep.Train))

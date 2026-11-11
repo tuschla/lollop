@@ -1,5 +1,6 @@
 package app.milestone
 
+import app.milestone.core.CoreBridge
 import kotlin.concurrent.Volatile
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -17,13 +18,11 @@ import kotlinx.serialization.SerializationException
  * which [restore] replays at boot. Called on [CoreDispatcher] by the event queue
  * ([CoreEngine]).
  *
- * Android's engine is [Core] (the JNI natives); iOS installs a [BridgeCore] over
- * the C ABI. State is guarded by this object's lock (the JVM monitor on Android).
+ * Android's engine is [Core] (over JNI), iOS's one over the C ABI, tests' over
+ * scripted bridges. State is guarded by this object's lock (the JVM monitor on
+ * Android).
  */
-abstract class DurableCore : SynchronizedObject(), CoreEngine {
-    /** The core's bridge calls: the JNI natives on Android, the C ABI on iOS. */
-    protected abstract val bridge: CoreBridge
-
+open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), CoreEngine {
     /** Why the platform's core library failed to load, or null. Only Android can
      *  fail here (`System.loadLibrary`); the iOS core is linked into the app. */
     internal open val loadError: Throwable? get() = null
@@ -76,11 +75,10 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
 
     /** The distance and moving time [track] will be SAVED with, from the core's own
      *  QC and derivation (the same as the saved run's card), so the Finish review
-     *  shows what History will list. Null when the core can't answer (an error
-     *  envelope or an allocation failure). O(fixes): fine on the main thread for
-     *  a capped (decimated) track. */
+     *  shows what History will list. Null when the core can't answer. O(fixes):
+     *  fine on the main thread for a capped (decimated) track. */
     fun savedFigures(track: Event.LogRunTrack): TrackFigures? {
-        val json = bridge.trackFigures(track.toJson().toString().encodeToByteArray()) ?: return null
+        val json = query { bridge.trackFigures(track.toJson().toString().encodeToByteArray()) } ?: return null
         return try {
             coreJson.decodeFromString(TrackFigures.serializer(), json)
         } catch (e: SerializationException) {
@@ -89,33 +87,49 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         }
     }
 
-    /** The core's stateless FIT parse of a `.fit` file's [bytes] (fitparser): the
-     *  tracker-import JSON or an `{"error":…}` object; null when the answer couldn't
-     *  be allocated (callers treat it like the error envelope). Touches no model or log. */
-    fun parseFitFile(bytes: ByteArray): String? = bridge.parseFit(bytes)
+    /** The core's FIT parse of a `.fit` file's [bytes]: the tracker-import JSON or
+     *  an `{"error":…}` object; null when the core can't answer (callers treat it
+     *  like the error envelope). Touches no model or log. */
+    fun parseFitFile(bytes: ByteArray): String? = query { bridge.parseFit(bytes) }
 
     /** The GPX 1.1 document of ONE logged run, by the same (entry_id, observed_at)
-     *  identity as delete/amend: "" for a hand-entered run or an unknown id, null only
-     *  when the string couldn't be allocated (treat it like ""). Reads the registry the
-     *  last view filled, so call it after the run list rendered; heavy, so off the
-     *  main thread. */
-    fun runGpx(entryId: Long, observedAt: Long): String? = bridge.exportGpx(entryId, observedAt)
+     *  identity as delete/amend: "" for a hand-entered run, an unknown id, or a core
+     *  that can't answer. Heavy, so off the main thread. */
+    fun runGpx(entryId: Long, observedAt: Long): String {
+        val run = coreJson.encodeToString(RunRef.serializer(), RunRef(entryId, observedAt))
+        val gpx = query { bridge.exportGpx(run.encodeToByteArray()) } ?: return ""
+        if (isCoreErrorEnvelope(gpx)) {
+            PlatformLog.w("Core", "GPX export failed: $gpx")
+            return ""
+        }
+        return gpx
+    }
 
     /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
-     *  the core can't answer (the library didn't load, it is [unavailable], or the
-     *  call failed): the caller then keeps every line. */
-    internal fun compaction(lines: List<String>): LogCompaction? {
-        if (loadError != null || unavailable) return null
-        val json = try {
-            bridge.compactLog(lines.toTypedArray())
-        } catch (e: Throwable) {
-            if (!e.isLinkageError()) throw e
-            null
-        } ?: return null
+     *  the core can't answer: the caller then keeps every line. */
+    internal fun compaction(lines: List<String>): Compaction? {
+        val json = query { bridge.compactLog(lines.toTypedArray()) } ?: return null
+        if (isCoreErrorEnvelope(json)) {
+            PlatformLog.w("Core", "compaction failed, keeping every line: $json")
+            return null
+        }
         return try {
-            coreJson.decodeFromString(LogCompaction.serializer(), json)
+            coreJson.decodeFromString(Compaction.serializer(), json)
         } catch (e: SerializationException) {
             PlatformLog.w("Core", "compaction verdict unreadable, keeping every line", e)
+            null
+        }
+    }
+
+    /** A core call outside the event path, as text: null when the library didn't
+     *  load, the core is [unavailable], the answer couldn't be allocated, or the
+     *  call hit a missing native symbol. */
+    private inline fun query(call: () -> ByteArray?): String? {
+        if (loadError != null || unavailable) return null
+        return try {
+            call()?.decodeToString()
+        } catch (e: Throwable) {
+            if (!e.isLinkageError()) throw e
             null
         }
     }
@@ -211,23 +225,21 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
     /**
      * Put this engine back where a new process starts it: the native core emptied
      * ([CoreBridge.reset]) and the replayed log forgotten, so the next [restore]
-     * replays the event log file afresh. The iOS data import, which can't restart
-     * its process, calls this after replacing the log and then re-runs the boot.
-     * False, with nothing changed, where the bridge can't reset (Android).
+     * replays the event log file afresh. A reboot into an imported log
+     * ([AppRuntime.requestReboot]) calls this before its restore.
      */
-    fun resetForReboot(): Boolean = synchronized(this) {
-        if (!bridge.reset()) return false
-        forgetLog()
-        true
-    }
+    fun resetForReboot() = synchronized(this) { startOver() }
 
     /** Start over as a new process starts the engine ([AppRuntime.resetForTest]):
-     *  the native core emptied where the bridge can, and everything this engine
-     *  learnt (the replayed log, the cached view, the [unavailable] latch) forgotten. */
+     *  [resetForReboot], and the [unavailable] latch forgotten too. */
     internal fun forgetProcess() = synchronized(this) {
+        startOver()
+        unavailable = false
+    }
+
+    private fun startOver() {
         if (loadError == null) bridge.reset()
         forgetLog()
-        unavailable = false
     }
 
     private fun forgetLog() {
@@ -287,8 +299,8 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
             replayLogAfterReset()
             return Applied.Rejected
         }
-        // A serde-rejected event returns empty bytes (ffi out.clear()); a core panic
-        // returns an {"error":...} object; a null is a byte-array alloc failure.
+        // A serde-rejected event answers no bytes, a core panic an {"error":...}
+        // object, and a null is an answer that couldn't be allocated.
         // None is persisted: the line would just be re-dropped on every replay.
         if (!isAccepted(response)) {
             PlatformLog.e("Core", "event rejected: ${event::class.simpleName}")
@@ -379,7 +391,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
 
     /** True if the core ACCEPTED an event: crux emits a non-empty JSON effect
      *  array. A rejected event yields empty bytes; a panic yields an `{"error"…}`
-     *  object (leading `{`); a null (alloc failure) is likewise not accepted. */
+     *  object (leading `{`); a null (an unallocatable answer) is likewise not accepted. */
     private fun isAccepted(response: ByteArray?): Boolean = response.firstNonBlank() == '['.code.toByte()
 
     /** Current view model without dispatching an event. Shares this object's lock
@@ -388,15 +400,12 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  view returns the last good one (never a blank that would wipe a live
      *  DO-NOT-TRAIN hold) and marks the result stale. */
     fun currentView(): ViewModel = synchronized(this) {
-        // A null return is the byte-array alloc failure (ffi byte_array_or_null
-        // exhausted its retries).
         val bytes = bridge.view() ?: run {
-            PlatformLog.e("Core", "core view() returned null (alloc failure), keeping last good view")
+            PlatformLog.e("Core", "core view() answered null (allocation failure), keeping last good view")
             return staleView()
         }
-        // view() never resets the bridge (ffi.rs `catch_panic("view", false, …)`: a
-        // panic there does not poison the model), so a panic arrives as the plain
-        // error envelope handled below.
+        // A view panic leaves the core intact (it doesn't poison the model), so it
+        // arrives as the plain error envelope handled below.
         val text = bytes.decodeToString()
         // The FFI panic firewall returns {"error":{...}} on a core panic. With
         // ignoreUnknownKeys that would decode into an all-default ViewModel -
@@ -422,10 +431,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         return lastGoodView ?: ViewModel()
     }
 }
-
-/** A [DurableCore] over any [CoreBridge]: iOS's engine over the C ABI
- *  (`android/core-bridge`'s `NativeCore`), and the tests' scripted cores. */
-class BridgeCore(override val bridge: CoreBridge) : DurableCore()
 
 /** Whether [this] is the JVM's `LinkageError` (a native library or symbol that
  *  never loaded). Kotlin/Native links the core statically, so never on iOS. */

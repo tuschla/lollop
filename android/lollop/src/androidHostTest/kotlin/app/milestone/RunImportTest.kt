@@ -173,7 +173,7 @@ class RunImportTest {
         val cases = listOf(
             """{"error":{"kind":"not_a_run","context":"cycling","message":"This FIT file records cycling, not a run"}}""" to ImportFailure.NotARun,
             // A 13 s fragment under the keep threshold.
-            """{"error":{"kind":"no_track","context":"too_short","message":"Too short to import as a run"}}""" to ImportFailure.TooShort,
+            """{"error":{"kind":"too_short","context":"","message":""}}""" to ImportFailure.TooShort,
             """{"error":{"kind":"no_track","context":"","message":"No GPS points"}}""" to ImportFailure.NoTrack,
             // The legacy plain-string error and a null JNI result read as a damaged file.
             """{"error":"Couldn't read this FIT file"}""" to ImportFailure.Damaged,

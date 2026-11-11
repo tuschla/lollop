@@ -45,6 +45,7 @@ import app.milestone.SessionPlanView
 import app.milestone.ViewModel
 import app.milestone.WeightUnit
 import app.milestone.WorkoutType
+import app.milestone.label
 import app.milestone.localizedDayFormatter
 import app.milestone.planDayObservedAt
 import org.junit.After

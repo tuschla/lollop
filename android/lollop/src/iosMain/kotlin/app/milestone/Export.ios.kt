@@ -116,9 +116,3 @@ private fun readChunk(fd: Int, buf: ByteArray): Int {
 
 /** Kotlin/Native has no recoverable VM errors: an out-of-memory aborts the process. */
 internal actual fun Throwable.isFatalToVm(): Boolean = false
-
-internal actual suspend fun restartForImport(ctx: PlatformContext) {
-    AppRuntime.requestReboot(beforeRestore = {
-        check(AppRuntime.engine.resetForReboot()) { "the core bridge can't reset for the import" }
-    })
-}

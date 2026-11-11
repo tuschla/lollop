@@ -41,9 +41,13 @@ private fun setEvent(entryId: Int): String =
 
 private fun accepted(answer: ByteArray?): Boolean = answer?.firstOrNull() == '['.code.toByte()
 
-private fun json(bytes: ByteArray?): JsonElement = Json.parseToJsonElement(bytes!!.decodeToString())
+private fun json(bytes: ByteArray?): JsonElement = json(bytes!!.decodeToString())
 
-private fun json(text: String?): JsonElement = Json.parseToJsonElement(text!!)
+private fun json(text: String): JsonElement = Json.parseToJsonElement(text)
+
+/** The GPX export's input for the run `(entryId, observedAt)`. */
+private fun runRef(entryId: Long, observedAt: Long): ByteArray =
+    """{"entry_id":$entryId,"observed_at":$observedAt}""".encodeToByteArray()
 
 private fun JsonElement.errorKind(): String? =
     (this as? JsonObject)?.get("error")?.jsonObject?.get("kind")?.jsonPrimitive?.content
@@ -54,10 +58,12 @@ private fun JsonElement.errorKind(): String? =
  * device run) must come back through Kotlin/Native unchanged.
  */
 class BridgeTest {
-    private val core = rustCore
+    private val core: CoreBridge = NativeCore
 
     @BeforeTest
-    fun freshCore() = core.reset()
+    fun freshCore() {
+        core.reset()
+    }
 
     private fun replay(lines: List<String>) = lines.forEach { line ->
         assertTrue(accepted(core.update(line.encodeToByteArray())), "replayed line accepted: ${line.take(80)}")
@@ -145,9 +151,10 @@ class BridgeTest {
         assertTrue(run["has_gpx"]!!.jsonPrimitive.boolean, "the recorded run has a route")
         assertEquals(run["distance_km"]!!.jsonPrimitive.double, figures["distance_km"]!!.jsonPrimitive.double)
         assertEquals(run["duration_min"]!!.jsonPrimitive.double, figures["duration_min"]!!.jsonPrimitive.double)
-        val gpx = core.exportGpx(run["entry_id"]!!.jsonPrimitive.long, run["observed_at"]!!.jsonPrimitive.long)!!
+        val gpx = core.exportGpx(runRef(run["entry_id"]!!.jsonPrimitive.long, run["observed_at"]!!.jsonPrimitive.long))!!.decodeToString()
         assertTrue(gpx.startsWith("<?xml") && "<trkpt" in gpx, "GPX document: ${gpx.take(80)}")
-        assertEquals("", core.exportGpx(-1, 0), "an unknown run exports nothing")
+        assertEquals(0, core.exportGpx(runRef(1, 0))!!.size, "an unknown run exports nothing")
+        assertEquals("bad_input", json(core.exportGpx(runRef(-1, 0))).errorKind(), "a negative id names no run")
         assertEquals("track_figures", json(core.trackFigures(PROFILE.encodeToByteArray())).jsonObject["error"]!!
             .jsonObject["context"]!!.jsonPrimitive.content)
     }
@@ -159,7 +166,7 @@ class BridgeTest {
         val ride = json(core.parseFit(readRepoFile("shared/tests/fixtures/garmin-fenix-5-bike.fit")))
         assertEquals("not_a_run", ride.errorKind(), "a bike ride: $ride")
         val fragment = json(core.parseFit(readRepoFile("shared/tests/fixtures/Activity.fit")))
-        assertEquals("no_track", fragment.errorKind(), "a 13 s fragment: $fragment")
+        assertEquals("too_short", fragment.errorKind(), "a 13 s fragment: $fragment")
     }
 
     @Test
@@ -168,7 +175,7 @@ class BridgeTest {
         val workers = List(4) { Worker.start() }
         val accepted = workers.mapIndexed { w, worker ->
             worker.execute(TransferMode.SAFE, { w }) { w ->
-                (1..25).count { i -> accepted(rustCore.update(setEvent(w * 25 + i).encodeToByteArray())) }
+                (1..25).count { i -> accepted(NativeCore.update(setEvent(w * 25 + i).encodeToByteArray())) }
             }
         }.sumOf { it.result }
         workers.forEach { it.requestTermination().result }

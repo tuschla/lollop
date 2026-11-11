@@ -53,7 +53,7 @@ class TodayEditorA11yTest {
         // Mon 2026-09-21: Thursday is held.
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
         val week = (0 until 7).map {
-            SessionPlanView(epoch_day = monday + it, title = "Day $it", session_type = "Lift(MaxEffort)", status = if (it == 3) "blocked" else "planned")
+            SessionPlanView(epoch_day = monday + it, title = "Day $it", session_type = SessionType.LiftMaxEffort, status = if (it == 3) SessionStatus.Blocked else SessionStatus.Planned)
         }
         rule.setContent {
             MilestoneTheme {

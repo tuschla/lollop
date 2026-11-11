@@ -23,9 +23,9 @@
 //! today back to any reading's day, and a safety hold lives until it is
 //! cleared (HARD RULE 3).
 //!
-//! The Android shell compacts its raw log through [`compact_lines`] over JNI
-//! (`ffi.rs`), one [`LineFacts`] per line, so a multi-year GPS log is never
-//! held decoded.
+//! Both shells compact their raw log through [`compact_lines`] over the
+//! bridge's `CompactLog` op (`ffi/bridge.rs`), one [`LineFacts`] per line, so
+//! a multi-year GPS log is never held decoded.
 
 use std::collections::HashMap;
 
@@ -237,7 +237,7 @@ impl LineFacts {
 }
 
 /// [`compact_lines`]' verdict on a raw log, by line index.
-#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, crate::wire::Wire)]
 pub struct Compaction {
     /// Lines compaction drops, ascending.
     pub dropped: Vec<usize>,

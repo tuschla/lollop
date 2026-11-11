@@ -1,5 +1,6 @@
 package app.milestone
 
+import app.milestone.core.CoreBridge
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -41,21 +42,26 @@ private class BootCore(
     override fun view(): ByteArray = when {
         viewFails -> """{"error":{"kind":"panic","context":"view"}}"""
         else -> buildString {
-            append("{\"safety_tier\":\"${applied.size}\"")
+            append("{\"input_count\":${applied.size}")
             if (profile) append(",\"profile\":{}")
             if (program) append(",\"program\":{\"name\":\"plan\"}")
             append('}')
         }
     }.encodeToByteArray()
 
-    override fun parseFit(bytes: ByteArray): String? = null
+    override fun parseFit(fit: ByteArray): ByteArray? = null
 
-    override fun exportGpx(entryId: Long, observedAt: Long): String = ""
+    override fun exportGpx(run: ByteArray): ByteArray = ByteArray(0)
 
-    override fun trackFigures(event: ByteArray): String? = null
+    override fun trackFigures(event: ByteArray): ByteArray? = null
 
-    override fun compactLog(lines: Array<String>): String =
-        """{"dropped":[],"torn":[],"max_entry_id":0,"plan_removed":$planRemoved}"""
+    override fun compactLog(lines: Array<String>): ByteArray =
+        """{"dropped":[],"torn":[],"max_entry_id":0,"plan_removed":$planRemoved}""".encodeToByteArray()
+
+    override fun reset(): ByteArray {
+        applied.clear()
+        return ByteArray(0)
+    }
 }
 
 /** [KeyValueStore] in memory. */
@@ -90,7 +96,7 @@ private class MemoryStore : KeyValueStore {
 /** The event queue's boot facts, as [EventDispatcher] keeps them. */
 private class Ledger : BootLedger {
     override var bootHandled = false
-    override var lastToday: Pair<Long, Int>? = null
+    override var lastToday: Pair<Long, Long>? = null
     override var published: ViewModel? = null
     val reports = mutableListOf<SendResult>()
 
@@ -110,7 +116,7 @@ class AppBootTest {
     private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
     private val store = MemoryStore()
     private val ledger = Ledger()
-    private val day = 20_000L to 3_600
+    private val day = 20_000L to 3_600L
 
     @AfterTest
     fun removeLog() {
@@ -118,7 +124,7 @@ class AppBootTest {
         AppFiles.delete(dir)
     }
 
-    private suspend fun boot(core: BootCore, engine: DurableCore = BridgeCore(core), today: Pair<Long, Int> = day): BootTurn? =
+    private suspend fun boot(core: BootCore, engine: DurableCore = DurableCore(core), today: Pair<Long, Long> = day): BootTurn? =
         bootTurn(engine, store, ledger, restore = { engine.restoreFrom(log) }, today = today, planDay = { 19_999L })
 
     @Test
@@ -180,7 +186,7 @@ class AppBootTest {
     @Test
     fun aReRunOnTheSameDaySendsNothingAndANewDayResendsTheClock() = runTest {
         val core = BootCore()
-        val engine = BridgeCore(core)
+        val engine = DurableCore(core)
         val first = assertNotNull(boot(core, engine))
         ledger.bootHandled = true
         ledger.published = first.view
@@ -204,7 +210,7 @@ class AppBootTest {
     @Test
     fun aCoreThatRefusesTheClockIsMarkedUnavailable() = runTest {
         val core = BootCore(refuseToday = true)
-        val engine = BridgeCore(core)
+        val engine = DurableCore(core)
         assertNull(boot(core, engine))
         assertTrue(engine.unavailable)
         assertNull(ledger.lastToday)

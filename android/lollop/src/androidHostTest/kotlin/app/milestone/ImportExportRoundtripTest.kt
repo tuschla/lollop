@@ -14,6 +14,7 @@ import app.milestone.qa.launchApp
 import app.milestone.qa.launchAppExpectingSetup
 import app.milestone.qa.plural
 import app.milestone.qa.str
+import app.milestone.qa.waitForState
 import java.io.File
 import java.io.InputStream
 import java.util.Locale
@@ -38,9 +39,9 @@ import org.robolectric.RobolectricTestRunner
  *
  *  - The full data backup (Profile › Your data): the compacted event log written by
  *    [exportDataTo], validated by [readImportCandidate], swapped in by
- *    [replaceEventLog] and replayed by a fresh process, must rebuild the SAME
+ *    [replaceEventLog] and replayed by the in-process reboot, must rebuild the SAME
  *    History, plan and profile, and importing it twice must not double anything.
- *  - A run's GPX export ([Core.exportGpx]) re-imported through the real importer
+ *  - A run's GPX export ([Core.runGpx]) re-imported through the real importer
  *    ([parseRunFileSegments] → [importedRunEvent]) must give back the same distance,
  *    moving time and pauses, and re-importing it next to the original must be
  *    recognised as the same run (no double-counted weekly volume).
@@ -185,7 +186,7 @@ class ImportExportRoundtripTest {
      *  would send for [files] next to a history whose runs end at [existing]. */
     private fun planImport(existing: Set<Long>, vararg files: Pair<String, ByteArray>): RunImportPlan =
         planRunImport(
-            files = files.map { (name, bytes) -> ParsedRunFile(name, runCatching { parseRunFileSegments(bytes, Core::parseFit) }) },
+            files = files.map { (name, bytes) -> ParsedRunFile(name, runCatching { parseRunFileSegments(bytes, Core::parseFitFile) }) },
             existingObservedAt = existing,
             build = { importedRunEvent(it, null) },
         )
@@ -193,7 +194,7 @@ class ImportExportRoundtripTest {
     private fun reasonsByFile(plan: RunImportPlan) = plan.failures.associate { it.fileName to it.reason }
 
     private fun gpxOf(run: RunResultView): String =
-        checkNotNull(Core.exportGpx(run.entry_id, run.observed_at)?.takeIf { it.isNotBlank() }) { "no GPX for ${run.entry_id}" }
+        checkNotNull(Core.runGpx(run.entry_id, run.observed_at).takeIf { it.isNotBlank() }) { "no GPX for ${run.entry_id}" }
 
     private fun segmentCount(gpx: String) = parseGpx(gpx).size
 
@@ -214,7 +215,7 @@ class ImportExportRoundtripTest {
         val gpx = gpxOf(original)
         assertEquals("one <trkseg> per recording segment", 3, segmentCount(gpx))
 
-        val parsed = parseRunFileSegments(gpx.toByteArray(), Core::parseFit).single()
+        val parsed = parseRunFileSegments(gpx.toByteArray(), Core::parseFitFile).single()
         val reimported = importedRunEvent(parsed, null)
         assertEquals("the imported run is stamped at the same last fix", original.observed_at, reimported.observedAt)
 
@@ -225,7 +226,7 @@ class ImportExportRoundtripTest {
         assertEquals("pauses survive the round trip", 3, segmentCount(restoredGpx))
         // A second export → import cycle is a fixed point: nothing drifts.
         val again = freshInstallCore(QaHarness.strengthProfile())
-            .let { send(importedRunEvent(parseRunFileSegments(restoredGpx.toByteArray(), Core::parseFit).single(), null)) }
+            .let { send(importedRunEvent(parseRunFileSegments(restoredGpx.toByteArray(), Core::parseFitFile).single(), null)) }
             .runs.single()
         assertSameRun("second round trip", restored, again)
     }
@@ -412,7 +413,7 @@ class ImportExportRoundtripTest {
         val trueKm = pts.zipWithNext { a, b -> segmentKm(a, b) }.sum()
         val bytes = gpxDoc(listOf(pts.asFixes())).toByteArray()
         assertTrue("a multi-MB file", bytes.size > 2_000_000)
-        val ev = importedRunEvent(parseRunFileSegments(bytes, Core::parseFit).single(), null)
+        val ev = importedRunEvent(parseRunFileSegments(bytes, Core::parseFitFile).single(), null)
         assertTrue("decimated to the save cap: ${ev.points.size}", ev.points.size <= TRACK_DECIMATION_CAP + 2)
         assertEquals("endpoints kept", pts.first().observedAt, ev.points.first().observedAt)
         assertEquals(pts.last().observedAt, ev.observedAt)
@@ -509,7 +510,7 @@ class ImportExportRoundtripTest {
                     if (day == 9 && k == 1) amendTarget = set
                     if (day == 12 && k == 3) deleteTarget = set
                 }
-                1 -> out += Event.LogRun(5.0 + rnd.nextInt(3), 30.0 + rnd.nextInt(10), 0.0, noon, noon * 1000)
+                1 -> out += Event.LogRun(5.0 + rnd.nextInt(3), 30.0 + rnd.nextInt(10), 0.0, observedAt = noon, entryId = noon * 1000)
                 else -> if (gpsRun == null) {
                     val (pts, starts) = synthRun(seed = 24, startSec = noon - 3600, n = 1200, pauseAt = setOf(700))
                     gpsRun = trackEvent(pts, starts).also { out += it }
@@ -518,7 +519,7 @@ class ImportExportRoundtripTest {
         }
         val a = amendTarget!!
         out += Event.AmendSet(a.entryId, a.exercise, a.weightKg + 5.0, a.reps - 1, a.rpe, a.observedAt, a.observedAt)
-        out += Event.DeleteEntry(Event.EntryKind.Set, deleteTarget!!.entryId, deleteTarget!!.observedAt)
+        out += Event.DeleteEntry(EntryKind.Set, deleteTarget!!.entryId, deleteTarget!!.observedAt)
         val g = gpsRun!!
         out += Event.TrimRunTrack(g.entryId, g.observedAt, g.points.first().observedAt + 90, g.points.last().observedAt - 120)
         out += Event.ComputeProtein(78.5, masters = false, deficit = false)
@@ -534,17 +535,19 @@ class ImportExportRoundtripTest {
             .filter { it.get(a) != it.get(b) }
             .map { "${it.name}:\n  before ${it.get(a)}\n  after  ${it.get(b)}" }
 
-    /** Import [file] as the Profile › Your data flow does, then restart the process
-     *  the way [restartForImport] does (the next boot replays the swapped log). */
-    private fun importBackupAndRestart(file: File): ImportSummary {
+    /** Import [file] as the Profile › Your data flow does, rebooting into it in
+     *  process ([AppRuntime.requestReboot]) until the boot confirmed the restore. */
+    private fun importBackupAndReboot(file: File): ImportSummary {
         val check = onAppScope { readImportCandidate(ctx, Uri.fromFile(file)) }
         assertTrue("the backup validates", check is ImportCheck.Valid)
         val lines = (check as ImportCheck.Valid).lines
         val summary = summarizeImport(lines, kotlinx.datetime.TimeZone.currentSystemDefault())
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
         ctx.setupPrefs().edit().putInt(KEY_RESTORED_ENTRIES, summary.entries).commit()
-        ProcessDeath.kill(ctx)
-        rule.launchApp()
+        AppRuntime.requestReboot()
+        // The reboot is the session's boot effect re-keyed on the new generation: it
+        // runs on a recomposition, so wait on the compose clock, not the looper alone.
+        rule.waitForState { AppRuntime.bootHandled && !ctx.setupPrefs().contains(KEY_RESTORED_ENTRIES) }
         return summary
     }
 
@@ -571,7 +574,7 @@ class ImportExportRoundtripTest {
         AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
         rule.launchAppExpectingSetup()
 
-        val summary = importBackupAndRestart(backup)
+        val summary = importBackupAndReboot(backup)
         val restored = EventDispatcher.model.value!!
         val diff = diffViews(original, restored)
         assertTrue("the restored install differs:\n" + diff.joinToString("\n"), diff.isEmpty())
@@ -579,7 +582,7 @@ class ImportExportRoundtripTest {
         rule.assertCountEventually(hasText(plural(R.plurals.main_restored_entries, summary.entries, summary.entries)), 1)
 
         // The very same backup imported again: still the same, nothing doubled.
-        importBackupAndRestart(backup)
+        importBackupAndReboot(backup)
         val twice = EventDispatcher.model.value!!
         val diff2 = diffViews(original, twice)
         assertTrue("a second import changed:\n" + diff2.joinToString("\n"), diff2.isEmpty())
@@ -601,7 +604,7 @@ class ImportExportRoundtripTest {
         QaHarness.teardown()
         QaHarness.reset(ctx)
         rule.launchAppExpectingSetup()
-        importBackupAndRestart(backup)
+        importBackupAndReboot(backup)
         assertEquals(1, EventDispatcher.model.value!!.lifts.size)
         assertNull("restoring a plan-less backup must not invent a plan", EventDispatcher.model.value!!.program)
     }

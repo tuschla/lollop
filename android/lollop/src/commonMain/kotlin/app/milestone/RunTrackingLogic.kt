@@ -136,7 +136,7 @@ internal fun plannedRunToday(model: ViewModel): PrescriptionView? {
     val ns = model.next_session ?: return null
     if (ns.epoch_day != model.today()) return null
     if (!ns.actionable) return null
-    if (sessionDiscipline(ns.session_type) != "Run") return null
+    if (ns.session_type.discipline != SessionDiscipline.Run) return null
     val open = ns.items.filter { !it.done }
     return open.firstOrNull { it.run_target != null || it.run_structure != null } ?: open.firstOrNull()
 }
@@ -154,14 +154,13 @@ internal fun workoutTypeForBand(band: String?): WorkoutType? = when (band) {
 
 /** The run-type chip preselected for a followed plan: the planned session's type
  *  when it names one of the chips (a long run's band is "easy", so the band alone
- *  would read Steady), else [workoutTypeForBand]. [sessionType] is the session's
- *  wire name (plan_views.rs `format!("{:?}")`, e.g. "Run(LongRun)"). */
-internal fun workoutTypeForPlan(sessionType: String?, band: String?): WorkoutType? = when (sessionType) {
-    "Run(LongRun)" -> WorkoutType.LongRun
-    "Run(Recovery)" -> WorkoutType.Recovery
-    "Run(Easy)" -> WorkoutType.Easy
-    "Run(Tempo)" -> WorkoutType.Tempo
-    "Run(Interval)", "Run(Repetition)", "Run(Hills)" -> WorkoutType.Interval
+ *  would read Steady), else [workoutTypeForBand]. */
+internal fun workoutTypeForPlan(sessionType: SessionType?, band: String?): WorkoutType? = when (sessionType) {
+    SessionType.RunLongRun -> WorkoutType.LongRun
+    SessionType.RunRecovery -> WorkoutType.Recovery
+    SessionType.RunEasy -> WorkoutType.Easy
+    SessionType.RunTempo -> WorkoutType.Tempo
+    SessionType.RunInterval, SessionType.RunRepetition, SessionType.RunHills -> WorkoutType.Interval
     else -> workoutTypeForBand(band)
 }
 

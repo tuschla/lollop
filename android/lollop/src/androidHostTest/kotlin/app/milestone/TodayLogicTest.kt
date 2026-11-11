@@ -17,22 +17,22 @@ class TodayLogicTest {
     fun holdAction_followsTheHoldReasonBeforeTheTier() {
         // Profile illness and under-18 both arrive as a MedicalReferral tier; the
         // reason decides the way back, never "a doctor's OK" for both.
-        assertEquals(HoldAction.EndIllness, holdAction("acute_illness_profile", "MedicalReferral"))
-        assertEquals(HoldAction.CheckAge, holdAction("youth", "MedicalReferral"))
-        assertEquals(HoldAction.ReviewHealth, holdAction("parq", "MedicalReferral"))
-        assertEquals(HoldAction.ReviewHealth, holdAction("pregnancy", "MedicalReferral"))
+        assertEquals(HoldAction.EndIllness, holdAction(HoldReason.AcuteIllnessProfile, SafetyTier.MedicalReferral))
+        assertEquals(HoldAction.CheckAge, holdAction(HoldReason.Youth, SafetyTier.MedicalReferral))
+        assertEquals(HoldAction.ReviewHealth, holdAction(HoldReason.Parq, SafetyTier.MedicalReferral))
+        assertEquals(HoldAction.ReviewHealth, holdAction(HoldReason.Pregnancy, SafetyTier.MedicalReferral))
         // A reported illness removes only that report, not every readiness input.
-        assertEquals(HoldAction.RemoveIllness, holdAction("illness", "Illness"))
-        assertEquals(HoldAction.RemovePain, holdAction("pain", "Pain"))
-        assertEquals(HoldAction.ClearReadiness, holdAction("medical_signal", "MedicalReferral"))
+        assertEquals(HoldAction.RemoveIllness, holdAction(HoldReason.Illness, SafetyTier.Illness))
+        assertEquals(HoldAction.RemovePain, holdAction(HoldReason.Pain, SafetyTier.Pain))
+        assertEquals(HoldAction.ClearReadiness, holdAction(HoldReason.MedicalSignal, SafetyTier.MedicalReferral))
     }
 
     @Test
     fun holdAction_withoutAReasonFallsBackToTheTier() {
-        assertEquals(HoldAction.RemovePain, holdAction(null, "Pain"))
-        assertEquals(HoldAction.RemoveIllness, holdAction(null, "Illness"))
-        assertEquals(HoldAction.ReviewHealth, holdAction(null, "MedicalReferral"))
-        assertEquals(HoldAction.ClearReadiness, holdAction(null, "HrvTrend"))
+        assertEquals(HoldAction.RemovePain, holdAction(null, SafetyTier.Pain))
+        assertEquals(HoldAction.RemoveIllness, holdAction(null, SafetyTier.Illness))
+        assertEquals(HoldAction.ReviewHealth, holdAction(null, SafetyTier.MedicalReferral))
+        assertEquals(HoldAction.ClearReadiness, holdAction(null, SafetyTier.HrvTrend))
     }
 
     @Test
@@ -57,8 +57,8 @@ class TodayLogicTest {
     @Test
     fun illnessResolution_endsTheReportAndTheProfileAnswerInOneConfirm() {
         // Owner 2026-10-17: "I'm better" left the profile's "I'm ill right now" on.
-        val ill = ProfileView(age_years = 30.0, health = HealthScreen(acute_illness = true, parq_yes = 0b10))
-        val both = HoldResolutionView(signal = "Illness", action_label = "I'm better", ends_profile_illness = true)
+        val ill = Profile(age_years = 30.0, health = HealthScreen(acute_illness = true, parq_yes = 0b10))
+        val both = HoldResolutionView(signal = ReadinessSignal.Illness, action_label = "I'm better", ends_profile_illness = true)
         val sent = holdResolutionEvents(both, ill, today = 20_740L, nowSec = 1_792_000_000L)
         assertEquals(Event.ResolveHold(ReadinessSignal.Illness, 1_792_000_000L), sent[0])
         val profile = sent[1] as Event.SetProfile
@@ -71,30 +71,29 @@ class TodayLogicTest {
 
     @Test
     fun illnessResolution_withoutTheProfileAnswerSendsOnlyTheResolve() {
-        val reportOnly = HoldResolutionView(signal = "Illness", action_label = "I've recovered")
+        val reportOnly = HoldResolutionView(signal = ReadinessSignal.Illness, action_label = "I've recovered")
         assertEquals(
             listOf<Event>(Event.ResolveHold(ReadinessSignal.Illness, 5L)),
-            holdResolutionEvents(reportOnly, ProfileView(), today = 1L, nowSec = 5L),
+            holdResolutionEvents(reportOnly, Profile(), today = 1L, nowSec = 5L),
         )
-        assertTrue(holdResolutionEvents(HoldResolutionView(signal = "Bogus"), null, 1L, 5L).isEmpty())
     }
 
     @Test
     fun holdProfileRow_landsOnTheAnswerThatHoldsTraining() {
         // Owner check 2026-10-17: a pregnancy hold landed on "Health questions ·
         // None apply" with the pregnancy switch off-screen below it.
-        assertEquals(ProfileRowId.Pregnant, holdProfileRow("pregnancy", HealthScreen(pregnant = true)))
+        assertEquals(ProfileRowId.Pregnant, holdProfileRow(HoldReason.Pregnancy, HealthScreen(pregnant = true)))
         assertEquals(
             ProfileRowId.PregnancyWarning,
-            holdProfileRow("pregnancy", HealthScreen(pregnant = true, pregnancy_warning_sign = true)),
+            holdProfileRow(HoldReason.Pregnancy, HealthScreen(pregnant = true, pregnancy_warning_sign = true)),
         )
-        assertEquals(ProfileRowId.Age, holdProfileRow("youth", null))
-        assertEquals(ProfileRowId.ParqSymptom, holdProfileRow("symptomatic", HealthScreen()))
-        assertEquals(ProfileRowId.ParqInjury, holdProfileRow("injury_rehab", HealthScreen()))
-        assertEquals(ProfileRowId.ParqClearance, holdProfileRow("parq", HealthScreen()))
-        assertEquals(ProfileRowId.Reds, holdProfileRow("reds", HealthScreen(reds_signal = true)))
-        assertEquals("a weekly-check-in RED-S answer has no profile switch", ProfileRowId.HealthQuestions, holdProfileRow("reds", HealthScreen()))
-        assertEquals(ProfileRowId.Ill, holdProfileRow("acute_illness_profile", HealthScreen(acute_illness = true)))
+        assertEquals(ProfileRowId.Age, holdProfileRow(HoldReason.Youth, null))
+        assertEquals(ProfileRowId.ParqSymptom, holdProfileRow(HoldReason.Symptomatic, HealthScreen()))
+        assertEquals(ProfileRowId.ParqInjury, holdProfileRow(HoldReason.InjuryRehab, HealthScreen()))
+        assertEquals(ProfileRowId.ParqClearance, holdProfileRow(HoldReason.Parq, HealthScreen()))
+        assertEquals(ProfileRowId.Reds, holdProfileRow(HoldReason.Reds, HealthScreen(reds_signal = true)))
+        assertEquals("a weekly-check-in RED-S answer has no profile switch", ProfileRowId.HealthQuestions, holdProfileRow(HoldReason.Reds, HealthScreen()))
+        assertEquals(ProfileRowId.Ill, holdProfileRow(HoldReason.AcuteIllnessProfile, HealthScreen(acute_illness = true)))
         assertEquals(ProfileRowId.HealthQuestions, holdProfileRow(null, null))
     }
 
@@ -114,17 +113,17 @@ class TodayLogicTest {
     @Test
     fun bannerStatesHold_coversReportsTheProfileIllnessAPregnancyWarningAndTheYouthPause() {
         // The profile-ill and pregnancy-warning SAFETY cards repeated the banner's own line.
-        assertTrue(bannerStatesHold("acute_illness_profile", "MedicalReferral", pregnancyWarning = false))
-        assertTrue(bannerStatesHold("pain", "Pain", pregnancyWarning = false))
-        assertTrue(bannerStatesHold("illness", "Illness", pregnancyWarning = false))
-        assertTrue(bannerStatesHold("pregnancy", "MedicalReferral", pregnancyWarning = true))
+        assertTrue(bannerStatesHold(HoldReason.AcuteIllnessProfile, SafetyTier.MedicalReferral, pregnancyWarning = false))
+        assertTrue(bannerStatesHold(HoldReason.Pain, SafetyTier.Pain, pregnancyWarning = false))
+        assertTrue(bannerStatesHold(HoldReason.Illness, SafetyTier.Illness, pregnancyWarning = false))
+        assertTrue(bannerStatesHold(HoldReason.Pregnancy, SafetyTier.MedicalReferral, pregnancyWarning = true))
         // The under-18 card already carries the hold's summary behind its "?".
-        assertTrue(bannerStatesHold("youth", "MedicalReferral", pregnancyWarning = false))
+        assertTrue(bannerStatesHold(HoldReason.Youth, SafetyTier.MedicalReferral, pregnancyWarning = false))
         // A plain pregnancy's card carries the activity reference; the other
         // health answers' cards name the answer behind the generic banner line.
-        assertFalse(bannerStatesHold("pregnancy", "MedicalReferral", pregnancyWarning = false))
-        for (reason in listOf("parq", "symptomatic", "injury_rehab", "reds", "medical_signal")) {
-            assertFalse(reason, bannerStatesHold(reason, "MedicalReferral", pregnancyWarning = false))
+        assertFalse(bannerStatesHold(HoldReason.Pregnancy, SafetyTier.MedicalReferral, pregnancyWarning = false))
+        for (reason in listOf(HoldReason.Parq, HoldReason.Symptomatic, HoldReason.InjuryRehab, HoldReason.Reds, HoldReason.MedicalSignal)) {
+            assertFalse(reason.wire, bannerStatesHold(reason, SafetyTier.MedicalReferral, pregnancyWarning = false))
         }
     }
 
@@ -132,7 +131,7 @@ class TodayLogicTest {
     fun returnCheckAdjustmentKey_onlyForTheReturnCheckSession() {
         val adj = AdjustmentView(summary = "Return check after illness: …", citation = "Schwellnus 2022", safety_critical = true)
         val check = SessionPlanView(
-            status = "adjusted",
+            status = SessionStatus.Adjusted,
             items = listOf(PrescriptionView(summary = "Return check: 10–20 min easy", return_check = true)),
             adjustment = adj,
         )
@@ -192,14 +191,14 @@ class TodayLogicTest {
     fun reviewAsksRun_onlyOnADayWithARun() {
         val day = 20_000L
         val zone = kotlinx.datetime.TimeZone.UTC
-        val lifts = SessionPlanView(epoch_day = day, session_type = "Lift(Strength)", items = listOf(PrescriptionView(exercise = "Back Squat")))
+        val lifts = SessionPlanView(epoch_day = day, session_type = SessionType.LiftMaxEffort, items = listOf(PrescriptionView(exercise = "Back Squat")))
         val liftDay = ViewModel(today_epoch_day = day, week_plan = listOf(lifts))
         assertFalse("a lift-only day skips the run questions", reviewAsksRun(liftDay, zone))
         val ranToo = liftDay.copy(runs = listOf(RunResultView(observed_at = day * 86_400L + 3_600L)))
         assertTrue("a run logged today brings them back", reviewAsksRun(ranToo, zone))
         val runDay = ViewModel(
             today_epoch_day = day,
-            week_plan = listOf(SessionPlanView(epoch_day = day, session_type = "Run(Easy)", items = listOf(PrescriptionView()))),
+            week_plan = listOf(SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, items = listOf(PrescriptionView()))),
         )
         assertTrue("a planned run asks them", reviewAsksRun(runDay, zone))
     }
@@ -226,8 +225,8 @@ class TodayLogicTest {
 
     @Test
     fun todayCards_aDoneSessionSpendsItsCoachingButKeepsTheSafetyCall() {
-        val cue = AdjustmentView(summary = "Stop a rep earlier", grade = "B", citation = "c1", exercise = "Back squat")
-        val safety = AdjustmentView(summary = "Head cold: fewer sets", grade = "B", citation = "c2", safety_critical = true)
+        val cue = AdjustmentView(summary = "Stop a rep earlier", grade = EvidenceGrade.Moderate, citation = "c1", exercise = "Back squat")
+        val safety = AdjustmentView(summary = "Head cold: fewer sets", grade = EvidenceGrade.Moderate, citation = "c2", safety_critical = true)
         val underWay = ViewModel(today_epoch_day = 100, adjustments = listOf(cue, safety))
         val open = todayCards(underWay, hasSignal = true, DistanceUnit.Km)
         assertSame(safety, open.hostAdjustment)

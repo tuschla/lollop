@@ -1,9 +1,5 @@
 package app.milestone
 
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-
 /**
  * Result of [EventLog.load] / [EventLog.read]: the surviving replayable lines plus
  * whether this is a genuinely fresh install. [freshInstall] is true ONLY when the
@@ -22,17 +18,6 @@ data class RestoredLog(
     val planRemoved: Boolean = false,
 )
 
-/** The core's compaction verdict on a log's lines (log.rs `Compaction`), by line
- *  index: the lines compaction drops, the lines that are not JSON (a tail torn by
- *  a kill mid-append), the largest `entry_id` and whether the plan was removed. */
-@Serializable
-internal class LogCompaction(
-    val dropped: List<Int> = emptyList(),
-    val torn: List<Int> = emptyList(),
-    val max_entry_id: Long = 0L,
-    val plan_removed: Boolean = false,
-)
-
 /**
  * Reads, repairs and compacts the persisted event log (one event's serde wire JSON
  * per line). The compaction rules live in the core (`shared/src/log.rs`, reached
@@ -41,24 +26,6 @@ internal class LogCompaction(
  * through [AppFiles].
  */
 object EventLog {
-    /** Event variants that serialize as a BARE JSON string (Rust unit variants). A
-     *  named object such as {"ClearSets":{}} is not one: the core rejects a unit
-     *  variant carrying a payload. */
-    private val unitVariants = setOf(
-        "ClearReadiness", "ClearSets", "ClearRuns", "ClearCheckins", "ClearProfile",
-        "ClearReview", "ClearWeeklyCheckin", "ClearRacePrediction", "ClearHypertrophyPlan", "ClearProtein",
-        "ClearHrZones", "ClearPlan", "ClearActivities",
-    )
-
-    /** Event variants that serialize as a single-key object ({"LogSet":{…}}). A known
-     *  name with a non-object payload ({"LogSet":5}) is a shape the core rejects. */
-    private val structVariants = setOf(
-        "SubmitReadiness", "RemoveReadiness", "ResolveHold", "SubmitCheckin", "RestartHrvBaseline", "LogSet", "AmendSet",
-        "LogRun", "LogRunTrack", "AmendRun", "TrimRunTrack", "AmendRunMeta", "DeleteEntry",
-        "SetProfile", "SubmitReview", "SubmitWeeklyCheckin", "PredictRace", "PlanHypertrophyMeso",
-        "ComputeProtein", "ComputeHrZones", "GeneratePlan", "SetToday", "SetExerciseEnded", "SetCalisthenicsRung",
-        "MoveSession", "LogActivity",
-    )
 
     /** [lines] minus those [core]'s compaction drops (replay-equivalent, order
      *  kept); unchanged when the core can't answer. A line that is not JSON is kept. */
@@ -138,7 +105,7 @@ object EventLog {
         val lines = ArrayList<String>()
         AppFiles.forEachLine(file) { if (it.isNotBlank()) lines += it }
         val verdict = core.compaction(lines)
-            ?: LogCompaction(torn = lines.indices.filter { runCatching { coreJson.parseToJsonElement(lines[it]) }.isFailure })
+            ?: Compaction(torn = lines.indices.filter { runCatching { coreJson.parseToJsonElement(lines[it]) }.isFailure })
         val skip = BooleanArray(lines.size)
         verdict.dropped.forEach { skip[it] = true }
         verdict.torn.forEach { skip[it] = true }
@@ -155,12 +122,7 @@ object EventLog {
     }
 
     /** The serde variant tag of one wire line, or null when it names no event the
-     *  core accepts in that shape: unit variants are a bare JSON string
-     *  (`"ClearRuns"`), struct variants a single-key object (`{"LogRun": {…}}`). */
+     *  core accepts in that shape. */
     fun variantOf(line: String): String? =
-        when (val el = runCatching { coreJson.parseToJsonElement(line) }.getOrNull()) {
-            is JsonPrimitive -> if (el.isString && el.content in unitVariants) el.content else null
-            is JsonObject -> el.keys.singleOrNull()?.takeIf { it in structVariants && el[it] is JsonObject }
-            else -> null
-        }
+        runCatching { coreJson.parseToJsonElement(line) }.getOrNull()?.let { Event.tagOf(it) }
 }

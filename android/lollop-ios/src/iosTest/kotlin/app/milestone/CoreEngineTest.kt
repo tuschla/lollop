@@ -2,21 +2,18 @@
 
 package app.milestone
 
-import app.milestone.core.cinterop.LollopBytes
-import app.milestone.core.cinterop.lollop_bytes_free
+import app.milestone.core.CoreBridge
+import app.milestone.core.NativeCore
 import app.milestone.core.cinterop.lollop_panic_for_test
-import app.milestone.core.cinterop.lollop_reset
+import app.milestone.core.take
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
-import kotlinx.cinterop.readBytes
-import kotlinx.cinterop.useContents
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSTemporaryDirectory
@@ -35,16 +32,9 @@ private const val PROFILE =
         """"goal_distance":"FiveK","concurrent_goal":"Strength","weekly_sets":12,""" +
         """"running_days_per_week":3,"running_km_per_week":30.0,"advanced":false}}"""
 
-/** Copy a core-owned buffer into a [ByteArray] and free it. */
-private fun CValue<LollopBytes>.take(): ByteArray {
-    val out = useContents { data?.readBytes(len.convert()) ?: ByteArray(0) }
-    lollop_bytes_free(this)
-    return out
-}
-
 /**
- * The iOS engine as the app runs it: [BridgeCore] over the Rust core's C ABI
- * ([RustCoreBridge]) with the event log in a real file. Each [boot] is a new
+ * The iOS engine as the app runs it: [DurableCore] over the Rust core's C ABI
+ * ([NativeCore]) with the event log in a real file. Each [boot] is a new
  * process: the core emptied, a new engine, boot's restore.
  */
 class CoreEngineTest {
@@ -60,9 +50,9 @@ class CoreEngineTest {
         NSFileManager.defaultManager.removeItemAtPath(dir, error = null)
     }
 
-    private fun boot(bridge: CoreBridge = RustCoreBridge): BridgeCore {
-        lollop_reset()
-        return BridgeCore(bridge).also { it.restoreFrom(AppPath(path)) }
+    private fun boot(bridge: CoreBridge = NativeCore): DurableCore {
+        NativeCore.reset()
+        return DurableCore(bridge).also { it.restoreFrom(AppPath(path)) }
     }
 
     private fun set(id: Long) = Event.LogSet("Back Squat", 100.0, 5, 8.0, observedAt = 1_725_904_800, entryId = id)
@@ -71,7 +61,7 @@ class CoreEngineTest {
 
     private val today = Event.SetToday(19_975)
 
-    private fun liftIds(engine: BridgeCore) = engine.currentView().lifts.map { it.entry_id }.toSet()
+    private fun liftIds(engine: DurableCore) = engine.currentView().lifts.map { it.entry_id }.toSet()
 
     private fun write(text: String) {
         val file = checkNotNull(fopen(path, "wb")) { "cannot open $path" }
@@ -112,6 +102,17 @@ class CoreEngineTest {
     }
 
     @Test
+    fun aRebootReplaysTheReplacedLogInProcess() {
+        write("$PROFILE\n")
+        val engine = boot()
+        assertTrue(engine.send(set(1)).persisted)
+        write("$PROFILE\n${wire(set(5))}\n")
+        engine.resetForReboot()
+        engine.restoreFrom(AppPath(path))
+        assertEquals(setOf(5L), liftIds(engine), "only the replaced log's sets")
+    }
+
+    @Test
     fun bootHealsATornTail() {
         write("$PROFILE\n${wire(set(1))}\n${wire(set(2)).take(20)}")
         val engine = boot()
@@ -136,9 +137,9 @@ class CoreEngineTest {
     @Test
     fun aPanicResetRebuildsTheCoreFromTheLog() {
         val poison = set(99)
-        val bridge = object : CoreBridge by RustCoreBridge {
+        val bridge = object : CoreBridge by NativeCore {
             override fun update(event: ByteArray): ByteArray? =
-                if (event.decodeToString() == wire(poison)) lollop_panic_for_test(true).take() else RustCoreBridge.update(event)
+                if (event.decodeToString() == wire(poison)) lollop_panic_for_test(true).take() else NativeCore.update(event)
         }
         write("$PROFILE\n")
         val engine = boot(bridge)

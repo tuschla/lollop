@@ -108,11 +108,11 @@ class UpgradeFixturesTest {
             assertTrue("$at distance $km vs ${r.distance_km}", abs(km - r.distance_km) <= 1e-9 * km.coerceAtLeast(1.0))
             val min = o["duration_min"]!!.jsonPrimitive.double
             assertTrue("$at duration $min vs ${r.duration_min}", abs(min - r.duration_min) <= 1e-9 * min.coerceAtLeast(1.0))
-            o["workout_type"]?.let { assertEquals("$at type", it.jsonPrimitive.contentOrNull, r.workout_type) }
+            o["workout_type"]?.let { assertEquals("$at type", it.jsonPrimitive.contentOrNull, r.workout_type?.wire) }
             o["session_rpe"]?.let { assertEquals("$at session RPE", it.jsonPrimitive.intOrNull, r.session_rpe) }
             o["avg_hr_bpm"]?.let { assertEquals("$at avg HR", it.jsonPrimitive.doubleOrNull, r.avg_hr_bpm) }
         }
-        assertEquals("$what: safety tier", e["safety_tier"]!!.jsonPrimitive.content, view.safety_tier)
+        assertEquals("$what: safety tier", e["safety_tier"]!!.jsonPrimitive.content, view.safety_tier?.wire)
         assertEquals("$what: training paused", e["train_blocked"]!!.jsonPrimitive.boolean, view.train_blocked)
         assertNotNull("$what: profile", view.profile)
     }

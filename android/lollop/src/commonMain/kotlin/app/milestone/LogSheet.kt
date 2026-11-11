@@ -165,16 +165,16 @@ internal fun LogSheetContent(
                 // row disappears.
                 val ns = model.todaysPlan()
                 if (ns != null) {
-                    val nsDiscipline = sessionDiscipline(ns.session_type)
+                    val isRun = ns.session_type.discipline == SessionDiscipline.Run
                     val item = firstOpenItem(ns.items) ?: ns.items.first()
                     LogOptionRow(
                         stringResource(Res.string.main_todays_plan, ns.title),
                         // A run's distance reads in the profile's unit like every other surface.
-                        glueFigures(if (nsDiscipline == "Run" && item.run_head.isNotBlank()) runHeadText(item, distanceUnit) else planRowSubtitle(item)),
-                        if (nsDiscipline == "Run") Res.drawable.ic_content_run else Res.drawable.ic_content_set_dumbbell,
+                        glueFigures(if (isRun && item.run_head.isNotBlank()) runHeadText(item, distanceUnit) else planRowSubtitle(item)),
+                        if (isRun) Res.drawable.ic_content_run else Res.drawable.ic_content_set_dumbbell,
                         LogRowTone.Plan,
                     ) {
-                        if (nsDiscipline == "Run") {
+                        if (isRun) {
                             if (onTrackRun != null) {
                                 onTrackRun(); onDismiss()
                             } else {
@@ -373,8 +373,8 @@ internal fun LogSheetContent(
                 plannedType = remember(model.week_plan, planObservedAt) {
                     val day = planObservedAt?.let { localEpochDay(it) } ?: model.today()
                     model.week_plan.firstOrNull {
-                        it.epoch_day == day && sessionDiscipline(it.session_type) == "Run" &&
-                            !it.isDone && it.status != "blocked"
+                        it.epoch_day == day && it.session_type.discipline == SessionDiscipline.Run &&
+                            !it.isDone && it.status != SessionStatus.Blocked
                     }?.let { s ->
                         val item = s.items.firstOrNull { it.run_target != null } ?: s.items.firstOrNull()
                         workoutTypeForPlan(s.session_type, item?.run_target?.band)

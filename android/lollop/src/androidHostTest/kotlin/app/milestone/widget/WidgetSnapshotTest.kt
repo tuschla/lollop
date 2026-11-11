@@ -6,13 +6,19 @@ import app.milestone.AppFileNames
 import app.milestone.ConsistencyView
 import app.milestone.DistanceUnit
 import app.milestone.HealthScreen
+import app.milestone.HoldReason
+import app.milestone.ItemStatus
 import app.milestone.OpenDest
+import app.milestone.PlanWithheld
 import app.milestone.PrescriptionView
-import app.milestone.ProfileView
+import app.milestone.Profile
 import app.milestone.R
+import app.milestone.SafetyTier
 import app.milestone.SessionDoneItemView
 import app.milestone.SessionDoneView
 import app.milestone.SessionPlanView
+import app.milestone.SessionStatus
+import app.milestone.SessionType
 import app.milestone.ViewModel
 import app.milestone.YouthActivityView
 import app.milestone.nextLocalMidnightMillis
@@ -53,7 +59,7 @@ class WidgetSnapshotTest {
     private fun model(
         ns: SessionPlanView? = null,
         week: List<SessionPlanView> = listOfNotNull(ns),
-        profile: ProfileView? = ProfileView(),
+        profile: Profile? = Profile(),
     ) = ViewModel(
         today_epoch_day = day,
         profile = profile,
@@ -69,7 +75,7 @@ class WidgetSnapshotTest {
     @Test
     fun snapshotWriteReadRoundtrip() {
         val snap = widgetSnapshotOf(
-            model(SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "next", listOf(lift("Squat", "3 × 5 @ 100 kg")))),
+            model(SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Squat", "3 × 5 @ 100 kg")))),
             DistanceUnit.Km,
         )
         val before = WidgetSnapshotStore.revision.value
@@ -101,7 +107,7 @@ class WidgetSnapshotTest {
     @Test
     fun snapshotFromAnotherDayNeverShowsAsToday() {
         val snap = widgetSnapshotOf(
-            model(SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "next", listOf(lift("Squat", "3 × 5 @ 100 kg")))),
+            model(SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Squat", "3 × 5 @ 100 kg")))),
             DistanceUnit.Km,
         )
         WidgetSnapshotStore.write(ctx, snap)
@@ -169,7 +175,7 @@ class WidgetSnapshotTest {
     @Test
     fun liftDayShowsTitleItemsWeekAndTheTilesLogSet() {
         val ns = SessionPlanView(
-            day, "Lower body", "Lift(MaxEffort)", "next",
+            day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Next,
             listOf(lift("Squat", "3 × 5 @ 100 kg", done = true), lift("Romanian deadlift", "3 × 8 @ 80 kg")),
         )
         val snap = widgetSnapshotOf(model(ns), DistanceUnit.Km)
@@ -191,15 +197,15 @@ class WidgetSnapshotTest {
 
     @Test
     fun weekStripCarriesEachPlanDayAndGoesWithAHold() {
-        val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "next", listOf(lift("Squat", "3 × 5 @ 100 kg")))
+        val ns = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Squat", "3 × 5 @ 100 kg")))
         val week = listOf(
-            SessionPlanView(day - 3, "", "Lift(MaxEffort)", "before_plan"),
-            SessionPlanView(day - 2, "Run", "Run(Easy)", "missed"),
-            SessionPlanView(day - 1, "Upper", "Lift(Hypertrophy)", "done_lighter"),
+            SessionPlanView(day - 3, "", SessionType.LiftMaxEffort, SessionStatus.BeforePlan),
+            SessionPlanView(day - 2, "Run", SessionType.RunEasy, SessionStatus.Missed),
+            SessionPlanView(day - 1, "Upper", SessionType.LiftMaxEffort, SessionStatus.DoneLighter),
             ns,
-            SessionPlanView(day + 1, "", "Rest", "rest"),
-            SessionPlanView(day + 2, "Run", "Run(Easy)", "planned"),
-            SessionPlanView(day + 3, "Upper", "Lift(Hypertrophy)", "adjusted"),
+            SessionPlanView(day + 1, "", SessionType.Rest, SessionStatus.Rest),
+            SessionPlanView(day + 2, "Run", SessionType.RunEasy, SessionStatus.Planned),
+            SessionPlanView(day + 3, "Upper", SessionType.LiftMaxEffort, SessionStatus.Adjusted),
         )
         val snap = widgetSnapshotOf(model(ns, week = week), DistanceUnit.Km)
         assertEquals(
@@ -212,7 +218,7 @@ class WidgetSnapshotTest {
         assertEquals(week.map { it.epoch_day }, snap.week.map { it.epochDay })
         assertEquals(snap.week, widgetFace(snap, day, res).days)
         // A hold shows no week: it carries no plan.
-        assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = "pain", safety_tier = "Pain"), DistanceUnit.Km).week.isEmpty())
+        assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain), DistanceUnit.Km).week.isEmpty())
         // A file written before the week was recorded still reads, without a strip.
         val f = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT)
         f.writeText("""{"version":$WIDGET_SNAPSHOT_VERSION,"epochDay":$day,"kind":"Rest"}""")
@@ -223,10 +229,10 @@ class WidgetSnapshotTest {
     fun finishedDayShowsSessionDoneAndTheNextSession() {
         // Once today's session is done the core moves next_session to a later day and
         // keeps today's row done in week_plan (calendar_edges.rs, "the hero moves on").
-        val today = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "done", listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
-        val next = SessionPlanView(day + 2, "Upper body", "Lift(Hypertrophy)", "next", listOf(lift("Bench", "")))
+        val today = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Done, listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
+        val next = SessionPlanView(day + 2, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Bench", "")))
         val m = model(next, week = listOf(today, next))
-            .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = "done"))))
+            .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = ItemStatus.Done))))
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Lift, snap.kind)
         assertTrue(snap.sessionDone)
@@ -241,7 +247,7 @@ class WidgetSnapshotTest {
 
     @Test
     fun runDayOffersStartRunLikeTheTile() {
-        val ns = SessionPlanView(day, "Easy run", "Run(Easy)", "next", listOf(PrescriptionView(face_lead = "8 km easy")))
+        val ns = SessionPlanView(day, "Easy run", SessionType.RunEasy, SessionStatus.Next, listOf(PrescriptionView(face_lead = "8 km easy")))
         val snap = widgetSnapshotOf(model(ns), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Run, snap.kind)
         assertTrue(snap.trackable)
@@ -271,8 +277,8 @@ class WidgetSnapshotTest {
 
     @Test
     fun restDayShowsTheNextSession() {
-        val next = SessionPlanView(day + 1, "Upper body", "Lift(Hypertrophy)", "planned")
-        val rest = SessionPlanView(day, "", "Rest", "rest")
+        val next = SessionPlanView(day + 1, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Planned)
+        val rest = SessionPlanView(day, "", SessionType.Rest, SessionStatus.Rest)
         val snap = widgetSnapshotOf(model(next, week = listOf(rest, next)), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Rest, snap.kind)
         assertTrue(snap.restDay)
@@ -293,8 +299,8 @@ class WidgetSnapshotTest {
 
     @Test
     fun holdSaysTrainingIsPausedButNotWhy() {
-        val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "blocked", listOf(lift("Squat", "3 × 5 @ 100 kg")))
-        val m = model(ns).copy(hold_reason = "pain", safety_tier = "Pain")
+        val ns = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Blocked, listOf(lift("Squat", "3 × 5 @ 100 kg")))
+        val m = model(ns).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain)
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Paused, snap.kind)
         // A paused day carries no session, items, week count or Track run.
@@ -306,14 +312,14 @@ class WidgetSnapshotTest {
         assertNull(f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
         // A home screen never names the health reason behind a hold.
-        val warn = m.copy(hold_reason = "pregnancy", safety_tier = "MedicalReferral", profile = ProfileView(health = HealthScreen(pregnant = true, pregnancy_warning_sign = true)))
+        val warn = m.copy(hold_reason = HoldReason.Pregnancy, safety_tier = SafetyTier.MedicalReferral, profile = Profile(health = HealthScreen(pregnant = true, pregnancy_warning_sign = true)))
         assertEquals(f.title to f.lead, face(warn).let { it.title to it.lead })
     }
 
     @Test
     fun underEighteenPauseIsGenericAndNotInTheDangerColour() {
         val m = model().copy(
-            hold_reason = "youth",
+            hold_reason = HoldReason.Youth,
             youth_activity = YouthActivityView(minutes = 150, weekly_target_minutes = 420),
         )
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
@@ -334,8 +340,8 @@ class WidgetSnapshotTest {
         assertEquals(listOf(str(R.string.widget_no_plan_body)), f.lead)
         assertNull(f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
-        assertEquals(str(R.string.main_plan_withheld_empty_title), face(model().copy(plan_withheld = "nothing_to_plan")).title)
-        assertEquals(str(R.string.main_plan_withheld_health_title), face(model().copy(plan_withheld = "health_hold")).title)
+        assertEquals(str(R.string.main_plan_withheld_empty_title), face(model().copy(plan_withheld = PlanWithheld.NothingToPlan)).title)
+        assertEquals(str(R.string.main_plan_withheld_health_title), face(model().copy(plan_withheld = PlanWithheld.HealthHold)).title)
 
         val setup = widgetSnapshotOf(model(profile = null), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Setup, setup.kind)

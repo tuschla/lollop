@@ -191,19 +191,20 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // queued event interleaves with restore/SetToday/GeneratePlan. A re-run
     // (rotation) queues after it, skips the probe and the one-time block, and resends
     // SetToday only when the day or offset changed since the last send. A reboot
-    // ([requestReboot], iOS after a data import) runs it again as a fresh process would.
+    // ([AppRuntime.requestReboot], after a data import) runs it again as a fresh
+    // process would, from an emptied core.
     val generation by AppRuntime.bootGeneration.collectAsState()
     LaunchedEffect(generation) {
+        val reboot = generation > 0 && !AppRuntime.bootHandled
         // A reboot replaces the shown model: the loading state until it hydrates.
-        if (generation > 0 && !AppRuntime.bootHandled) session.loaded = false
+        if (reboot) session.loaded = false
         var fresh = false
         val vm = EventDispatcher.exclusive {
             // First touch of the engine on its own thread: Android's loads the native
             // library in its initializer, which must not run on the UI thread.
             val engine = withContext(CoreDispatcher) { AppRuntime.engine }
-            val beforeRestore = AppRuntime.takeBeforeRestore()
             bootTurn(engine, setupStore, AppRuntime, restore = {
-                beforeRestore?.invoke()
+                if (reboot) engine.resetForReboot()
                 engine.restore(ctx)
             })?.also { fresh = it.fresh }?.view
         }

@@ -8,6 +8,10 @@
 //! - `#[derive(ReviewParts)]` generates `take_session_fields` for a review
 //!   payload: every field must say which store it belongs to with
 //!   `#[review(session)]`, `#[review(weekly)]` or `#[review(stamp)]`.
+//! - `#[derive(Wire)]` implements `crate::wire::Wire`: the type's serde wire
+//!   shape as data, for `shared/wiregen` (see [`wire`]).
+
+mod wire;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
@@ -26,6 +30,14 @@ pub fn derive_sanitize(input: TokenStream) -> TokenStream {
 pub fn derive_review_parts(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     review_parts_impl(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(Wire, attributes(wire))]
+pub fn derive_wire(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    wire::wire_impl(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

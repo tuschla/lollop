@@ -29,12 +29,16 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
 import app.milestone.HealthScreen
+import app.milestone.HoldReason
 import app.milestone.LiftGoal
+import app.milestone.PlanWithheld
 import app.milestone.ProgressionCadence
 import app.milestone.R
+import app.milestone.ReadinessSignal
 import androidx.compose.ui.unit.dp
 import app.milestone.TestClock
 import app.milestone.todayEpochDay
+import app.milestone.train_blocked
 import kotlin.math.abs
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
@@ -112,7 +116,7 @@ class OwnerJourneysTest {
 
         // Today holds training for the profile's answer and offers its one way back.
         rule.assertTextCountEventually(doNotTrain, 1)
-        assertEquals("acute_illness_profile", EventDispatcher.model.value!!.hold_reason)
+        assertEquals(HoldReason.AcuteIllnessProfile, EventDispatcher.model.value!!.hold_reason)
         val labels = resolveLabels()
         assertEquals("one illness action on the banner: $labels", 1, labels.size)
         // No dead "Plan my training" while the hold stands.
@@ -166,7 +170,7 @@ class OwnerJourneysTest {
         QaHarness.seedLog(ctx, listOf(illProfile()))
         rule.launchApp()
         rule.checkInIll(R.string.log_illness_below_neck)
-        rule.waitForState { EventDispatcher.model.value?.readiness_summary?.any { it.signal == "Illness" } == true }
+        rule.waitForState { EventDispatcher.model.value?.readiness_summary?.any { it.signal == ReadinessSignal.Illness } == true }
         rule.assertTextCountEventually(doNotTrain, 1)
         val labels = resolveLabels()
         assertEquals("both illnesses share one action: $labels", 1, labels.size)
@@ -227,7 +231,7 @@ class OwnerJourneysTest {
         QaHarness.seedLog(ctx, listOf(illProfile()))
         rule.launchApp()
         rule.assertTextCountEventually(doNotTrain, 1)
-        assertEquals("health_hold", EventDispatcher.model.value!!.plan_withheld)
+        assertEquals(PlanWithheld.HealthHold, EventDispatcher.model.value!!.plan_withheld)
         rule.onAllNodesWithText(str(R.string.main_plan_prompt_cta)).fetchSemanticsNodes()
             .let { assertTrue("no Plan my training while it can't build anything", it.isEmpty()) }
         val withheld = rule.onAllNodesWithText(str(R.string.main_plan_withheld_health_title)).fetchSemanticsNodes()
@@ -268,7 +272,7 @@ class OwnerJourneysTest {
             ),
         )
         rule.launchApp()
-        assertEquals("nothing_to_plan", EventDispatcher.model.value!!.plan_withheld)
+        assertEquals(PlanWithheld.NothingToPlan, EventDispatcher.model.value!!.plan_withheld)
         val cta = str(R.string.main_plan_withheld_empty_cta)
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(cta))
         rule.assertTextCountEventually(str(R.string.main_plan_withheld_empty_title), 1)
