@@ -4,24 +4,26 @@
 use crate::app::evidence_views::why_from;
 use crate::app::format::{fmt_km_or_mi, fmt_weight, round_tenths};
 use crate::app::plan_views::flatten_run::fmt_run_km;
+use crate::app::plan_views::plan_item::{PlanItem, RunAmount};
 use crate::app::view_types::{
-    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, RunStructureView, WhyView,
+    EvidenceTagView, PlanIntensity, PrescriptionView, RunStructureView, WhyView,
 };
 use crate::autoreg;
 use crate::plates::{plates_per_side, round_load_grid};
+use crate::profile::DistanceUnit;
 use crate::schema::{AdjustmentCall, RunVolume};
 
 /// Rebuild a lift item's one-line summary from its (possibly adjusted) fields.
-pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
+pub(super) fn refresh_lift_summary(it: &mut PlanItem, weight_lb: bool) {
     if it.is_run() {
         return; // a run item - its summary is not sets×reps
     }
     // A timed-hold calisthenics item has no reps (reps_low == 0): render the hold
     // volume (carried in `rep_volume`, e.g. "30 s hold"), never "×0".
     if it.timed_hold {
-        let lead = format!("{}×{}", it.sets, it.rep_volume);
-        let label = it.intensity_label.clone();
-        set_named_summary(it, ": ", lead, &[label]);
+        let lead = FaceClause::plain(format!("{}×{}", it.sets, it.rep_volume));
+        let label = FaceClause::plain(it.intensity_label.clone());
+        set_named_summary(it, ": ", &[lead], &[label]);
         return;
     }
     let reps = range_text(it.reps_low, it.reps_high);
@@ -38,32 +40,35 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
             .filter(|_| !matches!(it.intensity, PlanIntensity::Prose))
     });
     let pick_rir = pick_rir(it);
-    let mut parts: Vec<String> = Vec::with_capacity(2);
+    let mut parts: Vec<FaceClause> = Vec::with_capacity(2);
     let effort = match pick_rir {
-        Some(_) if matches!(it.intensity, PlanIntensity::Prose) => it.intensity_label.clone(),
-        Some(_) => String::new(),
+        Some(_) if matches!(it.intensity, PlanIntensity::Prose) => {
+            Some(FaceClause::plain(it.intensity_label.clone()))
+        }
+        Some(_) => None,
         None => effort_phrase(it, load.is_some()),
     };
-    if !effort.is_empty() {
-        parts.push(effort);
-    }
+    parts.extend(effort.filter(|c| !c.text.is_empty()));
     // A calisthenics item's cue is its no-apparatus setup ("use a sturdy
     // table edge"): it rides the lead, the line a compact row shows.
     let setup_cue = it.calis.is_some() && !it.effort_cue.is_empty();
     if !it.effort_cue.is_empty() && !setup_cue {
-        parts.push(it.effort_cue.clone());
+        parts.push(FaceClause::plain(it.effort_cue.clone()));
     }
-    let mut lead = match load {
+    let mut lead = vec![FaceClause::plain(match load {
         Some(kg) => format!("{}×{} @ {}", it.sets, reps, fmt_weight(kg, weight_lb)),
         None => format!("{}×{}", it.sets, reps),
-    };
+    })];
     if let Some(rir) = pick_rir {
-        lead = format!("{lead} · pick a weight for {}", reps_left(rir));
+        lead.push(FaceClause::effort(format!(
+            "pick a weight for {}",
+            reps_left(rir)
+        )));
     }
     if setup_cue {
-        lead = format!("{lead} · {}", it.effort_cue);
+        lead.push(FaceClause::plain(it.effort_cue.clone()));
     }
-    set_named_summary(it, ": ", lead, &parts);
+    set_named_summary(it, ": ", &lead, &parts);
     // The plate breakdown always follows the load actually shown.
     it.plates_per_side = if crate::exercise::is_barbell_lift(&it.exercise) {
         it.load_kg
@@ -75,24 +80,51 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
     };
 }
 
+/// One ` · ` clause of a face line. `effort` marks the reps-left wording
+/// ("~2 reps left", "pick a weight for ~3 reps left"), which a face whose
+/// newcomer guide states the effort leaves out.
+pub(super) struct FaceClause {
+    pub(super) text: String,
+    pub(super) effort: bool,
+}
+
+impl FaceClause {
+    pub(super) fn plain(text: String) -> Self {
+        FaceClause {
+            text,
+            effort: false,
+        }
+    }
+
+    pub(super) fn effort(text: String) -> Self {
+        FaceClause { text, effort: true }
+    }
+}
+
+/// `clauses` joined by " · ", without the effort ones unless `with_effort`.
+fn join_clauses<'a>(clauses: impl Iterator<Item = &'a FaceClause>, with_effort: bool) -> String {
+    clauses
+        .filter(|c| with_effort || !c.effort)
+        .map(|c| c.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// Set a named item's `summary` (`"<exercise><sep><lead> · <clause> · …"`) and
 /// the face parts the shell renders from it: the name line, the prescription
-/// line after it and that line's lead.
+/// line after it (with and without its effort wording) and that line's lead.
 pub(super) fn set_named_summary(
     it: &mut PrescriptionView,
     sep: &str,
-    lead: String,
-    clauses: &[String],
+    lead: &[FaceClause],
+    clauses: &[FaceClause],
 ) {
-    let mut detail = lead.clone();
-    for c in clauses {
-        detail.push_str(" · ");
-        detail.push_str(c);
-    }
+    let detail = join_clauses(lead.iter().chain(clauses), true);
     it.summary = format!("{}{sep}{detail}", it.exercise);
     it.face_name.clone_from(&it.exercise);
     it.face_detail = detail;
-    it.face_lead = lead;
+    it.face_detail_without_effort = join_clauses(lead.iter().chain(clauses), false);
+    it.face_lead = join_clauses(lead.iter(), true);
 }
 
 /// Set a run item's `summary` to `"<head> · <rest>"` (just `rest` without a
@@ -108,6 +140,7 @@ pub(super) fn set_run_summary(
 ) {
     it.face_name.clear();
     it.face_detail.clear();
+    it.face_detail_without_effort.clear();
     it.run_head_km = head.as_ref().and(head_km);
     match head {
         Some(h) => {
@@ -181,7 +214,7 @@ pub(super) fn sets_reps_lead(it: &PrescriptionView) -> String {
 /// The single reps-left number [`effort_phrase`] shows, if it shows one: a
 /// structured target, or the reserve a %e1RM or RPE target implies. `None`
 /// for a band, a prose target, or no target.
-pub(super) fn face_rir(it: &PrescriptionView) -> Option<i64> {
+pub(super) fn face_rir(it: &PlanItem) -> Option<i64> {
     let from_rpe = |rpe: f64| crate::strength::rpe_to_rir(rpe).round() as i64;
     match it.intensity {
         PlanIntensity::Rir { rir } => Some(i64::from(rir)),
@@ -194,7 +227,7 @@ pub(super) fn face_rir(it: &PrescriptionView) -> Option<i64> {
 
 /// The reserve in "pick a weight for ~N reps left", shown when the day took
 /// the lift's weight away and none is suggested.
-fn pick_rir(it: &PrescriptionView) -> Option<i64> {
+fn pick_rir(it: &PlanItem) -> Option<i64> {
     let load_shown = it.load_kg.is_some()
         || (it.suggested_load_kg.is_some() && !matches!(it.intensity, PlanIntensity::Prose));
     it.target_rpe
@@ -205,7 +238,7 @@ fn pick_rir(it: &PrescriptionView) -> Option<i64> {
 
 /// The reps left the face states: the pick-a-weight reserve, else
 /// [`face_rir`].
-pub(super) fn shown_rir(it: &PrescriptionView) -> Option<i64> {
+pub(super) fn shown_rir(it: &PlanItem) -> Option<i64> {
     pick_rir(it).or_else(|| face_rir(it))
 }
 
@@ -213,15 +246,16 @@ pub(super) fn shown_rir(it: &PrescriptionView) -> Option<i64> {
 /// target as "~N reps left" / "1–2 reps left"; a %e1RM target by the reserve
 /// its percentage implies (`target_rpe`), falling back to the percentage only
 /// when it implies none; an "RPE n" prose target as its reps left; any other
-/// prose target verbatim.
-fn effort_phrase(it: &PrescriptionView, load_shown: bool) -> String {
+/// prose target verbatim (not marked as effort wording). `None` when the
+/// load already says it.
+fn effort_phrase(it: &PlanItem, load_shown: bool) -> Option<FaceClause> {
     if let Some(n) = face_rir(it) {
-        return reps_left(n);
+        return Some(FaceClause::effort(reps_left(n)));
     }
     match it.intensity {
-        PlanIntensity::RirRange { lo, hi } => rir_band_left(lo, hi),
-        PlanIntensity::PercentE1rm { .. } if load_shown => String::new(),
-        _ => it.intensity_label.clone(),
+        PlanIntensity::RirRange { lo, hi } => Some(FaceClause::effort(rir_band_left(lo, hi))),
+        PlanIntensity::PercentE1rm { .. } if load_shown => None,
+        _ => Some(FaceClause::plain(it.intensity_label.clone())),
     }
 }
 
@@ -282,7 +316,7 @@ impl PlanIntensity {
 /// `intensity`, then rebuild the one-line summary — the single sync point every
 /// adjustment routes through so the label never drifts from the numbers.
 /// A `Prose` target keeps its verbatim label.
-pub(super) fn resync_intensity(it: &mut PrescriptionView, weight_lb: bool) {
+pub(super) fn resync_intensity(it: &mut PlanItem, weight_lb: bool) {
     if let Some(label) = it.intensity.label() {
         it.intensity_label = label;
     }
@@ -305,7 +339,7 @@ impl RunAmount {
             RunAmount::Minutes(m) => Some(format!("{m:.0} min")),
             RunAmount::MinutesRange(lo, hi) => Some(format!("{lo}–{hi} min")),
             RunAmount::PlanKm(k) => Some(fmt_run_km(k)),
-            RunAmount::Km(k) => Some(fmt_km_or_mi(k, false)),
+            RunAmount::Km(k) => Some(fmt_km_or_mi(k, DistanceUnit::Km)),
             RunAmount::RunWalk => None,
         }
     }
@@ -338,7 +372,7 @@ impl RunAmount {
 /// rep count × the per-rep volume ("6 × 4 min" → 24 min, "6 × 800 m" →
 /// 4.8 km). `None` for a continuous run or run/walk reps. The recoveries are
 /// not counted (their length is not on the item).
-fn interval_total(it: &PrescriptionView) -> Option<RunAmount> {
+fn interval_total(it: &PlanItem) -> Option<RunAmount> {
     if it.rep_count == 0 {
         return None;
     }
@@ -354,7 +388,7 @@ fn interval_total(it: &PrescriptionView) -> Option<RunAmount> {
 /// A run item's shown whole-session volume as `(km, minutes)`, whichever the
 /// plan states (an interval day: its reps' total; a minutes band: its low
 /// end). Both `None` for run/walk bouts, which have no single number.
-pub(in crate::app) fn run_planned(it: &PrescriptionView) -> (Option<f64>, Option<f64>) {
+pub(in crate::app) fn run_planned(it: &PlanItem) -> (Option<f64>, Option<f64>) {
     let vol = if it.rep_count > 0 {
         interval_total(it)
     } else {
@@ -370,7 +404,7 @@ pub(in crate::app) fn run_planned(it: &PrescriptionView) -> (Option<f64>, Option
 }
 
 /// Drop a run item's rep structure ("N × …" and its per-rep amount).
-pub(super) fn clear_run_reps(it: &mut PrescriptionView) {
+pub(super) fn clear_run_reps(it: &mut PlanItem) {
     it.rep_count = 0;
     it.rep_volume.clear();
     it.rep_amount = None;
@@ -383,7 +417,7 @@ pub(super) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
 /// hard intensity with an easy zone. An interval day keeps its numbers as one
 /// continuous easy run of the same total work ("6 × 4 min" → "24 min"; never a
 /// card with no duration).
-pub(super) fn cap_run_item_easy(it: &mut PrescriptionView, r: &AdjustmentCall, note: &str) {
+pub(super) fn cap_run_item_easy(it: &mut PlanItem, r: &AdjustmentCall, note: &str) {
     // The rep structure is deferred, not prescribed: drop it (and any "N × …"
     // that would read as an interval on an easy card), carrying its total.
     let vol = if it.rep_count > 0 {
@@ -419,7 +453,7 @@ pub(super) fn cap_run_item_easy(it: &mut PrescriptionView, r: &AdjustmentCall, n
 
 /// Label a run (its volume already set) easy, with the easy pace/bpm target,
 /// and re-render its face.
-pub(super) fn set_easy_run_face(it: &mut PrescriptionView) {
+pub(super) fn set_easy_run_face(it: &mut PlanItem) {
     it.intensity_label = EASY_RUN_LABEL.into();
     crate::app::run_targets::downgrade_run_target_to_easy(it);
     let label = it.intensity_label.clone();
@@ -442,7 +476,6 @@ pub(super) fn repoint_evidence(
 ) {
     it.evidence = EvidenceTagView::of(r);
     it.safety_reason.clear();
-    it.safety_reason_mi.clear();
     it.why = why_from(basis, r);
 }
 

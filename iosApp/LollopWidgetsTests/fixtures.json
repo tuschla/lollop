@@ -1,0 +1,1496 @@
+{
+  "widgets": {
+    "lift": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Heavy day",
+        "titleInk": "Body",
+        "status": "4 exercises · Back Squat first",
+        "brief": "Back Squat",
+        "body": {
+          "lead": 0,
+          "fits": [
+            [],
+            [
+              "Back Squat · 5×3 @ 117.5 kg"
+            ],
+            [
+              "Back Squat · 5×3 @ 117.5 kg",
+              "3 more items"
+            ],
+            [
+              "Back Squat · 5×3 @ 117.5 kg",
+              "Deadlift · 3×5",
+              "2 more items"
+            ],
+            [
+              "Back Squat · 5×3 @ 117.5 kg",
+              "Deadlift · 3×5",
+              "Bench press · 3×5",
+              "Cable row · 3×5"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": {
+          "text": "1 of 4 sessions done",
+          "done": 1,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "●",
+              "ink": "Accent",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Log set",
+            "dest": "log_set",
+            "icon": "LogSet"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log set",
+        "subtitle": "Heavy day",
+        "dest": "log_set",
+        "symbol": "dumbbell"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "liftstarted": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Heavy day",
+        "titleInk": "Body",
+        "status": "1 of 4 done · Deadlift next",
+        "brief": "Deadlift",
+        "body": {
+          "lead": 0,
+          "fits": [
+            [],
+            [
+              "Deadlift · 3×5"
+            ],
+            [
+              "Deadlift · 3×5",
+              "3 more items"
+            ],
+            [
+              "Deadlift · 3×5",
+              "Bench press · 3×5",
+              "2 more items"
+            ],
+            [
+              "Deadlift · 3×5",
+              "Bench press · 3×5",
+              "Cable row · 3×5",
+              "Back Squat · Done"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": {
+          "text": "1 of 4 sessions done",
+          "done": 1,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "●",
+              "ink": "Accent",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Log set",
+            "dest": "log_set",
+            "icon": "LogSet"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log set",
+        "subtitle": "Heavy day",
+        "dest": "log_set",
+        "symbol": "dumbbell"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "run": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Easy run",
+        "titleInk": "Body",
+        "status": "3.4 mi · 9:00–9:40 /mi",
+        "brief": "3.4 mi",
+        "body": {
+          "lead": 0,
+          "fits": [
+            [],
+            [
+              "Run · 3.4 mi · 9:00–9:40 /mi"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": {
+          "text": "3.4 mi",
+          "note": "9:00–9:40 /mi",
+          "figure": true,
+          "body": {
+            "lead": 0,
+            "fits": [
+              []
+            ]
+          }
+        },
+        "week": {
+          "text": "1 of 4 sessions done",
+          "done": 1,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "●",
+              "ink": "Accent",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Start run",
+            "dest": "track",
+            "icon": "TrackRun"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Start run",
+        "subtitle": "Easy run",
+        "dest": "track",
+        "symbol": "location"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "recording": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Easy run",
+        "titleInk": "Body",
+        "status": "3.4 mi · 9:00–9:40 /mi",
+        "brief": "3.4 mi",
+        "body": {
+          "lead": 0,
+          "fits": [
+            [],
+            [
+              "Run · 3.4 mi · 9:00–9:40 /mi"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": {
+          "text": "3.4 mi",
+          "note": "9:00–9:40 /mi",
+          "figure": true,
+          "body": {
+            "lead": 0,
+            "fits": [
+              []
+            ]
+          }
+        },
+        "week": {
+          "text": "1 of 4 sessions done",
+          "done": 1,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "●",
+              "ink": "Accent",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Run · recording",
+            "dest": "track",
+            "icon": "TrackRun"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Run · recording",
+            "dest": "track",
+            "icon": "TrackRun"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Run · recording",
+        "subtitle": "Easy run",
+        "dest": "track",
+        "symbol": "location.fill"
+      },
+      "staleControl": {
+        "label": "Run · recording",
+        "subtitle": null,
+        "dest": "track",
+        "symbol": "location.fill"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "rest": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Rest day",
+        "titleInk": "Body",
+        "status": "Next: Heavy volume day, Thu, Oct 30",
+        "brief": "Next: Thu",
+        "body": {
+          "lead": 1,
+          "fits": [
+            [],
+            [
+              "Next: Heavy volume day, Thu, Oct 30"
+            ]
+          ]
+        },
+        "shortBody": {
+          "leadEm": 16.7,
+          "body": {
+            "lead": 1,
+            "fits": [
+              [],
+              [
+                "Next: Thu"
+              ]
+            ]
+          }
+        },
+        "hero": {
+          "text": "Heavy volume day",
+          "note": "Next: Thu, Oct 30",
+          "figure": false,
+          "body": {
+            "lead": 0,
+            "fits": [
+              [],
+              [
+                "Back Squat · 4×5 @ 112.5 kg"
+              ],
+              [
+                "Back Squat · 4×5 @ 112.5 kg",
+                "2 more items"
+              ],
+              [
+                "Back Squat · 4×5 @ 112.5 kg",
+                "Deadlift · 4×5 @ 57.5 kg",
+                "Bench press · 4×5 @ 57.5 kg"
+              ]
+            ]
+          }
+        },
+        "week": {
+          "text": "1 of 4 sessions done",
+          "done": 1,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log",
+        "subtitle": "Rest day",
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "done": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Easy run",
+        "titleInk": "Body",
+        "status": "Session done",
+        "brief": "Session done",
+        "body": {
+          "lead": 2,
+          "fits": [
+            [],
+            [
+              "Session done"
+            ],
+            [
+              "Session done",
+              "Next: Heavy volume day, Thu, Oct 30"
+            ],
+            [
+              "Session done",
+              "Next: Heavy volume day, Thu, Oct 30",
+              "Run · Done"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": {
+          "text": "Heavy volume day",
+          "note": "Next: Thu, Oct 30",
+          "figure": false,
+          "body": {
+            "lead": 1,
+            "fits": [
+              [],
+              [
+                "Session done"
+              ],
+              [
+                "Session done",
+                "Back Squat · 4×5 @ 112.5 kg"
+              ],
+              [
+                "Session done",
+                "Back Squat · 4×5 @ 112.5 kg",
+                "2 more items"
+              ],
+              [
+                "Session done",
+                "Back Squat · 4×5 @ 112.5 kg",
+                "Deadlift · 4×5 @ 57.5 kg",
+                "Bench press · 4×5 @ 57.5 kg"
+              ]
+            ]
+          }
+        },
+        "week": {
+          "text": "2 of 4 sessions done",
+          "done": 2,
+          "planned": 4,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log",
+        "subtitle": "Session done",
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "hold": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Training paused",
+        "titleInk": "Danger",
+        "status": "Open lollop for details.",
+        "brief": "Open lollop for details.",
+        "body": {
+          "lead": 1,
+          "fits": [
+            [],
+            [
+              "Open lollop for details."
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log",
+        "subtitle": "Training paused",
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "noplan": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "No plan yet",
+        "titleInk": "Body",
+        "status": "Open lollop to make a plan.",
+        "brief": "Open lollop to make a plan.",
+        "body": {
+          "lead": 1,
+          "fits": [
+            [],
+            [
+              "Open lollop to make a plan."
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log",
+        "subtitle": "No plan yet",
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "stale": {
+      "version": 2,
+      "current": null,
+      "face": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    },
+    "preview": {
+      "version": 2,
+      "current": {
+        "zone": "Europe/Berlin",
+        "startMs": 1761606000000,
+        "endMs": 1761692400000
+      },
+      "face": {
+        "overline": "Today · Tue, Oct 28",
+        "date": "Tue, Oct 28",
+        "title": "Upper body",
+        "titleInk": "Body",
+        "status": "3 exercises · Bench press first",
+        "brief": "Bench press",
+        "body": {
+          "lead": 0,
+          "fits": [
+            [],
+            [
+              "Bench press · 3×5 @ 60 kg"
+            ],
+            [
+              "Bench press · 3×5 @ 60 kg",
+              "2 more items"
+            ],
+            [
+              "Bench press · 3×5 @ 60 kg",
+              "Barbell row · 3×8 @ 50 kg",
+              "Overhead press · 3×8 @ 35 kg"
+            ]
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": {
+          "text": "1 of 5 sessions done",
+          "done": 1,
+          "planned": 5,
+          "days": [
+            {
+              "label": "Mo",
+              "glyph": "✓",
+              "ink": "Done",
+              "today": false
+            },
+            {
+              "label": "Tu",
+              "glyph": "●",
+              "ink": "Accent",
+              "today": true
+            },
+            {
+              "label": "We",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Th",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Fr",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Sa",
+              "glyph": "○",
+              "ink": "Faint",
+              "today": false
+            },
+            {
+              "label": "Su",
+              "glyph": " ",
+              "ink": "Faint",
+              "today": false
+            }
+          ]
+        },
+        "actions": [
+          {
+            "label": "Log set",
+            "dest": "log_set",
+            "icon": "LogSet"
+          },
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "staleFace": {
+        "overline": "Today",
+        "date": null,
+        "title": "Open lollop to update",
+        "titleInk": "Muted",
+        "status": null,
+        "brief": null,
+        "body": {
+          "lead": 0,
+          "fits": [
+            []
+          ]
+        },
+        "shortBody": null,
+        "hero": null,
+        "week": null,
+        "actions": [
+          {
+            "label": "Log",
+            "dest": "log",
+            "icon": "Log"
+          }
+        ]
+      },
+      "control": {
+        "label": "Log set",
+        "subtitle": "Upper body",
+        "dest": "log_set",
+        "symbol": "dumbbell"
+      },
+      "staleControl": {
+        "label": "Log",
+        "subtitle": null,
+        "dest": "log",
+        "symbol": "plus"
+      },
+      "light": {
+        "ground": "#FFFFFFFF",
+        "body": "#FF0A0A0A",
+        "muted": "#FF5C5C5A",
+        "faint": "#FF6E6E6C",
+        "accent": "#FF1A1A1A",
+        "onAccent": "#FFFFFFFF",
+        "accentTint": "#FFCCCCCC",
+        "danger": "#FFB3261E",
+        "done": "#FF166534"
+      },
+      "dark": {
+        "ground": "#FF0A0A0A",
+        "body": "#FFF5F5F3",
+        "muted": "#FFA0A09E",
+        "faint": "#FF848481",
+        "accent": "#FFF0F0EE",
+        "onAccent": "#FF0A0A0A",
+        "accentTint": "#FF383837",
+        "danger": "#FFF87171",
+        "done": "#FF4ADE80"
+      }
+    }
+  },
+  "runs": {
+    "recording": {
+      "recording": true,
+      "title": "Tracking run",
+      "chip": "23:41",
+      "text": null,
+      "step": null,
+      "movingSec": 1421,
+      "time": "23:41",
+      "distance": "4.12 km",
+      "pace": "5:45 /km",
+      "movingLabel": "Moving",
+      "distanceLabel": "Distance",
+      "paceLabel": "Pace now",
+      "canPause": true,
+      "paused": false,
+      "pauseLabel": "Pause",
+      "resumeLabel": "Resume",
+      "stopLabel": "Stop",
+      "accentLight": "#FF1A1A1A",
+      "accentDark": "#FFF0F0EE"
+    },
+    "paused": {
+      "recording": false,
+      "title": "Run paused",
+      "chip": "Paused",
+      "text": null,
+      "step": null,
+      "movingSec": 1421,
+      "time": "23:41",
+      "distance": "4.12 km",
+      "pace": null,
+      "movingLabel": "Moving",
+      "distanceLabel": "Distance",
+      "paceLabel": "Pace now",
+      "canPause": true,
+      "paused": true,
+      "pauseLabel": "Pause",
+      "resumeLabel": "Resume",
+      "stopLabel": "Stop",
+      "accentLight": "#FF1A1A1A",
+      "accentDark": "#FFF0F0EE"
+    },
+    "locating": {
+      "recording": false,
+      "title": "Finding GPS…",
+      "chip": "GPS…",
+      "text": "Tap Start to record.",
+      "step": null,
+      "movingSec": 1421,
+      "time": "23:41",
+      "distance": null,
+      "pace": null,
+      "movingLabel": "Moving",
+      "distanceLabel": "Distance",
+      "paceLabel": "Pace now",
+      "canPause": false,
+      "paused": false,
+      "pauseLabel": "Pause",
+      "resumeLabel": "Resume",
+      "stopLabel": "Stop",
+      "accentLight": "#FF1A1A1A",
+      "accentDark": "#FFF0F0EE"
+    }
+  },
+  "rest": {
+    "title": "Resting · Back squat",
+    "next": "Next: Set 3 of 4 · 100 kg × 5",
+    "startMs": 1761690000000,
+    "endMs": 1761690090000,
+    "doneTitle": "Rest done",
+    "accentLight": "#FF1A1A1A",
+    "accentDark": "#FFF0F0EE"
+  }
+}

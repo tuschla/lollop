@@ -103,7 +103,7 @@ internal fun CalculatorResultCard(
 ) {
     val status = LocalStatusColors.current
     var expanded by rememberSaveable(overline, headlines.firstOrNull()?.value) { mutableStateOf(false) }
-    val glossaryKeys = (claims.map { it.row } + notes).flatMap { glossaryKeysIn(it.summary) }.distinct()
+    val glossaryKeys = (claims.map { it.row } + notes).flatMap { it.glossary }.terms()
     Box(Modifier.fillMaxWidth().testTag("calc-result")) {
         PlainCard {
             Row(
@@ -133,13 +133,10 @@ internal fun CalculatorResultCard(
                 claims.forEachIndexed { i, c ->
                     if (i > 0) RowHairline()
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                        Text(stripClaimIds(guidanceSummary(c.row)), color = OnBgBody, style = Type.BodyBold)
+                        Text(c.row.summary, color = OnBgBody, style = Type.BodyBold)
                         WhyDetail(
                             why = c.row.why,
-                            grade = c.row.grade,
-                            citation = c.row.citation,
-                            confidence = c.row.confidence,
-                            contested = c.row.contested,
+                            evidence = c.row.evidence,
                             // Safety is a rule, not a probability.
                             showConfidence = !c.row.safety_critical,
                             extraDetail = c.extraDetail,
@@ -158,7 +155,7 @@ internal fun CalculatorResultCard(
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                     if (n.safety_critical) Chip(stringResource(Res.string.main_chip_safety), status.danger)
                     Text(
-                        stripClaimIds(guidanceSummary(n)),
+                        n.summary,
                         color = OnBgBody,
                         style = if (n.safety_critical) Type.BodyBold else Type.Body,
                     )
@@ -175,7 +172,7 @@ internal fun CalculatorResultCard(
 @Composable
 private fun PlainCalcRows(rows: List<GuidanceView>, overline: String, onClear: () -> Unit) {
     rows.forEach {
-        EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section, why = it.why)
+        EvidenceCard(it.summary, it.evidence, it.section, why = it.why, glossary = it.glossary, spokenSubject = it.subject, proseSummary = it.prose)
     }
     ClearResultAction(overline, onClear)
 }
@@ -205,6 +202,7 @@ internal fun wholeRange(low: Double, high: Double): String {
 internal fun RaceResult(rp: RacePredictionView, onClear: () -> Unit) {
     val primary = GuidanceView(
         summary = rp.summary,
+        glossary = rp.glossary,
         grade = rp.grade,
         citation = rp.citation,
         confidence = rp.confidence,
@@ -218,7 +216,7 @@ internal fun RaceResult(rp: RacePredictionView, onClear: () -> Unit) {
             if (usable) {
                 CalcHeadline(rp.predicted, stringResource(Res.string.main_calc_race_caption, rp.goal_label))
             } else {
-                CalcHeadline(EmptyValuePlaceholder, stripClaimIds(rp.summary))
+                CalcHeadline(EmptyValuePlaceholder, rp.summary)
             },
         ),
         claims = listOf(CalcClaim(primary)) + rp.notes.map { CalcClaim(it) },
@@ -243,7 +241,11 @@ internal fun ProteinResult(model: ViewModel, onClear: () -> Unit) {
     CalculatorResultCard(
         overline = stringResource(Res.string.main_calc_protein_overline),
         headlines = figures.map { f ->
-            val context = stringResource(if (f.kind == ProteinTargetKind.Masters) Res.string.main_calc_protein_masters else Res.string.main_calc_protein_deficit)
+            val context = if (f.kind == ProteinTargetKind.Masters) {
+                stringResource(Res.string.main_calc_protein_masters, mastersAgeLabel())
+            } else {
+                stringResource(Res.string.main_calc_protein_deficit)
+            }
             CalcHeadline(
                 value = wholeRange(f.low_g_per_day, f.high_g_per_day),
                 caption = stringResource(Res.string.main_calc_protein_caption),

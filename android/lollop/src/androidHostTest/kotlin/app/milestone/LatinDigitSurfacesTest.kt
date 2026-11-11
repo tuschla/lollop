@@ -52,7 +52,7 @@ import org.robolectric.annotation.Config
 /**
  * On a phone set to Arabic (Egypt), whose locale writes Arabic-Indic digits, every
  * text the app builds outside its Activity shows its counts in ASCII digits
- * ([latinDigitResources]): the session reminder, the run import result, the coach
+ * ([appResources]): the session reminder, the run import result, the coach
  * export, the widget and the run tracker's notification. Each surface is driven
  * through its production entry point and its text read back from what it posted.
  */

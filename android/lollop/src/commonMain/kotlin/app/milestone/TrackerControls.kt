@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.milestone.resources.Res
 import app.milestone.resources.ic_track_pause
@@ -511,7 +512,7 @@ internal fun startGatesCaptionRes(precise: Boolean, moving: Boolean): StringReso
 @Composable
 private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
     val res = currentResources()
-    val targets = remember(item.run_target, unit) { runTargetLines(res, item.run_target, unit) }
+    val targets = remember(item.run_target) { runTargetLines(res, item.run_target) }
     val headline = remember(item, unit) { runPlanHeadline(item, unit) }
     PlanCard {
         Text(
@@ -546,9 +547,9 @@ private fun PlanCard(content: @Composable ColumnScope.() -> Unit) {
  * without steps or targets.
  */
 @Composable
-internal fun RunGuideCard(item: PrescriptionView, progress: StepProgress?, unit: DistanceUnit, onSkip: () -> Unit) {
+internal fun RunGuideCard(item: PrescriptionView, progress: StepProgress?, onSkip: () -> Unit) {
     val res = currentResources()
-    val targets = remember(item.run_target, unit) { runTargetSummary(res, item.run_target, unit) }
+    val targets = remember(item.run_target) { runTargetSummary(res, item.run_target) }
     if (progress == null && targets == null) return
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         targets?.let { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
@@ -591,7 +592,7 @@ private fun RunStepCard(res: PlatformResources, progress: StepProgress, onSkip: 
             Text(
                 runStepRemaining(res, progress),
                 color = if (counting) OnBgBody else OnBgMuted,
-                style = if (counting) Type.Countdown else Type.Caption,
+                style = if (counting) CountdownStyle else Type.Caption,
             )
         }
         progress.next?.let { next ->
@@ -604,6 +605,12 @@ private fun RunStepCard(res: PlatformResources, progress: StepProgress, onSkip: 
         }
     }
 }
+
+/** A guided-run step's countdown: 28sp/32sp ExtraBold, tabular. */
+internal val CountdownStyle = androidx.compose.ui.text.TextStyle(
+    fontSize = 28.sp, lineHeight = 32.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
+    fontFeatureSettings = "tnum", textDirection = AppTextDirection,
+)
 
 /**
  * The stat sheet while precise location is missing: a caption matching what the

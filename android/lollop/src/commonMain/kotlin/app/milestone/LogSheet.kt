@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -85,9 +84,6 @@ internal fun LogSheetContent(
     // editor instead.
     onTrackRun: (() -> Unit)?,
     onDismiss: () -> Unit,
-    // The shown editor reports whether it has unsaved edits so the host's
-    // swipe-down dismissal can guard it.
-    onDirtyChange: (Boolean) -> Unit,
     // Coach prescription to prefill the Set editor from (NEW mode only); null
     // opens blank. `onPlanPrefill` records which exercise the "Today's plan"
     // fast-path picked so the host can resolve it against the live model.
@@ -96,8 +92,6 @@ internal fun LogSheetContent(
     // Seed the Set/Run editor's stamp to a PAST plan day's local noon; null =
     // today's flow. The editors' date chips stay user-editable.
     planObservedAt: Long?,
-    // The Set editor's loop locks the sheet against swipe / scrim dismissal.
-    onSheetLockChange: (Boolean) -> Unit,
     // The loop's "Done for now" / "Finish session": closes the sheet like
     // [onDismiss]; the host also returns Today to its top.
     onFinishSession: () -> Unit,
@@ -135,10 +129,6 @@ internal fun LogSheetContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // The exercise search field is the one IME-summoning field in the
-            // flow; grow the bottom inset with the keyboard so it can't cover
-            // the form (the keypad editors never open the IME).
-            .imePadding()
             // Every form, the pinned action and the chooser's scroll viewport end
             // above the system nav bar (applied outside the scroll, so the last
             // chooser tiles never scroll under it at a large font scale).
@@ -162,45 +152,34 @@ internal fun LogSheetContent(
                 // prescribed session (the hero carries no start action). Only a
                 // trainable session dated today, with items, reaches here; once
                 // it's logged the core advances next_session off today so the
-                // row disappears.
+                // row disappears and today's started lift session can be resumed.
                 val ns = model.todaysPlan()
-                if (ns != null) {
-                    val isRun = ns.session_type.discipline == SessionDiscipline.Run
-                    val item = firstOpenItem(ns.items) ?: ns.items.first()
+                val lift = model.openLiftTarget()
+                if (ns != null && ns.session_type.discipline == SessionDiscipline.Run) {
+                    val item = ns.runItem ?: ns.items.first()
                     LogOptionRow(
                         stringResource(Res.string.main_todays_plan, ns.title),
                         // A run's distance reads in the profile's unit like every other surface.
-                        glueFigures(if (isRun && item.run_head.isNotBlank()) runHeadText(item, distanceUnit) else planRowSubtitle(item)),
-                        if (isRun) Res.drawable.ic_content_run else Res.drawable.ic_content_set_dumbbell,
+                        if (item.run_head.isNotBlank()) runHeadText(item, distanceUnit) else planRowSubtitle(item),
+                        Res.drawable.ic_content_run,
                         LogRowTone.Plan,
                     ) {
-                        if (isRun) {
-                            if (onTrackRun != null) {
-                                onTrackRun(); onDismiss()
-                            } else {
-                                onMode(LogMode.Run)
-                            }
+                        if (onTrackRun != null) {
+                            onTrackRun(); onDismiss()
                         } else {
-                            onPlanPrefill(item.exercise)
-                            onMode(LogMode.Set)
+                            onMode(LogMode.Run)
                         }
                     }
-                } else {
-                    // After Finish the core moves next_session off today; today's
-                    // started lift session can be resumed (its open item, else its
-                    // last one for an extra set).
-                    val today = model.resumableLiftDay()
-                    if (today != null && liftVisible && !model.train_blocked) {
-                        val item = firstOpenItem(today.items) ?: today.items.last()
-                        LogOptionRow(
-                            stringResource(Res.string.log_chooser_resume, today.title),
-                            glueFigures(planRowSubtitle(item)),
-                            Res.drawable.ic_content_set_dumbbell,
-                            LogRowTone.Plan,
-                        ) {
-                            onPlanPrefill(item.exercise)
-                            onMode(LogMode.Set)
-                        }
+                } else if (lift != null && (lift.first === ns || (liftVisible && !model.train_blocked))) {
+                    val (session, item) = lift
+                    LogOptionRow(
+                        stringResource(if (session === ns) Res.string.main_todays_plan else Res.string.log_chooser_resume, session.title),
+                        planRowSubtitle(item),
+                        Res.drawable.ic_content_set_dumbbell,
+                        LogRowTone.Plan,
+                    ) {
+                        onPlanPrefill(item.exercise)
+                        onMode(LogMode.Set)
                     }
                 }
                 if (runVisible && onTrackRun != null) {
@@ -307,40 +286,8 @@ internal fun LogSheetContent(
                 }
             }
             LogMode.Set -> {
-              // Today's + this week's prescribed items.
-              val planItems = remember(model.next_session, model.week_plan) {
-                  model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items }
-              }
               LogSetEditor(
-                // Quick-picks: the user's own most recent exercises, newest
-                // first (History list is oldest-first on the wire). Memoized on
-                // model.lifts so the full-history scan isn't rerun per recomposition.
-                recentExercises = remember(model.lifts) {
-                    model.lifts.asReversed().map { it.exercise }.distinct()
-                },
-                // Modality-aware quick picks: the prescribed exercises; no
-                // hard-coded barbell defaults.
-                plannedExercises = remember(planItems) {
-                    planItems.map { it.exercise }.filter { it.isNotEmpty() }.distinct()
-                },
-                // Canonical names of today's + this week's prescribed timed-hold
-                // rungs, so the editor logs those as holds (seconds) not reps.
-                holdExercises = remember(planItems, model.calisthenics_ladders) {
-                    (
-                        planItems.filter { it.timed_hold }.map { it.exercise } +
-                            // A hold rung picked from the chooser.
-                            model.calisthenics_ladders.flatMap { it.rungs }
-                                .filter { it.timed_hold }
-                                .map { it.name }
-                        ).toSet()
-                },
-                // Prescribed pure-bodyweight rungs (added load 0, and the rung takes
-                // no belt or vest): the editor hides the weight field for these — a
-                // Wall push-up has no load to enter. A load-capable rung keeps its
-                // added-load field even at 0.
-                bodyweightExercises = remember(planItems) {
-                    planItems.filter { it.added_kg == 0.0 && it.calis?.load_capable != true }.map { it.exercise }.toSet()
-                },
+                inputs = remember(model) { SetEditorInputs.from(model) },
                 weightUnit = weightUnit,
                 initialObservedAt = planObservedAt,
                 prescription = planPrefill,
@@ -356,8 +303,6 @@ internal fun LogSheetContent(
                 adjustments = model.adjustments,
                 reviewAdjustments = model.review_adjustments,
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
-                onSheetLockChange = onSheetLockChange,
                 // Dispatch-only: a NEW today set keeps the sheet open and loops; an
                 // EDIT (amend) and the planned loop's X close via onDone, the loop's
                 // Finish via onFinish.
@@ -375,14 +320,10 @@ internal fun LogSheetContent(
                     model.week_plan.firstOrNull {
                         it.epoch_day == day && it.session_type.discipline == SessionDiscipline.Run &&
                             !it.isDone && it.status != SessionStatus.Blocked
-                    }?.let { s ->
-                        val item = s.items.firstOrNull { it.run_target != null } ?: s.items.firstOrNull()
-                        workoutTypeForPlan(s.session_type, item?.run_target?.band)
-                    }
+                    }?.let { s -> workoutTypeForPlan(s.session_type, s.runItem?.run_target?.band) }
                 },
-                profile = model.profile,
+                hrMaxKnown = model.hr_max_known,
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
             ) { run -> onEvent(run); onDismiss() }
             // The primary human morning check-in. The core derives
             // the z-scores; the user never enters one.
@@ -390,7 +331,6 @@ internal fun LogSheetContent(
                 echo = model.latest_checkin,
                 illnessPrompt = model.illness_check_prompt,
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
             ) { checkin, illness ->
                 checkin?.let(onEvent)
                 // AUTOREG-4: the illness answer is its own readiness report.
@@ -401,20 +341,17 @@ internal fun LogSheetContent(
                 // Red-flag fence position comes from the core's signal_groups.
                 signalGroups = model.signal_groups.associate { it.signal to it.group },
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
             ) { r -> onEvent(r); onDismiss() }
             // The session review (off day + hand-logged run details) and the weekly
             // check-in are separate events with separate lifecycles.
             LogMode.Review -> SessionReviewSheet(
                 showRun = reviewAsksRun(model),
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
             ) { review -> onEvent(review); onDismiss() }
             LogMode.WeeklyCheckin -> WeeklyCheckinSheet(
                 female = model.profile?.female,
                 checkinPresent = model.weekly_checkin_present,
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
                 onClear = { onEvent(Event.ClearWeeklyCheckin); onDismiss() },
             ) { checkin -> onEvent(checkin); onDismiss() }
             // Pain triage → full PainDetail, then the hold.
@@ -422,7 +359,6 @@ internal fun LogSheetContent(
                 val saved = stringResource(Res.string.main_pain_report_saved)
                 PainTriageSheet(
                     onClose = { onMode(LogMode.Chooser) },
-                    onDirtyChange = onDirtyChange,
                 ) { r ->
                     onEvent(r)
                     onDismiss()
@@ -431,7 +367,6 @@ internal fun LogSheetContent(
             }
             LogMode.Activity -> LogActivityEditor(
                 onClose = { onMode(LogMode.Chooser) },
-                onDirtyChange = onDirtyChange,
             ) { activity -> onEvent(activity); onDismiss() }
         }
       }
@@ -515,14 +450,6 @@ private fun LogOptionRow(
  *  the Today card already shows, so it stays one short line. Pure. */
 private fun planRowSubtitle(item: PrescriptionView): String =
     if (item.face_name.isNotBlank()) "${item.face_name}: ${item.face_lead}" else item.face_lead
-
-/** A figure and its unit (and "@" and its load) held on one line with
- *  non-breaking spaces, so a large font scale never wraps "275 / lb". Pure. */
-internal fun glueFigures(text: String): String =
-    text.replace(FigureUnit, "$1\u00A0$2").replace(AtFigure, "@\u00A0$1")
-
-private val FigureUnit = Regex("""(\d) (kg|lb|km|mi|min|s)\b""")
-private val AtFigure = Regex("""@ (\d)""")
 
 /** A compact chooser entry inside a [ChooserGroup]: a bold title over a
  *  one-line subtitle and a trailing chevron, no icon tile. */

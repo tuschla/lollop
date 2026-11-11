@@ -121,7 +121,7 @@ private val delegate by ProcessLocal { NotificationDelegate() }
 internal fun installNotificationDelegate() {
     val center = notificationCenter
     center.delegate = delegate
-    val res = systemResources()
+    val res = PlatformContext.INSTANCE.appResources()
     fun category(id: String, label: String) = UNNotificationCategory.categoryWithIdentifier(
         id,
         actions = listOf(

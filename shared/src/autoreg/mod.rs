@@ -30,10 +30,10 @@ pub use derive::{BaselineKind, BaselineStatus, DerivedReadiness, derive_readines
 pub(crate) use derive::{HRV_ROLLING_DAYS, checkin_days_in_reach};
 pub use hold::{ReturnKind, TimedInput, last_hold_resolution, return_adjustment};
 pub use pain::{
-    item_spared_by_pain, pain_blocks_progression, pain_blocks_training, pain_hold_active,
-    pain_region, worst_active_pain,
+    item_spared_by_pain, pain_blocks_progression, pain_blocks_training, pain_context,
+    pain_hold_active, pain_region, worst_active_pain,
 };
-pub(crate) use perf::{E1RM_NOISE_FRAC, E1RM_REDUCE_RATIO};
+pub(crate) use perf::{E1RM_INCREASE_RATIO, E1RM_NOISE_FRAC, E1RM_REDUCE_RATIO};
 pub use perf::{MovementPerf, PerfSet, derive_performance};
 pub use prescriptions::{
     AutoregSource, SetVolumeAction, VbtReadiness, autoreg_source, deload_from_failed_sessions,
@@ -45,11 +45,15 @@ pub use prescriptions::{
 };
 pub(crate) use prescriptions::{
     FAILED_KEY_SESSIONS_DELOAD, HRV_QC_LOOKBACK, HRV_UNRELIABLE_SUSPEND,
-    INTERVAL_REPS_OVER_TARGET_CUT, PACE_RETEST_WEEKS, RPE_CREEP_WELLNESS_LOW_DAYS,
-    RPE_LOAD_GAP_DELOAD_PCT, RPE_LOAD_GAP_DELOAD_SESSIONS, VBT_RELIABILITY_M_S,
-    VBT_WEEKLY_DROP_DELOAD_M_S, WELLNESS_RHR_EASY_DAYS,
+    INTERVAL_REPS_OVER_TARGET_CUT, NFOR_DECLINE_WEEKS, PACE_RETEST_WEEKS,
+    RPE_CREEP_WELLNESS_LOW_DAYS, RPE_LOAD_GAP_DELOAD_PCT, RPE_LOAD_GAP_DELOAD_SESSIONS,
+    VBT_RELIABILITY_M_S, VBT_WEEKLY_DROP_DELOAD_M_S, WELLNESS_RHR_EASY_DAYS,
 };
-pub(crate) use rules::HRV_ESCALATE_STREAK;
+pub(crate) use rules::{
+    DECOUPLING_MIN_EFFORT_MIN, HRV_ESCALATE_STREAK, HRV_SWC_LOWER_Z, RHR_DOWNGRADE_FLOOR_BPM,
+    RHR_DOWNGRADE_STREAK, RHR_STOP_BPM, RPE_DELTA_ABOVE, RPE_DELTA_WELL_ABOVE, SORENESS_HIGH,
+    WELLNESS_SINGLE_DAY_Z,
+};
 pub use rules::{
     RhrNoise, RuleContext, adjustments_in, bone_stress_referral, failed_set_stop,
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,

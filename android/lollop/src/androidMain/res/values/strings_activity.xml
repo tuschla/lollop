@@ -55,7 +55,8 @@
     <string name="activity_field_kind">What did you do?</string>
     <string name="activity_field_minutes">Active time</string>
     <string name="activity_minutes_hint">Count the time you were moving at least moderately.</string>
-    <string name="activity_minutes_invalid">Enter 1 to 600 minutes.</string>
+    <!-- %1$s = ACTIVITY_MAX_MINUTES (CoreConstants). -->
+    <string name="activity_minutes_invalid">Enter 1 to %1$s minutes.</string>
     <string name="activity_field_effort">How hard was it?</string>
     <string name="activity_strengthening">Strengthened muscles or bones</string>
     <string name="activity_strengthening_hint">For example jumping, climbing or bodyweight exercises.</string>

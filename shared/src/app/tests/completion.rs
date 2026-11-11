@@ -106,7 +106,7 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
 }
 
 /// The set loop's one-tap warm-up row logs the STR-WARMUP-001 ramp (40 % × 5,
-/// 60 % × 3, 80 % × 2 of the working load, `SetEditorState.kt` `warmUpSteps`)
+/// 60 % × 3, 80 % × 2 of the working load, `strength::warm_up_ramp`)
 /// unrated BEFORE the first work set: "warm-up sets do not count as work
 /// sets", so the 80 % × 2 step is a warm-up while it is still the day's heaviest.
 #[test]
@@ -1087,16 +1087,19 @@ fn stacked_deloads_take_the_single_deepest_cut_not_compounded() {
     // item done at 2 sets while the next day's judgement needs 3 (a done→missed
     // flip). Both the display fold and the completion judgement share one
     // composition.
-    let mut ns = SessionPlanView {
-        items: vec![PrescriptionView {
-            exercise: "Back Squat".into(),
-            sets: 5,
-            reps_low: 3,
-            reps_high: 3,
-            load_kg: Some(120.0),
-            sets_done: 3,
-            ..Default::default()
-        }],
+    let mut ns = PlanRow {
+        items: vec![
+            PrescriptionView {
+                exercise: "Back Squat".into(),
+                sets: 5,
+                reps_low: 3,
+                reps_high: 3,
+                load_kg: Some(120.0),
+                sets_done: 3,
+                ..Default::default()
+            }
+            .into(),
+        ],
         ..Default::default()
     };
     let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
@@ -1131,7 +1134,7 @@ fn first_distance_run(app: &Engine, model: &mut Model) -> (i64, f64) {
     )
     .expect_only_render();
     set_today(app, model, MON);
-    app.view(model)
+    working_plan(model)
         .week_plan
         .iter()
         .find_map(|s| {
@@ -1203,8 +1206,15 @@ fn session_done_carries_run_numbers_and_says_of_plan_when_short() {
         fb.message,
         format!("Run done: {km:.1} km of {planned:.1} km in 60 min."),
     );
+    // A miles profile reads the same line in miles.
+    let miles = Profile {
+        distance_unit: DistanceUnit::Mi,
+        ..model.profile().cloned().expect("a profile")
+    };
+    app.update(Event::SetProfile(miles), &mut model)
+        .expect_only_render();
     assert_eq!(
-        fb.message_mi,
+        app.view(&model).feedback.expect("feedback").message,
         format!(
             "Run done: {} of {} in 60 min.",
             fmt_mi_of_km(km),

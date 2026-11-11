@@ -172,7 +172,7 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
             CoachToolRow(
                 stringResource(CoachTool.Protein.titleRes),
                 cta = when {
-                    model.proteinDeficitOnly() -> stringResource(Res.string.main_tool_protein_cta_deficit)
+                    !model.protein_masters_offered -> stringResource(Res.string.main_tool_protein_cta_deficit)
                     model.profile?.bodyweight_kg != null -> stringResource(Res.string.main_tool_protein_cta_compute)
                     else -> stringResource(Res.string.main_tool_protein_cta_add_bw)
                 },
@@ -199,17 +199,6 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
         }
     }
 }
-
-/** The age the masters protein target is graded for; mirrors the core's
- *  `plan::MASTERS_AGE_YEARS` (MASTERS-001, File 08 indiv-013 "masters (65+)"). */
-private const val MastersAgeYears = 65.0
-
-/** True when the profile's age is known and under 65: the KB backs a protein
- *  target only for masters (65+, indiv-013) or in a caloric deficit
- *  (indiv-020), so only the deficit context can give this person a number. An
- *  unknown age leaves both contexts open. */
-internal fun ViewModel.proteinDeficitOnly(): Boolean =
-    profile?.age_years?.let { it < MastersAgeYears } ?: false
 
 /** True for an under-18 profile (the core's age gate, `health.youth`): Profile
  *  offers no Volume planner or Protein calculator (safety-011: no autonomous load
@@ -361,7 +350,7 @@ internal fun CoachToolSheet(
                     onKeypad = { keypadOpen = it },
                     profileBodyweightKg = model.profile?.bodyweight_kg,
                     weightUnit = weightUnit,
-                    mastersAvailable = !model.proteinDeficitOnly(),
+                    mastersAvailable = model.protein_masters_offered,
                 ) { bodyweight, masters, deficit ->
                     compute(Event.ComputeProtein(bodyweight, masters, deficit))
                 }
@@ -404,12 +393,6 @@ internal fun CoachToolSheet(
     }
 }
 
-/** The guidance rows that belong in the Reference library (everything the core
- *  emits under `guidance` that is NOT the one Profile-context block). Shared by
- *  the Profile "Evidence & references" screen. */
-private fun referenceGuidance(model: ViewModel): List<GuidanceView> =
-    model.guidance.filterNot { it.section == PROFILE_GUIDANCE_SECTION }
-
 /** Cards in the Reference library's Training load group: the weekly report rows plus
  *  the heart-rate and session-effort (sRPE) load cards, two separate series. */
 private fun trainingLoadCount(model: ViewModel): Int =
@@ -417,7 +400,7 @@ private fun trainingLoadCount(model: ViewModel): Int =
 
 /** How many cards the Reference library holds (guidance groups + reference defaults). */
 internal fun referenceLibraryCount(model: ViewModel): Int =
-    referenceGuidance(model).size + model.reference.size + trainingLoadCount(model)
+    model.guidance.size + model.reference.size + trainingLoadCount(model)
 
 /** One Reference library group: its row's [title] and [count], and the [cards] it opens to. */
 private class ReferenceGroupEntry(val title: String, val count: Int, val cards: @Composable () -> Unit)
@@ -434,7 +417,7 @@ private class ReferenceGroupEntry(val title: String, val count: Int, val cards: 
  */
 @Composable
 internal fun ReferenceLibrarySheet(model: ViewModel) {
-    val otherGuidance = referenceGuidance(model)
+    val otherGuidance = model.guidance
     val loadCount = trainingLoadCount(model)
     Column(
         modifier = Modifier.sheetBody(rememberScrollState(), Space.ReadingSheet.dp),
@@ -460,20 +443,21 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
                     ReferenceGroupEntry(stringResource(Res.string.main_overline_training_load), loadCount) {
                         model.weekly_report.byGuidancePriority().forEach { g ->
                             ReferenceItem {
-                                ReferenceEvidenceCard(guidanceSummary(g), g.grade, g.citation, g.confidence, g.safety_critical, g.contested, why = g.why)
+                                ReferenceEvidenceCard(g.summary, g.evidence, why = g.why, glossary = g.glossary, spokenSubject = g.subject)
                             }
                         }
                         model.training_load?.let { tl ->
                             ReferenceItem {
                                 ReferenceEvidenceCard(
-                                    tl.summary, tl.grade, tl.citation, tl.confidence, tl.safety_critical, tl.contested,
+                                    tl.summary, tl.evidence,
                                     extraDetail = pluralStringResource(Res.plurals.main_training_load_detail, tl.sessions_counted, tl.method, tl.sessions_counted, tl.sessions_skipped),
+                                    glossary = tl.glossary, spokenSubject = tl.subject,
                                 )
                             }
                         }
                         model.srpe_load?.let { sl ->
                             ReferenceItem {
-                                ReferenceEvidenceCard(sl.summary, sl.grade, sl.citation, sl.confidence, false, false, extraDetail = sl.method.ifBlank { null })
+                                ReferenceEvidenceCard(sl.summary, sl.evidence, extraDetail = sl.method.ifBlank { null }, glossary = sl.glossary, spokenSubject = sl.subject)
                             }
                         }
                     },
@@ -484,7 +468,7 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
                     ReferenceGroupEntry(section, rows.size) {
                         rows.byGuidancePriority().forEach {
                             ReferenceItem {
-                                ReferenceEvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
+                                ReferenceEvidenceCard(it.summary, it.evidence, why = it.why, glossary = it.glossary, spokenSubject = it.subject)
                             }
                         }
                     },
@@ -570,19 +554,19 @@ private fun ReferenceItem(content: @Composable () -> Unit) {
 @Composable
 private fun ReferenceEvidenceCard(
     summary: String,
-    grade: EvidenceGrade?,
-    citation: String,
-    confidence: Float,
-    safetyCritical: Boolean,
-    contested: Boolean,
+    evidence: EvidenceTagView,
     extraDetail: String? = null,
     why: WhyView? = null,
+    glossary: List<GlossarySpan> = emptyList(),
+    spokenSubject: String? = null,
 ) = EvidenceCard(
-    summary, grade, citation, confidence, safetyCritical, contested,
+    summary, evidence,
     border = Color.Transparent,
     extraDetail = extraDetail,
     why = why,
     proseSummary = true,
+    glossary = glossary,
+    spokenSubject = spokenSubject,
 )
 
 /**
@@ -885,13 +869,18 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHy
     }
 }
 
+/** Where the masters bracket begins, as the protein copy states it ("65"):
+ *  [CoreConstants.MASTERS_AGE_YEARS], [trimDecimal]-trimmed. */
+internal fun mastersAgeLabel(): String = trimDecimal(CoreConstants.MASTERS_AGE_YEARS)
+
 /**
  * Absolute daily protein target tool. Picks a bodyweight and one or both graded
- * goal contexts (masters 65+, caloric deficit) and emits [Event.ComputeProtein];
+ * goal contexts (masters, caloric deficit) and emits [Event.ComputeProtein];
  * the core answers with an evidence-graded g/day range (bodyweight × each graded
  * g/kg bound) rendered from `model.protein_targets`. No general/default number
  * exists, with neither toggle set the core returns nothing, so this form only
- * picks the inputs. With [mastersAvailable] false (a known age under 65) the
+ * picks the inputs. With [mastersAvailable] false (a known age below
+ * [CoreConstants.MASTERS_AGE_YEARS]) the
  * masters toggle is gone and never sent, leaving the deficit context alone. The
  * keypad shows only while [keypadOpen] (the well was tapped).
  */
@@ -965,7 +954,7 @@ fun ProteinForm(
             )
         }
         if (mastersAvailable) {
-            LabeledSwitchRow(stringResource(Res.string.log_switch_masters), masters) { masters = it; onKeypad(false) }
+            LabeledSwitchRow(stringResource(Res.string.log_switch_masters, mastersAgeLabel()), masters) { masters = it; onKeypad(false) }
         }
         LabeledSwitchRow(stringResource(Res.string.log_switch_deficit), deficit) { deficit = it; onKeypad(false) }
         if (!mastersOn && !deficit) {
@@ -974,7 +963,11 @@ fun ProteinForm(
             // button would look actionable yet render no result on tap: say why
             // and gate the button, matching the other forms' validity idiom.
             Text(
-                stringResource(if (mastersAvailable) Res.string.log_protein_no_context else Res.string.log_protein_deficit_only),
+                if (mastersAvailable) {
+                    stringResource(Res.string.log_protein_no_context)
+                } else {
+                    stringResource(Res.string.log_protein_deficit_only, mastersAgeLabel())
+                },
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -1026,14 +1019,14 @@ fun HrZonesForm(
     var rhr by rememberSaveable { mutableStateOf(seedRhr?.roundToInt() ?: HrZonesRhrSeedBpm) }
 
     val ageParsed = parseKeypadNumber(ageText)
-    val ageValid = ageParsed != null && ageParsed in TanakaAgeRange
+    val ageValid = ageParsed != null && ageParsed in CoreConstants.TANAKA_AGE_MIN_YEARS..CoreConstants.TANAKA_AGE_MAX_YEARS
 
     FormCard {
         KeypadValueField(
             stringResource(Res.string.log_field_age), stringResource(Res.string.log_unit_years), ageText,
             active = keypadOpen,
             invalid = !ageValid,
-            min = TanakaAgeRange.start, max = TanakaAgeRange.endInclusive, decimals = 0,
+            min = CoreConstants.TANAKA_AGE_MIN_YEARS, max = CoreConstants.TANAKA_AGE_MAX_YEARS, decimals = 0,
             adjustments = listOf(-1.0, 1.0),
             onActivate = { fresh = true; onKeypad(true) },
             onText = { ageText = it; fresh = false; onKeypad(false) },

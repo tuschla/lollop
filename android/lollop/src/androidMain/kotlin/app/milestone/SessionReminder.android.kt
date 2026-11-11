@@ -182,7 +182,7 @@ internal object AndroidReminder : SessionReminderPort {
     /** [reminder] for local day [day]. */
     private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
-        val res = app.latinDigitResources()
+        val res = app.appResources()
         val start = NotificationCompat.Action.Builder(
             if (reminder.kind == WidgetDayKind.Run) R.drawable.ic_content_track_run else R.drawable.ic_content_set_dumbbell,
             reminderActionLabel(res, reminder),
@@ -225,9 +225,10 @@ internal object AndroidReminder : SessionReminderPort {
     private fun ensureChannel(app: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = nm(app) ?: return
+        val res = app.appResources()
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, app.getString(R.string.reminder_channel), NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = app.getString(R.string.reminder_channel_description) },
+            NotificationChannel(CHANNEL, res.getString(R.string.reminder_channel), NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = res.getString(R.string.reminder_channel_description) },
         )
     }
 }

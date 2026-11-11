@@ -12,12 +12,12 @@ Sources (android/lollop/src/androidMain/res):
   drawable/splash_logo_{light,dark}.xml
                                    the splash marks: the launch screen logo for
                                    the light and dark appearance
-  drawable/ic_content_track_run.xml, ic_content_set_dumbbell.xml,
-  ic_action_log_plus.xml, ic_stat_mark.xml, ic_track_{pause,play,stop}.xml
-                                   the widget buttons (the Quick Settings tile's
-                                   faces), the notifications' route mark and the
-                                   tracker's buttons: template images of the
-                                   widget extension, tinted by the views
+  drawable/<icon>.xml              each surface icon (widget-icons.json, generated
+                                   from android/lollop's SurfaceIcon by
+                                   GeneratedSourcesTest): the widget buttons, the
+                                   notifications' route mark and the tracker's
+                                   buttons, as template images of the widget
+                                   extension, tinted by the views
 
 One 1024 px icon per appearance is all Xcode 14+ needs; actool derives the
 smaller sizes at build time. Needs rsvg-convert (librsvg) and Pillow. The
@@ -36,15 +36,7 @@ RES = ROOT / "android/lollop/src/androidMain/res"
 ASSETS = ROOT / "iosApp/iosApp/Assets.xcassets"
 WIDGET_ASSETS = ROOT / "iosApp/LollopWidgets/Assets.xcassets"
 # Widget extension image set → Android drawable (24 dp each).
-WIDGET_ICONS = {
-    "IconTrackRun": "ic_content_track_run",
-    "IconLogSet": "ic_content_set_dumbbell",
-    "IconLog": "ic_action_log_plus",
-    "IconMark": "ic_stat_mark",
-    "IconPause": "ic_track_pause",
-    "IconPlay": "ic_track_play",
-    "IconStop": "ic_track_stop",
-}
+WIDGET_ICONS = json.loads((ROOT / "iosApp/widget-icons.json").read_text())
 A = "{http://schemas.android.com/apk/res/android}"
 
 

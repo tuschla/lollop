@@ -3,6 +3,7 @@
 
 use crate::day::local_day;
 use crate::plates::LB_PER_KG;
+use crate::profile::DistanceUnit;
 use crate::running::{self, GoalDistance};
 use crate::schema::Goal;
 
@@ -132,16 +133,16 @@ pub(super) fn fmt_weight(kg: f64, lb: bool) -> String {
 pub(super) const MIN_RATIO_BASE_KG: f64 = 0.05;
 
 /// A figure rounded ONCE to one decimal, half away from zero. For distances it
-/// is the one rounding behind both the km line and its miles twin, so the pair
-/// always describe the same distance (`{:.1}` on the raw value would round an
-/// exact .x5 tie half to EVEN: "5.2 km" beside the "3.3 mi" of 5.3 km).
+/// is the one rounding behind both units' lines, so a km line and the miles
+/// line of the same distance describe the same distance (`{:.1}` on the raw
+/// value would round an exact .x5 tie half to EVEN: "5.2 km" beside the
+/// "3.3 mi" of 5.3 km).
 pub(super) fn round_tenths(x: f64) -> f64 {
     (x * 10.0).round() / 10.0
 }
 
 /// The km distance a line shows at one decimal ([`round_tenths`]), restated
-/// in miles at one decimal with a trailing ".0" dropped ("7.5 mi", "5 mi"): the
-/// `_mi` twin of a km line for a shell that shows miles.
+/// in miles at one decimal with a trailing ".0" dropped ("7.5 mi", "5 mi").
 pub(super) fn fmt_mi_of_km(km: f64) -> String {
     let mi = round_tenths(km) * 1000.0 / crate::running::MILE_M;
     format!("{} mi", fmt_rounded(round_tenths(mi)))
@@ -163,23 +164,21 @@ pub(super) fn is_ratio_base_km(km: f64) -> bool {
     km >= MIN_RATIO_BASE_KM
 }
 
-/// A km figure as a line shows it ("12.3 km", [`round_tenths`]), or its
-/// miles twin.
-pub(super) fn fmt_km_or_mi(km: f64, mi: bool) -> String {
-    if mi {
-        fmt_mi_of_km(km)
-    } else {
-        format!("{:.1} km", round_tenths(km))
+/// A km figure as a line shows it in `unit`: "12.3 km" ([`round_tenths`]), or
+/// [`fmt_mi_of_km`].
+pub(super) fn fmt_km_or_mi(km: f64, unit: DistanceUnit) -> String {
+    match unit {
+        DistanceUnit::Km => format!("{:.1} km", round_tenths(km)),
+        DistanceUnit::Mi => fmt_mi_of_km(km),
     }
 }
 
-/// A km figure rounded to a whole number with its unit ("64 km"), or restated
-/// in whole miles ("40 mi"): for weekly volumes and thresholds in prose.
-pub(super) fn fmt_whole_km_or_mi(km: f64, mi: bool) -> String {
-    if mi {
-        format!("{:.0} mi", km * 1000.0 / crate::running::MILE_M)
-    } else {
-        format!("{km:.0} km")
+/// A km figure rounded to a whole number in `unit` ("64 km", "40 mi"): for
+/// weekly volumes and thresholds in prose.
+pub(super) fn fmt_whole_km_or_mi(km: f64, unit: DistanceUnit) -> String {
+    match unit {
+        DistanceUnit::Km => format!("{km:.0} km"),
+        DistanceUnit::Mi => format!("{:.0} mi", km * 1000.0 / crate::running::MILE_M),
     }
 }
 

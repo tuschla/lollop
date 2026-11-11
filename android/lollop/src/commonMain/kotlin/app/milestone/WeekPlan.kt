@@ -62,8 +62,25 @@ import app.milestone.resources.main_muscle_volume_all_on_target
 import app.milestone.resources.main_muscle_volume_no_target
 import app.milestone.resources.main_muscle_volume_short
 import app.milestone.resources.main_muscle_volume_title
+import app.milestone.resources.main_plan_footer_line
+import app.milestone.resources.main_plan_phase_base
+import app.milestone.resources.main_plan_phase_build
+import app.milestone.resources.main_plan_phase_deload
+import app.milestone.resources.main_plan_phase_peak
+import app.milestone.resources.main_plan_phase_taper
 import app.milestone.resources.main_remove_plan
 import app.milestone.resources.main_rest_day
+import app.milestone.resources.main_week_a11y_adjusted
+import app.milestone.resources.main_week_a11y_before_plan
+import app.milestone.resources.main_week_a11y_done
+import app.milestone.resources.main_week_a11y_done_lighter
+import app.milestone.resources.main_week_a11y_missed
+import app.milestone.resources.main_week_a11y_next
+import app.milestone.resources.main_week_a11y_on
+import app.milestone.resources.main_week_a11y_partial
+import app.milestone.resources.main_week_a11y_paused
+import app.milestone.resources.main_week_a11y_planned
+import app.milestone.resources.main_week_a11y_rest
 import app.milestone.resources.main_week_before_plan
 import app.milestone.resources.main_week_day_lighter
 import app.milestone.resources.main_week_day_partial
@@ -71,44 +88,28 @@ import app.milestone.resources.main_week_done_count
 import app.milestone.resources.main_week_done_on
 import app.milestone.resources.main_week_done_on_lighter
 import app.milestone.resources.ui_label_value
-import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
-
-
-/** Two-letter weekday for the week strip (Mo Tu We Th Fr Sa Su), unambiguous
- *  where a single narrow initial collides (M/T/T, S/S). */
-private fun weekdayShort(epochDay: Long): String = when (
-    LocalDate.fromEpochDays(epochDay).dayOfWeek
-) {
-    DayOfWeek.MONDAY -> "Mo"
-    DayOfWeek.TUESDAY -> "Tu"
-    DayOfWeek.WEDNESDAY -> "We"
-    DayOfWeek.THURSDAY -> "Th"
-    DayOfWeek.FRIDAY -> "Fr"
-    DayOfWeek.SATURDAY -> "Sa"
-    DayOfWeek.SUNDAY -> "Su"
-}
 
 /** Weekday name (e.g. "Monday") for the week-strip accessibility description, in
  *  the app's language ([appLocale]) like the rest of the spoken phrase. */
 private fun weekdayFull(epochDay: Long): String =
     weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Full, appLocale())
 
-/** Plain-language week-strip day status for the accessibility description. */
-// l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
-private fun weekDayStatusPhrase(status: SessionStatus): String = when (status) {
-    SessionStatus.Next -> "next session"
-    SessionStatus.Adjusted -> "adjusted"
-    SessionStatus.Blocked -> "paused"
-    SessionStatus.Done -> "done"
-    SessionStatus.DoneLighter -> "done, lighter than planned"
-    SessionStatus.BeforePlan -> "before your plan started"
-    SessionStatus.Missed -> "not logged"
-    SessionStatus.Partial -> "partly done"
-    SessionStatus.Rest -> "rest day"
-    SessionStatus.Planned -> "planned"
+/** A week-strip day's status, spoken mid-phrase in the day's accessibility description. */
+private fun weekDayStatusPhrase(status: SessionStatus): StringResource = when (status) {
+    SessionStatus.Next -> Res.string.main_week_a11y_next
+    SessionStatus.Adjusted -> Res.string.main_week_a11y_adjusted
+    SessionStatus.Blocked -> Res.string.main_week_a11y_paused
+    SessionStatus.Done -> Res.string.main_week_a11y_done
+    SessionStatus.DoneLighter -> Res.string.main_week_a11y_done_lighter
+    SessionStatus.BeforePlan -> Res.string.main_week_a11y_before_plan
+    SessionStatus.Missed -> Res.string.main_week_a11y_missed
+    SessionStatus.Partial -> Res.string.main_week_a11y_partial
+    SessionStatus.Rest -> Res.string.main_week_a11y_rest
+    SessionStatus.Planned -> Res.string.main_week_a11y_planned
 }
 
 /** A week-strip day's type token: "Lift", "Run" or "Rest". */
@@ -124,12 +125,6 @@ internal class WeekActions(
     val onReopen: (PrescriptionView, Long) -> Unit,
     val onMove: (from: Long, to: Long) -> Unit,
 )
-
-/** The (summary, citation) of [ns]'s adjustment when the session is the return
- *  check: its item already states the dose and the stop list, so the adjustment
- *  card behind it is not shown again. Null for any other session. */
-internal fun returnCheckAdjustmentKey(ns: SessionPlanView?): Pair<String, String>? =
-    ns?.adjustment?.takeIf { ns.items.any { it.return_check } }?.let { it.summary to it.citation }
 
 /**
  * Rescheduling on a session card: where a moved session came from and
@@ -276,10 +271,7 @@ internal fun ThisWeekCard(
                 notes.firstOrNull()?.let { n ->
                     WhyDetail(
                         why = n.why,
-                        grade = n.grade,
-                        citation = n.citation,
-                        confidence = n.confidence,
-                        contested = n.contested,
+                        evidence = n.evidence,
                         showConfidence = true,
                     )
                 }
@@ -289,20 +281,14 @@ internal fun ThisWeekCard(
                     Text(n.summary, color = OnBgBody, style = Type.Caption.copy(fontWeight = FontWeight.Bold))
                     WhyDetail(
                         why = n.why,
-                        grade = n.grade,
-                        citation = n.citation,
-                        confidence = n.confidence,
-                        contested = n.contested,
+                        evidence = n.evidence,
                         showConfidence = true,
                     )
                 }
                 program?.let { prog ->
                     WhyDetail(
                         why = prog.why,
-                        grade = prog.grade,
-                        citation = prog.citation,
-                        confidence = prog.confidence,
-                        contested = prog.contested,
+                        evidence = prog.evidence,
                         showConfidence = true,
                     )
                     // Remove plan, a destructive action, kept OFF the main face and
@@ -451,16 +437,16 @@ private fun MuscleVolumeSection(prog: ProgramSummaryView) {
 
 /** A plain-language one-liner for the plan footer: "Strength · building up ·
  *  week 5 of 6", the phase enum turned into human copy. Display only. */
-// l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
+@Composable
 private fun planPlainLabel(prog: ProgramSummaryView): String {
     val phaseWord = when (prog.phase) {
-        MesoPhase.Base -> "building a base"
-        MesoPhase.Build -> "building up"
-        MesoPhase.Peak -> "hardest weeks"
-        MesoPhase.Taper -> "easing off"
-        MesoPhase.Deload -> "lighter week"
+        MesoPhase.Base -> Res.string.main_plan_phase_base
+        MesoPhase.Build -> Res.string.main_plan_phase_build
+        MesoPhase.Peak -> Res.string.main_plan_phase_peak
+        MesoPhase.Taper -> Res.string.main_plan_phase_taper
+        MesoPhase.Deload -> Res.string.main_plan_phase_deload
     }
-    return "${prog.name} · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
+    return stringResource(Res.string.main_plan_footer_line, prog.name, stringResource(phaseWord), prog.week, prog.weeks_total)
 }
 
 /** Least height of a week-strip day's glyph slot (the ✓ or the dot); the slot
@@ -492,7 +478,7 @@ private fun WeekStrip(
     // The widest word a day column shows (bold, as today's weekday is), so the
     // strip can tell when seven columns no longer fit them whole.
     val dayLabels = week.flatMap { s ->
-        listOf(weekdayShort(s.epoch_day), if (s.status == SessionStatus.BeforePlan) "\u2014" else disciplineLabel(s))
+        listOf(weekdayStripLabel(LocalDate.fromEpochDays(s.epoch_day).dayOfWeek), if (s.status == SessionStatus.BeforePlan) "\u2014" else disciplineLabel(s))
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -639,6 +625,8 @@ private fun WeekStripDay(
     // One spoken description per day column: the weekday, its discipline,
     // and its status (the dot's fill/colour is a purely visual cue).
     val todayPrefix = stringResource(Res.string.main_a11y_today_prefix)
+    val phrase = stringResource(weekDayStatusPhrase(s.status))
+    val phraseOn = creditedFrom?.let { stringResource(Res.string.main_week_a11y_on, phrase, weekdayFull(it)) }
     val dayDesc = buildString {
         if (isToday) append(todayPrefix)
         append(weekdayFull(s.epoch_day))
@@ -647,8 +635,7 @@ private fun WeekStripDay(
             append(disciplineLabel(s))
             append(", ")
         }
-        append(weekDayStatusPhrase(s.status))
-        creditedFrom?.let { append(", on ").append(weekdayFull(it)) }
+        append(phraseOn ?: phrase)
     }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -678,7 +665,7 @@ private fun WeekStripDay(
             .semantics(mergeDescendants = true) { contentDescription = dayDesc },
     ) {
         Text(
-            weekdayShort(s.epoch_day),
+            weekdayStripLabel(LocalDate.fromEpochDays(s.epoch_day).dayOfWeek),
             color = if (isToday || sel) Accent else OnBgBody,
             style = if (isToday) Type.Chip else Type.ChipRegular,
             maxLines = 1,
@@ -692,11 +679,11 @@ private fun WeekStripDay(
         )
         // One glyph slot of the strip's height, so every column keeps one height.
         Box(Modifier.height(glyphSlot), contentAlignment = Alignment.Center) {
-            when {
-                s.status == SessionStatus.Rest || beforePlan -> Unit
+            when (s.status.mark) {
+                DayMark.Rest, DayMark.None -> Unit
                 // Non-colour done cue (a11y): a ✓ glyph, not hue alone, so
                 // a colour-blind user can answer "did I finish?" at a glance.
-                s.isDone -> Text(
+                DayMark.Done -> Text(
                     "\u2713",
                     color = status.done,
                     style = Type.Chip,

@@ -313,11 +313,20 @@ fn signal_states_track_rule_thresholds() {
     assert!(vl_stop(&vl, None).is_some());
 }
 
+/// The one-line context of the report the gate holds on.
+fn active_context(inputs: &[ReadinessInput]) -> String {
+    pain_context(
+        worst_active_pain(inputs)
+            .and_then(|i| i.pain.as_ref())
+            .expect("an active characterized report"),
+    )
+}
+
 #[test]
-fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
-    // A reported body-part location must reach the shell as display context
-    // on the Pain row's `detail` sub-line; absent one, `detail` names no
-    // body part (never fabricated, HARD RULE 1).
+fn pain_location_surfaces_in_the_context_and_none_omits_it() {
+    // A reported body-part location reaches the shell as display context on
+    // the pain sub-line; absent one, the line names no body part (never
+    // fabricated, HARD RULE 1).
     let with_loc = vec![pain_input_loc(
         PainKind::SharpJoint,
         6,
@@ -325,17 +334,10 @@ fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
         false,
         Some("Left knee"),
     )];
-    let row = signal_states(&with_loc, None, false, &[])
-        .into_iter()
-        .find(|s| s.signal == ReadinessSignal::Pain)
-        .expect("pain row present");
-    assert!(
-        row.detail.contains("Left knee"),
-        "location must surface in the sub-line detail, got {:?}",
-        row.detail
+    assert_eq!(
+        active_context(&with_loc),
+        "Left knee · sharp or joint pain · 6/10"
     );
-    assert!(row.detail.contains("sharp or joint pain") && row.detail.contains("6/10"));
-
     let no_loc = vec![pain_input_loc(
         PainKind::SharpJoint,
         6,
@@ -343,16 +345,84 @@ fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
         false,
         None,
     )];
-    let row = signal_states(&no_loc, None, false, &[])
-        .into_iter()
-        .find(|s| s.signal == ReadinessSignal::Pain)
-        .expect("pain row present");
-    assert!(
-        !row.detail.to_lowercase().contains("knee"),
-        "no location must be fabricated when None, got {:?}",
-        row.detail
+    assert_eq!(active_context(&no_loc), "sharp or joint pain · 6/10");
+}
+
+#[test]
+fn pain_context_words_each_kind_and_trend() {
+    // The triage choices' words; "Not sure" adds nothing (never a stray "not
+    // sure" fragment); both worsening trends read "worsening".
+    let d = |kind, severity, trend, location: Option<&str>| PainDetail {
+        kind,
+        severity,
+        trend,
+        persists: false,
+        location: location.map(str::to_owned),
+    };
+    assert_eq!(
+        pain_context(&d(
+            PainKind::TendonLoadRelated,
+            Some(3),
+            PainTrend::Stable,
+            None
+        )),
+        "dull ache · 3/10"
     );
-    assert_eq!(row.detail, "sharp or joint pain · 6/10");
+    assert_eq!(
+        pain_context(&d(
+            PainKind::Other,
+            Some(4),
+            PainTrend::Stable,
+            Some("Left knee")
+        )),
+        "Left knee · 4/10"
+    );
+    assert_eq!(
+        pain_context(&d(PainKind::Other, None, PainTrend::Stable, None)),
+        ""
+    );
+    assert_eq!(
+        pain_context(&d(PainKind::Doms, None, PainTrend::WorseningAfter24h, None)),
+        "muscle soreness · worsening"
+    );
+    assert_eq!(
+        pain_context(&d(PainKind::Doms, None, PainTrend::Rising, None)),
+        "muscle soreness · worsening"
+    );
+}
+
+#[test]
+fn every_preset_pain_area_scopes_to_its_region() {
+    // The triage's preset areas are fixed English keys the stop scoping reads:
+    // each maps to the region its body part loads, "Other" to none.
+    use crate::schema::{PainArea, PainRegion};
+    for area in PainArea::ALL {
+        let want = match area {
+            PainArea::LeftKnee
+            | PainArea::RightKnee
+            | PainArea::Ankle
+            | PainArea::Hip
+            | PainArea::Foot => Some(PainRegion::LowerLimb),
+            PainArea::LowerBack => Some(PainRegion::Back),
+            PainArea::Shoulder | PainArea::ElbowWrist | PainArea::Neck => {
+                Some(PainRegion::UpperLimb)
+            }
+            PainArea::Other => None,
+        };
+        assert_eq!(pain_region(area.location()), want, "{area:?}");
+        assert_eq!(
+            crate::wire::json(&area),
+            area.location(),
+            "the wire name is the location"
+        );
+        let named = PainArea::of_location(&area.location().to_uppercase());
+        assert_eq!(named, (area != PainArea::Other).then_some(area));
+    }
+    assert_eq!(
+        PainArea::of_location("left shin"),
+        None,
+        "free text names no preset"
+    );
 }
 
 #[test]
@@ -2420,15 +2490,14 @@ fn the_pain_row_describes_the_worst_active_report_not_the_newest() {
         "the row must show the stop, got {}",
         row.state
     );
+    let context = active_context(&inputs);
     assert!(
-        row.detail.contains("knee"),
-        "detail names the knee, got {}",
-        row.detail
+        context.contains("knee"),
+        "the line names the knee, got {context}"
     );
     assert!(
-        !row.detail.to_lowercase().contains("calves"),
-        "the milder DOMS must not label the row, got {}",
-        row.detail
+        !context.to_lowercase().contains("calves"),
+        "the milder DOMS must not label the line, got {context}"
     );
 }
 

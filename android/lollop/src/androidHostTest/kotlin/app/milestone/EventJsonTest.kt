@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -16,6 +17,11 @@ import org.junit.Test
  * is [WireConformanceTest]'s.
  */
 class EventJsonTest {
+
+    // Draft facts come from the real core: start from a fresh process, not an
+    // engine another test class left installed.
+    @Before
+    fun setUp() = AppRuntime.resetForTest()
 
     private fun obj(e: Event) = (e.toJson() as JsonObject)
 
@@ -62,7 +68,8 @@ class EventJsonTest {
                 layoffReturnedEpochDay = 20360L, meetEpochDay = 20420L,
                 calisEquipment = CalisEquipment(pull_up_bar = true), specializationMuscle = "side delts",
                 runnerStrength = true,
-                health = HealthScreen().withParqAnswer(ParqItem.ChestPain, true).copy(acute_illness = true),
+                health = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.ChestPain, true))).health
+                    .copy(acute_illness = true),
             )
         )["SetProfile"]!!.jsonObject
         assertEquals(4, fields["lift_days_per_week"]!!.jsonPrimitive.content.toInt())
@@ -392,7 +399,7 @@ class EventJsonTest {
                   {"summary":"Downgrade to an easier session","grade":"Moderate",
                    "citation":"Plews 2013","confidence":0.65,"safety_critical":false,
                    "contested":false,
-                   "why":{"basis":"Your 7-day HRV average is below your normal band.",
+                   "why":{"basis":["Your 7-day HRV average is below your normal band."],
                      "grade_note":"Moderate evidence - mixed or limited randomized trials.",
                      "improves":"Keep logging morning check-ins to tighten the baseline."}}],
                 "review_adjustments":[],"input_count":1,"lifts":[],"runs":[],
@@ -400,24 +407,24 @@ class EventJsonTest {
                   {"section":"Heart-rate zones","summary":"Estimated HRmax: 187 bpm",
                    "grade":"Weak","citation":"Tanaka","confidence":0.4,
                    "safety_critical":false,"contested":false,
-                   "why":{"basis":"Estimated from your age (30) with the Tanaka formula.",
+                   "why":{"basis":["Estimated from your age (30) with the Tanaka formula."],
                      "grade_note":"Weak evidence - from mechanism or observation.",
                      "improves":"Log a measured max HR from an all-out effort to replace the age-based estimate."}}],
                 "feedback":null,"reference":[],
                 "today_headline":{"kind":"adjustment","summary":"Downgrade to an easier session",
                   "grade":"Moderate","citation":"Plews 2013","confidence":0.65,
                   "safety_critical":false,"contested":false,
-                  "why":{"basis":"HRV below band.","grade_note":"Moderate evidence.","improves":"More check-ins."}},
+                  "why":{"basis":["HRV below band."],"grade_note":"Moderate evidence.","improves":"More check-ins."}},
                 "grade_definitions":[
-                  {"grade":"Strong","label":"Strong",
+                  {"grade":"Strong",
                    "definition":"Well-replicated meta-analyses or randomized controlled trials.","confidence":0.9},
-                  {"grade":"Weak","label":"Weak",
+                  {"grade":"Weak",
                    "definition":"Mechanistic or observational evidence only.","confidence":0.4}]}"""
         )
         // why? triad decodes on adjustment, guidance, and headline.
-        assertEquals("Your 7-day HRV average is below your normal band.", vm.adjustments[0].why.basis)
+        assertEquals(listOf("Your 7-day HRV average is below your normal band."), vm.adjustments[0].why.basis)
         assertTrue(vm.adjustments[0].why.improves.contains("check-ins"))
-        assertTrue(vm.guidance[0].why.basis.contains("Tanaka"))
+        assertTrue(vm.guidance[0].why.basis.single().contains("Tanaka"))
         assertTrue(vm.guidance[0].why.improves.contains("measured max HR"))
         assertEquals(HeadlineKind.Adjustment, vm.today_headline.kind)
         assertTrue(vm.today_headline.why.grade_note.contains("Moderate"))
@@ -619,15 +626,13 @@ class EventJsonTest {
     }
 
     @Test
-    fun runResultViewMapsItsWorkoutTypeLabel() {
+    fun runResultViewDecodesItsWorkoutType() {
         val tagged = coreJson.decodeFromString<RunResultView>(
             """{"zone":"Z2","pace":"5:00/km","distance_km":10.0,"summary":"","citation":"",
                 "observed_at":0,"workout_type":"LongRun"}"""
         )
         assertEquals(WorkoutType.LongRun, tagged.workout_type)
         assertEquals(ThreeZone.Z2, tagged.zone)
-        assertEquals("Long run", tagged.workout_type?.label)
-        assertEquals("Tempo", WorkoutType.Tempo.label)
     }
 
     @Test
@@ -738,7 +743,7 @@ class EventJsonTest {
               "youth_activity":{"week_monday_epoch_day":20376,"minutes":95,"run_minutes":30,"lift_minutes":35,"activity_minutes":30,
               "daily_target_minutes":60,"weekly_target_minutes":420,"vigorous_days":1,"strengthening_days":2,"target_days":3,
               "week_entries":[],"grade":"Strong","citation":"Bull et al. 2020","confidence":0.8,"safety_critical":false,
-              "contested":false,"why":{"basis":"WHO 2020","grade_note":"","improves":""}}}""",
+              "contested":false,"why":{"basis":["WHO 2020"],"grade_note":"","improves":""}}}""",
         )
         assertEquals(ActivityKind.Cycling, vm.activities.single().kind)
         assertTrue(vm.activities.single().strengthening)
@@ -747,7 +752,7 @@ class EventJsonTest {
         assertEquals(420, y.weekly_target_minutes)
         assertEquals(3, y.target_days)
         assertEquals(EvidenceGrade.Strong, y.grade)
-        assertEquals("WHO 2020", y.why.basis)
+        assertEquals(listOf("WHO 2020"), y.why.basis)
     }
 
     @Test
@@ -782,7 +787,7 @@ class EventJsonTest {
         assertTrue(vm.protein_figures.isEmpty())
         assertTrue(vm.activities.isEmpty())
         assertEquals(null, vm.youth_activity)
-        assertEquals("", vm.adjustments.single().why.basis)
+        assertTrue(vm.adjustments.single().why.basis.isEmpty())
         assertEquals("", vm.adjustments.single().why.grade_note)
         assertEquals(null, vm.lifts.single().cross_check)
         val run = vm.runs.single()

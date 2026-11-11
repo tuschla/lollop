@@ -37,8 +37,10 @@ class TrackingCopyTest {
     fun shortRunNoteShowsTheRunAndARoundThreshold() {
         assertEquals("0.3 mi", shortRunThresholdLabel(DistanceUnit.Mi))
         assertEquals("0.5 km", shortRunThresholdLabel(DistanceUnit.Km))
-        val note = ctx.getString(R.string.track_short_run_note, "0.13 mi", shortRunThresholdLabel(DistanceUnit.Mi))
-        assertTrue(note, note.contains("0.13 mi") && note.contains("under 0.3 mi"))
+        val note = ctx.getString(
+            R.string.track_short_run_note, "0.13 mi", shortRunThresholdLabel(DistanceUnit.Mi), shortRunMinutesLabel(),
+        )
+        assertEquals("Short run (0.13 mi). Runs under 0.3 mi or 3 minutes are often started by accident.", note)
     }
 
     @Test

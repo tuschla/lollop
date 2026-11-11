@@ -14,7 +14,9 @@ import kotlin.test.assertTrue
  * the preview and the route, the armed start, pause, the sidecar it writes, the
  * failure and stale-session unwinds and the signal-loss watchdog. A scripted host
  * stands in for the location stream, the surface and the timers; [RunSession] and
- * [ActiveRunStore] are the real ones (the sidecar in a temporary directory).
+ * [ActiveRunStore] are the real ones (the sidecar in a temporary directory). The
+ * engine is a scripted one (the JVM runs these without Robolectric, where the native
+ * core must not load), so a save or recovery keeps every fix (no core thinning).
  */
 class RunRecorderTest {
     private val dir = newTempDir()
@@ -24,6 +26,7 @@ class RunRecorderTest {
 
     @BeforeTest
     fun setUp() {
+        AppRuntime.resetForTest(engine = DurableCore(ScriptedCore()))
         RunSession.reset()
         ActiveRunStore.open(sidecar)
     }
@@ -80,7 +83,7 @@ class RunRecorderTest {
         assertNull(RunSession.lastFix.value, "a cached first fix")
         recorder.onFix(fix(0, ageMs = ARMED_FIX_MAX_AGE_MS + 1), batchSize = 2)
         assertNotNull(RunSession.lastFix.value, "an old fix in a batch is screen-off delivery")
-        recorder.onFix(fix(1, accuracyM = MAX_GPS_ACCURACY_M + 1), batchSize = 1)
+        recorder.onFix(fix(1, accuracyM = CoreConstants.MAX_GPS_ACCURACY_M + 1), batchSize = 1)
         recorder.onFix(fix(2, accuracyM = null), batchSize = 1)
         assertEquals(0.0, RunSession.lastFix.value?.lon, "too wide or no accuracy: not shown")
     }

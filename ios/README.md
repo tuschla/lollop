@@ -11,7 +11,8 @@ and iOS. Its `commonMain` holds the app root and boot, every screen (Today,
 History, the Log sheet and its editors, Profile, guided setup, the tracker, run
 detail and trim, the maps), the core engine and event log, the core's wire
 types and events, the serial event queue (`EventDispatcher`), run tracking
-(`RunSession`, `RunRecorder`, the active-run store), GPX/TCX parsing, units,
+(`RunSession`, `RunRecorder`, the active-run store), the run import batch over
+the core's `ParseRunFile` op (the core reads GPX, TCX and FIT), units,
 settings, the theme, and what the widget and the tile show (`WidgetSnapshot`,
 `widgetFace`, `TileFace`). They reach the platform through `expect` seams with
 Android and iOS actuals (see below). The surfaces outside the app are drawn by
@@ -32,8 +33,8 @@ shared/ (Rust core, pure update/view)
                                   CoreBridge from the Rust types and the op table
 android/ (the Gradle build of the app, both platforms)
   ├─ core-bridge/
-  │    ├─ commonMain  CoreBridge (generated): one method per op (update, view, parseFit,
-  │    │              trackFigures, exportGpx, compactLog, reset), same JSON wire
+  │    ├─ commonMain  CoreBridge (generated): one method per op in shared/src/ffi/ops.rs
+  │    │              (update, view, parseRunFile, runTrack, draftFacts, …), same JSON wire
   │    ├─ jvmMain     JniCore: CoreBridge over the JNI entry points
   │    ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
   │    └─ nativeTest  bridge tests against the core's own golden fixtures (linuxX64 + iOS)
@@ -49,8 +50,8 @@ android/ (the Gradle build of the app, both platforms)
   │    │                   tile service, Live Updates, Core.kt)
   │    ├─ iosMain          iOS actuals (LollopIosRoot, POSIX files, MapKit,
   │    │                   CoreLocation, UserNotifications, document pickers, …)
-  │    │                   and IosSurfaces.kt: the widget payload and the Live
-  │    │                   Activity content as JSON for the Swift side
+  │    │                   and IosSurfaces.kt: hands the widget payload and the
+  │    │                   Live Activity frames (commonMain widget/IosSurfacePayload.kt) to Swift
   │    ├─ commonTest       engine, formatting, date, map and run recorder tests:
   │    │                   JVM and iOS simulator
   │    ├─ iosTest          the iOS tracker and the surface payloads (simulator)
@@ -349,18 +350,29 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 
 - **Data**: the common `WidgetSurfaces` feature hands every change of the
   widget inputs (published model, distance unit, theme, dark mode, recording,
-  time zone or clock change) to `IosWidgetSurface` (iosMain,
-  widget/IosWidgetSurface.kt), which turns it into a payload:
-  the common `WidgetSnapshot` JSON, the widget faces for its day and for any
-  other day ("Open lollop to update"), the control's faces, "N more items" per
-  count, and the theme's colours light and dark. `Surfaces.swift` writes it to
-  `widget-today.json` in the App Group container and reloads the widgets and
-  controls (`WidgetCenter`, `ControlCenter`). Without a group container (the
-  extension dropped at install) the widgets read "Open lollop to update".
-- **Day rule**: as Android's. The timeline shows the snapshot's face and, from
-  the next local midnight, the stale face; a snapshot marked stale, from another
-  day or written in another time zone shows the stale face. The app writes a new
-  one when it publishes a model for the new day.
+  time zone or clock change) to `IosWidgetSurface` (iosMain), which builds the
+  payload of commonMain `widget/IosSurfacePayload.kt`: the widget faces for the
+  snapshot's day and for any other day ("Open lollop to update"), each with its
+  body lines already cut for every slot count, the short form of a long lead
+  line with its width in em, the week strip's glyphs and colour roles, the
+  buttons' icons; the control's faces with their SF Symbols; the day the faces
+  hold (start and end in its time zone); and the colours for the light and dark
+  appearance. `Surfaces.swift` writes it to `widget-today.json` in the App Group
+  container and reloads the widgets and controls (`WidgetCenter`,
+  `ControlCenter`). Without a group container (the extension dropped at install)
+  the widgets show the bundled `fallback.json` ("Open lollop to update").
+- **Generated contract**: the Swift payload types and payload version
+  (`Shared/SurfacePayload.swift`), the type and spacing tokens
+  (`LollopWidgets/WidgetTheme.swift`), the English `Shared/en.lproj/Localizable.strings`
+  the widget, control and App Intents name by resource key, `fallback.json`, the
+  Swift tests' `fixtures.json`, the launch background and `widget-icons.json`
+  (make-assets.py's icon list) are written from the Kotlin by android/lollop's
+  `GeneratedSourcesTest`, which fails when a committed file differs. Regenerate:
+  `LOLLOP_WRITE_GENERATED=1 ./gradlew :lollop:testAndroidHostTest --tests app.milestone.GeneratedSourcesTest --rerun`.
+- **Day rule**: as Android's. The timeline shows the snapshot's face while the
+  reader's clock is within its day and in its time zone, and the stale face
+  after (an entry at the day's end); a snapshot marked stale holds no day. The
+  app writes a new one when it publishes a model for the new day.
 
 | Surface | Families / parts | Taps |
 |---|---|---|

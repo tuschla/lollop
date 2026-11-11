@@ -505,7 +505,8 @@ class ReviewShellComponentTest {
      * cancellation (as Export.kt's `withContext(CoreDispatcher + NonCancellable)`
      * restore body does), the cancelled consumer can't drain them, and a dropped
      * block's awaiter would hang forever. The in-flight send that finishes after the
-     * reset publishes nothing into the fresh process.
+     * reset publishes nothing: not to a collector still on the old process's model,
+     * and no notice into the fresh process.
      */
     @Test
     fun resetForTest_completesOrFailsQueuedExclusiveAwaiters() {
@@ -514,10 +515,12 @@ class ReviewShellComponentTest {
         val late = ViewModel(input_count = 777)
         try {
             QaHarness.freshProcess()
+            val oldModel = EventDispatcher.model
             // Hold the consumer on one non-cancellable in-flight send so the next unit waits in the queue.
+            // Stale, so publishing it would also raise a notice.
             TestSink.sender = { _ ->
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() }
-                SendResult(late, accepted = true, persisted = true, stale = false)
+                SendResult(late, accepted = true, persisted = true, stale = true)
             }
             EventDispatcher.send(Event.SetToday(1L, 0))
             var settled = false
@@ -529,8 +532,14 @@ class ReviewShellComponentTest {
             QaHarness.freshProcess()
             gate.complete(Unit) // the in-flight unit finishes after the reset
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
+            var notice: app.milestone.CoreNotice? = null
+            val noticeJob = AppRuntime.scope.launch { EventDispatcher.notices.collect { notice = it } }
+            shadowOf(Looper.getMainLooper()).idle()
+            noticeJob.cancel()
             assertTrue("the queued exclusive() awaiter settled after resetForTest (still active: ${awaiter.isActive})", settled)
             assertTrue("the send that finished after the reset published nothing", EventDispatcher.model.value !== late)
+            assertTrue("nor to a collector still on the old process's model", oldModel.value !== late)
+            assertTrue("nor a notice into the fresh process, got $notice", notice == null)
             awaiter.cancel()
         } finally {
             gate.complete(Unit)
@@ -548,6 +557,7 @@ class ReviewShellComponentTest {
         val late = ViewModel(input_count = 778)
         try {
             QaHarness.freshProcess()
+            val oldModel = EventDispatcher.model
             // Awaiters outside the app's process scope, which the reset cancels.
             val callers = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
             var got: ViewModel? = null
@@ -569,6 +579,7 @@ class ReviewShellComponentTest {
             assertTrue("the in-flight body's awaiter got its result (got $got)", got === late)
             assertTrue("the block queued behind it settled", queuedSettled)
             assertTrue("a body that finished after the reset published nothing", EventDispatcher.model.value !== late)
+            assertTrue("nor to a collector still on the old process's model", oldModel.value !== late)
             first.cancel()
             queued.cancel()
         } finally {
@@ -672,11 +683,12 @@ class ReviewShellComponentTest {
      */
     @Test
     fun sessionReview_sameDateConfirmed_isNotAnEdit() = pinnedClock {
-        var dirty = false
+        val guard = app.milestone.EditorGuard()
+        val dirty by guard::dirty
         rule.setContent {
             MilestoneTheme {
-                CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true) {
-                    app.milestone.SessionReviewSheet(onDirtyChange = { dirty = it }, showRun = false, onSubmit = {})
+                CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true, app.milestone.LocalEditorGuard provides guard) {
+                    app.milestone.SessionReviewSheet(showRun = false, onSubmit = {})
                 }
             }
         }
@@ -691,11 +703,12 @@ class ReviewShellComponentTest {
     /** The weekly check-in: the same day confirmed is no edit, another day is. */
     @Test
     fun weeklyCheckin_sameDateConfirmed_isNotAnEdit() = pinnedClock {
-        var dirty = false
+        val guard = app.milestone.EditorGuard()
+        val dirty by guard::dirty
         rule.setContent {
             MilestoneTheme {
-                CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true) {
-                    app.milestone.WeeklyCheckinSheet(onDirtyChange = { dirty = it }, onSubmit = {})
+                CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true, app.milestone.LocalEditorGuard provides guard) {
+                    app.milestone.WeeklyCheckinSheet(onSubmit = {})
                 }
             }
         }

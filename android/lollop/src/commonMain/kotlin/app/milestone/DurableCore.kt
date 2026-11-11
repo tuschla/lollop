@@ -4,7 +4,10 @@ import app.milestone.core.CoreBridge
 import kotlin.concurrent.Volatile
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 
 /**
  * The core engine both platforms run: the Rust/crux core behind [bridge] plus the
@@ -87,10 +90,67 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         }
     }
 
-    /** The core's FIT parse of a `.fit` file's [bytes]: the tracker-import JSON or
-     *  an `{"error":…}` object; null when the core can't answer (callers treat it
-     *  like the error envelope). Touches no model or log. */
-    fun parseFitFile(bytes: ByteArray): String? = query { bridge.parseFit(bytes) }
+    /** The core's import verdict on a run file's [bytes] (`ParseRunFile`: FIT, GPX or
+     *  TCX): the runs to log, or why the file holds none; null when the core can't
+     *  answer. Reads no core state, so it runs on the calling thread. */
+    fun parseRunFile(bytes: ByteArray): ImportVerdict? =
+        decodeQuery("run file import", ImportVerdict.serializer()) { bridge.parseRunFile(bytes) }
+
+    /** The core's match key of each of [names], in order (`names::exercise_key`:
+     *  two spellings of one exercise share a key); null when the core can't answer.
+     *  Reads no core state, so it runs on the calling thread. */
+    fun exerciseKeys(names: List<String>): List<String>? =
+        decodeQuery("exercise keys", ListSerializer(String.serializer())) { bridge.exerciseKeys(names.toTypedArray()) }
+
+    /** The core's warm-up ramp for [query] (`strength::warm_up_ramp`, STR-WARMUP-001);
+     *  null when the core can't answer. Reads no core state, so it runs on the
+     *  calling thread. */
+    fun warmUpRamp(query: WarmUpQuery): List<WarmUpStep>? =
+        decodeQuery("warm-up ramp", ListSerializer(WarmUpStep.serializer())) {
+            bridge.warmUpRamp(coreJson.encodeToString(WarmUpQuery.serializer(), query).encodeToByteArray())
+        }
+
+    /** The core's reading of a profile still being edited (`DraftFacts` op): the
+     *  age, the youth and health gates it would raise and the PAR-Q+ answers after
+     *  [ProfileDraft.answer]; null when the core can't answer. Reads no core state,
+     *  so it runs on the calling thread. */
+    fun draftFacts(draft: ProfileDraft): DraftFacts? =
+        decodeQuery("draft facts", DraftFacts.serializer()) {
+            bridge.draftFacts(coreJson.encodeToString(ProfileDraft.serializer(), draft).encodeToByteArray())
+        }
+
+    /** The core's thinning of a recorded track (`ThinTrack` op, `gps::thin_track`):
+     *  the fixes a save or a crash recovery keeps and the segment starts among them;
+     *  null when the core can't answer. Reads no core state, so it runs on the
+     *  calling thread. */
+    fun thinTrack(track: TrackThinning): ThinnedTrack? =
+        decodeQuery("track thinning", ThinnedTrack.serializer()) {
+            bridge.thinTrack(coreJson.encodeToString(TrackThinning.serializer(), track).encodeToByteArray())
+        }
+
+    /** An imported run's `hr_pct_max` (`ImportedHrPct` op,
+     *  `import::imported_hr_pct_max`); null when the core can't answer. Reads no
+     *  core state, so it runs on the calling thread. */
+    fun importedHrPct(hr: ImportedHr): Double? =
+        decodeQuery("imported heart rate", Double.serializer()) {
+            bridge.importedHrPct(coreJson.encodeToString(ImportedHr.serializer(), hr).encodeToByteArray())
+        }
+
+    /** A [query] answer decoded with [serializer]; null, logged as [what], for an
+     *  error envelope or an answer that doesn't decode. */
+    private inline fun <T> decodeQuery(what: String, serializer: KSerializer<T>, call: () -> ByteArray?): T? {
+        val json = query(call) ?: return null
+        if (isCoreErrorEnvelope(json)) {
+            PlatformLog.w("Core", "$what failed: $json")
+            return null
+        }
+        return try {
+            coreJson.decodeFromString(serializer, json)
+        } catch (e: SerializationException) {
+            PlatformLog.w("Core", "$what unreadable", e)
+            null
+        }
+    }
 
     /** The GPX 1.1 document of ONE logged run, by the same (entry_id, observed_at)
      *  identity as delete/amend: "" for a hand-entered run, an unknown id, or a core
@@ -103,6 +163,16 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
             return ""
         }
         return gpx
+    }
+
+    /** The route fixes of ONE logged run (the fixes its GPX export writes), one list
+     *  per recording segment, by the same (entry_id, observed_at) identity as
+     *  delete/amend: empty for a hand-entered run, an unknown id, or a core that
+     *  can't answer. Off the main thread. */
+    fun runTrack(entryId: Long, observedAt: Long): List<List<GpsPoint>> {
+        val run = coreJson.encodeToString(RunRef.serializer(), RunRef(entryId, observedAt))
+        return decodeQuery("run track", RunTrack.serializer()) { bridge.runTrack(run.encodeToByteArray()) }
+            ?.segments.orEmpty()
     }
 
     /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
@@ -145,12 +215,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     // exactly once per process.
     private var restored = false
 
-    /** Whether the log this process replayed ended with the plan removed (its last
-     *  plan line a kept `ClearPlan`, [RestoredLog.planRemoved]). Boot reads it so a
-     *  removed plan stays removed when the setup prefs' marker was lost. */
-    var restoredPlanRemoved = false
-        private set
-
     /**
      * Point the core at [ctx]'s event log and replay it to rebuild state. Safe to
      * call on every Activity creation: replay runs only on the first call per
@@ -183,7 +247,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         // applied, so a second attempt in this process would double those events.
         restored = true
         log = file
-        restoredPlanRemoved = false
         // Compacting before replay matters here: a run's GPS track (thousands of
         // points) is the heaviest line in the log, and every `Clear*` supersedes
         // its whole family: the compacted replay is model-equivalent.
@@ -198,7 +261,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         // Entry ids seed from the wall clock; after the clock moved back they must
         // still never reuse an id a restored entry carries.
         EntryIds.raiseTo(loaded.maxEntryId)
-        restoredPlanRemoved = loaded.planRemoved
         // A failed torn-tail repair (often disk full, the same cause as the tear)
         // leaves the durable tail newline-less: the next append must lead with one.
         appendTornGuard = try {
@@ -245,7 +307,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     private fun forgetLog() {
         restored = false
         log = null
-        restoredPlanRemoved = false
         lastGoodView = null
         appendTornGuard = false
         lastSetToday = null

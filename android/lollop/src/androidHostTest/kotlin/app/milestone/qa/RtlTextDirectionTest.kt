@@ -11,7 +11,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performSemanticsAction
 import app.milestone.Accent
 import app.milestone.AppSettings
-import app.milestone.GpxFix
+import app.milestone.GpsPoint
 import app.milestone.RunResultView
 import app.milestone.RunRoute
 import app.milestone.TrimRunSheetContent
@@ -115,7 +115,7 @@ class RtlTextDirectionTest {
                     Text(plan, style = Type.Body, onTextLayout = { layouts["plan"] = it })
                     Text(note, style = Type.Body, onTextLayout = { layouts["note"] = it })
                     // A neutral-only figure (no letter to take a direction from).
-                    Text(delta, style = Type.StatValue, onTextLayout = { layouts["delta"] = it })
+                    Text(delta, style = app.milestone.StatValueStyle, onTextLayout = { layouts["delta"] = it })
                     // A tabular caption (the FieldLabel hint style).
                     Text(plan, style = Type.Caption.merge(TabularFigures), onTextLayout = { layouts["caption"] = it })
                     // No explicit style: Material's LocalTextStyle from the theme.
@@ -149,8 +149,8 @@ class RtlTextDirectionTest {
     @Test
     fun typeScale_measuredUnderRtl_resolvesLtr() {
         val styles: Map<String, TextStyle> = mapOf(
-            "Display" to Type.Display, "Title" to Type.Title, "BannerTitle" to Type.BannerTitle,
-            "Countdown" to Type.Countdown, "KeypadKey" to Type.KeypadKey, "StatValue" to Type.StatValue,
+            "Display" to Type.Display, "Title" to Type.Title, "BannerTitle" to app.milestone.BannerTitleStyle,
+            "Countdown" to app.milestone.CountdownStyle, "KeypadKey" to app.milestone.KeypadKeyStyle, "StatValue" to app.milestone.StatValueStyle,
             "CardTitle" to Type.CardTitle, "Section" to Type.Section, "Body" to Type.Body,
             "Caption" to Type.Caption, "Chip" to Type.Chip, "Overline" to Type.Overline,
             "TabularFigures" to TabularFigures,
@@ -269,9 +269,9 @@ class RtlTextDirectionTest {
     fun trimTrack_keptWindowSitsBetweenTheThumbs_inBothDirections() {
         AppSettings.setShowRouteMaps(androidx.test.core.app.ApplicationProvider.getApplicationContext(), false)
         try {
-            val fixes = (0..20).map { GpxFix(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, hrBpm = null) }
+            val fixes = (0..20).map { GpsPoint(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, 5.0) }
             val segments = listOf(fixes)
-            val route = RunRoute(gpx = null, segments = segments, trimmable = true, track = timedTrackFromSegments(segments))
+            val route = RunRoute(segments = segments, trimmable = true, track = timedTrackFromSegments(segments))
             val run = RunResultView(distance_km = 0.75, duration_min = 200 / 60.0, entry_id = 1L, observed_at = 1_700_000_200L, has_gpx = true)
             var dir by mutableStateOf(LayoutDirection.Ltr)
             var accent = Color.Unspecified

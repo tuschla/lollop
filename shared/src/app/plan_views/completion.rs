@@ -12,11 +12,10 @@ use crate::app::plan_views::flatten::{flatten_prescription, plan_session_title};
 use crate::app::plan_views::item_render::{
     derate_reason, refresh_lift_summary, round_load_or_drop,
 };
+use crate::app::plan_views::plan_item::{PlanItem, PlanRow};
 use crate::app::run_metrics::RunFacts;
 use crate::app::set_index::SetIndex;
-use crate::app::view_types::{
-    ItemSetView, ItemStatus, PrescriptionView, SessionPlanView, SessionStatus,
-};
+use crate::app::view_types::{ItemSetView, ItemStatus, PrescriptionView, SessionStatus};
 use crate::plates::{load_grid_step_kg, round_load_grid};
 use crate::schema::{AdjustmentCall, AdjustmentKind, Prescription, Rx, Session, SessionType};
 
@@ -38,10 +37,6 @@ const WORK_SET_FLOOR: f64 = 0.80;
 /// Without a prescribed load, a working set is one at this share of the day's
 /// heaviest same-movement weight; lighter sets are warm-ups.
 const NO_LOAD_WORK_SHARE: f64 = 0.9;
-/// The set screen's warm-up ramp after its first step (STR-WARMUP-001; the
-/// exact steps are expert opinion): 40 % × 5, 60 % × 3 and 80 % × 2 of the
-/// working load.
-const WARM_UP_RAMP: [(f64, u32); 3] = [(0.4, 5), (0.6, 3), (0.8, 2)];
 
 /// How a logged set that is not a warm-up counts toward a plan item. The
 /// caller has matched movement (`same_movement`); RPE never gates. Any set of
@@ -92,28 +87,6 @@ fn set_credit(
     } else {
         SetCredit::NotCounted
     }
-}
-
-/// The warm-up steps `(kg, reps)` the set screen offers before the first work
-/// set at `work_kg` of a barbell lift (`warmUpSteps` in `SetEditorState.kt`):
-/// a first step × 5 (the empty bar, or for a pull from the floor the bar with
-/// one full plate a side), then [`WARM_UP_RAMP`] on the unit's plate grid. A
-/// ramp step that rounds onto the first step or up to the work load is
-/// dropped. Empty at or below the first step.
-fn warm_up_steps(work_kg: f64, weight_lb: bool, exercise: &str) -> Vec<(f64, u32)> {
-    let first =
-        crate::plates::warm_up_start_kg(crate::exercise::starts_from_floor(exercise), weight_lb);
-    if work_kg <= first + 1e-6 {
-        return Vec::new();
-    }
-    let mut steps = vec![(first, 5)];
-    for (share, reps) in WARM_UP_RAMP {
-        let kg = crate::plates::round_warm_up_kg(work_kg * share, weight_lb);
-        if kg > first + 1e-6 && kg < work_kg - 1e-6 && steps.iter().all(|(k, _)| *k != kg) {
-            steps.push((kg, reps));
-        }
-    }
-    steps
 }
 
 /// Whether a set fell short of the prescribed reps (or hold).
@@ -178,7 +151,7 @@ const STEP_UP_SURPLUS_REPS: f64 = 2.0;
 /// (REENTRY-001: treat as novice) nothing is suggested. The athlete's own
 /// data, never an invented load.
 pub(in crate::app) fn apply_last_sets(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     model: &Model,
     set_index: &SetIndex,
     anchors: &crate::plan::LiftAnchors,
@@ -326,7 +299,7 @@ pub(in crate::app) fn last_top_set(
 /// comparable work under DUP: a heavy day's triples never cap a ×5 day, and a
 /// deload or speed day never drags a heavier day down (the window's best wins).
 fn apply_hold_caps(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     model: &Model,
     set_index: &SetIndex,
     session_days: &[Option<i64>],
@@ -484,7 +457,7 @@ impl PrescriptionView {
 
 /// One item's status from its completion fields. `pain`: a pain report
 /// stopped it.
-fn item_status(it: &PrescriptionView, pain: bool) -> ItemStatus {
+fn item_status(it: &PlanItem, pain: bool) -> ItemStatus {
     if it.is_run() {
         let ran = it.ran();
         return if pain && !ran {
@@ -535,10 +508,7 @@ fn item_status(it: &PrescriptionView, pain: bool) -> ItemStatus {
 /// covers nothing to do (`done`), skipped for pain when no work set was
 /// logged. Idempotent (a pain-skipped item stays one), so a caller that
 /// re-judges `done`/`sets_done` after this re-runs it.
-pub(in crate::app) fn refresh_item_statuses(
-    items: &mut [PrescriptionView],
-    recs: &[AdjustmentCall],
-) {
+pub(in crate::app) fn refresh_item_statuses(items: &mut [PlanItem], recs: &[AdjustmentCall]) {
     for it in items.iter_mut() {
         let pain = matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain)
             || pain_stopped(it, recs);
@@ -552,7 +522,7 @@ pub(in crate::app) fn refresh_item_statuses(
 /// Whether a past day logged at least [`LIGHTER_CREDIT_SHARE`] of its planned
 /// work sets with every run item credited, so it reads "done lighter", not
 /// "missed". Pain-stopped items are left out.
-fn most_work_logged(items: &[PrescriptionView]) -> bool {
+fn most_work_logged(items: &[PlanItem]) -> bool {
     let (mut planned, mut logged) = (0u32, 0u32);
     for it in items {
         if matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain) {
@@ -573,7 +543,7 @@ fn most_work_logged(items: &[PrescriptionView]) -> bool {
 
 /// Whether any of a day's (not pain-stopped) items has work logged against
 /// it: a lift set of the movement, or a run.
-fn any_work_logged(items: &[PrescriptionView]) -> bool {
+fn any_work_logged(items: &[PlanItem]) -> bool {
     items.iter().any(|it| {
         !matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain) && it.has_work()
     })
@@ -582,7 +552,7 @@ fn any_work_logged(items: &[PrescriptionView]) -> bool {
 /// A session's status once every item is finished: `done` when every item is
 /// done, `done_lighter` when all are finished (done, short, lighter, skipped
 /// or stopped) with some work; `None` otherwise or with no items.
-pub(in crate::app) fn finished_status(items: &[PrescriptionView]) -> Option<SessionStatus> {
+pub(in crate::app) fn finished_status(items: &[PlanItem]) -> Option<SessionStatus> {
     use ItemStatus::{Done, DoneLighter, DoneShort, Skipped, SkippedPain, StoppedPain};
     if items.is_empty() {
         return None;
@@ -609,7 +579,7 @@ pub(in crate::app) fn finished_status(items: &[PrescriptionView]) -> Option<Sess
 /// session every item of which a pain report stopped is `blocked`, never
 /// "missed" (the safety rule stopped it).
 fn session_status(
-    items: &[PrescriptionView],
+    items: &[PlanItem],
     rest: bool,
     epoch_day: i64,
     today: i64,
@@ -659,7 +629,7 @@ pub(super) fn flatten_session(
     anchors: &crate::plan::Anchors,
     judge: &DayJudge,
     ctx: &FlattenCtx,
-) -> SessionPlanView {
+) -> PlanRow {
     let FlattenCtx {
         today,
         start,
@@ -672,10 +642,10 @@ pub(super) fn flatten_session(
     let fold = judge.fold;
     let judge_day = judge.day;
     let bodyweight = model.profile().and_then(|p| p.bodyweight_kg);
-    let mut items: Vec<PrescriptionView> = s
+    let mut items: Vec<PlanItem> = s
         .prescriptions
         .iter()
-        .map(|rx| flatten_prescription(rx, anchors, bodyweight, weight_lb))
+        .map(|rx| flatten_prescription(rx, anchors, bodyweight, weight_lb, model.distance_unit()))
         .collect();
     // Every run item reads as numbers a runner can follow (pace from race
     // fitness, bpm from HRmax, effort cue), resolved from the anchors.
@@ -730,7 +700,7 @@ pub(super) fn flatten_session(
         today,
         start,
     );
-    SessionPlanView {
+    PlanRow {
         epoch_day,
         title: plan_session_title(s),
         session_type: s.session_type,
@@ -750,7 +720,7 @@ pub(super) fn flatten_session(
 /// they clear [`RUN_DONE_SHARE`] of the volume shown that day, done lighter
 /// from [`LIGHTER_CREDIT_SHARE`] of it (under a head cold, any run: the shown
 /// run is the short easy one).
-fn judge_run_item(it: &mut PrescriptionView, rx: &Rx, judge: &DayJudge, ctx: &FlattenCtx) {
+fn judge_run_item(it: &mut PlanItem, rx: &Rx, judge: &DayJudge, ctx: &FlattenCtx) {
     let facts = ctx.run_facts;
     let mut km = 0.0;
     let mut min = 0.0;
@@ -776,7 +746,7 @@ fn judge_run_item(it: &mut PrescriptionView, rx: &Rx, judge: &DayJudge, ctx: &Fl
 /// Judge a lift/calisthenics item: every same-movement set attributed to the
 /// judged day, chronological, against the load and set count shown for the
 /// day (`judge.fold`).
-fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx) {
+fn judge_lift_item(it: &mut PlanItem, judge: &DayJudge, ctx: &FlattenCtx) {
     let FlattenCtx {
         model,
         weight_lb,
@@ -818,11 +788,11 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
 }
 
 /// Each of a day's chronological same-movement sets credited ([`set_credit`]),
-/// not-yet-taken step of the set screen's ramp ([`warm_up_steps`]) for the
-/// load shown that day, else the suggested start (`SetEditor.kt`:
-/// `load_kg ?: suggested_load_kg`): within half a plate step of the step's
-/// load, at most its reps. Each step is taken once, so a day holds at most as
-/// many warm-ups as the ramp has steps.
+/// not-yet-taken step of the set screen's warm-up ramp
+/// ([`crate::strength::warm_up_ramp`]) for the load shown that day, else the
+/// suggested start (the set screen's `load_kg ?: suggested_load_kg`): within
+/// half a plate step of the step's load, at most its reps. Each step is taken
+/// once, so a day holds at most as many warm-ups as the ramp has steps.
 fn day_credits(
     it: &PrescriptionView,
     day_sets: &[&LoggedSet],
@@ -839,8 +809,8 @@ fn day_credits(
         it.load_kg
     };
     let mut ramp = match shown_load.or(it.suggested_load_kg) {
-        Some(work) if !it.timed_hold && crate::exercise::is_barbell_lift(&it.exercise) => {
-            warm_up_steps(work, weight_lb, &it.exercise)
+        Some(work) if !it.timed_hold => {
+            crate::strength::warm_up_ramp(&it.exercise, work, weight_lb).value
         }
         _ => Vec::new(),
     };
@@ -848,9 +818,9 @@ fn day_credits(
     day_sets
         .iter()
         .map(|s| {
-            let matches = |&(kg, reps): &(f64, u32)| {
-                (s.weight_kg - kg).abs() <= load_grid_step_kg(kg, weight_lb) / 2.0 + 1e-9
-                    && (1..=reps).contains(&s.reps)
+            let matches = |step: &crate::strength::WarmUpStep| {
+                (s.weight_kg - step.kg).abs() <= load_grid_step_kg(step.kg, weight_lb) / 2.0 + 1e-9
+                    && (1..=step.reps).contains(&s.reps)
             };
             if !working
                 && s.hold_sec.is_none()
@@ -1012,11 +982,19 @@ mod tests {
             credits(&it, &[(20.0, 5), (25.0, 5), (62.5, 5), (62.5, 5)], false),
             [NotCounted, NotCounted, Full, Full]
         );
-        // A floor pull starts at 60 kg, so 25 kg × 5 is no step of its ramp;
-        // a Turkish keyboard's "DEADLİFT" is one too (the folded name).
-        assert_eq!(warm_up_steps(62.5, false, "Deadlift"), [(60.0, 5)]);
-        assert_eq!(warm_up_steps(62.5, false, "DEADLİFT"), [(60.0, 5)]);
-        assert_eq!(warm_up_steps(20.0, false, "Back Squat"), []);
+        // A floor pull starts at 60 kg, so 60 kg × 5 is its first step even
+        // spelled on a Turkish keyboard ("DEADLİFT", the folded name).
+        for exercise in ["Deadlift", "DEADLİFT"] {
+            let pull = PrescriptionView {
+                exercise: exercise.to_string(),
+                ..it.clone()
+            };
+            assert_eq!(
+                credits(&pull, &[(60.0, 5)], false),
+                [NotCounted],
+                "{exercise}"
+            );
+        }
     }
 
     #[test]
@@ -1069,13 +1047,16 @@ mod tests {
         // suggested start is one 5 lb plate step up, never floored back to
         // the logged 225 lb.
         let logged_kg = 225.0 / LB_PER_KG;
-        let mut item = PrescriptionView {
-            exercise: "Barbell Bench Press".to_string(),
-            sets: 3,
-            reps_low: 5,
-            reps_high: 5,
+        let mut item = PlanItem {
+            view: PrescriptionView {
+                exercise: "Barbell Bench Press".to_string(),
+                sets: 3,
+                reps_low: 5,
+                reps_high: 5,
+                target_rpe: Some(crate::strength::rir_to_rpe(3.0)),
+                ..Default::default()
+            },
             intensity: PlanIntensity::Rir { rir: 3 },
-            target_rpe: Some(crate::strength::rir_to_rpe(3.0)),
             ..Default::default()
         };
         let mut model = Model::default();

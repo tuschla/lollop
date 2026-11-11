@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L10N: iOS only, the static text of the widget extension and the App Intents
+  (iosApp/Shared/en.lproj/Localizable.strings is generated from these and the other
+  keys the Swift side names, by GeneratedSourcesTest).
+-->
+<resources>
+    <!-- The Control Center control's description in the controls gallery. -->
+    <string name="ios_control_description">Opens today\'s next step: Start run, Log set or Log.</string>
+    <!-- Shortcuts: the intent that opens the app at a screen, and its parameter. -->
+    <string name="ios_intent_open_title">Open lollop</string>
+    <string name="ios_intent_open_screen">Screen</string>
+    <string name="ios_intent_screen_type">lollop screen</string>
+    <!-- The run Live Activity's Pause/Resume button, as an App Intent, and its parameter. -->
+    <string name="ios_intent_pause_title">Pause or resume the run</string>
+    <string name="ios_intent_paused">Paused</string>
+</resources>

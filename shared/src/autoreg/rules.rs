@@ -205,8 +205,8 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
 // ---------------------------------------------------------------------------
 
 /// RPE delta (actual − target) bands (autoreg-001/002/004/005).
-pub(super) const RPE_DELTA_WELL_ABOVE: f64 = 2.0;
-pub(super) const RPE_DELTA_ABOVE: f64 = 1.0;
+pub(crate) const RPE_DELTA_WELL_ABOVE: f64 = 2.0;
+pub(crate) const RPE_DELTA_ABOVE: f64 = 1.0;
 pub(super) const RPE_DELTA_WELL_BELOW: f64 = -2.0;
 pub(super) const RPE_DELTA_BELOW: f64 = -1.0;
 
@@ -216,7 +216,7 @@ pub(super) const RPE_DELTA_BELOW: f64 = -1.0;
 /// z ≤ [`WELLNESS_MULTIDAY_Z`] for [`WELLNESS_DOWNGRADE_STREAK`] consecutive
 /// days. The §5 tier-4 SubjectiveMultiDay escalation needs the longer
 /// [`WELLNESS_MULTIDAY_STREAK`] run.
-pub(super) const WELLNESS_SINGLE_DAY_Z: f64 = -1.5;
+pub(crate) const WELLNESS_SINGLE_DAY_Z: f64 = -1.5;
 pub(super) const WELLNESS_MULTIDAY_Z: f64 = -1.0;
 /// Consecutive suppressed days that arm the wellness multi-day intensity downgrade.
 pub(super) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
@@ -224,16 +224,16 @@ pub(super) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
 pub(super) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
 
 /// HRV lnRMSSD z-score SWC band, ± around rolling baseline (autoreg-028/029).
-pub(super) const HRV_SWC_LOWER_Z: f64 = -0.5;
+pub(crate) const HRV_SWC_LOWER_Z: f64 = -0.5;
 pub(super) const HRV_SWC_UPPER_Z: f64 = 0.5;
 
 /// Resting-HR elevation bands, bpm above baseline (autoreg-040/041).
-pub(super) const RHR_STOP_BPM: f64 = 10.0;
-pub(super) const RHR_DOWNGRADE_FLOOR_BPM: f64 = 5.0;
-pub(super) const RHR_DOWNGRADE_STREAK: u8 = 2;
+pub(crate) const RHR_STOP_BPM: f64 = 10.0;
+pub(crate) const RHR_DOWNGRADE_FLOOR_BPM: f64 = 5.0;
+pub(crate) const RHR_DOWNGRADE_STREAK: u8 = 2;
 
 /// Soreness-item downgrade floor on the 7-point scale (autoreg-030).
-pub(super) const SORENESS_HIGH: f64 = 6.0;
+pub(crate) const SORENESS_HIGH: f64 = 6.0;
 
 /// The load change one RPE-vs-target delta calls for (autoreg-001/002/004/005):
 /// RPE ≥ target + 2 → −10 % (ceiling of the −7–10 % band); target + 1 → −5 %;
@@ -493,7 +493,7 @@ pub fn hrv_below_swc(z: f64) -> bool {
 
 /// Minimum continuous-effort duration for aerobic decoupling to be a valid
 /// signal (File 06 signal spec: "Valid only for efforts >20 min").
-pub(super) const DECOUPLING_MIN_EFFORT_MIN: f64 = 20.0;
+pub(crate) const DECOUPLING_MIN_EFFORT_MIN: f64 = 20.0;
 
 /// Aerobic-decoupling downgrade on easy/steady runs.
 /// autoreg-037: decoupling at/above 10% → base insufficient/fatigued → keep

@@ -279,7 +279,7 @@ fun RunTrackingScreen(
                     // service so the radio isn't left on indefinitely; a live/armed run
                     // keeps its foreground service. Live RunSession reads, not the
                     // captured composition values the long-lived observer would stale.
-                    if (!RunSession.tracking.value && !RunSession.armed.value &&
+                    if (!RunSession.runActive &&
                         RunSession.points.value.isEmpty()
                     ) {
                         tracker.stop(ctx)
@@ -744,7 +744,6 @@ fun RunTrackingScreen(
                             RunGuideCard(
                                 item = item,
                                 progress = stepProgress,
-                                unit = unit,
                                 onSkip = { RunSession.skipStep(AppClock.monotonicMillis()) },
                             )
                         }
@@ -893,7 +892,11 @@ private fun ColumnScope.DragHandle() {
     )
 }
 
-/** [KeyValueStore] keys (the [setupStore], [KEY_PLAN_CLEARED] idiom) for
+/** Width of the side panel (stats and controls) beside the map on a landscape
+ *  window: a portrait phone's stat sheet; at most half the window. */
+private val TrackerPanelWidth = 400.dp
+
+/** [KeyValueStore] keys (the [setupStore], [KEY_ONBOARDING_DONE] idiom) for
  *  the two optional, stackable start gates, both default false. */
 private const val KEY_START_PRECISE = "run_start_precise"
 private const val KEY_START_MOVING = "run_start_moving"

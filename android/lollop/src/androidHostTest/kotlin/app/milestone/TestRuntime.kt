@@ -52,11 +52,23 @@ internal class FaultBridge(@Volatile var fault: CoreFault) : CoreBridge {
 
     override fun view(): ByteArray? = fault.view()
 
-    override fun parseFit(fit: ByteArray): ByteArray? = null
+    override fun parseRunFile(file: ByteArray): ByteArray? = null
 
     override fun exportGpx(run: ByteArray): ByteArray? = null
 
+    override fun runTrack(run: ByteArray): ByteArray? = null
+
     override fun trackFigures(event: ByteArray): ByteArray? = null
+
+    override fun exerciseKeys(names: Array<String>): ByteArray? = null
+
+    override fun warmUpRamp(query: ByteArray): ByteArray? = null
+
+    override fun draftFacts(draft: ByteArray): ByteArray? = null
+
+    override fun thinTrack(track: ByteArray): ByteArray? = null
+
+    override fun importedHrPct(hr: ByteArray): ByteArray? = null
 
     override fun compactLog(lines: Array<String>): ByteArray? = null
 

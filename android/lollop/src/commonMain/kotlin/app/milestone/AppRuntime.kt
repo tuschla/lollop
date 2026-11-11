@@ -101,7 +101,8 @@ internal object AppRuntime : BootLedger {
 
     private val features: List<AppFeature> get() = commonFeatures + platformFeatures()
 
-    /** Start the process once: settings, then every feature. Later calls do nothing. */
+    /** Start the process once: settings (migrated, then loaded), then every
+     *  feature. Later calls do nothing. */
     fun start(ctx: PlatformContext) {
         val p = process
         synchronized(p) {
@@ -109,6 +110,7 @@ internal object AppRuntime : BootLedger {
             p.started = true
         }
         p.debuggable = ctx.isDebuggable()
+        AppSettings.migrate(ctx)
         AppSettings.load(ctx)
         features.forEach { it.start(ctx) }
     }
@@ -170,7 +172,7 @@ internal object AppRuntime : BootLedger {
      * (closed first when it is [AutoCloseable]: the event queue), the boot ledger
      * cleared, nothing started. An engine the process used starts over
      * ([DurableCore.forgetProcess]); one it never touched is left alone (a plain-JVM
-     * test must not load the native library). A test may run the process on its
+     * test loads the native library only when it asks the core). A test may run the process on its
      * own [engine], event [sink] or [clock].
      */
     fun resetForTest(engine: DurableCore? = null, sink: EventSink? = null, clock: WallClock = DeviceClock) {

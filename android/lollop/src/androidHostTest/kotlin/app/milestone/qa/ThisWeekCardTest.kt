@@ -22,6 +22,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
+import app.milestone.ActivePainView
+import app.milestone.PainArea
+import app.milestone.PainDetail
 import app.milestone.ItemStatus
 import app.milestone.MesoPhase
 import app.milestone.MilestoneTheme
@@ -172,7 +175,12 @@ class ThisWeekCardTest {
             next_session = session,
             week_plan = listOf(session),
             readiness_summary = listOf(
-                ReadinessSignalView(signal = ReadinessSignal.Pain, state = "reported", detail = "Left knee · sharp/joint · 6/10"),
+                ReadinessSignalView(signal = ReadinessSignal.Pain, state = "reported"),
+            ),
+            active_pain = ActivePainView(
+                report = PainDetail(severity = 6, location = "Left knee"),
+                area = PainArea.LeftKnee,
+                context = "Left knee · sharp or joint pain · 6/10",
             ),
         )
         rule.setContent {

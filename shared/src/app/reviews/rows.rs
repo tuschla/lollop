@@ -3,10 +3,11 @@
 //! a row today's session already settles.
 
 use crate::app::evidence_views::{describe, to_view, to_view_with};
+use crate::app::plan_views::PlanRow;
 use crate::app::readiness::{RankedRow, suppression_active};
 use crate::app::review_deloads::RECOVERY_WEEK_LOAD_CUT_PCT;
 use crate::app::reviews::split::FEEDBACK_FRESH_DAYS;
-use crate::app::view_types::{AdjustmentView, SessionPlanView};
+use crate::app::view_types::AdjustmentView;
 use crate::event::SessionReview;
 use crate::evidence::claims;
 use crate::profile::Profile;
@@ -496,10 +497,7 @@ pub(in crate::app) fn next_time_add_superseded(
 /// Whether `r` is an item-scoped call about a lift's REMAINING sets today (a
 /// load cut or an effort cap) on an exercise `today` already shows finished:
 /// nothing is left for it to change. A "next time" add stays.
-pub(in crate::app) fn remaining_sets_call_spent(
-    r: &AdjustmentCall,
-    today: &SessionPlanView,
-) -> bool {
+pub(in crate::app) fn remaining_sets_call_spent(r: &AdjustmentCall, today: &PlanRow) -> bool {
     let Adjustment::ForItem {
         exercise,
         adjustment,

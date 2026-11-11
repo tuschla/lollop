@@ -278,7 +278,7 @@ fn retain_runs_trims_every_per_run_memo_to_the_live_runs() {
     };
     let facts = RunFacts::new(&model.runs);
     for (i, r) in model.runs.iter().enumerate() {
-        let _ = to_run_view(r, facts.keys[i], facts.qc[i].as_deref());
+        let _ = memo_run_card(r, facts.keys[i], facts.qc[i].as_deref(), DistanceUnit::Km);
     }
     let _ = build_run_progress(&model, &facts, 0.0);
     let (live_key, deleted_key) = (facts.keys[0], facts.keys[1]);
@@ -448,7 +448,7 @@ fn run_splits_carry_numeric_seconds_per_unit_consistent_with_pace() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    let splits = &vm.runs[0].splits_km;
+    let splits = &vm.runs[0].splits;
     assert!(
         splits.len() >= 2,
         "expected multiple km splits, got {}",

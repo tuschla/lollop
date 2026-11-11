@@ -1,7 +1,11 @@
 //! A birthday-carrying profile's age and under-18 gate as of a given day, and
 //! the calendar window a profile date is plausible in.
 
+#[cfg(any(ffi_surface, test))]
+use crate::envelope::{DraftFacts, ProfileDraft};
 use crate::profile::Profile;
+#[cfg(any(ffi_surface, test))]
+use crate::schema::ParqQuestion;
 
 /// Plausible calendar window for a wire epoch day on the profile (race / meet
 /// / layoff / race-result dates): 1920-01-02 through 2120-01-02. A corrupt
@@ -35,6 +39,52 @@ pub(super) fn derive_birthday_age(p: &mut Profile, today: i64) {
         let age = whole_years_between(birth, today) as f64;
         p.age_years = Some(age);
         p.health.youth = Profile::youth_age(age);
+    }
+}
+
+/// A sent profile's age and pediatric gate: the birthday's age on `today`
+/// when both are known, else the stated age; `health.youth` is exactly
+/// "under 18" on that age (HARD RULE 3; safety-011 gives no cutoff, 18 y is
+/// the core's). The core owns the flag: a `youth` the shell sends (an echo of
+/// an earlier profile) never outlives the age it came from. No age = adult,
+/// not gated (KB onboard-050). A NaN age arrives as 0, so it gates.
+pub(super) fn derive_age_gate(p: &mut Profile, today: Option<i64>) {
+    if let Some(today) = today {
+        derive_birthday_age(p, today);
+    }
+    p.health.youth = p.age_years.is_some_and(Profile::youth_age);
+}
+
+/// The gates and form facts of a profile the shell is still editing, by the
+/// same rules a sent `SetProfile` meets: the age from the birthday on `today`
+/// (else the stated age), the pediatric gate on it, the health answers'
+/// deferral gates and the PAR-Q+ answers after the user's latest one.
+#[cfg(any(ffi_surface, test))]
+pub(crate) fn draft_facts(d: ProfileDraft) -> DraftFacts {
+    let health = match d.answer {
+        Some(answer) => d.health.answered(answer),
+        None => d.health,
+    };
+    let age_years = match (d.birth_epoch_day, d.today) {
+        (Some(birth), Some(today)) => Some(whole_years_between(birth, today) as f64),
+        _ => d.age_years,
+    };
+    DraftFacts {
+        parq_yes: ParqQuestion::ALL
+            .into_iter()
+            .filter(|q| health.answered_yes(*q))
+            .collect(),
+        first_symptom: ParqQuestion::ALL
+            .into_iter()
+            .find(|q| q.is_symptom() && health.answered_yes(*q)),
+        legacy_parq: health.legacy_parq(),
+        health_defers: health.answers_defer(),
+        age_years,
+        youth: age_years.is_some_and(Profile::youth_age),
+        can_hang: d
+            .calis_equipment
+            .map(|e| crate::calisthenics::Kit::from_equipment(e).hang()),
+        health,
     }
 }
 

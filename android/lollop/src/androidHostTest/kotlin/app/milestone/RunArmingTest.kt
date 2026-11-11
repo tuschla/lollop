@@ -22,17 +22,17 @@ class RunArmingTest {
 
     @Test
     fun aLockIsAnAccurateRecentFix() {
-        // Within the core's running::MAX_GPS_ACCURACY_M and LOCK_FRESH_MS old at
+        // Within the core's CoreConstants.MAX_GPS_ACCURACY_M and LOCK_FRESH_MS old at
         // most, so a Start never latches onto a coarse or stale cached fix.
         val now = 100_000L
         val rows = listOf(
             // accuracy m, fix age ms, lock
             Triple(10.0, 4_000L, true),
-            Triple(MAX_GPS_ACCURACY_M, 0L, true), // just landed: the pill resamples the clock per fix
+            Triple(CoreConstants.MAX_GPS_ACCURACY_M, 0L, true), // just landed: the pill resamples the clock per fix
             Triple(10.0, LOCK_FRESH_MS, true),
             Triple(10.0, LOCK_FRESH_MS + 1, false),
             Triple(10.0, -1_000L, false), // stamped after now
-            Triple(MAX_GPS_ACCURACY_M + 0.1, 1_000L, false),
+            Triple(CoreConstants.MAX_GPS_ACCURACY_M + 0.1, 1_000L, false),
             Triple(60.0, 1_000L, false),
             Triple(null, 1_000L, false),
         )

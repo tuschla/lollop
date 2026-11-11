@@ -3,9 +3,9 @@
     <!-- Post-splash application theme. Edge-to-edge: the status/navigation bars
          are transparent and their icon contrast is set at runtime from the
          RESOLVED palette (MainActivity.onCreate), because a hardcoded
-         statusBarColor is ignored on API 35+. windowBackground matches the
-         resolved ground so the Compose-load frame doesn't flash the opposite
-         color (light = white here; values-night overrides to black). -->
+         statusBarColor is ignored on API 35+. windowBackground is the default
+         theme's ground (colors_launch.xml) so the Compose-load frame doesn't
+         flash the opposite color (light here; values-night overrides to dark). -->
     <style name="Theme.Milestone.App" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/splash_bg_light</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
@@ -18,7 +18,7 @@
          with windowSplashScreenBackground + the route-mark icon, then hands off
          to postSplashScreenTheme once installSplashScreen() runs in onCreate.
          Follows the SYSTEM light/dark setting via the values / values-night
-         split: light ground + DARK logo here, black ground + WHITE logo in
+         split: light ground + DARK logo here, dark ground + WHITE logo in
          values-night. -->
     <style name="Theme.Milestone" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_bg_light</item>

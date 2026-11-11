@@ -13,19 +13,19 @@ import kotlinx.coroutines.test.runTest
 /**
  * A stand-in core for the boot sequence: every known event is accepted; the view
  * carries a profile when [profile] is set and a program once a GeneratePlan landed
- * (or from the start, [programAtStart]) until a ClearPlan; [refuseToday] drops
- * SetToday, [viewFails] answers every view with an error envelope, and the
- * compaction reports [planRemoved].
+ * (or from the start, [programAtStart]) until a ClearPlan, which sets
+ * `plan_removed` until the next GeneratePlan; [refuseToday] drops SetToday and
+ * [viewFails] answers every view with an error envelope.
  */
 private class BootCore(
     var profile: Boolean = false,
     programAtStart: Boolean = false,
     val refuseToday: Boolean = false,
     val viewFails: Boolean = false,
-    val planRemoved: Boolean = false,
 ) : CoreBridge {
     val applied = mutableListOf<String>()
     private var program = programAtStart
+    private var planRemoved = false
 
     fun variants() = applied.map { EventLog.variantOf(it) }
 
@@ -34,8 +34,14 @@ private class BootCore(
         val variant = EventLog.variantOf(line) ?: return ByteArray(0)
         if (refuseToday && variant == "SetToday") return ByteArray(0)
         applied += line
-        if (variant == "GeneratePlan") program = true
-        if (variant == "ClearPlan") program = false
+        if (variant == "GeneratePlan") {
+            program = true
+            planRemoved = false
+        }
+        if (variant == "ClearPlan") {
+            program = false
+            planRemoved = true
+        }
         return "[]".encodeToByteArray()
     }
 
@@ -45,18 +51,31 @@ private class BootCore(
             append("{\"input_count\":${applied.size}")
             if (profile) append(",\"profile\":{}")
             if (program) append(",\"program\":{\"name\":\"plan\"}")
+            if (planRemoved) append(",\"plan_removed\":true")
             append('}')
         }
     }.encodeToByteArray()
 
-    override fun parseFit(fit: ByteArray): ByteArray? = null
+    override fun parseRunFile(file: ByteArray): ByteArray? = null
 
     override fun exportGpx(run: ByteArray): ByteArray = ByteArray(0)
 
+    override fun runTrack(run: ByteArray): ByteArray? = null
+
     override fun trackFigures(event: ByteArray): ByteArray? = null
 
+    override fun exerciseKeys(names: Array<String>): ByteArray? = null
+
+    override fun warmUpRamp(query: ByteArray): ByteArray? = null
+
+    override fun draftFacts(draft: ByteArray): ByteArray? = null
+
+    override fun thinTrack(track: ByteArray): ByteArray? = null
+
+    override fun importedHrPct(hr: ByteArray): ByteArray? = null
+
     override fun compactLog(lines: Array<String>): ByteArray =
-        """{"dropped":[],"torn":[],"max_entry_id":0,"plan_removed":$planRemoved}""".encodeToByteArray()
+        """{"dropped":[],"torn":[],"max_entry_id":0}""".encodeToByteArray()
 
     override fun reset(): ByteArray {
         applied.clear()
@@ -108,13 +127,15 @@ private class Ledger : BootLedger {
 /**
  * The boot sequence both platforms run ([bootTurn] and the once-per-process
  * decisions) on a stand-in core and a real event log: a fresh install, a returning
- * user, the auto plan and the plan-removed marker, the rotation re-run, an unusable
- * core, the import confirmation and the interrupted-run offer.
+ * user, the auto plan, a removed plan and the legacy plan-removed pref, the
+ * rotation re-run, an unusable core, the import confirmation and the
+ * interrupted-run offer.
  */
 class AppBootTest {
     private val dir = newTempDir()
     private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
     private val store = MemoryStore()
+    private val settings = MemoryStore()
     private val ledger = Ledger()
     private val day = 20_000L to 3_600L
 
@@ -125,7 +146,13 @@ class AppBootTest {
     }
 
     private suspend fun boot(core: BootCore, engine: DurableCore = DurableCore(core), today: Pair<Long, Long> = day): BootTurn? =
-        bootTurn(engine, store, ledger, restore = { engine.restoreFrom(log) }, today = today, planDay = { 19_999L })
+        bootTurn(engine, store, settings, ledger, restore = { engine.restoreFrom(log) }, today = today, planDay = { 19_999L })
+
+    private fun logVariants(): List<String?> {
+        val lines = mutableListOf<String?>()
+        AppFiles.forEachLine(log) { if (it.isNotBlank()) lines += EventLog.variantOf(it) }
+        return lines
+    }
 
     @Test
     fun aFreshInstallIsDatedAndOffersTheSetupOnce() = runTest {
@@ -161,26 +188,85 @@ class AppBootTest {
     }
 
     @Test
-    fun aRemovedPlanIsNotGeneratedAgain() = runTest {
+    fun anOlderBuildsDistanceUnitMovesIntoTheProfileOnce() = runTest {
+        settings.edit { putString(LEGACY_DISTANCE_UNIT_KEY, "Mi") }
+        val core = BootCore(profile = true)
+        assertNotNull(boot(core))
+        assertEquals(listOf("SetToday", "SetProfile", "GeneratePlan"), core.variants())
+        val sent = core.applied.single { EventLog.variantOf(it) == "SetProfile" }
+        assertTrue(sent.contains("\"distance_unit\":\"Mi\""), sent)
+        assertFalse(settings.contains(LEGACY_DISTANCE_UNIT_KEY), "the setting is spent")
+    }
+
+    @Test
+    fun withoutAnOlderBuildsDistanceUnitNothingIsSent() = runTest {
+        val core = BootCore(profile = true)
+        assertNotNull(boot(core))
+        assertEquals(listOf("SetToday", "GeneratePlan"), core.variants())
+    }
+
+    @Test
+    fun anOlderBuildsDistanceUnitWaitsForAProfile() = runTest {
+        settings.edit { putString(LEGACY_DISTANCE_UNIT_KEY, "Mi") }
+        val core = BootCore()
+        assertNotNull(boot(core))
+        assertEquals(listOf("SetToday"), core.variants())
+        assertEquals("Mi", settings.getString(LEGACY_DISTANCE_UNIT_KEY, null), "kept for the guided setup")
+    }
+
+    @Test
+    fun aRemovedPlanStaysRemovedAcrossRelaunches() = runTest {
+        AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
+        repeat(2) { launch ->
+            val core = BootCore(profile = true)
+            val view = assertNotNull(boot(core)).view
+            assertNull(view.program, "launch $launch: no plan generated over the removal")
+            assertTrue(view.plan_removed)
+            assertEquals(listOf("ClearPlan", "SetToday"), core.variants(), "launch $launch: the log replayed, then the clock")
+        }
+    }
+
+    @Test
+    fun aLegacyMarkerWhoseLogLostTheClearPlanLogsTheRemoval() = runTest {
+        AppFiles.writeLinesSynced(log, listOf(Event.SetToday(19_000).toJson().toString()))
+        store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
+        val core = BootCore(profile = true)
+        val view = assertNotNull(boot(core)).view
+        assertNull(view.program, "no plan generated over the removal")
+        assertTrue(view.plan_removed)
+        assertEquals(listOf("SetToday", "SetToday", "ClearPlan"), core.variants())
+        assertEquals("ClearPlan", logVariants().last(), "the log carries the removal")
+        assertFalse(KEY_PLAN_CLEARED in store, "the pref is read once")
+
+        // The next launch has only the log.
+        val relaunch = BootCore(profile = true)
+        assertNull(assertNotNull(boot(relaunch)).view.program)
+        assertEquals(listOf("SetToday", "ClearPlan", "SetToday"), relaunch.variants())
+    }
+
+    @Test
+    fun aLegacyMarkerOverALoggedRemovalIsDropped() = runTest {
+        AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
         store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
         val core = BootCore(profile = true)
         assertNull(assertNotNull(boot(core)).view.program)
-        assertEquals(listOf("SetToday"), core.variants())
+        assertEquals(listOf("ClearPlan", "SetToday"), core.variants(), "no second ClearPlan")
+        assertFalse(KEY_PLAN_CLEARED in store)
     }
 
     @Test
-    fun aSurvivingProgramDropsAStaleMarker() = runTest {
+    fun aStaleLegacyMarkerIsDropped() = runTest {
         store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
-        boot(BootCore(profile = true, programAtStart = true))
-        assertFalse(store.getBoolean(KEY_PLAN_CLEARED, true), "a ClearPlan never landed")
-    }
+        val core = BootCore(profile = true, programAtStart = true)
+        assertNotNull(assertNotNull(boot(core)).view.program, "the surviving program stays")
+        assertEquals(listOf("SetToday"), core.variants(), "a ClearPlan never landed: none is sent now")
+        assertFalse(KEY_PLAN_CLEARED in store)
 
-    @Test
-    fun aLogEndingWithThePlanRemovedReArmsALostMarker() = runTest {
-        AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
-        val core = BootCore(profile = true, planRemoved = true)
-        assertNull(assertNotNull(boot(core)).view.program, "no plan generated over the removal")
-        assertTrue(store.getBoolean(KEY_PLAN_CLEARED, false))
+        store.edit { putBoolean(KEY_PLAN_CLEARED, false) }
+        val unmarked = BootCore(profile = true)
+        assertNotNull(assertNotNull(boot(unmarked)).view.program, "a false marker removes nothing")
+        assertEquals(listOf("SetToday", "GeneratePlan"), unmarked.variants())
+        assertFalse(KEY_PLAN_CLEARED in store)
     }
 
     @Test

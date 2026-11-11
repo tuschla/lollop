@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 
 use super::inputs::latest_input;
-use super::pain::{PainVerdict, classify_pain, latest_pain_clear, pain_context, worst_active_pain};
+use super::pain::{PainVerdict, classify_pain, latest_pain_clear, worst_active_pain};
 use super::perf::{E1RM_DELOAD_RATIO, E1RM_DELOAD_STREAK, E1rmOutcome, e1rm_ratio_outcome};
 use super::rules::{
     DECOUPLING_MIN_EFFORT_MIN, HRV_SWC_LOWER_Z, HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE, RPE_DELTA_BELOW,
@@ -71,10 +71,6 @@ pub struct SignalState {
     pub streak: u8,
     /// Qualitative state, e.g. `"below normal"` / `"well above normal: rest"`.
     pub state: String,
-    /// Extra display context for the shell, e.g. the pain sub-line
-    /// `"Left knee · sharp or joint pain · 6/10"`. Empty for signals that carry
-    /// no characterizing detail. Display-only, never a graded claim.
-    pub detail: String,
     /// Registry claim of the rule whose threshold judged the state. `None`
     /// when the row is a plain factual echo (a recorded-only signal with no
     /// gating rule, or an explicit all-clear), those judge nothing, so they
@@ -139,18 +135,11 @@ pub fn signal_states_in(
             } else {
                 state.into_owned()
             };
-            // Display-only sub-line context: only a characterized pain report
-            // carries one (e.g. "Left knee · sharp or joint pain · 6/10").
-            let detail = match (signal, &input.pain) {
-                (ReadinessSignal::Pain, Some(d)) if v > 0.0 => pain_context(d),
-                _ => String::new(),
-            };
             Some(SignalState {
                 signal,
                 value: v,
                 streak: input.streak,
                 state,
-                detail,
                 claim,
                 from_today: dated_today(input, ctx),
                 stale: stale_row,

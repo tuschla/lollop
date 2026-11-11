@@ -11,9 +11,10 @@ use std::fmt::Write as _;
 
 use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min, round_tenths};
 use crate::app::model::{Model, profile_for_day};
-use crate::app::view_types::{EvidenceTagView, PrescriptionView, RunTargetView};
+use crate::app::plan_views::PlanItem;
+use crate::app::view_types::{EvidenceTagView, RunTargetView};
 use crate::evidence::claims;
-use crate::profile::Profile;
+use crate::profile::{DistanceUnit, Profile};
 use crate::schema::{
     Prescription, Recommended, RunIntensity, RunSessionType, Session, SessionType, ThreeZone,
     VdotBand,
@@ -90,7 +91,7 @@ pub(super) fn logged_hr_pct_max(
 fn hr_rest_anchor(profile: &Profile) -> Option<f64> {
     profile
         .resting_hr_bpm
-        .filter(|r| r.is_finite() && (25.0..=120.0).contains(r))
+        .filter(|r| running::plausible_resting_hr(*r))
 }
 
 /// The training band a run prescription is executed in.
@@ -252,15 +253,34 @@ fn band_pace(band: TargetBand, vdot: f64) -> Option<(f64, f64)> {
     }
 }
 
-fn pace_label(fast: f64, slow: f64, unit: &str, per_km_factor: f64) -> String {
+/// A pace range in `unit` from its per-km bounds (seconds): "4:50–5:05 /km",
+/// "slower than 8:11 /mi" (`fast == 0`), "4:30 /km or faster" (`slow == 0`).
+fn pace_label(fast: f64, slow: f64, unit: DistanceUnit) -> String {
+    let (suffix, per_km_factor) = match unit {
+        DistanceUnit::Km => ("km", 1.0),
+        DistanceUnit::Mi => ("mi", running::MILE_M / 1000.0),
+    };
     let (f, s) = (fast * per_km_factor, slow * per_km_factor);
     if fast <= 0.0 {
-        format!("slower than {} /{unit}", fmt_mss(s))
+        format!("slower than {} /{suffix}", fmt_mss(s))
     } else if slow <= 0.0 {
-        format!("{} /{unit} or faster", fmt_mss(f))
+        format!("{} /{suffix} or faster", fmt_mss(f))
     } else {
-        format!("{}–{} /{unit}", fmt_mss(f), fmt_mss(s))
+        format!("{}–{} /{suffix}", fmt_mss(f), fmt_mss(s))
     }
+}
+
+/// The target's pace in km for the item's own line (`summary`,
+/// `intensity_label`, which state km in every unit), from the whole seconds
+/// the target carries; `None` without a pace.
+fn km_pace_label(t: &RunTargetView) -> Option<String> {
+    (!t.pace_label.is_empty()).then(|| {
+        pace_label(
+            f64::from(t.pace_fast_sec_per_km),
+            f64::from(t.pace_slow_sec_per_km),
+            DistanceUnit::Km,
+        )
+    })
 }
 
 /// %HRmax band (percent) for a band, from the prescription's own %HRmax band
@@ -301,27 +321,44 @@ pub(super) fn hr_anchor(profile: Option<&Profile>) -> HrAnchor {
     }
 }
 
+/// The figures a run target was resolved from: the fitness score behind the
+/// paces, the heart-rate figures (zero when HRmax is unknown) and the unit
+/// the pace label reads in.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct TargetAnchor {
+    pub(super) vdot: Option<f64>,
+    pub(super) hr: HrAnchor,
+    pub(super) unit: DistanceUnit,
+}
+
+impl TargetAnchor {
+    pub(super) fn new(vdot: Option<f64>, hr: HrAnchor, unit: DistanceUnit) -> Self {
+        TargetAnchor {
+            vdot: vdot.filter(|v| v.is_finite() && *v > 0.0),
+            hr: if hr.max_bpm > 0.0 {
+                hr
+            } else {
+                HrAnchor::default()
+            },
+            unit,
+        }
+    }
+}
+
 /// Resolve the numeric target for one band. `vdot` provides the paces; `hr`
-/// the bpm; the effort cue is always present.
+/// the bpm; the effort cue is always present. The pace label reads in `unit`.
 pub(super) fn resolve_target(
     band: TargetBand,
     intensity: &RunIntensity,
     vdot: Option<f64>,
     hr: HrAnchor,
+    unit: DistanceUnit,
 ) -> RunTargetView {
     let mut t = RunTargetView {
         band: band.word().to_string(),
         ..Default::default()
     };
-    // The anchors are kept even when this band shows no pace or bpm, so a
-    // downgrade can re-derive the easy band from them.
     let vdot = vdot.filter(|v| v.is_finite() && *v > 0.0);
-    t.vdot = vdot.unwrap_or(0.0);
-    if hr.max_bpm > 0.0 {
-        t.hr_max_bpm = hr.max_bpm;
-        t.hr_max_measured = hr.measured;
-        t.hr_rest_bpm = hr.rest_bpm;
-    }
     let mut evidence: Option<Recommended<()>> = None;
 
     // Pace (running-007 VDOT bands off the CURRENT race fitness).
@@ -330,8 +367,7 @@ pub(super) fn resolve_target(
     {
         t.pace_fast_sec_per_km = fast.round() as u32;
         t.pace_slow_sec_per_km = slow.round() as u32;
-        t.pace_label_km = pace_label(fast, slow, "km", 1.0);
-        t.pace_label_mi = pace_label(fast, slow, "mi", running::MILE_M / 1000.0);
+        t.pace_label = pace_label(fast, slow, unit);
         evidence = Some(Recommended::new((), claims::RUN_VDOT_001));
     }
 
@@ -369,7 +405,7 @@ pub(super) fn resolve_target(
         Some((lo, hi)) => format!("{lo}–{hi} of 10"),
         None => String::new(),
     };
-    let unanchored = t.pace_label_km.is_empty() && !hr.measured;
+    let unanchored = t.pace_label.is_empty() && !hr.measured;
     if band.is_easy() && unanchored {
         detail = if detail.is_empty() {
             "you can talk in full sentences".to_string()
@@ -396,8 +432,8 @@ pub(super) fn resolve_target(
 /// when known, otherwise the original band label with its bpm, then the
 /// effort cue.
 fn target_label(base: &str, t: &RunTargetView, feel: &str) -> String {
-    let mut label = if !t.pace_label_km.is_empty() {
-        let mut label = format!("{} ({feel})", t.pace_label_km);
+    let mut label = if let Some(pace) = km_pace_label(t) {
+        let mut label = format!("{pace} ({feel})");
         if !t.hr_label.is_empty() {
             let _ = write!(label, " · {}", t.hr_label);
         }
@@ -428,7 +464,7 @@ fn base_label(original: &str, band: TargetBand, intensity: &RunIntensity) -> Str
 /// [`RunStructureView`] (zero = absent). The volume stays the summary's first
 /// `·` segment (the downgrade path reads it), so every structure note goes
 /// after the target.
-fn structure_suffix(it: &PrescriptionView) -> String {
+pub(in crate::app) fn structure_suffix(it: &PlanItem) -> String {
     let Some(s) = it.run_structure.as_ref() else {
         return String::new();
     };
@@ -473,7 +509,7 @@ fn structure_suffix(it: &PrescriptionView) -> String {
 }
 
 /// Rewrite one run item's intensity line + summary from a resolved target.
-fn apply_target(it: &mut PrescriptionView, t: RunTargetView, base: &str, feel: &str) {
+fn apply_target(it: &mut PlanItem, t: RunTargetView, base: &str, feel: &str) {
     let new_label = target_label(base, &t, feel);
     let head = if it.run_head.is_empty() {
         String::new()
@@ -489,7 +525,7 @@ fn apply_target(it: &mut PrescriptionView, t: RunTargetView, base: &str, feel: &
 /// Fill every run item of one flattened session with its numeric target
 /// (`items` are aligned with `s.prescriptions`; lifts are untouched).
 pub(super) fn apply_run_targets(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     s: &Session,
     anchors: &crate::plan::Anchors,
     model: &Model,
@@ -508,9 +544,20 @@ pub(super) fn apply_run_targets(
         let Some(band) = band_for(kind, &r.intensity) else {
             continue;
         };
-        let t = resolve_target(band, &r.intensity, anchors.run_vdot, hr);
+        let t = resolve_target(
+            band,
+            &r.intensity,
+            anchors.run_vdot,
+            hr,
+            model.distance_unit(),
+        );
         let base = base_label(&it.intensity_label, band, &r.intensity);
         apply_target(it, t, &base, band.plain());
+        it.target_anchor = Some(TargetAnchor::new(
+            anchors.run_vdot,
+            hr,
+            model.distance_unit(),
+        ));
     }
 }
 
@@ -519,19 +566,15 @@ pub(super) fn apply_run_targets(
 /// the downgrade path right after it sets the easy `intensity_label` (and
 /// before it rebuilds `summary` from it): appends the easy pace / bpm / effort
 /// to that label. No-op for an item without a run target.
-pub(super) fn downgrade_run_target_to_easy(it: &mut PrescriptionView) {
-    let Some(old) = it.run_target.take() else {
+pub(super) fn downgrade_run_target_to_easy(it: &mut PlanItem) {
+    if it.run_target.take().is_none() {
         return;
-    };
-    let hr = HrAnchor {
-        max_bpm: old.hr_max_bpm,
-        measured: old.hr_max_measured,
-        rest_bpm: old.hr_rest_bpm,
-    };
-    let vdot = (old.vdot > 0.0).then_some(old.vdot);
+    }
+    let a = it.target_anchor.unwrap_or_default();
     let easy = RunIntensity::Vdot(VdotBand::Easy);
-    let t = resolve_target(TargetBand::Easy, &easy, vdot, hr);
-    for part in [&t.pace_label_km, &t.hr_label, &t.effort_cue] {
+    let t = resolve_target(TargetBand::Easy, &easy, a.vdot, a.hr, a.unit);
+    let pace = km_pace_label(&t).unwrap_or_default();
+    for part in [&pace, &t.hr_label, &t.effort_cue] {
         if !part.is_empty() {
             it.intensity_label.push_str(" · ");
             it.intensity_label.push_str(part);

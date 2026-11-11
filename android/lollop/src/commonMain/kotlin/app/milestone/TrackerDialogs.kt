@@ -198,6 +198,7 @@ internal fun RunFinishPanel(
                                 Res.string.track_short_run_note,
                                 runDistLabel(km, unit),
                                 shortRunThresholdLabel(unit),
+                                shortRunMinutesLabel(),
                             ),
                         )
                     }

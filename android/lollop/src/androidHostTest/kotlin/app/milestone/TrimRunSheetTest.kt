@@ -34,15 +34,15 @@ class TrimRunSheetTest {
     @Before
     fun kmWithoutTiles() {
         AppSettings.setShowRouteMaps(ctx, false)
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
+        EventDispatcher.model.value = ViewModel(profile = Profile(distance_unit = DistanceUnit.Km))
     }
 
     @After
     fun restore() = AppRuntime.resetForTest()
 
     // 21 fixes 10 s apart, ~37 m each: a 200 s, ~0.745 km raw GPS track.
-    private val segments = listOf((0..20).map { GpxFix(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, hrBpm = null) })
-    private val route = RunRoute(gpx = null, segments = segments, trimmable = true, track = timedTrackFromSegments(segments))
+    private val segments = listOf((0..20).map { GpsPoint(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, 5.0) })
+    private val route = RunRoute(segments = segments, trimmable = true, track = timedTrackFromSegments(segments))
 
     // The core's QC'd figure differs from the raw track's, as on a real run.
     private val run = RunResultView(distance_km = 0.60, duration_min = 200 / 60.0, entry_id = 1L, observed_at = 1_700_000_200L, has_gpx = true)

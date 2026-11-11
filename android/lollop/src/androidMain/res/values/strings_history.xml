@@ -4,11 +4,12 @@
 <resources>
     <!-- Run import: why one file was skipped, shown after its name ("bike.fit (a cycling activity, not a run)"). -->
     <string name="import_reason_read_failed">couldn\'t be read</string>
-    <string name="import_reason_too_large">too large, 32 MB max</string>
+    <!-- %1$s = MAX_RUN_IMPORT_BYTES in MiB (CoreConstants). -->
+    <string name="import_reason_too_large">too large, %1$s MB max</string>
     <string name="import_reason_wrong_type">not a GPX, TCX or FIT file</string>
     <string name="import_reason_no_track">no GPS points</string>
-    <!-- %1$s = the keep threshold in the user's unit ("0.3 mi"); "3 minutes" mirrors MIN_RUN_SEC (RunTracking.kt). -->
-    <string name="import_reason_too_short">too short for a run, under %1$s or 3 minutes</string>
+    <!-- %1$s = the keep threshold in the user's unit ("0.3 mi"), %2$s = MIN_RUN_SEC in minutes (CoreConstants). -->
+    <string name="import_reason_too_short">too short for a run, under %1$s or %2$s minutes</string>
     <string name="import_reason_no_timestamps">no timestamps, so it looks like a planned route</string>
     <string name="import_reason_damaged">the file is damaged</string>
     <!-- %1$s = the activity's sport as the file names it, lowercase ("cycling"). -->
@@ -64,6 +65,13 @@
     <string name="run_rate_title">Rate this run</string>
     <string name="run_effort_value">%1$d of 10 · %2$s</string>
     <string name="run_type_unset">Set type</string>
+    <!-- Run type (the user's run-intent tag): the RUN TYPE chips and row. -->
+    <string name="run_type_steady">Steady</string>
+    <string name="run_type_interval">Interval</string>
+    <string name="run_type_tempo">Tempo</string>
+    <string name="run_type_long">Long run</string>
+    <string name="run_type_recovery">Recovery</string>
+    <string name="run_type_easy">Easy</string>
     <string name="run_details">Details</string>
     <string name="run_details_value">Distance, time, HR</string>
     <string name="run_trim_row">Trim start or end</string>

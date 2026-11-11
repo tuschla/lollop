@@ -50,33 +50,26 @@ private enum class PainCharacter(val labelRes: StringResource, val kind: PainKin
     NotSure(Res.string.log_pain_char_not_sure, PainKind.Other),
 }
 
-/** Preset body areas for the pain report. [wire] is what the report carries and
- *  must stay a fixed English key: the core maps it to a body region to scope a
- *  sharp-pain stop (`autoreg::pain_region`) and echoes it on the banner;
- *  [labelRes] is only the chip text. */
-private enum class PainArea(val wire: String, val labelRes: StringResource) {
-    LeftKnee("Left knee", Res.string.log_pain_area_left_knee),
-    RightKnee("Right knee", Res.string.log_pain_area_right_knee),
-    Ankle("Ankle / Achilles", Res.string.log_pain_area_ankle),
-    Hip("Hip", Res.string.log_pain_area_hip),
-    LowerBack("Lower back", Res.string.log_pain_area_lower_back),
-    Shoulder("Shoulder", Res.string.log_pain_area_shoulder),
-    ElbowWrist("Elbow / wrist", Res.string.log_pain_area_elbow_wrist),
-    Neck("Neck", Res.string.log_pain_area_neck),
-    Foot("Foot", Res.string.log_pain_area_foot),
-    Other("Other", Res.string.log_pain_area_other),
-}
+/** The chip text of a preset body area ([PainArea] is the core's: its wire
+ *  name is the location the report carries). */
+private val PainArea.labelRes: StringResource
+    get() = when (this) {
+        PainArea.LeftKnee -> Res.string.log_pain_area_left_knee
+        PainArea.RightKnee -> Res.string.log_pain_area_right_knee
+        PainArea.Ankle -> Res.string.log_pain_area_ankle
+        PainArea.Hip -> Res.string.log_pain_area_hip
+        PainArea.LowerBack -> Res.string.log_pain_area_lower_back
+        PainArea.Shoulder -> Res.string.log_pain_area_shoulder
+        PainArea.ElbowWrist -> Res.string.log_pain_area_elbow_wrist
+        PainArea.Neck -> Res.string.log_pain_area_neck
+        PainArea.Foot -> Res.string.log_pain_area_foot
+        PainArea.Other -> Res.string.log_pain_area_other
+    }
 
-/** The body area a pain report names, as its chip label: from the report's own
- *  [location] when the shell still holds it, else from the head of the core's
- *  pain detail line ("Left knee · sharp/joint · 6/10"). Null when no preset area
- *  is named. */
+/** The chip label of the area the active pain report names (`active_pain.area`);
+ *  null when it names none. */
 @Composable
-internal fun painAreaLabel(location: String?, coreDetail: String?): String? {
-    val wire = location ?: coreDetail?.substringBefore(" · ")?.trim()
-    val area = PainArea.entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) && it != PainArea.Other }
-    return area?.let { stringResource(it.labelRes) }
-}
+internal fun painAreaLabel(area: PainArea?): String? = area?.let { stringResource(it.labelRes) }
 
 /** Pain severity, 0 (none) to 10 (worst), left to right. */
 private val PainSeverityValues = (0..10).toList()
@@ -91,8 +84,6 @@ private val PainSeverityValues = (0..10).toList()
 @Composable
 fun PainTriageSheet(
     onClose: () -> Unit,
-    // Report unsaved-triage state so a host sheet's swipe-down can guard it.
-    onDirtyChange: (Boolean) -> Unit,
     onSubmit: (Event.SubmitReadiness) -> Unit,
 ) {
     var location by rememberSaveable { mutableStateOf<PainArea?>(null) }
@@ -114,7 +105,6 @@ fun PainTriageSheet(
         rising ||
         worseningAfter24h ||
         observedAt != initialObservedAt
-    ReportDirty(dirty, onDirtyChange)
     val characterLabels = PainCharacter.entries.associateWith { stringResource(it.labelRes) }
     val severityText = PainSeverityValues.associateWith { stringResource(Res.string.log_pain_severity_value, it) }
     val severitySpoken = PainSeverityValues.associateWith { stringResource(Res.string.rating_pain_spoken, it) }

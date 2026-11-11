@@ -109,9 +109,9 @@ internal object IosReminder : SessionReminderPort {
         val prefs = SessionReminder.store(ctx)
         val remindedToday = prefs.getLong(KEY_SCHEDULED_DAY, Long.MIN_VALUE) == today &&
             prefs.getLong(KEY_SCHEDULED_AT, Long.MAX_VALUE) <= now
-        val snapshot = model?.let { widgetSnapshotOf(it, resolveDistanceUnit(AppSettings.distanceUnitOverride.value), zone.id) }
+        val snapshot = model?.let { widgetSnapshotOf(it, it.distanceUnit(), zone.id) }
         fun open(day: Long): Reminder? = SessionReminder.due(snapshot, day, today, zone.id, recording)
-        val res = systemResources()
+        val res = PlatformContext.INSTANCE.appResources()
         val wanted = mutableMapOf<String, UNNotificationRequest>()
         var todayAt: Long? = null
         if (s.enabled) {

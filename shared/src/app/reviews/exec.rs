@@ -5,13 +5,14 @@
 use std::fmt::Write as _;
 
 use crate::app::format::{fmt_km_or_mi, round_tenths};
+use crate::app::plan_views::{PlanItem, PlanRow};
 use crate::app::view_types::{
     ItemSetView, ItemStatus, PlanIntensity, PrescriptionView, SessionDoneItemView, SessionDoneView,
-    SessionPlanView,
 };
 use crate::event::{Decouple, IntervalExec};
 use crate::evidence::claims;
 use crate::feedback::FeedbackCategory;
+use crate::profile::DistanceUnit;
 use crate::schema::Recommended;
 use crate::{feedback, strength};
 
@@ -67,7 +68,7 @@ pub(in crate::app) struct DerivedExec {
 /// minus the prescribed reps, strength-005); beyond 4 reps in reserve a rating
 /// is too far from failure to judge (feedback-020/022: RIR is trusted within
 /// ~1–3 reps of failure).
-pub(in crate::app) fn target_rir(it: &PrescriptionView) -> Option<u8> {
+pub(in crate::app) fn target_rir(it: &PlanItem) -> Option<u8> {
     match it.intensity {
         PlanIntensity::Rir { rir } => Some(rir.clamp(0, 10) as u8),
         PlanIntensity::RirRange { lo, .. } => Some(lo.clamp(0, 10) as u8),
@@ -97,7 +98,7 @@ fn top_set(it: &PrescriptionView) -> Option<&ItemSetView> {
         })
 }
 
-fn lift_outcome(it: &PrescriptionView) -> LiftOutcome {
+fn lift_outcome(it: &PlanItem) -> LiftOutcome {
     let qualifying: Vec<&ItemSetView> = it.logged_sets.iter().filter(|s| s.qualifies).collect();
     let top = top_set(it);
     let rir_actual = qualifying
@@ -125,10 +126,7 @@ fn lift_outcome(it: &PrescriptionView) -> LiftOutcome {
 /// The latest completed (status `"done"`) plan day on or before today, judged
 /// item by item against what was shown that day: reps met, reserve vs target,
 /// run volume. `None` when no plan day is complete this week.
-pub(in crate::app) fn derive_session_exec(
-    week: &[SessionPlanView],
-    today: i64,
-) -> Option<DerivedExec> {
+pub(in crate::app) fn derive_session_exec(week: &[PlanRow], today: i64) -> Option<DerivedExec> {
     let day = week
         .iter()
         .filter(|s| s.status.is_done() && s.epoch_day <= today && !s.items.is_empty())
@@ -167,7 +165,7 @@ pub(in crate::app) fn derive_session_exec(
 /// Today's completed session for the Today screen: one line per item, from the
 /// logged work. `None` unless today's plan day is complete.
 pub(in crate::app) fn build_session_done(
-    week: &[SessionPlanView],
+    week: &[PlanRow],
     today: Option<i64>,
 ) -> Option<SessionDoneView> {
     let today = today?;
@@ -219,10 +217,10 @@ pub(in crate::app) fn build_session_done(
 }
 
 /// The completed-run line: "as planned" only when the run reached the volume
-/// shown for the day (at the precision shown), else "8.1 km of 9.5 km"; `mi`
-/// states the distances in miles.
-pub(super) fn run_done_message(r: &RunOutcome, mi: bool) -> String {
-    let d = |km: f64| fmt_km_or_mi(km, mi);
+/// shown for the day (at the precision shown), else "8.1 km of 9.5 km", the
+/// distances in `unit`.
+pub(super) fn run_done_message(r: &RunOutcome, unit: DistanceUnit) -> String {
+    let d = |km: f64| fmt_km_or_mi(km, unit);
     match (r.planned_km, r.planned_min) {
         (Some(p), _) if r.km > 0.0 && round_tenths(r.km) < round_tenths(p) => {
             format!("Run done: {} of {} in {:.0} min.", d(r.km), d(p), r.min)

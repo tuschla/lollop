@@ -2,8 +2,7 @@ use crate::app::evidence_views::describe;
 use crate::app::format::{fmt_u8_range, fmt_whole_km_or_mi};
 use crate::app::guidance::hybrid::build_hybrid_guidance;
 use crate::app::guidance::rows::{
-    WeeklyBasis, push_guidance, push_guidance_mi, push_hold_row, training_age_label,
-    weekly_basis_text,
+    WeeklyBasis, push_guidance, push_hold_row, training_age_label, weekly_basis_text,
 };
 use crate::app::guidance::running::build_running_guidance;
 use crate::app::guidance::strength::build_strength_guidance;
@@ -14,6 +13,10 @@ use crate::individualization::{self, Environment};
 use crate::memo::{MemoId, fingerprint, memoized};
 use crate::profile::{PlanProfile, Profile};
 use crate::schema::{AdjustmentCall, AdjustmentKind, Recommended, ScreenGate};
+
+/// The section of the profile-context rows (the training age), which the view
+/// sends apart from the rest of the guidance (`ViewModel::profile_guidance`).
+pub(in crate::app) const PROFILE_SECTION: &str = "Profile";
 
 /// The weekly running volume the guidance rows should reason about, and how it
 /// was determined: the LARGER of the stated profile figure and the MEASURED
@@ -90,7 +93,7 @@ fn build_guidance_measured_uncached(
     let before = rows.len();
     push_guidance(
         &mut rows,
-        "Profile",
+        PROFILE_SECTION,
         format!("Training age: {}", training_age_label(age)),
         age_r,
     );
@@ -210,14 +213,13 @@ fn build_safety_guidance(
     // leading Safety block so the section stays contiguous with the gates.
     let bsi = hybrid::bsi_surveillance_flag(weekly_km);
     if bsi.value {
-        let bsi_text = |mi: bool| {
-            format!(
-                "Bone stress: you run {}, above ~{}. Watch for pain in one spot on a bone, and eat enough for your training",
-                weekly_basis_text(weekly_km, weekly_basis, mi),
-                fmt_whole_km_or_mi(hybrid::BSI_SURVEILLANCE_KM_PER_WEEK, mi)
-            )
-        };
-        push_guidance_mi(rows, "Safety", bsi_text(false), bsi_text(true), &bsi);
+        let unit = p.distance_unit;
+        let bsi_text = format!(
+            "Bone stress: you run {}, above ~{}. Watch for pain in one spot on a bone, and eat enough for your training",
+            weekly_basis_text(weekly_km, weekly_basis, unit),
+            fmt_whole_km_or_mi(hybrid::BSI_SURVEILLANCE_KM_PER_WEEK, unit)
+        );
+        push_guidance(rows, "Safety", bsi_text, &bsi);
         // hybrid-024 energy-availability guard: high-volume endurance is one
         // of its higher-risk cohorts.
         let ea = Recommended::new((), claims::HYB_EA_001);

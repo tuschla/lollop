@@ -335,11 +335,22 @@ fn bsi_surveillance_reads_measured_not_stated_mileage() {
         "the row states the measured basis: {}",
         bsi.summary
     );
+    let miles = Profile {
+        distance_unit: DistanceUnit::Mi,
+        ..model.profile().cloned().expect("a profile")
+    };
+    app.update(Event::SetProfile(miles), &mut model)
+        .expect_only_render();
+    let bsi = app
+        .view(&model)
+        .guidance
+        .into_iter()
+        .find(|g| g.summary.contains("Bone stress:"))
+        .expect("the BSI row in miles");
     assert!(
-        bsi.summary_mi.contains(" mi a week from your logged runs")
-            && bsi.summary_mi.contains("~40 mi"),
-        "a miles twin restates the distances: {}",
-        bsi.summary_mi
+        bsi.summary.contains(" mi a week from your logged runs") && bsi.summary.contains("~40 mi"),
+        "a miles profile restates the distances in miles: {}",
+        bsi.summary
     );
 }
 

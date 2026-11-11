@@ -240,13 +240,13 @@ pub enum Event {
     /// Drop all logged activities (part of "Clear all data").
     ClearActivities,
     /// Delete one logged set, run or activity. Targets the newest entry
-    /// whose `entry_id` matches (or, for a row with no id, whose
-    /// `observed_at` matches `observed_at_fallback`). A no-op when nothing
+    /// whose id matches (`event::entry::row_id`). A no-op when nothing
     /// matches. Compaction cancels it against its matched log line (Rule 3).
     DeleteEntry {
         kind: EntryKind,
         entry_id: u64,
-        /// Match target for a row with no entry id (`entry_id == 0`).
+        /// The row's `observed_at`: names the row in a line an old build
+        /// wrote with `entry_id` 0.
         #[serde(default)]
         observed_at_fallback: i64,
     },
@@ -264,10 +264,8 @@ pub enum Event {
         /// when the user re-dates a set).
         #[serde(default)]
         observed_at: i64,
-        /// The OLD `observed_at` of the row being amended. For a row with no id
-        /// (`entry_id == 0`) whose date the user CHANGED, the original entry can
-        /// only be located by its old timestamp; matching on the new one would
-        /// find nothing and push a DUPLICATE. 0 = match on `observed_at`.
+        /// The OLD `observed_at` of the row being amended: names the row in
+        /// a line an old build wrote with `entry_id` 0. 0 = `observed_at`.
         #[serde(default)]
         observed_at_fallback: i64,
         /// Timed-hold duration, seconds (see [`Event::LogSet`]).
@@ -314,8 +312,7 @@ pub enum Event {
     /// from the sliced track at `view()`. Matches like `DeleteEntry`/`AmendRun`.
     TrimRunTrack {
         entry_id: u64,
-        /// The run's `observed_at`, so a run with no id (`entry_id == 0`) is
-        /// located by timestamp; see [`Event::AmendRun`].
+        /// The run's `observed_at`; see [`Event::DeleteEntry`].
         #[serde(default)]
         observed_at_fallback: i64,
         keep_from_sec: i64,
@@ -328,8 +325,7 @@ pub enum Event {
     /// matches. Compaction family 2 (runs), kept like a trim line.
     AmendRunMeta {
         entry_id: u64,
-        /// The run's `observed_at`, so a run with no id (`entry_id == 0`) is
-        /// located by timestamp.
+        /// The run's `observed_at`; see [`Event::DeleteEntry`].
         #[serde(default)]
         observed_at_fallback: i64,
         /// Whole-session effort, CR-10 (0–10); values above 10 clamp to 10.

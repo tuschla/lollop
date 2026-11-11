@@ -157,7 +157,7 @@ class ThemeContrastTest {
                 Triple("dark", t.dark, DarkStatusColors.warnMark),
                 Triple("light", t.light, StatusColors().warnMark),
             )) {
-                val glyph = if (tile == StatusColors().warn) Color.White else p.bgTop
+                val glyph = if (tile == StatusColors().warn) OnStatusFill else p.bgTop
                 val onCard = contrastRatio(tile, p.bgElevated)
                 assertTrue("${t.name} $mode: warn tile on bgElevated is %.2f:1, needs ≥ 3.0:1".format(onCard), onCard >= 3.0)
                 val glyphRatio = contrastRatio(glyph, tile)
@@ -189,11 +189,24 @@ class ThemeContrastTest {
 
     @Test
     fun safetyBannerText_clearsAaOnDangerSurface() {
-        // The DO-NOT-TRAIN banner's title, actions and summary are white; its
+        // The DO-NOT-TRAIN banner's title, actions and summary are OnStatusFill; its
         // captions (reason, "paused" line, grade, citation) are DangerOn.
         val danger = StatusColors().danger
-        assertAa("all themes", "white on danger", Color.White, danger)
+        assertAa("all themes", "OnStatusFill on danger", OnStatusFill, danger)
         assertAa("all themes", "DangerOn on danger", DangerOn, danger)
+    }
+
+    @Test
+    fun statusFillLabels_clearAaOnEveryStatusFill() {
+        // Chips and marks on the fixed fills: warn, the evidence grades, and the
+        // done/slot fill (evidenceStrong).
+        val s = StatusColors()
+        for ((name, fill) in listOf(
+            "warn" to s.warn, "evidenceStrong" to s.evidenceStrong, "evidenceModerate" to s.evidenceModerate,
+            "evidenceWeak" to s.evidenceWeak, "evidenceExpert" to s.evidenceExpert, "evidenceUnknown" to s.evidenceUnknown,
+        )) {
+            assertAa("all themes", "OnStatusFill on $name", OnStatusFill, fill)
+        }
     }
 
     @Test

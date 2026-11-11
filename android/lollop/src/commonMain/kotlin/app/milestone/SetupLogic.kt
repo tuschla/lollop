@@ -11,10 +11,6 @@ import app.milestone.resources.setup_equip_rings
 import app.milestone.resources.setup_focus_both
 import app.milestone.resources.setup_focus_lift
 import app.milestone.resources.setup_focus_run
-import app.milestone.resources.setup_goaldist_10k
-import app.milestone.resources.setup_goaldist_5k
-import app.milestone.resources.setup_goaldist_half
-import app.milestone.resources.setup_goaldist_marathon
 import app.milestone.resources.setup_lead_lifting
 import app.milestone.resources.setup_lead_running
 import app.milestone.resources.setup_level_advanced_consequence
@@ -65,6 +61,7 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.yearsUntil
+import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.StringResource
 
 // Pure guided-setup logic: the answer vocabulary, the screen path, the answers →
@@ -209,18 +206,19 @@ internal val ResistanceModality.setupConsequenceRes: StringResource
 internal fun seedWeightUnit(initial: Event.SetProfile?, locale: PlatformLocale = deviceLocale()): WeightUnit =
     initial?.weightUnit ?: localeWeightUnit(locale)
 
-/** Age at which the core's pediatric hold (SAFE-PEDS-001) stops applying. */
-private const val ADULT_AGE_YEARS = 18.0
+/** The core's reading of a profile still being edited ([DurableCore.draftFacts]):
+ *  the age on [ProfileDraft.today], the youth (SAFE-PEDS-001) and health gates it
+ *  would raise and the PAR-Q+ answers after [ProfileDraft.answer], so setup and
+ *  Profile say what a sent profile would hold before it is sent. A core that
+ *  can't answer (setup is unreachable then: boot shows the core unavailable)
+ *  leaves the draft's answers as they are and reads no gate. */
+internal fun draftFacts(draft: ProfileDraft): DraftFacts =
+    AppRuntime.engine.draftFacts(draft) ?: DraftFacts(health = draft.health, age_years = draft.ageYears)
 
-/** Under 18: the core's pediatric hold (SAFE-PEDS-001) keys off age alone. */
-internal fun isMinor(ageYears: Double?): Boolean = ageYears != null && ageYears < ADULT_AGE_YEARS
-
-/** Completed years from [birthEpochDay] to [today] (local epoch days): the same
- *  calendar count the core derives `age_years` with (a 29 February birthday
- *  completes its year on 1 March in common years). Display only before the core
- *  echoes the profile; a future birthday reads 0. */
-internal fun ageOnDay(birthEpochDay: Long, today: Long): Int =
-    LocalDate.fromEpochDays(birthEpochDay).yearsUntil(LocalDate.fromEpochDays(today)).coerceAtLeast(0)
+/** A birthday's completed years on [today] (local epoch days), as the core counts
+ *  them. */
+internal fun birthdayAge(birthDay: Long, today: Long): Double? =
+    draftFacts(ProfileDraft(birthEpochDay = birthDay, today = today)).age_years
 
 /** The birthdays whose age on [today] lies inside [AGE_RANGE] (14–100), oldest
  *  first: the picker's selectable days, so no future date can be picked. */
@@ -242,15 +240,6 @@ internal fun birthdayPickerStart(birthDay: Long?, today: Long): Long {
 
 /** Years back from today the birthday calendar opens on when no birthday is set. */
 private const val PICKER_START_YEARS_BACK = 30L
-
-/** Whether the health answers raise a core deferral gate, so the wizard can say
- *  so before Finish. Age (the core's pediatric gate) is checked apart with
- *  [isMinor]. A symptom (Q2/Q3) defers even with a clearance answer (onboard-052). */
-internal fun healthDefers(health: HealthScreen): Boolean =
-    (health.parq_positive && !health.medically_cleared) ||
-        health.symptomatic || health.acute_illness ||
-        health.pregnant || health.pregnancy_warning_sign ||
-        health.injury_or_rehab || health.reds_signal
 
 /** A display buffer parsed as a number inside [range], else null. */
 internal fun parseInRange(text: String, range: ClosedFloatingPointRange<Double>): Double? =
@@ -307,7 +296,8 @@ internal fun setupProgress(steps: List<SetupStep>, index: Int, modality: Modalit
 /** The path the answers had when an edit started from the review (or when a
  *  Profile Focus switch opened the setup): Next walks only what the edit
  *  changed, then returns to the review. */
-internal data class ReviewReturn(val modality: Modality?, val calisthenics: Boolean, val raceGoal: Boolean) : JvmSerializable {
+@Serializable
+internal data class ReviewReturn(val modality: Modality?, val calisthenics: Boolean, val raceGoal: Boolean) {
     val steps: List<SetupStep> get() = setupSteps(modality, calisthenics, raceGoal)
 }
 
@@ -358,58 +348,43 @@ internal fun toggleWeekday(mask: Int?, day: Int): Int? =
  *  "Any days" (null). Shared by the wizard's Days step and Profile › Training days. */
 internal fun weekdaysCover(mask: Int?, days: Int): Boolean = mask == null || weekdayCount(mask) >= days
 
-/** Short weekday name, Monday = 0, in the app's language. */
-internal fun weekdayShortName(day: Int, locale: PlatformLocale = appLocale()): String =
-    weekdayName(DayOfWeek(day + 1), WeekdayWidth.Short, locale)
-
 /** "Sat, Sun" for a mask (Monday first). */
 internal fun weekdaysLabel(mask: Int, locale: PlatformLocale = appLocale()): String =
-    (0 until WEEK_DAYS).filter { mask and (1 shl it) != 0 }.joinToString(", ") { weekdayShortName(it, locale) }
+    (0 until WEEK_DAYS).filter { mask and (1 shl it) != 0 }.joinToString(", ") { weekdayShort(DayOfWeek(it + 1), locale) }
 
-/** Lifting days a pure lifting plan can hold (app::Profile lift_days_per_week). */
-internal val LIFT_DAYS = 2..5
+/** Lifting days a lifting plan can hold: the core's held range (LIFT-DAYS-001). */
+internal val LIFT_DAYS = CoreConstants.LIFT_DAYS_MIN..CoreConstants.LIFT_DAYS_MAX
 
 /** Training days a running plan can hold. */
 private val RUN_DAYS = 2..WEEK_DAYS
 
-/** Lift days the engine schedules for a lift-only profile that never answered
- *  (plan::mod lift_days_per_week fallback). */
-internal const val LIFT_ONLY_DEFAULT_DAYS = 3
-
-/** Lift days a Both week starts at before the user changes the split. */
-internal const val HYBRID_DEFAULT_LIFT_DAYS = 2
-
-/** The engine's hybrid caps (HYB-RUNCAP-001): while lifting leads, running is
- *  capped at 3 days; while running leads, lifting is held to 3 (maintenance). */
-internal const val HYBRID_CAPPED_DAYS = 3
-
 /** Lift-day choices for a Both week of [totalDays]: at least one run day stays,
- *  and a run-led week lifts at most [HYBRID_CAPPED_DAYS] days. */
+ *  within [hybridLiftDayRange]. */
 internal fun hybridLiftDayOptions(totalDays: Int, lead: BothPriority?): IntRange =
-    HYBRID_DEFAULT_LIFT_DAYS..maxOf(HYBRID_DEFAULT_LIFT_DAYS, minOf(hybridLiftDayRange(lead).last, totalDays - 1))
+    CoreConstants.HYBRID_DEFAULT_LIFT_DAYS..maxOf(CoreConstants.HYBRID_DEFAULT_LIFT_DAYS, minOf(hybridLiftDayRange(lead).last, totalDays - 1))
 
-/** Lift days a Both week can hold whatever its total: [LIFT_DAYS], at most
- *  [HYBRID_CAPPED_DAYS] while running leads. */
+/** Lift days a Both week can hold whatever its total: [LIFT_DAYS], at most the
+ *  core's maintenance dose while running leads (CONC-RE-001). */
 internal fun hybridLiftDayRange(lead: BothPriority?): IntRange =
-    LIFT_DAYS.first..(if (lead == BothPriority.RunLean) HYBRID_CAPPED_DAYS else LIFT_DAYS.last)
+    LIFT_DAYS.first..(if (lead == BothPriority.RunLean) CoreConstants.MAINTENANCE_LIFT_SESSIONS_MAX else LIFT_DAYS.last)
 
 /** Run days a Both week can hold beside [liftDays]: the rest of the week, at most
- *  [HYBRID_CAPPED_DAYS] while lifting leads. */
+ *  the core's run cap while lifting leads (HYB-RUNCAP-001). */
 internal fun hybridRunDayOptions(liftDays: Int, lead: BothPriority?): IntRange {
     val rest = WEEK_DAYS - liftDays
-    return 1..(if (lead == BothPriority.RunLean) rest else minOf(rest, HYBRID_CAPPED_DAYS))
+    return 1..(if (lead == BothPriority.RunLean) rest else minOf(rest, CoreConstants.ENDURANCE_FREQUENCY_CAP_DAYS))
 }
 
 /** Run days the engine schedules in a Both week: the rest of the athlete's days,
- *  within [hybridRunDayOptions] (capped at [HYBRID_CAPPED_DAYS] while lifting leads). */
+ *  within [hybridRunDayOptions]. */
 internal fun hybridRunDays(totalDays: Int, liftDays: Int, lead: BothPriority?): Int =
     (totalDays - liftDays).coerceIn(1, hybridRunDayOptions(liftDays, lead).last)
 
 /** Days-step range per modality: a lifting plan holds [LIFT_DAYS] sessions, a Both
- *  week needs room for [HYBRID_DEFAULT_LIFT_DAYS] lift days plus a run. */
+ *  week needs room for the core's default lift days plus a run. */
 internal fun dayOptions(modality: Modality?): IntRange = when (modality) {
     Modality.Lift -> LIFT_DAYS
-    Modality.Both -> (HYBRID_DEFAULT_LIFT_DAYS + 1)..WEEK_DAYS
+    Modality.Both -> (CoreConstants.HYBRID_DEFAULT_LIFT_DAYS + 1)..WEEK_DAYS
     else -> RUN_DAYS
 }
 
@@ -423,8 +398,8 @@ internal fun seedTotalDays(modality: Modality?, initial: Event.SetProfile?): Int
 /** [seedTotalDays] before it is fitted to [dayOptions]. */
 private fun storedTotalDays(modality: Modality?, initial: Event.SetProfile?): Int? = when (modality) {
     Modality.Run -> initial?.runningDaysPerWeek
-    Modality.Both -> initial?.runningDaysPerWeek?.let { it + (initial.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS) }
-    Modality.Lift -> initial?.liftDaysPerWeek ?: LIFT_ONLY_DEFAULT_DAYS
+    Modality.Both -> initial?.runningDaysPerWeek?.let { it + (initial.liftDaysPerWeek ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS) }
+    Modality.Lift -> initial?.liftDaysPerWeek ?: CoreConstants.LIFT_ONLY_DEFAULT_LIFT_DAYS
     null -> null
 }
 
@@ -450,14 +425,18 @@ internal val LONGEST_RUN_KM = 0.5..60.0
 /** How close a stored race distance must be to a chip's to count as that chip. */
 private const val RACE_DISTANCE_MATCH_KM = 0.01
 
-/** Distance chips for a recent race or time trial. */
-internal enum class RaceDistance(val km: Double, val labelRes: StringResource) {
-    Mile(METERS_PER_MILE / 1000.0, Res.string.setup_racedist_mile),
-    FiveK(5.0, Res.string.setup_goaldist_5k),
-    TenK(10.0, Res.string.setup_goaldist_10k),
-    Half(21.0975, Res.string.setup_goaldist_half),
-    Marathon(42.195, Res.string.setup_goaldist_marathon),
+/** Distance chips for a recent race or time trial: the core's race distances
+ *  ([CoreConstants]) and the mile, labelled like their [GoalDistance]. */
+internal enum class RaceDistance(val metres: Double, val goal: GoalDistance?) {
+    Mile(CoreConstants.MILE_M, null),
+    FiveK(CoreConstants.FIVE_K_M, GoalDistance.FiveK),
+    TenK(CoreConstants.TEN_K_M, GoalDistance.TenK),
+    Half(CoreConstants.MARATHON_M / 2.0, GoalDistance.HalfMarathon),
+    Marathon(CoreConstants.MARATHON_M, GoalDistance.Marathon),
     ;
+
+    val km: Double get() = metres / 1000.0
+    val labelRes: StringResource get() = goal?.labelRes ?: Res.string.setup_racedist_mile
 
     companion object {
         fun of(km: Double): RaceDistance? = entries.firstOrNull { abs(it.km - km) < RACE_DISTANCE_MATCH_KM }
@@ -569,9 +548,11 @@ internal enum class CalisPiece(val labelRes: StringResource) {
     }
 }
 
-/** Something to hang and pull from: every pull-up rung needs one (the core's
- *  calisthenics rung_available, Kit::hang). */
-internal val CalisEquipment.canHang: Boolean get() = pull_up_bar || rings
+/** Whether [equipment] has something to hang and pull from, which every pull-up
+ *  rung needs (the core's `Kit::hang`); null when no equipment is stated (the
+ *  core then assumes everything). */
+internal fun canHang(equipment: CalisEquipment?): Boolean? =
+    equipment?.let { draftFacts(ProfileDraft(calisEquipment = it)).can_hang }
 
 // ── Answers → profile ───────────────────────────────────────────────────────
 
@@ -594,6 +575,7 @@ internal fun deriveDraft(
     female: Boolean?,
     restingHrBpm: Double?,
     weightLb: Boolean,
+    distanceUnit: DistanceUnit,
     health: HealthScreen,
     initial: Event.SetProfile?,
     keepLiftVolume: Boolean,
@@ -623,7 +605,7 @@ internal fun deriveDraft(
         Modality.Run -> null
         Modality.Both -> {
             val options = hybridLiftDayOptions(daysPerWeek, lead)
-            (liftDays ?: HYBRID_DEFAULT_LIFT_DAYS).coerceIn(options.first, options.last)
+            (liftDays ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS).coerceIn(options.first, options.last)
         }
     }
     // Re-run preservation: when the answers that drive run days are unchanged
@@ -633,7 +615,7 @@ internal fun deriveDraft(
     } else when (modality) {
         Modality.Lift -> 0
         Modality.Run -> daysPerWeek
-        Modality.Both -> hybridRunDays(daysPerWeek, liftDaysVal ?: HYBRID_DEFAULT_LIFT_DAYS, lead)
+        Modality.Both -> hybridRunDays(daysPerWeek, liftDaysVal ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS, lead)
     }
     // Run-only carries NO lifting scaffold (weekly_sets = 0) so the modality gate
     // reads it as a pure runner; Lift/Both use the level-scaled per-muscle volume.
@@ -689,8 +671,9 @@ internal fun deriveDraft(
         // The wizard never asks for a measured HRmax, so re-running must carry the
         // profile's existing value through untouched instead of nulling it.
         measuredHrMax = initial?.measuredHrMax,
-        // Display-unit preference, answered on the About-you step.
+        // Display-unit preferences, answered on the About-you step.
         weightLb = weightLb,
+        distanceUnit = distanceUnit,
         health = health,
         // Run-only carries no lifting, so the modality choice is irrelevant: pin it
         // to Weights so a pure runner emits the legacy SetProfile wire.
@@ -764,6 +747,7 @@ internal fun keepFlags(
  * [equipment] unanswered, a placement "Not sure, start easy", [weekdays] "Any
  * days", [distanceChoice] the app setting.
  */
+@Serializable
 internal data class SetupAnswers(
     val modality: Modality?,
     val liftFocus: LiftFocus?,
@@ -801,7 +785,7 @@ internal data class SetupAnswers(
     val restingHrTouched: Boolean = false,
     val weeklyTouched: Boolean = false,
     val longestTouched: Boolean = false,
-) : JvmSerializable {
+) {
     /** Calisthenics placement applies: lifting is trained, on bodyweight. */
     val calisthenics: Boolean
         get() = modality != Modality.Run && resistanceModality == ResistanceModality.Calisthenics
@@ -881,7 +865,7 @@ internal fun seedAnswers(
         goalDistance = initial?.takeIf { it.runningDaysPerWeek > 0 }?.goalDistance,
         bothPriority = if (both) initial.concurrentGoal.lead() else null,
         days = seedTotalDays(modality, initial),
-        liftSplit = if (both) initial.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS else null,
+        liftSplit = if (both) initial.liftDaysPerWeek ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS else null,
         weekdays = initial?.trainingWeekdays,
         level = level,
         // Without a recorded running level a Both profile seeds it from the shared one.
@@ -892,7 +876,7 @@ internal fun seedAnswers(
         raceDigits = initial?.recentRace?.takeIf { recentDistance != null }?.let { secondsToHmsDigits(it.time_sec) } ?: "",
         equipment = initial?.calisEquipment,
         pushPlace = seededPlace(LadderId.HorizontalPush),
-        pullPlace = seededPlace(LadderId.VerticalPull)?.takeIf { initial?.calisEquipment?.canHang != false },
+        pullPlace = seededPlace(LadderId.VerticalPull)?.takeIf { canHang(initial?.calisEquipment) != false },
         squatPlace = seededPlace(LadderId.Squat),
         // A first run defaults to Weights, which keeps the legacy wire.
         resistanceModality = initial?.resistanceModality ?: ResistanceModality.Weights,
@@ -961,17 +945,30 @@ internal class SetupValues(
     private val seed: SetupAnswers,
     private val initial: Event.SetProfile?,
     seedWeeklyKm: Double?,
-    distanceUnit: DistanceUnit,
+    private val distanceUnit: DistanceUnit,
     private val today: Long,
 ) {
     val weeklyBounds = distanceBounds(0.0..WEEKLY_VOLUME_MAX_KM, distanceUnit)
     val longestBounds = distanceBounds(LONGEST_RUN_KM, distanceUnit)
     val bodyweightRange = bodyweightBounds(answers.weightUnit)
 
+    /** The core's reading of the age and health answers ([draftFacts]). */
+    private val facts: DraftFacts = draftFacts(
+        ProfileDraft(
+            health = answers.health,
+            ageYears = initial?.ageYears?.takeIf { !answers.birthSkipped },
+            birthEpochDay = answers.birthDay,
+            today = today,
+        ),
+    )
+
     /** The birthday's age on [today]; without one, a legacy profile's stated age
      *  unless the user chose "Prefer not to say". */
-    val ageYears: Double? = answers.birthDay?.let { ageOnDay(it, today).toDouble() }
-        ?: initial?.ageYears?.takeIf { !answers.birthSkipped }
+    val ageYears: Double? = facts.age_years
+    /** Under 18: the core's pediatric hold (SAFE-PEDS-001), from age alone. */
+    val youth: Boolean = facts.youth
+    /** The health answers raise a core deferral gate (the age gate apart). */
+    val healthDefers: Boolean = facts.health_defers
     /** The birthday question has an answer: an age, or "Prefer not to say". */
     val ageAnswered: Boolean = ageYears != null || answers.birthSkipped
     /** Never asked in the setup: a re-run carries the profile's value through. */
@@ -1005,7 +1002,7 @@ internal class SetupValues(
     val totalDays: Int? = answers.days?.takeIf { it in dayRange }
     val liftOptions: IntRange? = totalDays?.let { hybridLiftDayOptions(it, answers.bothPriority) }
     /** The lift-day split as shown: the answer (or the default) inside [liftOptions]. */
-    val liftSplit: Int? = liftOptions?.let { (answers.liftSplit ?: HYBRID_DEFAULT_LIFT_DAYS).coerceIn(it.first, it.last) }
+    val liftSplit: Int? = liftOptions?.let { (answers.liftSplit ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS).coerceIn(it.first, it.last) }
     /** Ticked weekdays that don't cover every training day ("Any days" always does). */
     val weekdaysShort = totalDays != null && !weekdaysCover(answers.weekdays, totalDays)
 
@@ -1052,6 +1049,7 @@ internal class SetupValues(
             female = answers.sex?.female,
             restingHrBpm = restingHrBpm,
             weightLb = answers.weightUnit == WeightUnit.Lb,
+            distanceUnit = distanceUnit,
             health = answers.health,
             initial = initial,
             // "Only overwrite what the user actually changed": preserve the

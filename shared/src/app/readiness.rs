@@ -8,33 +8,26 @@ use crate::app::logged_days::{DeloadDays, LoggedDays, lift_deload_days, plan_wee
 use crate::app::model::{LoggedSet, Model};
 use crate::app::run_metrics::RunFacts;
 use crate::app::view_types::{
-    AdjustmentView, BaselineStatusView, EvidenceTagView, FeedbackView, HeadlineKind, HoldReason,
-    HoldResolutionView, ReadinessSignalView, SessionPlanView, SessionStatus, SignalGroupView,
-    TodayHeadlineView,
+    ActivePainView, AdjustmentView, BaselineStatusView, EvidenceTagView, FeedbackView,
+    HeadlineKind, HoldReason, HoldResolutionView, ReadinessSignalView, SessionPlanView,
+    SessionStatus, SignalGroupView, TodayHeadlineView,
 };
 use crate::autoreg;
 use crate::day::{is_undated, local_day};
 use crate::feedback::{self, FeedbackCategory};
 use crate::profile::Profile;
 use crate::schema::{
-    Adjustment, AdjustmentCall, AdjustmentKind, CheckinInput, HealthScreen, ReadinessInput,
-    ReadinessSignal, Recommended, SafetyTier, ScreenGate,
+    Adjustment, AdjustmentCall, AdjustmentKind, CheckinInput, HealthScreen, PainArea,
+    ReadinessInput, ReadinessSignal, Recommended, SafetyTier, ScreenGate,
 };
 use crate::strength::LiftGoal;
 
-/// Human label for one still-collecting check-in channel. The shell phrases
-/// the progress row itself from `kind`/`have`/`need`; no training claim
+/// One still-collecting check-in channel. The shell labels and phrases the
+/// progress row itself from `signal`/`kind`/`have`/`need`; no training claim
 /// (HARD RULE 1/2).
 pub(super) fn to_baseline_status_view(s: &autoreg::BaselineStatus) -> BaselineStatusView {
-    let label = match s.signal {
-        ReadinessSignal::WellnessZ => "Sleep, soreness, fatigue, stress & mood",
-        ReadinessSignal::HrvLnRmssd => "HRV (rMSSD)",
-        ReadinessSignal::RestingHr => "Resting HR",
-        _ => "Readiness",
-    };
     BaselineStatusView {
         signal: s.signal,
-        label: label.to_string(),
         have: s.have as u32,
         need: s.need as u32,
         kind: s.kind,
@@ -327,12 +320,14 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         summary: v.summary.clone(),
         evidence: v.evidence.clone(),
         why: v.why.clone(),
+        ..Default::default()
     };
     let from_feedback = |fb: &FeedbackView| TodayHeadlineView {
         kind: HeadlineKind::Feedback,
         summary: fb.message.clone(),
         evidence: fb.evidence.clone(),
         why: fb.why.clone(),
+        ..Default::default()
     };
     if train_blocked {
         let blocks = |r: &&AdjustmentCall| blocks_training(r);
@@ -421,6 +416,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
             summary: String::new(),
             evidence: first.evidence.clone(),
             why: first.why.clone(),
+            ..Default::default()
         };
     }
     // Only non-critical feedback reaches here.
@@ -621,13 +617,27 @@ impl ReadinessPicture {
                 value: s.value,
                 streak: s.streak,
                 state: s.state,
-                detail: s.detail,
                 evidence,
                 from_today: s.from_today,
                 stale: s.stale,
             }
         })
         .collect()
+    }
+
+    /// The pain report the gate holds on, as the shell's pain surfaces show
+    /// it; `None` with no active report or a bare (detail-less) one.
+    pub(super) fn active_pain(&self) -> Option<ActivePainView> {
+        let d = autoreg::worst_active_pain(&self.inputs)?.pain.as_ref()?;
+        let context = autoreg::pain_context(d);
+        Some(ActivePainView {
+            report: d.clone(),
+            area: d
+                .location
+                .as_deref()
+                .and_then(|l| PainArea::of_location(l.trim())),
+            context: (!context.is_empty()).then_some(context),
+        })
     }
 
     /// The rules' adjustments plus, with a clock, the first session after a

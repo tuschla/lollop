@@ -62,7 +62,7 @@ internal fun StatusTone.colors(): StatusToneColors {
         StatusTone.Adjusted -> StatusToneColors(
             ring = status.warnMark,
             tileFill = status.warnMark,
-            glyph = if (status.warnMark == status.warn) Color.White else BgTop,
+            glyph = if (status.warnMark == status.warn) OnStatusFill else BgTop,
             text = WarnText,
         )
         StatusTone.Danger -> StatusToneColors(
@@ -244,7 +244,7 @@ internal fun AdjustedChip() {
     ) {
         Text(
             stringResource(Res.string.main_adjusted_chip),
-            color = Color.White,
+            color = OnStatusFill,
             style = Type.Chip,
             maxLines = 1,
         )

@@ -4,8 +4,8 @@
 
 use super::*;
 
-fn planned_long_run_summary(app: &Engine, model: &Model) -> String {
-    planned_long_run_item(app, model).summary
+fn planned_long_run_summary(model: &Model) -> String {
+    planned_long_run_item(model).view.summary
 }
 
 /// Build a run history via the real ingest path with explicit timestamps.
@@ -185,7 +185,7 @@ fn seeded_10k_model(stated_on: i64, today: i64) -> (Engine, Model) {
     (app, model)
 }
 
-fn long_run_km_of(item: &PrescriptionView) -> f64 {
+fn long_run_km_of(item: &PlanItem) -> f64 {
     match item.run_volume {
         Some(RunAmount::PlanKm(k)) => k as f64,
         Some(RunAmount::Km(k)) => k,
@@ -197,8 +197,8 @@ fn long_run_km_of(item: &PrescriptionView) -> f64 {
 fn a_logged_shakeout_keeps_the_stated_long_run() {
     // One logged 2 mi run collapsed the Sunday long run from
     // 7.8 mi to 2.2 mi (10% over the logged run).
-    let (app, model) = seeded_10k_model(SEEDED_10K_DAY, SEEDED_10K_DAY);
-    let item = planned_long_run_item(&app, &model);
+    let (app, mut model) = seeded_10k_model(SEEDED_10K_DAY, SEEDED_10K_DAY);
+    let item = planned_long_run_item(&model);
     let km = long_run_km_of(&item);
     let mi = (km / 1.609_344 * 10.0).round() / 10.0;
     assert!(mi >= 7.8, "long run {km} km shows ≥ 7.8 mi");
@@ -214,12 +214,22 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
             item.summary.split(" · ").next().unwrap()
         )
     );
-    // The miles twin states the same cap in miles; the head carries its km.
+    // A miles profile states the same cap in miles; the head carries its km.
     let shown_km = (km * 10.0).round() / 10.0;
     assert_eq!(item.run_head_km, Some(shown_km));
+    let miles = Profile {
+        distance_unit: DistanceUnit::Mi,
+        ..model.profile().cloned().expect("a profile")
+    };
+    let _ = app.update(Event::SetProfile(miles), &mut model);
+    let item_mi = planned_long_run_item(&model);
+    assert_eq!(
+        item_mi.run_head_km, item.run_head_km,
+        "the plan does not move"
+    );
     let mi_txt = format!("{:.1}", shown_km / 1.609_344);
     assert_eq!(
-        item.safety_reason_mi,
+        item_mi.safety_reason,
         format!(
             "Capped at {} mi: at most 10% over the longest recent run you entered",
             mi_txt.strip_suffix(".0").unwrap_or(&mi_txt)
@@ -227,12 +237,99 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
     );
 }
 
+/// `v` without the lines a distance unit renders (`safety_reason`,
+/// `pace_label`), so what is left are the plan's facts.
+fn without_unit_text(mut v: serde_json::Value) -> serde_json::Value {
+    fn strip(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(map) => {
+                map.remove("safety_reason");
+                map.remove("pace_label");
+                map.values_mut().for_each(strip);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    strip(&mut v);
+    v
+}
+
+/// The plan and logged-history part of a view, as JSON.
+fn plan_facts(vm: &ViewModel) -> serde_json::Value {
+    serde_json::json!({
+        "next_session": vm.next_session,
+        "week_plan": vm.week_plan,
+        "next_week_plan": vm.next_week_plan,
+        "program": vm.program,
+        "hr": vm.runs.iter().map(|r| r.hr_pct_max).collect::<Vec<_>>(),
+    })
+}
+
+#[test]
+fn a_unit_only_profile_edit_moves_no_plan_fact() {
+    // The distance unit is display, like `weight_lb`: an edit that changes
+    // only it keeps every plan fact, the logged runs' %HRmax and the earlier
+    // profile history, and switching back renders the view it started from.
+    let today = SEEDED_10K_DAY + 2;
+    let (app, mut model) = seeded_10k_model(SEEDED_10K_DAY, today);
+    let before = app.view(&model);
+    let keys = |m: &Model| {
+        m.profile_history
+            .iter()
+            .map(Profile::history_key)
+            .collect::<Vec<_>>()
+    };
+    let keys_before = keys(&model);
+    let edit = |unit: DistanceUnit, at: i64| Profile {
+        distance_unit: unit,
+        effective_from_epoch_day: Some(today),
+        edited_at: Some(today * DAY_SEC + at * 3_600),
+        ..model.profile().cloned().expect("a profile")
+    };
+    let to_miles = edit(DistanceUnit::Mi, 18);
+    let back = edit(DistanceUnit::Km, 19);
+
+    let _ = app.update(Event::SetProfile(to_miles), &mut model);
+    let miles = app.view(&model);
+    let keys_miles = keys(&model);
+    assert_eq!(
+        keys_miles[..keys_before.len()],
+        keys_before[..],
+        "earlier history entries keep their keys"
+    );
+    assert_eq!(keys_miles.len(), keys_before.len() + 1);
+    assert_eq!(
+        without_unit_text(plan_facts(&miles)),
+        without_unit_text(plan_facts(&before)),
+        "a unit-only edit moves no plan fact"
+    );
+    assert!(
+        miles
+            .next_session
+            .iter()
+            .chain(&miles.week_plan)
+            .chain(&miles.next_week_plan)
+            .flat_map(|s| &s.items)
+            .any(|it| it.safety_reason.contains(" mi:")),
+        "the miles view states its cap in miles"
+    );
+
+    let _ = app.update(Event::SetProfile(back), &mut model);
+    let mut again = serde_json::to_value(app.view(&model)).unwrap();
+    let mut first = serde_json::to_value(&before).unwrap();
+    // The profile echo carries the edit's own date; everything else is as before.
+    again.as_object_mut().unwrap().remove("profile");
+    first.as_object_mut().unwrap().remove("profile");
+    assert_eq!(again, first, "switching back renders the starting view");
+}
+
 #[test]
 fn a_stale_stated_long_run_yields_to_the_logged_run() {
     // 31+ days after it was stated, the answer is no longer "the last 30 days".
     let today = SEEDED_10K_DAY + 35;
-    let (app, model) = seeded_10k_model(SEEDED_10K_DAY, today);
-    let km = long_run_km_of(&planned_long_run_item(&app, &model));
+    let (_, model) = seeded_10k_model(SEEDED_10K_DAY, today);
+    let km = long_run_km_of(&planned_long_run_item(&model));
     assert!(km <= 3.22 * 1.1 + 1e-9, "logged baseline governs: {km}");
 }
 
@@ -244,7 +341,7 @@ fn re_saving_an_unchanged_stated_long_run_does_not_refresh_it() {
     p.effective_from_epoch_day = Some(today);
     p.weekly_sets = 10;
     let _ = app.update(Event::SetProfile(p), &mut model);
-    let km = long_run_km_of(&planned_long_run_item(&app, &model));
+    let km = long_run_km_of(&planned_long_run_item(&model));
     assert!(km <= 3.22 * 1.1 + 1e-9, "re-save keeps the old date: {km}");
 }
 
@@ -305,7 +402,7 @@ fn the_long_run_anchors_to_logged_recent_distance_not_a_stale_profile() {
     .expect_only_render();
     set_today(&app, &mut model, MON);
 
-    let item = planned_long_run_item(&app, &model);
+    let item = planned_long_run_item(&model);
     assert!(
         item.summary.starts_with("21 km"),
         "the long run anchors to the demonstrated recent distance, got {:?}",
@@ -339,7 +436,7 @@ fn a_volume_dominated_long_run_card_still_cites_the_share_cap() {
     .expect_only_render();
     set_today(&app, &mut model, MON);
 
-    let item = planned_long_run_item(&app, &model);
+    let item = planned_long_run_item(&model);
     assert!(item.summary.starts_with("14 km"), "{:?}", item.summary);
     assert!(
         item.evidence.citation.contains("Daniels"),
@@ -370,7 +467,7 @@ fn a_stale_run_outside_the_window_does_not_raise_the_long_run() {
     .expect_only_render();
     set_today(&app, &mut model, MON);
 
-    let summary = planned_long_run_summary(&app, &model);
+    let summary = planned_long_run_summary(&model);
     // Fully-detrained run ignored → the 3-day average run, 16 / 3 → 5 km
     // (as with no history).
     assert!(
@@ -398,7 +495,7 @@ fn an_undated_run_does_not_raise_the_long_run() {
     .expect_only_render();
     set_today(&app, &mut model, MON);
 
-    let summary = planned_long_run_summary(&app, &model);
+    let summary = planned_long_run_summary(&model);
     assert!(
         summary.starts_with("5 km"),
         "an undated run must not raise the long run, got {summary:?}"
@@ -420,7 +517,7 @@ fn a_log_less_running_plan_is_unchanged_by_the_run_anchors() {
     )
     .expect_only_render();
     set_today(&app, &mut model, MON);
-    assert!(planned_long_run_summary(&app, &model).starts_with("5 km"));
+    assert!(planned_long_run_summary(&model).starts_with("5 km"));
 }
 
 #[test]
@@ -648,7 +745,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         )),
         claims::RUN_INTERVAL_001,
     );
-    let it = flatten_prescription(&interval, &anchors, None, false);
+    let it = flatten_prescription(&interval, &anchors, None, false, DistanceUnit::Km);
     assert_eq!(it.rep_count, 4);
     assert_eq!(it.rep_volume, "4 min");
     assert!(
@@ -675,7 +772,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         )),
         claims::RUN_LONGRUN_001,
     );
-    let ci = flatten_prescription(&cont, &anchors, None, false);
+    let ci = flatten_prescription(&cont, &anchors, None, false, DistanceUnit::Km);
     assert_eq!(ci.rep_count, 0);
     assert!(ci.rep_volume.is_empty());
     assert_eq!(
@@ -697,7 +794,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         )),
         claims::RUN_TEMPO_001,
     );
-    let ti = flatten_prescription(&tempo, &anchors, None, false);
+    let ti = flatten_prescription(&tempo, &anchors, None, false, DistanceUnit::Km);
     assert_eq!(ti.summary, "30 min · 88–92% HRmax");
 
     // A Recovery band carries both its %HRmax ceiling and the Karvonen %HRR
@@ -714,7 +811,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         )),
         claims::RUN_RECOVERY_001,
     );
-    let ri = flatten_prescription(&recovery, &anchors, None, false);
+    let ri = flatten_prescription(&recovery, &anchors, None, false, DistanceUnit::Km);
     assert_eq!(
         ri.summary,
         "30 min · ≤ 76% HRmax · ≤ 70% of heart-rate reserve"

@@ -36,137 +36,62 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
-/** Read cap for any import file: real GPX/TCX exports are well under it, and it keeps a
- *  wrong-type or endless source from exhausting memory. FIT has its own smaller cap. */
-internal const val MAX_RUN_IMPORT_BYTES = 32 * 1024 * 1024 // 32 MB
-
-/** FIT cap. [DurableCore.parseFitFile] returns one JSON object per FIT record, up to ~6× the
- *  file's bytes, and [fitSegments] holds that as a JSON tree, so the 32 MB read cap
- *  would admit ~190 M chars. 8 MB still fits a day-long 1 Hz recording (86 400
- *  records under 90 bytes each). */
-internal const val MAX_FIT_IMPORT_BYTES = 8 * 1024 * 1024 // 8 MB
-
-/** How much of a file the XML sniff decodes to find its root element. */
-private const val SNIFF_BYTES = 4 * 1024
-
 /** Above this many skipped files the result names none inline; "Details" lists them. */
 private const val INLINE_SKIPPED_MAX = 2
 
-/**
- * One file → the runs it holds (one per GPX `<trk>` or TCX `<Activity>`, else one).
- * Sniffs the CONTENT, not the extension/MIME (providers lie): the FIT header magic
- * first (binary, refused over [MAX_FIT_IMPORT_BYTES]), then the XML root within the
- * first [SNIFF_BYTES] to tell GPX from TCX, so a wrong-type file is refused without
- * decoding all of it. XML that breaks off or is malformed past the root (a cut-off
- * download) is [ImportFailure.Damaged], and so is a document that declares a DTD
- * ([declaresDtd]).
- */
-internal fun parseRunFileSegments(bytes: ByteArray, parseFit: (ByteArray) -> String?): List<ImportedRun> =
-    parseRunFileSegments(bytes, parseFit, ::importXmlReader)
-
-/** [parseRunFileSegments] with the XML reader [xml] opens (the host tests compare the
- *  platform's with [XmlUtilImportReader]). */
-internal fun parseRunFileSegments(
-    bytes: ByteArray,
-    parseFit: (ByteArray) -> String?,
-    xml: (String) -> ImportXmlReader,
-): List<ImportedRun> {
-    if (isFitFile(bytes)) {
-        if (bytes.size > MAX_FIT_IMPORT_BYTES) throw ImportException(ImportFailure.TooLarge)
-        return listOf(ImportedRun(fitSegments(parseFit(bytes))))
-    }
-    // XML 1.0 §4.3.3: a UTF-16 entity starts with its byte order mark; anything
-    // else is read as UTF-8 (the BOM, if any, skipped: the pull-parser throws
-    // "content not allowed in prolog" on it).
-    val (charset, bom) = when {
-        bytes.startsWith(0xFE, 0xFF) -> ImportCharset.Utf16Be to 2
-        bytes.startsWith(0xFF, 0xFE) -> ImportCharset.Utf16Le to 2
-        bytes.startsWith(0xEF, 0xBB, 0xBF) -> ImportCharset.Utf8 to 3
-        else -> ImportCharset.Utf8 to 0
-    }
-    val head = decodeImportText(bytes, bom, minOf(bytes.size - bom, SNIFF_BYTES), charset)
-    val tcx = head.contains("<TrainingCenterDatabase")
-    if (!tcx && !head.contains("<gpx")) throw ImportException(ImportFailure.WrongType)
-    val text = decodeImportText(bytes, bom, bytes.size - bom, charset)
-    if (declaresDtd(text)) throw ImportException(ImportFailure.Damaged)
-    return try {
-        if (tcx) parseTcxActivities(text, xml) else parseGpxRuns(text, xml)
-    } catch (e: ImportXmlException) {
-        throw ImportException(ImportFailure.Damaged, cause = e)
-    }
+/** Why one imported file produced no run: the core's [ImportRefusal]s and the shell's
+ *  own read and save failures. The shell maps each to plain-language copy beside the
+ *  file's name. */
+internal enum class ImportFailure {
+    ReadFailed, TooLarge, WrongType, NoTrack, TooShort, NoTimestamps, Damaged, NotARun, ImplausiblePace, Rejected, Unknown,
 }
 
-/** The text encodings an import file is read in. */
-internal enum class ImportCharset { Utf8, Utf16Be, Utf16Le }
+/** An import that produced no event, with its [reason]. [detail] carries the one
+ *  variable part a reason needs (the activity's sport for [ImportFailure.NotARun]). */
+internal class ImportException(val reason: ImportFailure, val detail: String? = null, cause: Throwable? = null) :
+    Exception(detail?.let { "$reason: $it" } ?: reason.name, cause)
 
-/** [length] bytes of [bytes] from [offset] as [charset] text, malformed input
- *  replaced by U+FFFD. Android: `String(bytes, offset, length, charset)`; iOS:
- *  Kotlin's UTF-8 decoder and [decodeUtf16]. */
-internal expect fun decodeImportText(bytes: ByteArray, offset: Int, length: Int, charset: ImportCharset): String
-
-/**
- * UTF-16 ([bigEndian] or little-endian) as the JDK's decoder reads it with
- * replacement: a byte order mark stays a character, an unpaired surrogate (a high one
- * swallows the unit after it) and trailing bytes too short for a character each read
- * as one U+FFFD.
- */
-internal fun decodeUtf16(bytes: ByteArray, offset: Int, length: Int, bigEndian: Boolean): String {
-    val end = offset + length
-    val out = StringBuilder(length / 2)
-    fun unit(at: Int): Char {
-        val a = bytes[at].toInt() and 0xFF
-        val b = bytes[at + 1].toInt() and 0xFF
-        return (if (bigEndian) (a shl 8) or b else (b shl 8) or a).toChar()
-    }
-    var i = offset
-    while (end - i >= 2) {
-        val c = unit(i)
-        when {
-            c.isLowSurrogate() -> {
-                out.append('\uFFFD')
-                i += 2
-            }
-            c.isHighSurrogate() -> {
-                if (end - i < 4) break
-                val low = unit(i + 2)
-                if (low.isLowSurrogate()) out.append(c).append(low) else out.append('\uFFFD')
-                i += 4
-            }
-            else -> {
-                out.append(c)
-                i += 2
-            }
-        }
-    }
-    if (i < end) out.append('\uFFFD')
-    return out.toString()
+private fun ImportRefusal.failure(): ImportFailure = when (this) {
+    ImportRefusal.TooLarge -> ImportFailure.TooLarge
+    ImportRefusal.WrongType -> ImportFailure.WrongType
+    ImportRefusal.NoTrack -> ImportFailure.NoTrack
+    ImportRefusal.TooShort -> ImportFailure.TooShort
+    ImportRefusal.NoTimestamps -> ImportFailure.NoTimestamps
+    ImportRefusal.Damaged -> ImportFailure.Damaged
+    ImportRefusal.NotARun -> ImportFailure.NotARun
+    ImportRefusal.ImplausiblePace -> ImportFailure.ImplausiblePace
 }
 
-private fun ByteArray.startsWith(vararg prefix: Int): Boolean =
-    size >= prefix.size && prefix.indices.all { this[it] == prefix[it].toByte() }
+/**
+ * One file → the runs it holds, by the core's import ([DurableCore.parseRunFile]
+ * through [parse]): the format sniffed from the content (FIT, GPX or TCX), every run
+ * gated and decimated there. A file that holds none throws its [ImportException]
+ * (the sport a [ImportFailure.NotARun] file names as its detail); a core that can't
+ * answer reads as a damaged file.
+ */
+internal fun parseRunFile(bytes: ByteArray, parse: (ByteArray) -> ImportVerdict?): List<ImportedRun> {
+    val verdict = parse(bytes) ?: throw ImportException(ImportFailure.Damaged)
+    verdict.refusal?.let { throw ImportException(it.failure(), verdict.sport?.takeIf { s -> s.isNotBlank() }) }
+    return verdict.runs.ifEmpty { throw ImportException(ImportFailure.NoTrack) }
+}
 
 /**
- * Whether [text]'s prolog (what precedes the root element: the XML declaration,
- * comments, processing instructions) holds a `<!DOCTYPE`. No GPX or TCX exporter
- * writes one, and the platform pull parser expands a DTD's internal entities
- * without any limit: ten nested entities in a 700-byte file make 10^10
- * characters (billion laughs, an OutOfMemoryError). So such a file is refused
- * before it reaches the parser (OWASP: disable DTDs entirely); external entities
- * go with it. A `<!DOCTYPE` anywhere else is no declaration (XML 1.0 §2.8 allows
- * it only in the prolog), and the parser refuses it as malformed.
+ * The [Event.LogRunTrack] for an imported [run]: the core's gated, decimated fixes,
+ * sent as a live-tracked save sends its own, so distance, pace, splits and zone all
+ * derive in-core, stamped when the run happened. `hr_pct_max` is the core's share of
+ * the file's average heart rate against a MEASURED HRmax ([measuredHrMax];
+ * `ImportedHrPct` op), else 0.0 = "no HR", as the tracker sends. Every run gets its
+ * own entry id, so the runs of one multi-activity file, built in a tight loop, never
+ * share one.
  */
-internal fun declaresDtd(text: String): Boolean {
-    var i = 0
-    while (i < text.length) {
-        i = when {
-            text[i].isWhitespace() -> i + 1
-            text.startsWith("<?", i) -> text.indexOf("?>", i + 2).takeIf { it >= 0 }?.plus(2) ?: return false
-            text.startsWith("<!--", i) -> text.indexOf("-->", i + 4).takeIf { it >= 0 }?.plus(3) ?: return false
-            else -> return text.startsWith("<!DOCTYPE", i)
-        }
-    }
-    return false
-}
+internal fun importedRunEvent(run: ImportedRun, measuredHrMax: Double?): Event.LogRunTrack = Event.LogRunTrack(
+    points = run.points,
+    hrPctMax = AppRuntime.engine.importedHrPct(ImportedHr(run.avg_hr_bpm, measuredHrMax)) ?: 0.0,
+    entryId = EntryIds.next(),
+    observedAt = run.observed_at,
+    workoutType = null,
+    segmentStarts = run.segment_starts,
+)
 
 /** One picked/shared file, already read and parsed: its display [name] and the
  *  runs it holds, or why it couldn't be read. */
@@ -191,14 +116,12 @@ internal data class RunImportPlan(
  * normally [importedRunEvent]) so the batch rules are JVM-testable:
  *  - each file stands alone, so one unreadable / wrong-type / route-only / cycling /
  *    implausibly fast file is reported by name and never blocks the others;
- *  - inside a multi-activity file, an activity that fails is skipped as long as
- *    another imports; when none does, the first activity's reason is the file's;
  *  - a run logged at the same second as an already-logged run ([existingObservedAt])
  *    or as an earlier run in this batch IS that run (entry ids differ per import, so
  *    the core can't pair them): it is skipped and counted, never double-counted into
  *    weekly volume or the spike baseline. A run's own GPX export names its logged-at
- *    stamp ([ImportedRun.loggedAtSec]), so it matches even when its track ends
- *    earlier (a standing-still finish dropped by QC, a trimmed end).
+ *    stamp, so it matches even when its track ends earlier (a standing-still finish
+ *    dropped by QC, a trimmed end).
  */
 internal fun planRunImport(
     files: List<ParsedRunFile>,
@@ -210,48 +133,37 @@ internal fun planRunImport(
     val failures = ArrayList<RunImportFailure>()
     var duplicates = 0
     for (file in files) {
-        val unreadable = file.runs.exceptionOrNull()
-        if (unreadable != null) {
-            failures += failureOf(file.name, unreadable)
+        val fileRuns = file.runs.getOrElse { e ->
+            failures += if (e is ImportException) {
+                RunImportFailure(file.name, e.reason, e.detail)
+            } else {
+                RunImportFailure(file.name, ImportFailure.Unknown)
+            }
             continue
         }
-        val activities = file.runs.getOrThrow().filter { it.segments.isNotEmpty() }
-        if (activities.isEmpty()) {
-            failures += RunImportFailure(file.name, ImportFailure.NoTrack)
-            continue
-        }
-        var firstFailure: Throwable? = null
-        val built = activities.mapNotNull { run ->
-            runCatching { build(run) }.onFailure { if (firstFailure == null) firstFailure = it }.getOrNull()
-        }
-        if (built.isEmpty()) {
-            failures += failureOf(file.name, firstFailure)
-            continue
-        }
-        for (ev in built) {
+        for (run in fileRuns) {
+            val ev = build(run)
             if (seen.add(ev.observedAt)) runs += PlannedRun(file.name, ev) else duplicates++
         }
     }
     return RunImportPlan(runs, duplicates, failures)
 }
 
-private fun failureOf(fileName: String, e: Throwable?): RunImportFailure =
-    if (e is ImportException) {
-        RunImportFailure(fileName, e.reason, e.detail)
-    } else {
-        RunImportFailure(fileName, ImportFailure.Unknown)
-    }
+/** The import size cap as the too-large reason states it, in MiB ("32"):
+ *  [CoreConstants.MAX_RUN_IMPORT_BYTES], [trimDecimal]-trimmed. */
+internal fun importCapMbLabel(): String = trimDecimal(CoreConstants.MAX_RUN_IMPORT_BYTES / (1024.0 * 1024.0))
 
 /** The plain-language reason for one skipped file ("no GPS points", "a cycling
  *  activity, not a run"). */
 internal fun importFailureReason(res: PlatformResources, failure: RunImportFailure): String = when (failure.reason) {
     ImportFailure.ReadFailed -> res.getString(Res.string.import_reason_read_failed)
-    ImportFailure.TooLarge -> res.getString(Res.string.import_reason_too_large)
+    ImportFailure.TooLarge -> res.getString(Res.string.import_reason_too_large, importCapMbLabel())
     ImportFailure.WrongType -> res.getString(Res.string.import_reason_wrong_type)
     ImportFailure.NoTrack -> res.getString(Res.string.import_reason_no_track)
     ImportFailure.TooShort -> res.getString(
         Res.string.import_reason_too_short,
-        shortRunThresholdLabel(resolveDistanceUnit(AppSettings.distanceUnitOverride.value)),
+        shortRunThresholdLabel(EventDispatcher.model.value.distanceUnit()),
+        shortRunMinutesLabel(),
     )
     ImportFailure.NoTimestamps -> res.getString(Res.string.import_reason_no_timestamps)
     ImportFailure.Damaged -> res.getString(Res.string.import_reason_damaged)
@@ -319,17 +231,17 @@ internal interface RunImportFile {
     /** The file's name as the user sees it. */
     fun displayName(): String
 
-    /** The file's bytes: [ImportFailure.TooLarge] above [MAX_RUN_IMPORT_BYTES] (checked
-     *  before the bytes reach the parsers), [ImportFailure.ReadFailed] when unreadable. */
+    /** The file's bytes: [ImportFailure.TooLarge] above [CoreConstants.MAX_RUN_IMPORT_BYTES]
+     *  (checked before the bytes are held), [ImportFailure.ReadFailed] when unreadable. */
     fun readBytes(): ByteArray
 }
 
 /**
  * Run import from files: the Log sheet's multi-file picker, the History Runs import
  * button and the system "Open with" / "Share to" entry points share this one
- * pipeline. Shell-side parse (content sniff → GPX/TCX/FIT), then the SAME
- * `LogRunTrack` event a live-tracked save uses, so distance/pace/splits/zone all
- * derive in-core.
+ * pipeline. The core reads each file ([parseRunFile]: content sniff → GPX/TCX/FIT,
+ * the run gates), then the shell sends the SAME `LogRunTrack` event a live-tracked
+ * save uses, so distance/pace/splits/zone all derive in-core.
  *
  * Imports every file in [files] as one batch and posts the result through
  * [UiMessages] in [resources] (read once the batch is done). Process-scoped
@@ -348,7 +260,7 @@ internal fun launchRunImport(files: List<RunImportFile>, resources: () -> Platfo
             files.map { file ->
                 ParsedRunFile(
                     name = file.displayName(),
-                    runs = runCatching { parseRunFileSegments(file.readBytes(), AppRuntime.engine::parseFitFile) }
+                    runs = runCatching { parseRunFile(file.readBytes(), AppRuntime.engine::parseRunFile) }
                         .onFailure { e ->
                             // A non-import exception is a shell bug or an IO error, not a
                             // bad file; leave a diagnostic trail while the batch carries on.

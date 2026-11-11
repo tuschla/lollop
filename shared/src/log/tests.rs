@@ -1133,59 +1133,52 @@ fn legacy_amend(observed_at: i64, observed_at_fallback: i64, weight_kg: f64) -> 
 }
 
 #[test]
-fn rule3_walk_assumes_legacy_rows_are_never_redated() {
-    // Regression guard (latent, shell-blocked). Rule 3's chain-walk keys a
-    // whole legacy (entry_id 0) set/run chain by ONE (fam, id, observed_at)
-    // match key: correct ONLY while a legacy row's date is immutable, which
-    // the shell enforces (LogEntry.kt pins observed_at == observed_at_fallback
-    // for id-0 rows, blocking re-dating). This guard pins that invariant: if a
-    // future change lets legacy rows be re-dated, the `assert_ne!`s below start
-    // failing and force revisiting Rule 3 and the shell pin TOGETHER.
-
-    // PINNED (supported): every link shares one date (observed_at ==
-    // observed_at_fallback == DAY_SEC) → the legacy chain collapses
-    // replay-equivalently, exactly like an id-bearing one.
+fn rows_logged_without_ids_compact_replay_equivalently_when_redated() {
+    // An old build wrote `entry_id` 0 and named a row by its date; each row
+    // takes the id its date gives (`row_id`), so an amend that moved the date
+    // stores the row under a new id. Compaction keeps such a link and walks a
+    // delete through it.
     assert_replay_equivalent(vec![
         legacy_set(DAY_SEC, 100.0),
         legacy_amend(DAY_SEC, DAY_SEC, 110.0),
         legacy_amend(DAY_SEC, DAY_SEC, 130.0),
     ]);
-
-    // RE-DATED Log→Amend→Amend (unsupported): each amend moves the row's date,
-    // so the single-key walk telescopes the middle re-date link away and the
-    // final amend then matches nothing on replay → reverts to the ORIGINAL
-    // value after compaction. The full and compacted views MUST differ today.
-    let redated_chain = vec![
+    assert_replay_equivalent(vec![
         legacy_set(DAY_SEC, 100.0),
-        legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0), // re-date DAY_SEC → 2*DAY_SEC
-        legacy_amend(3 * DAY_SEC, 2 * DAY_SEC, 130.0), // re-date 2*DAY_SEC → 3*DAY_SEC
-    ];
-    assert_ne!(
-        replay(&redated_chain),
-        replay(&compact_event_log(redated_chain.clone())),
-        "legacy re-dating became replay-safe - update Rule 3 AND remove the \
-         LogEntry.kt pin together (see the legacy-row invariant comment)"
-    );
-
-    // RE-DATED Log→Amend→Delete (unsupported): the delete's fallback matches
-    // the re-dated amend but its base-chain walk (same key) can't reach the
-    // differently-dated base log, so the base log survives compaction and the
-    // deleted row is RESURRECTED. Full and compacted views MUST differ today.
-    let redated_delete = vec![
+        legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0),
+        legacy_amend(3 * DAY_SEC, 2 * DAY_SEC, 130.0),
+    ]);
+    assert_replay_equivalent(vec![
         legacy_set(DAY_SEC, 100.0),
-        legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0), // re-date DAY_SEC → 2*DAY_SEC
+        legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0),
         Event::DeleteEntry {
             kind: EntryKind::Set,
             entry_id: 0,
-            observed_at_fallback: 2 * DAY_SEC, // delete the re-dated (current) row
+            observed_at_fallback: 2 * DAY_SEC,
         },
-    ];
-    assert_ne!(
-        replay(&redated_delete),
-        replay(&compact_event_log(redated_delete.clone())),
-        "legacy re-dating became replay-safe - update Rule 3 AND remove the \
-         LogEntry.kt pin together (see the legacy-row invariant comment)"
-    );
+    ]);
+    // The shell edits such a row by the id the view gives it.
+    assert_replay_equivalent(vec![
+        legacy_set(DAY_SEC, 100.0),
+        legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0),
+        Event::AmendSet {
+            hold_sec: None,
+            entry_id: 2 * DAY_SEC as u64,
+            exercise: "Bench".into(),
+            weight_kg: 120.0,
+            reps: 5,
+            rpe: 8.0,
+            observed_at: 3 * DAY_SEC,
+            observed_at_fallback: 2 * DAY_SEC,
+        },
+        Event::DeleteEntry {
+            kind: EntryKind::Set,
+            entry_id: 2 * DAY_SEC as u64,
+            observed_at_fallback: 3 * DAY_SEC,
+        },
+    ]);
+    let view = replay(&[legacy_set(DAY_SEC, 100.0)]);
+    assert_eq!(view.lifts[0].entry_id, DAY_SEC as u64);
 }
 
 #[test]

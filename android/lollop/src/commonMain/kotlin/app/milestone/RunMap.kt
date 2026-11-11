@@ -82,7 +82,7 @@ private val FitGlyph = 24.dp
 internal const val TrimCutAlpha = 0.6f
 
 /** Metres in one display distance unit. */
-internal val DistanceUnit.metres: Double get() = if (this == DistanceUnit.Mi) METERS_PER_MILE else 1000.0
+internal val DistanceUnit.metres: Double get() = if (this == DistanceUnit.Mi) CoreConstants.MILE_M else 1000.0
 
 /** The header and stats the full-screen route map shows over the map. */
 internal data class RouteFullScreen(val title: String, val subtitle: String, val stats: List<RunStat>)
@@ -110,7 +110,7 @@ private fun routeDescription(track: RouteTrack, recordKm: Double, unit: Distance
  */
 @Composable
 internal fun RouteMapCard(
-    segments: List<List<GpxFix>>,
+    segments: List<List<GpsPoint>>,
     entryId: Long,
     height: Dp = RouteMapHeight,
     distanceMarkers: Boolean = true,
@@ -431,7 +431,7 @@ internal fun PlainRouteLayer(
  */
 @Composable
 fun TrimRouteMap(
-    segments: List<List<GpxFix>>,
+    segments: List<List<GpsPoint>>,
     keepFromSec: Long,
     keepUntilSec: Long,
     recordKm: Double,
@@ -474,3 +474,16 @@ internal fun MapOverlayButton(
         Icon(painterResource(icon), contentDescription = description, tint = OnBgBody, modifier = Modifier.size(glyph))
     }
 }
+
+/** Height of an embedded route map (run detail, trim sheet). */
+val RouteMapHeight = 220.dp
+
+/** Top-corner radius of the tracker's floating stat sheet. */
+val SheetCornerRadius = 26.dp
+
+/** Opacity of the `BgTop` ground behind the full-screen map's top bar and stat sheet. */
+const val MapChromeAlpha = 0.94f
+
+/** Medium motion, in ms: a content fade-in (the route map). */
+const val MotionMedium = 200
+

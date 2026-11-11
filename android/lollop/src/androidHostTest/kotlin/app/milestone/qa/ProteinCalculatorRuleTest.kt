@@ -18,6 +18,7 @@ import app.milestone.Profile
 import app.milestone.ProteinInputView
 import app.milestone.R
 import app.milestone.ViewModel
+import app.milestone.mastersAgeLabel
 import app.milestone.toJson
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -37,8 +38,14 @@ class ProteinCalculatorRuleTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun model(age: Double?, input: ProteinInputView? = null) =
-        ViewModel(profile = Profile(age_years = age, bodyweight_kg = 80.0), protein_input = input)
+    /** [mastersOffered] is the core's `protein_masters_offered` for [age] (app/mod.rs:
+     *  no age or a masters age offers it, a known younger age does not). */
+    private fun model(age: Double?, mastersOffered: Boolean, input: ProteinInputView? = null) =
+        ViewModel(
+            profile = Profile(age_years = age, bodyweight_kg = 80.0),
+            protein_input = input,
+            protein_masters_offered = mastersOffered,
+        )
 
     private fun showRowAndSheet(vm: ViewModel, onEvent: (Event) -> Unit = {}) {
         rule.setContent {
@@ -57,11 +64,11 @@ class ProteinCalculatorRuleTest {
     @Test
     fun underSixtyFive_rowSaysDeficitOnly_andSheetSendsDeficitAlone() {
         val sent = mutableListOf<Event>()
-        showRowAndSheet(model(age = 40.0)) { sent += it }
+        showRowAndSheet(model(age = 40.0, mastersOffered = false)) { sent += it }
         rule.onNode(hasText(str(R.string.main_tool_protein_title)) and hasClickAction()).assertExists()
         rule.onNode(hasText(str(R.string.main_tool_protein_cta_deficit))).assertExists()
-        rule.onNode(hasText(str(R.string.log_switch_masters))).assertDoesNotExist()
-        rule.onNode(hasText(str(R.string.log_protein_deficit_only))).assertExists()
+        rule.onNode(hasText(str(R.string.log_switch_masters, mastersAgeLabel()))).assertDoesNotExist()
+        rule.onNode(hasText(str(R.string.log_protein_deficit_only, mastersAgeLabel()))).assertExists()
         computeButton().assertIsNotEnabled()
 
         rule.onNode(hasText(str(R.string.log_switch_deficit))).performScrollTo().performClick()
@@ -73,7 +80,9 @@ class ProteinCalculatorRuleTest {
     @Test
     fun underSixtyFive_staleMastersQueryIsNeverSent() {
         val sent = mutableListOf<Event>()
-        showRowAndSheet(model(age = 40.0, ProteinInputView(bodyweight_kg = 80.0, masters = true))) { sent += it }
+        showRowAndSheet(
+            model(age = 40.0, mastersOffered = false, input = ProteinInputView(bodyweight_kg = 80.0, masters = true)),
+        ) { sent += it }
         computeButton().assertIsNotEnabled()
         rule.onNode(hasText(str(R.string.log_switch_deficit))).performScrollTo().performClick()
         computeButton().performClick()
@@ -83,17 +92,17 @@ class ProteinCalculatorRuleTest {
 
     @Test
     fun sixtyFivePlus_keepsComputeCtaAndMastersSwitch() {
-        showRowAndSheet(model(age = 70.0))
+        showRowAndSheet(model(age = 70.0, mastersOffered = true))
         rule.onNode(hasText(str(R.string.main_tool_protein_cta_compute))).assertExists()
         rule.onNode(hasText(str(R.string.main_tool_protein_cta_deficit))).assertDoesNotExist()
-        rule.onNode(hasText(str(R.string.log_switch_masters))).assertExists()
+        rule.onNode(hasText(str(R.string.log_switch_masters, mastersAgeLabel()))).assertExists()
         rule.onNode(hasText(str(R.string.log_protein_no_context))).assertExists()
     }
 
     @Test
     fun unknownAge_leavesBothContextsOpen() {
-        showRowAndSheet(model(age = null))
+        showRowAndSheet(model(age = null, mastersOffered = true))
         rule.onNode(hasText(str(R.string.main_tool_protein_cta_compute))).assertExists()
-        assertEquals(1, rule.onAllNodes(hasText(str(R.string.log_switch_masters))).fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodes(hasText(str(R.string.log_switch_masters, mastersAgeLabel()))).fetchSemanticsNodes().size)
     }
 }

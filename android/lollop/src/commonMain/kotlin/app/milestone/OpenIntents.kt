@@ -95,18 +95,11 @@ internal fun routeOpen(
 }
 
 /**
- * The exercise `log_set` prefills: the open item of today's lift session, by the
- * same rule as the Log chooser's "Today's plan" and "Resume" rows. Null (a blank
- * set editor) under a training hold, on a run or rest day, or without a plan.
+ * The exercise `log_set` prefills: [ViewModel.openLiftTarget], the Log chooser's
+ * "Today's plan" and "Resume" rows. Null (a blank set editor) under a training
+ * hold, on a run or rest day, or without a plan.
  */
 internal fun logSetTarget(model: ViewModel): String? {
     if (model.train_blocked) return null
-    val plan = model.todaysPlan()
-    val item = if (plan != null && plan.session_type.discipline == SessionDiscipline.Lift) {
-        firstOpenItem(plan.items) ?: plan.items.first()
-    } else {
-        val started = model.resumableLiftDay() ?: return null
-        firstOpenItem(started.items) ?: started.items.last()
-    }
-    return item.exercise.takeIf { it.isNotBlank() }
+    return model.openLiftTarget()?.second?.exercise?.takeIf { it.isNotBlank() }
 }

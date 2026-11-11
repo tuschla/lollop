@@ -40,8 +40,8 @@ import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
+import app.milestone.CoreConstants
 import app.milestone.DistanceUnit
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
@@ -55,7 +55,6 @@ import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.RunSession
-import app.milestone.TRACK_DECIMATION_CAP
 import app.milestone.TestClock
 import app.milestone.runDistLabel
 import app.milestone.openIntent
@@ -640,6 +639,8 @@ class RestoreRoundtripTest {
                 Event.LogRun(8.0, 44.0, 0.0, observedAt = runAt, entryId = runAt * 1000),
             ),
         )
+        // Starts in km whatever the test JVM's locale.
+        QaHarness.legacyDistanceUnit(ctx, DistanceUnit.Km)
         rule.launchApp()
         val before = model
         val beforeProfile = checkNotNull(before.profile)
@@ -647,10 +648,10 @@ class RestoreRoundtripTest {
         rule.selectTab(str(R.string.main_dest_profile))
         tapProfileOption(hasText(AppTheme.Meadow.name) and isSelectable())
         tapProfileOption(segment(str(R.string.main_unit_mi)))
+        rule.waitForState { model.profile?.distance_unit == DistanceUnit.Mi }
         tapProfileOption(segment(app.milestone.weightSuffix(app.milestone.WeightUnit.Lb)))
-        rule.waitForState { model.profile?.weight_lb == true }
+        rule.waitForState { model.profile?.weight_lb == true && model.profile?.distance_unit == DistanceUnit.Mi }
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
-        assertEquals(DistanceUnitOverride.Mi, AppSettings.distanceUnitOverride.value)
 
         recreate()
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
@@ -661,18 +662,20 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         rule.launchApp()
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
-        assertEquals(DistanceUnitOverride.Mi, AppSettings.distanceUnitOverride.value)
+        assertEquals(DistanceUnit.Mi, model.profile!!.distance_unit)
         assertTrue(model.profile!!.weight_lb)
         rule.selectTab(str(R.string.main_dest_history))
         rule.selectHistoryFilter(str(R.string.main_segment_runs))
         rule.scrollToText(runDistLabel(8.0, DistanceUnit.Mi))
 
-        // Back to kg: the profile is the one the user had, field for field (each flip
-        // is a dated edit, so only its stamps differ); the plan and every logged
-        // number are untouched by the two unit flips.
+        // Back to kg and km: the profile is the one the user had, field for field
+        // (each flip is a dated edit, so only its stamps differ); the plan and every
+        // logged number are untouched by the unit flips.
         rule.selectTab(str(R.string.main_dest_profile))
         tapProfileOption(segment(app.milestone.weightSuffix(app.milestone.WeightUnit.Kg)))
         rule.waitForState { model.profile?.weight_lb == false }
+        tapProfileOption(segment(str(R.string.main_unit_km)))
+        rule.waitForState { model.profile?.weight_lb == false && model.profile?.distance_unit == DistanceUnit.Km }
         val after = checkNotNull(model.profile)
         assertEquals(model.today_epoch_day, after.effective_from_epoch_day)
         assertEquals(beforeProfile, after.copy(effective_from_epoch_day = null, edited_at = null))
@@ -832,7 +835,7 @@ class RestoreRoundtripTest {
         feedLive(pts, t0, baseElapsedMs = 5_000)
         val live = liveSnapshot()
         val recovered = dieAndRecover()
-        assertTrue("thinned to the cap: ${recovered.size}", recovered.size <= TRACK_DECIMATION_CAP + 1)
+        assertTrue("thinned to the cap: ${recovered.size}", recovered.size <= CoreConstants.TRACK_DECIMATION_CAP + 1)
         assertEquals("start kept", pts.first(), recovered.first())
         assertEquals("finish kept", pts.last(), recovered.last())
         assertTrue("no fabricated pause: ${RunSession.decimatedSegmentStarts(Int.MAX_VALUE)}", RunSession.decimatedSegmentStarts(Int.MAX_VALUE).isEmpty())

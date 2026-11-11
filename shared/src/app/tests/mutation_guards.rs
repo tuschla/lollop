@@ -105,7 +105,7 @@ fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
         &mut m,
     );
     let vm = Engine.view(&m);
-    let split = vm.runs[0].split_pct.expect("the card shows the split");
+    let split = run_split_pct(&m.runs[0]).expect("the card shows the split");
     assert!(!split.is_sign_negative(), "the card's split_pct is -0.0");
     let json = serde_json::to_string(&vm.runs[0]).unwrap();
     assert!(!json.contains("-0.0"), "{json}");
@@ -419,9 +419,9 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
     );
     let vm = Engine.view(&m);
     assert!(
-        vm.runs
+        m.runs
             .iter()
-            .any(|r| r.split_pct.is_some_and(|p| p > 10.0)),
+            .any(|r| run_split_pct(r).is_some_and(|p| p > 10.0)),
         "fixture: one run fades"
     );
     let fb = serde_json::to_string(&vm.feedback).unwrap();

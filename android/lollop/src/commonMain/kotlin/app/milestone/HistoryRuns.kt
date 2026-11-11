@@ -47,12 +47,33 @@ import app.milestone.resources.history_run_tempo
 import app.milestone.resources.history_run_weekday
 import app.milestone.resources.main_run
 import app.milestone.resources.main_set
+import app.milestone.resources.run_type_easy
+import app.milestone.resources.run_type_interval
+import app.milestone.resources.run_type_long
+import app.milestone.resources.run_type_recovery
+import app.milestone.resources.run_type_steady
+import app.milestone.resources.run_type_tempo
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.resources.StringResource
 
 // ── Run cards (History "Runs" stream) ───────────────────────────────────────
+
+/** A run type's words: [label] on the RUN TYPE chips and row ("Tempo"), [title]
+ *  as a tagged run's card title ("Tempo run"). */
+internal class WorkoutTypeText(val label: StringResource, val title: StringResource)
+
+internal val WorkoutType.text: WorkoutTypeText
+    get() = when (this) {
+        WorkoutType.Steady -> WorkoutTypeText(Res.string.run_type_steady, Res.string.history_run_steady)
+        WorkoutType.Interval -> WorkoutTypeText(Res.string.run_type_interval, Res.string.history_run_interval)
+        WorkoutType.Tempo -> WorkoutTypeText(Res.string.run_type_tempo, Res.string.history_run_tempo)
+        WorkoutType.LongRun -> WorkoutTypeText(Res.string.run_type_long, Res.string.history_run_long)
+        WorkoutType.Recovery -> WorkoutTypeText(Res.string.run_type_recovery, Res.string.history_run_recovery)
+        WorkoutType.Easy -> WorkoutTypeText(Res.string.run_type_easy, Res.string.history_run_easy)
+    }
 
 /**
  * The run's title: the user's own run-type tag when set ("Tempo run"), so the title
@@ -62,16 +83,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun runTitle(r: RunResultView): String {
-    val tagged = when (r.workout_type) {
-        WorkoutType.Steady -> Res.string.history_run_steady
-        WorkoutType.Interval -> Res.string.history_run_interval
-        WorkoutType.Tempo -> Res.string.history_run_tempo
-        WorkoutType.LongRun -> Res.string.history_run_long
-        WorkoutType.Recovery -> Res.string.history_run_recovery
-        WorkoutType.Easy -> Res.string.history_run_easy
-        null -> null
-    }
-    if (tagged != null) return stringResource(tagged)
+    r.workout_type?.let { return stringResource(it.text.title) }
     if (r.started_at <= 0L) return stringResource(Res.string.main_run)
     val weekday = weekdayName(
         Instant.fromEpochSeconds(r.started_at).toLocalDateTime(TimeZone.currentSystemDefault()).dayOfWeek,

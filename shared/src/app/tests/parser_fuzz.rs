@@ -1,8 +1,8 @@
 //! Seeded mutation fuzzing of the byte-level paths the shell drives through
 //! the bridge (`crate::ffi`):
 //!
-//! - the FIT import (`fit::parse_fit` + `fit::import_gate`, the body of the
-//!   `ParseFit` op, serialized exactly as it does);
+//! - the FIT import (`fit::parse_fit` + `fit::import_gate`, then the verdict
+//!   of the `ParseRunFile` op, serialized exactly as it does);
 //! - the GPX export (`export_run_gpx` → `crate::gps::export_gpx`, what the
 //!   `ExportGpx` op answers);
 //! - the track-figures preview (`Event` decode + `preview_track_figures`, the
@@ -372,9 +372,9 @@ fn fit_seeds() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-// ── The ParseFit op's body and its invariants ───────────────────────────────
+// ── The FIT reader, the ParseRunFile op's verdict and their invariants ──────
 
-/// What the bridge's `ParseFit` op decides for some bytes, before serialization.
+/// What the FIT reader decides for some bytes, before the import's run gates.
 #[derive(Debug, Clone, PartialEq)]
 enum FitOutcome {
     Track(FitTrack),
@@ -388,14 +388,20 @@ fn decide(bytes: &[u8]) -> FitOutcome {
     }
 }
 
-/// The wire payload `parse_fit_json` would return for `out` (same shapes).
-fn payload(out: &FitOutcome) -> serde_json::Value {
-    match out {
-        FitOutcome::Track(t) => serde_json::to_value(t).expect("a track serializes"),
-        FitOutcome::Fail(e) => serde_json::json!({
-            "error": {"kind": crate::envelope::ErrorKind::from(e), "context": e.context(), "message": ""}
-        }),
+/// The FIT failure's kind, as the seeds' expectations name it.
+fn fit_kind(e: &FitError) -> &'static str {
+    match e {
+        FitError::NotFit => "not_fit",
+        FitError::Damaged => "damaged",
+        FitError::NoTrack => "no_track",
+        FitError::TooShort => "too_short",
+        FitError::NotARun(_) => "not_a_run",
     }
+}
+
+/// The wire payload the `ParseRunFile` op answers for `bytes`.
+fn payload(bytes: &[u8]) -> serde_json::Value {
+    serde_json::to_value(crate::import::import_run_file(bytes)).expect("a verdict serializes")
 }
 
 /// Per-input time bound (debug build). A real 4.6 KB file parses in ~1 ms.
@@ -447,16 +453,32 @@ fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
     // The wire: what the shell decodes must come back bit for bit (serde_json's
     // `float_roundtrip` parser is correctly rounded, as is the shell's kotlinx
     // parser; see `a_logged_track_survives_the_event_wire_bit_for_bit`).
-    let wire = serde_json::to_string(&payload(&first)).map_err(|e| e.to_string())?;
+    let sent = guarded(|| payload(bytes)).map_err(|p| format!("PANIC in the verdict: {p}"))?;
+    let wire = serde_json::to_string(&sent).map_err(|e| e.to_string())?;
     let back: serde_json::Value = serde_json::from_str(&wire).map_err(|e| e.to_string())?;
-    if back != payload(&first) {
+    if back != sent {
         return Err(format!("payload does not round-trip: {wire}"));
     }
-    if let FitOutcome::Track(t) = &first {
-        let segs = back["segments"].as_array().map(Vec::len);
-        if segs != Some(t.segments.len()) {
-            return Err(format!("segments lost on the wire: {wire}"));
+    // A FIT failure is the file's reason; a track either imports or is refused
+    // by the run gates.
+    let refusal = back["refusal"].as_str();
+    let want = match &first {
+        FitOutcome::Fail(FitError::NotFit) => Some("wrong_type"),
+        FitOutcome::Fail(e) => Some(fit_kind(e)),
+        FitOutcome::Track(_) => None,
+    };
+    let consistent = match (want, refusal) {
+        (Some(want), got) => {
+            got == Some(want) && back["runs"].as_array().is_some_and(Vec::is_empty)
         }
+        (None, Some(got)) => matches!(
+            got,
+            "no_timestamps" | "implausible_pace" | "too_short" | "no_track"
+        ),
+        (None, None) => back["runs"].as_array().is_some_and(|r| !r.is_empty()),
+    };
+    if !consistent {
+        return Err(format!("verdict {wire} for FIT outcome {first:?}"));
     }
     // Same input, same answer.
     let again = guarded(|| decide(bytes)).map_err(|p| format!("PANIC on 2nd call: {p}"))?;
@@ -565,9 +587,7 @@ fn every_seed_parses_to_its_known_outcome() {
             let out = check_fit(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
             let kind = match &out {
                 FitOutcome::Track(t) => format!("track {} segs", t.segments.len()),
-                FitOutcome::Fail(e) => {
-                    format!("{} {}", crate::envelope::ErrorKind::from(e), e.context())
-                }
+                FitOutcome::Fail(e) => format!("{} {}", fit_kind(e), e.context()),
             };
             (name, kind)
         })

@@ -160,13 +160,24 @@ class BridgeTest {
     }
 
     @Test
-    fun parseFitReportsTheCoresImportVerdicts() {
-        assertEquals("not_fit", json(core.parseFit("not a fit file".encodeToByteArray())).errorKind())
-        assertEquals("not_fit", json(core.parseFit(ByteArray(0))).errorKind())
-        val ride = json(core.parseFit(readRepoFile("shared/tests/fixtures/garmin-fenix-5-bike.fit")))
-        assertEquals("not_a_run", ride.errorKind(), "a bike ride: $ride")
-        val fragment = json(core.parseFit(readRepoFile("shared/tests/fixtures/Activity.fit")))
-        assertEquals("too_short", fragment.errorKind(), "a 13 s fragment: $fragment")
+    fun parseRunFileReportsTheCoresImportVerdicts() {
+        fun refusal(bytes: ByteArray) = json(core.parseRunFile(bytes)).jsonObject["refusal"]?.jsonPrimitive?.content
+        assertEquals("wrong_type", refusal("not a run file".encodeToByteArray()))
+        assertEquals("wrong_type", refusal(ByteArray(0)))
+        val ride = json(core.parseRunFile(readRepoFile("shared/tests/fixtures/garmin-fenix-5-bike.fit"))).jsonObject
+        assertEquals("not_a_run", ride["refusal"]?.jsonPrimitive?.content, "a bike ride: $ride")
+        assertEquals("cycling", ride["sport"]?.jsonPrimitive?.content, "a bike ride: $ride")
+        assertEquals("too_short", refusal(readRepoFile("shared/tests/fixtures/Activity.fit")), "a 13 s fragment")
+    }
+
+    @Test
+    fun theRecordersThinningAndAnImportsHeartRateAreTheCores() {
+        val thin = json(core.thinTrack("""{"fixes":10,"max_points":4,"segment_starts":[5]}""".encodeToByteArray())).jsonObject
+        assertEquals(listOf(0, 3, 5, 6, 9), thin["kept"]!!.jsonArray.map { it.jsonPrimitive.int })
+        assertEquals(listOf(2), thin["segment_starts"]!!.jsonArray.map { it.jsonPrimitive.int })
+        val hr = json(core.importedHrPct("""{"avg_hr_bpm":152.0,"measured_hr_max":140.0}""".encodeToByteArray()))
+        assertEquals(100.0, hr.jsonPrimitive.double, "capped at 100 %")
+        assertEquals("bad_input", json(core.thinTrack("{".encodeToByteArray())).errorKind())
     }
 
     @Test

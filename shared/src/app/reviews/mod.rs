@@ -12,14 +12,14 @@ mod session_feedback;
 mod split;
 mod trend;
 
-pub(super) use exec::{build_session_done, derive_session_exec};
+pub(super) use exec::{DerivedExec, build_session_done, derive_session_exec};
 pub(super) use last_time::annotate_last_time;
 pub(super) use mastery::detect_mastery;
 pub(super) use rows::{
     ReviewCtx, next_time_add_superseded, remaining_sets_call_spent, review_views,
 };
 pub(super) use session_feedback::{
-    FeedbackCtx, build_feedback, feedback_track_split, latest_run_spike,
+    FeedbackCtx, build_feedback, feedback_track_split, latest_run_spike, link_win_advice,
 };
 pub(super) use split::{merged_review, review_adjustment_expired, review_age_days};
 pub(super) use trend::build_trend;

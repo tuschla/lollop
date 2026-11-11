@@ -28,13 +28,13 @@ private fun LocaleList.withLatinDigits(): LocaleList = LocaleList(*Array(size())
 @Volatile private var latinCache: Pair<Configuration, Resources>? = null
 
 /**
- * [this] context's resources with Latin digits. Called where a text with a count
- * is built (a notification, the widget, the run import result, the coach
- * export), so a long-running service follows a language change. One copy is
- * kept per configuration, so a notification refreshed every second builds no new
- * context.
+ * [this] context's resources with Latin digits. Called where a text is built
+ * outside composition (a notification, the widget, the tile, the run import
+ * result, the coach export), so a long-running service follows a language
+ * change. One copy is kept per configuration, so a notification refreshed every
+ * second builds no new context.
  */
-internal fun Context.latinDigitResources(): Resources {
+internal actual fun Context.appResources(): Resources {
     val config = resources.configuration
     val latin = config.locales.withLatinDigits()
     if (latin == config.locales) return resources
@@ -47,10 +47,10 @@ internal fun Context.latinDigitResources(): Resources {
 private fun localesOnly(locales: LocaleList): Configuration =
     Configuration().apply { fontScale = 0f; setLocales(locales) }
 
-/** [this] context with [latinDigitResources], for MainActivity's base context: a
+/** [this] context with [appResources], for MainActivity's base context: a
  *  language change recreates the Activity, so its base follows. */
 internal fun Context.withLatinDigits(): Context {
-    val latin = latinDigitResources()
+    val latin = appResources()
     return if (latin === resources) this else LatinDigitsContext(this, latin)
 }
 

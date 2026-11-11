@@ -1,5 +1,5 @@
 use crate::app::format::fmt_frac_pct_range;
-use crate::app::guidance::rows::{WeeklyBasis, push_guidance, push_guidance_mi, weekly_basis_text};
+use crate::app::guidance::rows::{WeeklyBasis, push_guidance, weekly_basis_text};
 use crate::app::view_types::GuidanceView;
 use crate::evidence::claims;
 use crate::hybrid;
@@ -80,19 +80,17 @@ pub(super) fn build_hybrid_guidance(
 
     if let Some(llc) = hybrid::lower_lift_cap(shape.run_days, weekly_km) {
         let mid = (llc.value.volume_reduction_frac.0 + llc.value.volume_reduction_frac.1) / 2.0;
-        let llc_text = |mi: bool| {
-            format!(
-                "With your running ({}), leg lifting is kept to {} days a week and leg sets are trimmed by about {:.0}% (guideline {}%).",
-                weekly_basis_text(weekly_km, weekly_basis, mi),
-                llc.value.max_lower_sessions,
-                mid * 100.0,
-                fmt_frac_pct_range(
-                    llc.value.volume_reduction_frac.0,
-                    llc.value.volume_reduction_frac.1
-                )
+        let llc_text = format!(
+            "With your running ({}), leg lifting is kept to {} days a week and leg sets are trimmed by about {:.0}% (guideline {}%).",
+            weekly_basis_text(weekly_km, weekly_basis, p.distance_unit),
+            llc.value.max_lower_sessions,
+            mid * 100.0,
+            fmt_frac_pct_range(
+                llc.value.volume_reduction_frac.0,
+                llc.value.volume_reduction_frac.1
             )
-        };
-        push_guidance_mi(rows, "Hybrid", llc_text(false), llc_text(true), &llc);
+        );
+        push_guidance(rows, "Hybrid", llc_text, &llc);
     }
 
     // Interference is judged from the plan's own run days and hardest

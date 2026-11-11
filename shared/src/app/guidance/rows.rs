@@ -3,6 +3,7 @@ use crate::app::format::fmt_whole_km_or_mi;
 use crate::app::view_types::{EvidenceTagView, GuidanceView};
 use crate::evidence::EvidenceGrade;
 use crate::individualization;
+use crate::profile::DistanceUnit;
 use crate::schema::{AdjustmentCall, Recommended};
 use crate::strength::LiftGoal;
 
@@ -15,24 +16,6 @@ pub(in crate::app) fn push_guidance<T, K>(
     r: &Recommended<T, K>,
 ) {
     push_guidance_basis(rows, section, summary, None, r);
-}
-
-/// Like [`push_guidance`], with the summary's miles twin (`summary_mi`) for a
-/// row that states a distance. Sets the twin only when the row was pushed.
-pub(in crate::app) fn push_guidance_mi<T, K>(
-    rows: &mut Vec<GuidanceView>,
-    section: &str,
-    summary: String,
-    summary_mi: String,
-    r: &Recommended<T, K>,
-) {
-    let before = rows.len();
-    push_guidance_basis(rows, section, summary, None, r);
-    if rows.len() > before
-        && let Some(row) = rows.last_mut()
-    {
-        row.summary_mi = summary_mi;
-    }
 }
 
 /// Like [`push_guidance`], but with a call-site-specific `basis` line for the
@@ -52,10 +35,10 @@ pub(in crate::app) fn push_guidance_basis<T, K>(
     rows.push(GuidanceView {
         section: section.into(),
         summary,
-        summary_mi: String::new(),
         evidence: EvidenceTagView::of(r),
         why: why_from(basis, r),
         training_age: String::new(),
+        ..Default::default()
     });
 }
 
@@ -84,14 +67,14 @@ pub(in crate::app) enum WeeklyBasis {
     Profile,
 }
 
-/// The weekly volume with its source, in km or miles: "70 km a week from your
+/// The weekly volume with its source, in `unit`: "70 km a week from your
 /// logged runs" / "19 mi a week from your profile".
-pub(super) fn weekly_basis_text(weekly_km: f64, basis: WeeklyBasis, mi: bool) -> String {
+pub(super) fn weekly_basis_text(weekly_km: f64, basis: WeeklyBasis, unit: DistanceUnit) -> String {
     let source = match basis {
         WeeklyBasis::Logged => "from your logged runs",
         WeeklyBasis::Profile => "from your profile",
     };
-    format!("{} a week {source}", fmt_whole_km_or_mi(weekly_km, mi))
+    format!("{} a week {source}", fmt_whole_km_or_mi(weekly_km, unit))
 }
 
 /// A lift goal as it reads mid-sentence in guidance copy ("Weights for muscle

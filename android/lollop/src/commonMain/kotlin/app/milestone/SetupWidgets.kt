@@ -108,6 +108,7 @@ import app.milestone.resources.setup_review_edit
 import app.milestone.resources.setup_step_progress
 import app.milestone.resources.setup_weekdays_any
 import app.milestone.resources.setup_weekdays_any_of
+import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
@@ -120,21 +121,21 @@ import org.jetbrains.compose.resources.stringResource
 // ── Health screen ───────────────────────────────────────────────────────────
 
 /** One PAR-Q+ question in plain language (onboard-051). */
-internal val ParqItem.questionRes: StringResource
+internal val ParqQuestion.questionRes: StringResource
     get() = when (this) {
-        ParqItem.HeartOrBloodPressure -> Res.string.setup_parq_q1
-        ParqItem.ChestPain -> Res.string.setup_parq_q2
-        ParqItem.DizzyOrFainting -> Res.string.setup_parq_q3
-        ParqItem.OtherCondition -> Res.string.setup_parq_q4
-        ParqItem.Medication -> Res.string.setup_parq_q5
-        ParqItem.BoneOrJoint -> Res.string.setup_parq_q6
-        ParqItem.SupervisedOnly -> Res.string.setup_parq_q7
+        ParqQuestion.HeartOrBloodPressure -> Res.string.setup_parq_q1
+        ParqQuestion.ChestPain -> Res.string.setup_parq_q2
+        ParqQuestion.DizzyOrFainting -> Res.string.setup_parq_q3
+        ParqQuestion.OtherCondition -> Res.string.setup_parq_q4
+        ParqQuestion.Medication -> Res.string.setup_parq_q5
+        ParqQuestion.BoneOrJoint -> Res.string.setup_parq_q6
+        ParqQuestion.SupervisedOnly -> Res.string.setup_parq_q7
     }
 
 /**
  * The seven PAR-Q+ questions + the "Cleared by a doctor" follow-up they unlock.
  * Every change goes through [onChange] with the whole new [HealthScreen], the gate
- * flags re-derived from the answers ([HealthScreen.withParqAnswer]) so a hidden
+ * flags re-derived by the core from all the answers ([draftFacts]) so a hidden
  * stale flag never defeats or pins a gate (HARD RULE 3). [revealItem] /
  * [revealClearance] scroll that row into view, then [onRevealed].
  */
@@ -144,31 +145,33 @@ internal fun ParqQuestions(
     divider: @Composable () -> Unit,
     showIntro: Boolean = true,
     leadingDivider: Boolean = true,
-    revealItem: ParqItem? = null,
+    revealItem: ParqQuestion? = null,
     revealClearance: Boolean = false,
     onRevealed: () -> Unit = {},
     onChange: (HealthScreen) -> Unit,
 ) {
+    val facts = remember(health) { draftFacts(ProfileDraft(health = health)) }
+    fun answer(a: HealthAnswer) = onChange(draftFacts(ProfileDraft(health = health, answer = a)).health)
     if (showIntro) Text(stringResource(Res.string.setup_parq_intro), color = OnBgMuted, style = Type.Caption)
-    if (health.legacyParq) {
+    if (facts.legacy_parq) {
         Text(stringResource(Res.string.setup_parq_legacy), color = OnBgMuted, style = Type.Caption)
     }
     // A raised answer says what it means under its row: a chest-pain or fainting Yes
     // (once, on the first symptom answered Yes) and the bone/joint Yes (the
     // injury/rehab hold); any other Yes unlocks the clearance row.
-    val firstSymptom = ParqItem.entries.firstOrNull { it.symptom && health.parqYes(it) }
-    ParqItem.entries.forEachIndexed { i, item ->
+    ParqQuestion.entries.forEachIndexed { i, item ->
         if (i > 0 || leadingDivider) divider()
+        val yes = item in facts.parq_yes
         RevealTarget(revealItem == item, onRevealed) {
             LabeledSwitchRow(
                 label = stringResource(item.questionRes),
                 subtitle = when {
-                    item.injury && health.parqYes(item) -> stringResource(Res.string.setup_health_injury_body)
-                    item == firstSymptom -> stringResource(Res.string.setup_parq_symptom_body)
+                    item == ParqQuestion.BoneOrJoint && yes -> stringResource(Res.string.setup_health_injury_body)
+                    item == facts.first_symptom -> stringResource(Res.string.setup_parq_symptom_body)
                     else -> null
                 },
-                checked = health.parqYes(item),
-                onCheckedChange = { onChange(health.withParqAnswer(item, it)) },
+                checked = yes,
+                onCheckedChange = { answer(HealthAnswer.Parq(item, it)) },
             )
         }
     }
@@ -179,7 +182,7 @@ internal fun ParqQuestions(
                 label = stringResource(Res.string.setup_health_cleared_label),
                 subtitle = stringResource(Res.string.setup_health_cleared_body),
                 checked = health.medically_cleared,
-                onCheckedChange = { onChange(health.withClearance(it)) },
+                onCheckedChange = { answer(HealthAnswer.Clearance(it)) },
             )
         }
     }
@@ -244,12 +247,12 @@ internal fun CurrentHealthRows(
  *  the Profile PAR-Q+ row passes the PAR-Q+ answers alone. */
 @Composable
 internal fun healthSummary(
-    health: HealthScreen,
-    count: Int = health.parqYesCount +
-        listOf(health.acute_illness, health.pregnant, health.pregnancy_warning_sign, health.reds_signal).count { it },
+    facts: DraftFacts,
+    count: Int = facts.parq_yes.size +
+        with(facts.health) { listOf(acute_illness, pregnant, pregnancy_warning_sign, reds_signal).count { it } },
 ): String = when {
     count > 0 -> pluralStringResource(Res.plurals.setup_health_flag_count, count, count)
-    health.legacyParq -> stringResource(Res.string.setup_parq_value_legacy)
+    facts.legacy_parq -> stringResource(Res.string.setup_parq_value_legacy)
     else -> stringResource(Res.string.setup_parq_value_clear)
 }
 
@@ -296,7 +299,7 @@ internal fun hybridSplitText(totalDays: Int, liftDays: Int, lead: BothPriority?)
     val rest = totalDays - liftDays - run
     if (rest <= 0) return split
     val restDays = pluralStringResource(Res.plurals.setup_days_rest_count, rest, rest)
-    return split + " " + stringResource(Res.string.setup_days_split_capped, HYBRID_CAPPED_DAYS, restDays)
+    return split + " " + stringResource(Res.string.setup_days_split_capped, CoreConstants.ENDURANCE_FREQUENCY_CAP_DAYS, restDays)
 }
 
 /** A recent race as a short line: "5K in 26:15"; a distance no chip matches is
@@ -494,7 +497,7 @@ internal fun RaceDistanceChips(current: RaceDistance?, onPick: (RaceDistance?) -
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun WeekdayChips(mask: Int?, onChange: (Int?) -> Unit) {
-    val names = (0 until WEEK_DAYS).map { weekdayShortName(it) }
+    val names = (0 until WEEK_DAYS).map { weekdayShort(DayOfWeek(it + 1)) }
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val gap = Space.Sm.dp
@@ -604,10 +607,12 @@ internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, onChange:
     }
 }
 
-/** "Born 12 Mar 1991 · 35": a birthday with the age it gives on [today]. */
+/** "Born 12 Mar 1991 · 35": a birthday with the age the core counts on [today]. */
 @Composable
-internal fun birthdayLabel(birthDay: Long, today: Long): String =
-    stringResource(Res.string.setup_birthday_value, epochDayLabel(birthDay), ageOnDay(birthDay, today))
+internal fun birthdayLabel(birthDay: Long, today: Long): String {
+    val age = remember(birthDay, today) { birthdayAge(birthDay, today)?.toInt() ?: 0 }
+    return stringResource(Res.string.setup_birthday_value, epochDayLabel(birthDay), age)
+}
 
 /**
  * The birthday answer (setup About step, Profile › Age): a calendar pill showing

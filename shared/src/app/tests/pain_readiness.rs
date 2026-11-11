@@ -99,40 +99,45 @@ fn pain_blocks_training_with_a_single_stop() {
 }
 
 #[test]
-fn pain_location_surfaces_on_the_readiness_row_detail_through_the_view() {
-    // A characterized pain report with a body-part location must reach the
-    // shell's DO-NOT-TRAIN banner sub-line via ReadinessSignalView.detail;
-    // an identical report with no location must leave detail body-part-free
-    // (never fabricated, HARD RULE 1).
-    let pain_row = |json: &str| -> ReadinessSignalView {
+fn the_active_pain_report_reaches_the_view_with_its_area_and_line() {
+    // A characterized pain report reaches the shell's pain surfaces as
+    // `active_pain`: the report itself (restored by the banner's undo), its
+    // preset area and its one-line context; an identical report with no
+    // location names no area and no body part (never fabricated, HARD RULE 1).
+    let active = |json: &str| {
         let app = Engine;
         let mut model = Model::default();
         let event: Event = serde_json::from_str(json).expect("pain event parses");
         app.update(event, &mut model).expect_only_render();
         app.view(&model)
-            .readiness_summary
-            .into_iter()
-            .find(|r| r.signal == ReadinessSignal::Pain)
-            .expect("pain row present")
+            .active_pain
+            .expect("a pain report in force")
     };
 
-    let with_loc = pain_row(
+    let with_loc = active(
         r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0,"pain":{"kind":"SharpJoint","severity":6,"trend":"Stable","location":"Left knee"}}}"#,
     );
-    assert!(
-        with_loc.detail.contains("Left knee"),
-        "banner sub-line must name the body part, got {:?}",
-        with_loc.detail
+    assert_eq!(with_loc.area, Some(crate::schema::PainArea::LeftKnee));
+    assert_eq!(
+        with_loc.context.as_deref(),
+        Some("Left knee · sharp or joint pain · 6/10")
     );
+    assert_eq!(with_loc.report.severity, Some(6));
 
-    let no_loc = pain_row(
+    let no_loc = active(
         r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0,"pain":{"kind":"SharpJoint","severity":6,"trend":"Stable"}}}"#,
     );
-    assert!(
-        !no_loc.detail.to_lowercase().contains("knee"),
-        "no location must be invented when None, got {:?}",
-        no_loc.detail
+    assert_eq!(no_loc.area, None);
+    assert_eq!(
+        no_loc.context.as_deref(),
+        Some("sharp or joint pain · 6/10")
     );
+
+    let unsure = active(
+        r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0,"pain":{"kind":"Other","trend":"Stable","location":"Other"}}}"#,
+    );
+    assert_eq!(unsure.area, None, "\"Other\" names no area");
+    assert_eq!(unsure.context.as_deref(), Some("Other"));
 }
 
 #[test]

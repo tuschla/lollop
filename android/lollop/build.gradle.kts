@@ -86,9 +86,6 @@ kotlin {
             // SynchronizedObject + synchronized(): a real lock on Kotlin/Native, where
             // @Synchronized does nothing; on the JVM it is the object's monitor.
             implementation(libs.atomicfu)
-            // Pure-Kotlin XML pull reader (KtXmlReader) for GPX/TCX run import on iOS
-            // (ImportXml.kt); Android reads with the platform's xmlpull parser.
-            implementation(libs.xmlutil.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

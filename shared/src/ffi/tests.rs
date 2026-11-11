@@ -46,36 +46,16 @@ fn profile() -> Value {
 
 #[test]
 fn error_kinds_serialise_to_the_names_the_shell_reads() {
-    // `CoreWire.kt` matches `panic_reset`, `Gpx.kt` the FIT kinds.
+    // `CoreWire.kt` matches `panic_reset`.
     let kinds = [
         (ErrorKind::PanicReset, "panic_reset"),
         (ErrorKind::Panic, "panic"),
         (ErrorKind::Unserializable, "unserializable"),
         (ErrorKind::BadInput, "bad_input"),
-        (ErrorKind::NotFit, "not_fit"),
-        (ErrorKind::Damaged, "damaged"),
-        (ErrorKind::NoTrack, "no_track"),
-        (ErrorKind::TooShort, "too_short"),
-        (ErrorKind::NotARun, "not_a_run"),
     ];
     for (kind, name) in kinds {
         assert_eq!(serde_json::to_value(kind).unwrap(), name);
         assert_eq!(kind.to_string(), name);
-    }
-}
-
-#[test]
-fn fit_errors_map_to_their_shell_kinds() {
-    use crate::fit::FitError;
-    let cases = [
-        (FitError::NotFit, "not_fit"),
-        (FitError::Damaged, "damaged"),
-        (FitError::NoTrack, "no_track"),
-        (FitError::TooShort, "too_short"),
-        (FitError::NotARun("cycling".to_owned()), "not_a_run"),
-    ];
-    for (err, kind) in cases {
-        assert_eq!(ErrorKind::from(&err).to_string(), kind, "{err:?}");
     }
 }
 
@@ -804,39 +784,105 @@ fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
 }
 
 #[test]
-fn parse_fit_json_reports_a_plain_error_for_garbage_bytes() {
-    // No model or event log: the firewalled wrapper around
-    // `crate::fit::parse_fit` shapes an `{"error":{...}}` object rather than
-    // propagating a Rust `Result` or panicking across the FFI boundary.
-    let v = pure(Op::ParseFit, b"not a fit file");
-    assert_eq!(v["error"]["kind"], "not_fit", "{v}");
-    assert_eq!(v["error"]["context"], "", "{v}");
+fn parse_run_file_answers_a_verdict_for_garbage_bytes() {
+    // No model or event log, no error envelope: a file that is no run is a
+    // verdict with its reason.
+    let v = pure(Op::ParseRunFile, b"not a run file");
+    assert_eq!(v, json!({ "runs": [], "refusal": "wrong_type" }), "{v}");
+    let fit_magic = pure(Op::ParseRunFile, b"not a .FIT file");
+    assert_eq!(
+        fit_magic,
+        json!({ "runs": [], "refusal": "wrong_type" }),
+        "{fit_magic}"
+    );
 }
 
 #[test]
-fn parse_fit_json_reports_a_bike_ride_as_not_a_run() {
+fn parse_run_file_reports_a_bike_ride_as_not_a_run() {
     // A real Garmin Fenix 5 cycling file with a full GPS track: the shell gets
-    // the machine-readable kind plus the sport, not a run import.
+    // the reason plus the sport, not a run import.
     let path = format!(
         "{}/tests/fixtures/garmin-fenix-5-bike.fit",
         env!("CARGO_MANIFEST_DIR")
     );
     let bytes = std::fs::read(&path).expect("fixture should read");
-    let v = pure(Op::ParseFit, &bytes);
-    assert_eq!(v["error"]["kind"], "not_a_run", "{v}");
-    assert_eq!(v["error"]["context"], "cycling", "{v}");
+    let v = pure(Op::ParseRunFile, &bytes);
+    assert_eq!(
+        v,
+        json!({ "runs": [], "refusal": "not_a_run", "sport": "cycling" }),
+        "{v}"
+    );
 }
 
 #[test]
-fn parse_fit_json_refuses_a_fragment_too_short_to_be_a_run() {
+fn parse_run_file_refuses_a_fragment_too_short_to_be_a_run() {
     // The real `Activity.fit` running file holds a 13 s, ~3 m fragment: it
-    // parses, but the import gate reports it as `too_short` instead of
-    // handing the shell a "run".
+    // parses, but the keep threshold refuses it as `too_short`.
     let path = format!("{}/tests/fixtures/Activity.fit", env!("CARGO_MANIFEST_DIR"));
     let bytes = std::fs::read(&path).expect("fixture should read");
-    let v = pure(Op::ParseFit, &bytes);
-    assert_eq!(v["error"]["kind"], "too_short", "{v}");
-    assert_eq!(v["error"]["context"], "", "{v}");
+    let v = pure(Op::ParseRunFile, &bytes);
+    assert_eq!(v, json!({ "runs": [], "refusal": "too_short" }), "{v}");
+}
+
+#[test]
+fn parse_run_file_answers_the_runs_to_log() {
+    let gpx = crate::gps::export_gpx(
+        &(0..300)
+            .map(|k| crate::gps::GpsPoint {
+                lat: 47.0 + f64::from(k) * 3.0 / 111_195.0,
+                lon: 8.0,
+                observed_at: 1_750_000_000 + i64::from(k),
+                accuracy_m: 5.0,
+            })
+            .collect::<Vec<_>>(),
+        "Run",
+        &[],
+        Some(1_750_000_400),
+    );
+    let v = pure(Op::ParseRunFile, gpx.as_bytes());
+    let runs = v["runs"].as_array().expect("runs");
+    assert_eq!(runs.len(), 1, "{v}");
+    assert_eq!(runs[0]["points"].as_array().map(Vec::len), Some(300));
+    assert_eq!(runs[0]["observed_at"], 1_750_000_400);
+    assert!(
+        v.get("refusal").is_none() && runs[0].get("segment_starts").is_none(),
+        "{v}"
+    );
+}
+
+#[test]
+fn run_track_answers_a_runs_route_fixes_by_segment() {
+    let core = CoreBridge::new();
+    let points: Vec<Value> = (0..40)
+        .map(|k| json!({"lat": 47.0 + f64::from(k) * 0.0001, "lon": 8.0, "observed_at": 1_750_000_000 + k * 5, "accuracy_m": 5.0}))
+        .collect();
+    send(
+        &core,
+        &json!({"LogRunTrack": {"points": points, "hr_pct_max": 0.0, "longest_recent_km": 0.0,
+            "observed_at": 1_750_000_195, "entry_id": 77, "segment_starts": [20]}}),
+    );
+    let run = br#"{"entry_id":77,"observed_at":1750000195}"#;
+    let track: Value = serde_json::from_slice(&call(&core, Op::RunTrack, run)).unwrap();
+    let segments = track["segments"].as_array().expect("segments");
+    assert_eq!(
+        segments
+            .iter()
+            .map(|s| s.as_array().map_or(0, Vec::len))
+            .collect::<Vec<_>>(),
+        [20, 20],
+        "{track}"
+    );
+    assert_eq!(segments[1][0]["observed_at"], 1_750_000_100);
+    let unknown: Value = serde_json::from_slice(&call(
+        &core,
+        Op::RunTrack,
+        br#"{"entry_id":1,"observed_at":2}"#,
+    ))
+    .unwrap();
+    assert_eq!(unknown, json!({"segments": []}));
+    let bad: Value = serde_json::from_slice(&call(&core, Op::RunTrack, b"{")).unwrap();
+    assert_eq!(bad["error"]["kind"], "bad_input");
+    assert_eq!(bad["error"]["context"], "run_track");
 }
 
 #[test]
@@ -992,11 +1038,117 @@ fn op_contexts_are_the_snake_case_names_the_shell_reads() {
         [
             "update",
             "view",
-            "parse_fit",
+            "parse_run_file",
             "track_figures",
             "export_gpx",
             "compact_log",
-            "reset"
+            "reset",
+            "exercise_keys",
+            "warm_up_ramp",
+            "draft_facts",
+            "run_track",
+            "thin_track",
+            "imported_hr_pct"
         ]
     );
+}
+
+#[test]
+fn exercise_keys_answers_each_names_key_in_order() {
+    let core = CoreBridge::new();
+    let mut names = ["  İNCLİNE Bench ", "Straße", ""]
+        .into_iter()
+        .map(|n| Ok::<_, String>(Cow::Borrowed(n)));
+    let keys: Value =
+        serde_json::from_slice(&core.call(Op::ExerciseKeys.code(), Input::Lines(&mut names)))
+            .unwrap();
+    assert_eq!(keys, json!(["incline bench", "strasse", ""]));
+    let mut unreadable = std::iter::once(Err("unreadable".to_owned()));
+    let failed: Value =
+        serde_json::from_slice(&core.call(Op::ExerciseKeys.code(), Input::Lines(&mut unreadable)))
+            .unwrap();
+    assert_eq!(failed["error"]["kind"], "bad_input", "{failed}");
+    assert_eq!(failed["error"]["context"], "exercise_keys", "{failed}");
+}
+
+#[test]
+fn warm_up_ramp_answers_the_steps_of_a_barbell_lift() {
+    let squat = pure(
+        Op::WarmUpRamp,
+        br#"{"exercise":"Back squat","work_kg":100.0,"weight_lb":false}"#,
+    );
+    assert_eq!(
+        squat,
+        json!([
+            {"kg": 20.0, "reps": 5, "bar": true},
+            {"kg": 40.0, "reps": 5, "bar": false},
+            {"kg": 60.0, "reps": 3, "bar": false},
+            {"kg": 80.0, "reps": 2, "bar": false}
+        ])
+    );
+    let curl = pure(
+        Op::WarmUpRamp,
+        br#"{"exercise":"Dumbbell curl","work_kg":20.0,"weight_lb":false}"#,
+    );
+    assert_eq!(curl, json!([]));
+    let bad = pure(Op::WarmUpRamp, br#"{"exercise":"Back squat"}"#);
+    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
+    assert_eq!(bad["error"]["context"], "warm_up_ramp", "{bad}");
+}
+
+#[test]
+fn draft_facts_answers_a_drafts_gates_and_answers() {
+    let chest = pure(
+        Op::DraftFacts,
+        br#"{"birth_epoch_day":13938,"today":20512,"answer":{"Parq":{"question":"ChestPain","yes":true}}}"#,
+    );
+    assert_eq!(chest["age_years"], 17.0, "{chest}");
+    assert_eq!(chest["youth"], true, "{chest}");
+    assert_eq!(chest["health_defers"], true, "{chest}");
+    assert_eq!(chest["parq_yes"], json!(["ChestPain"]), "{chest}");
+    assert_eq!(chest["first_symptom"], "ChestPain", "{chest}");
+    assert_eq!(chest["health"]["symptomatic"], true, "{chest}");
+    assert_eq!(chest["can_hang"], Value::Null, "{chest}");
+    let empty = pure(Op::DraftFacts, b"{}");
+    assert_eq!(empty["youth"], false, "{empty}");
+    assert_eq!(empty["health_defers"], false, "{empty}");
+    let bad = pure(Op::DraftFacts, br#"{"today":"monday"}"#);
+    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
+    assert_eq!(bad["error"]["context"], "draft_facts", "{bad}");
+}
+
+#[test]
+fn thin_track_answers_the_kept_fixes_and_their_segment_starts() {
+    // Ten fixes to ~4: stride 3 (0, 3, 6, 9) plus the segment start 5, which
+    // is position 2 of the kept fixes. A start at 0 or past the end opens
+    // nothing; order and repeats don't matter.
+    let thin = pure(
+        Op::ThinTrack,
+        br#"{"fixes":10,"max_points":4,"segment_starts":[12,5,0,5]}"#,
+    );
+    assert_eq!(
+        thin,
+        json!({"kept": [0, 3, 5, 6, 9], "segment_starts": [2]})
+    );
+    let whole = pure(Op::ThinTrack, br#"{"fixes":3,"max_points":5400}"#);
+    assert_eq!(whole, json!({"kept": [0, 1, 2], "segment_starts": []}));
+    let bad = pure(Op::ThinTrack, br#"{"fixes":-1,"max_points":4}"#);
+    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
+    assert_eq!(bad["error"]["context"], "thin_track", "{bad}");
+}
+
+#[test]
+fn imported_hr_pct_answers_the_share_of_a_measured_hr_max() {
+    let hr = pure(
+        Op::ImportedHrPct,
+        br#"{"avg_hr_bpm":152.0,"measured_hr_max":190.0}"#,
+    );
+    assert!((hr.as_f64().unwrap() - 80.0).abs() < 1e-9, "{hr}");
+    assert_eq!(
+        pure(Op::ImportedHrPct, br#"{"avg_hr_bpm":152.0}"#),
+        json!(0.0)
+    );
+    let bad = pure(Op::ImportedHrPct, br#"{"avg_hr_bpm":"fast"}"#);
+    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
+    assert_eq!(bad["error"]["context"], "imported_hr_pct", "{bad}");
 }

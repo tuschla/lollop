@@ -14,6 +14,7 @@ use crate::app::plan_views::adjustments::{
 };
 use crate::app::plan_views::completion::{DayJudge, FlattenCtx, flatten_session};
 use crate::app::plan_views::consistency::{CREDIT_WINDOW_DAYS, Discipline, discipline};
+use crate::app::plan_views::plan_item::PlanRow;
 use crate::app::plan_views::program_summary::build_program_summary;
 use crate::app::plan_views::week_anchors::plan_week_anchors;
 use crate::app::plan_views::week_moves::{
@@ -21,7 +22,7 @@ use crate::app::plan_views::week_moves::{
 };
 use crate::app::readiness::{manual_inputs_on, return_step_on};
 use crate::app::view_ctx::ViewCtx;
-use crate::app::view_types::{ProgramSummaryView, SessionPlanView, SessionStatus};
+use crate::app::view_types::{ProgramSummaryView, SessionStatus};
 use crate::memo::{MemoId, fingerprint, memoized};
 use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
@@ -212,7 +213,7 @@ impl WeekRecs {
     }
 
     /// Fold an active head cold into a future, non-rest day's row.
-    fn fold_illness_into(&self, row: &mut SessionPlanView, weight_lb: bool) {
+    fn fold_illness_into(&self, row: &mut PlanRow, weight_lb: bool) {
         if !self.illness_stop && !self.illness.is_empty() && !row.items.is_empty() {
             annotate_adjustments(row, &self.illness, None, weight_lb);
         }
@@ -227,15 +228,15 @@ impl WeekRecs {
 pub(in crate::app) struct PlanViews {
     /// The day of the hero row: the earliest unfinished session from today on.
     pub(in crate::app) hero_day: Option<i64>,
-    pub(in crate::app) week_plan: Vec<SessionPlanView>,
-    pub(in crate::app) next_week_plan: Vec<SessionPlanView>,
+    pub(in crate::app) week_plan: Vec<PlanRow>,
+    pub(in crate::app) next_week_plan: Vec<PlanRow>,
     pub(in crate::app) program: Option<ProgramSummaryView>,
     pub(in crate::app) planned_run_km: f64,
 }
 
 impl PlanViews {
     /// The row of `day` in either week.
-    pub(in crate::app) fn row_mut(&mut self, day: i64) -> Option<&mut SessionPlanView> {
+    pub(in crate::app) fn row_mut(&mut self, day: i64) -> Option<&mut PlanRow> {
         self.week_plan
             .iter_mut()
             .chain(self.next_week_plan.iter_mut())
@@ -243,7 +244,7 @@ impl PlanViews {
     }
 
     /// The row of `day` in either week.
-    pub(in crate::app) fn row(&self, day: i64) -> Option<&SessionPlanView> {
+    pub(in crate::app) fn row(&self, day: i64) -> Option<&PlanRow> {
         self.week_plan
             .iter()
             .chain(&self.next_week_plan)
@@ -453,7 +454,7 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
 /// adjustments. A past/today day keeps its own morning's snapshot from
 /// `snaps.past`; a later day shares `snaps.current` and carries an active
 /// illness.
-fn week_rows(f: &PlanFrame, snaps: &WeekSnapshots, recs: &WeekRecs) -> Vec<SessionPlanView> {
+fn week_rows(f: &PlanFrame, snaps: &WeekSnapshots, recs: &WeekRecs) -> Vec<PlanRow> {
     let PlanFrame {
         cx,
         model,
@@ -505,7 +506,7 @@ fn week_rows(f: &PlanFrame, snaps: &WeekSnapshots, recs: &WeekRecs) -> Vec<Sessi
     });
     let mut claimed = [[false; 2]; 7];
     let earliest_move = today.max(start);
-    let mut week: Vec<SessionPlanView> = Vec::with_capacity(7);
+    let mut week: Vec<PlanRow> = Vec::with_capacity(7);
     for d in 0..7usize {
         let epoch_day = week_monday.saturating_add(d as i64);
         let Some((a, s)) = plan_days[d] else {
@@ -572,8 +573,8 @@ fn resolve_hero(
     recs: &WeekRecs,
     train_blocked: bool,
     wording: &CallCtx,
-    week: &mut [SessionPlanView],
-    next_week: &mut [SessionPlanView],
+    week: &mut [PlanRow],
+    next_week: &mut [PlanRow],
 ) -> Option<i64> {
     let PlanFrame {
         cx,
@@ -612,7 +613,7 @@ fn resolve_hero(
 }
 
 /// Hold a row: blocked, with no items, adjustment or move options.
-fn blank_row(row: &mut SessionPlanView) {
+fn blank_row(row: &mut PlanRow) {
     row.status = SessionStatus::Blocked;
     row.items.clear();
     row.adjustment = None;

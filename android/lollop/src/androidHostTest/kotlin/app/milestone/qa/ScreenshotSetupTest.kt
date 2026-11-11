@@ -20,15 +20,17 @@ import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.GoalDistance
+import app.milestone.HealthAnswer
 import app.milestone.HealthScreen
 import app.milestone.LiftGoal
-import app.milestone.ParqItem
+import app.milestone.ParqQuestion
+import app.milestone.ProfileDraft
 import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.ResistanceModality
+import app.milestone.draftFacts
 import app.milestone.todayEpochDay
-import app.milestone.withParqAnswer
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -190,7 +192,8 @@ class ScreenshotSetupTest {
         advanced = false,
         bodyweightKg = 78.0,
         ageYears = 34.0,
-        health = HealthScreen().withParqAnswer(ParqItem.Medication, true).copy(medically_cleared = true),
+        health = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.Medication, true))).health
+            .copy(medically_cleared = true),
         weeksOff = 6.0,
         liftDaysPerWeek = 2,
         trainingWeekdays = fiveDays,

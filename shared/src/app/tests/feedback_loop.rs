@@ -189,7 +189,7 @@ fn msg(cat: FeedbackCategory, recovery_week_active: bool) -> String {
         double_progression: false,
         plain: true,
         weight_lb: false,
-        distance_mi: false,
+        distance_unit: DistanceUnit::Km,
         today: None,
     })
 }
@@ -485,12 +485,15 @@ fn missed_reps_on_logged_sets_yield_corrective_feedback() {
 
 #[test]
 fn derived_rir_target_comes_from_the_prescription() {
-    let item = |intensity: PlanIntensity, reps: u8| PrescriptionView {
-        exercise: "Back Squat".into(),
-        reps_low: reps,
-        reps_high: reps,
+    let item = |intensity: PlanIntensity, reps: u8| PlanItem {
+        view: PrescriptionView {
+            exercise: "Back Squat".into(),
+            reps_low: reps,
+            reps_high: reps,
+            ..PrescriptionView::default()
+        },
         intensity,
-        ..PrescriptionView::default()
+        ..PlanItem::default()
     };
     assert_eq!(target_rir(&item(PlanIntensity::Rir { rir: 3 }, 8)), Some(3));
     assert_eq!(
@@ -521,16 +524,14 @@ fn derived_rir_target_comes_from_the_prescription() {
     );
     // A cut %e1RM item keeps the effort its face shows (~1 rep
     // left), never the Epley reserve of its reduced percentage (~3).
-    let cut = PrescriptionView {
-        target_rpe: Some(9.0),
-        ..item(
-            PlanIntensity::PercentE1rm {
-                pct: 78,
-                reduced_from: Some(85),
-            },
-            5,
-        )
-    };
+    let mut cut = item(
+        PlanIntensity::PercentE1rm {
+            pct: 78,
+            reduced_from: Some(85),
+        },
+        5,
+    );
+    cut.target_rpe = Some(9.0);
     assert_eq!(target_rir(&cut), Some(1));
 }
 
@@ -974,15 +975,18 @@ fn nothing_to_adjust_note_carries_no_grade() {
 
 #[test]
 fn a_skipped_exercise_is_not_judged_as_coming_up_short() {
-    let lift = |name: &str, status: ItemStatus, done: u8| PrescriptionView {
-        exercise: name.into(),
-        sets: 6,
-        sets_done: done,
-        reps_low: 5,
-        status,
-        ..PrescriptionView::default()
+    let lift = |name: &str, status: ItemStatus, done: u8| -> PlanItem {
+        PrescriptionView {
+            exercise: name.into(),
+            sets: 6,
+            sets_done: done,
+            reps_low: 5,
+            status,
+            ..PrescriptionView::default()
+        }
+        .into()
     };
-    let week = vec![SessionPlanView {
+    let week = vec![PlanRow {
         epoch_day: 10,
         status: SessionStatus::Done,
         items: vec![
@@ -990,7 +994,7 @@ fn a_skipped_exercise_is_not_judged_as_coming_up_short() {
             lift("Leg press", ItemStatus::SkippedPain, 0),
             lift("Back Squat", ItemStatus::Done, 6),
         ],
-        ..SessionPlanView::default()
+        ..PlanRow::default()
     }];
     let exec = derive_session_exec(&week, 10).expect("a done day");
     let names: Vec<_> = exec.lifts.iter().map(|l| l.exercise.as_str()).collect();

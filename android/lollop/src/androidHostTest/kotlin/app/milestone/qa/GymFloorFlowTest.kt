@@ -33,6 +33,7 @@ import app.milestone.EventDispatcher
 import app.milestone.LiftResultView
 import app.milestone.R
 import app.milestone.TestClock
+import app.milestone.overtrainingWeekEdgeLabels
 import app.milestone.repsLeftText
 import app.milestone.train_blocked
 import kotlinx.serialization.json.boolean
@@ -390,7 +391,8 @@ class GymFloorFlowTest {
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_sleep)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
-        rule.onNodeWithText(str(R.string.log_weekly_signs_1to2)).performScrollTo().performClick()
+        val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
+        rule.onNodeWithText(str(R.string.log_weekly_signs_1to2, minWeeks, nforWeeks)).performScrollTo().performClick()
         rule.onNodeWithTag("editor-primary").performClick()
         rule.waitForState { journeyLog().any { it.variant == "SubmitWeeklyCheckin" } }
         val payload = journeyLog().last { it.variant == "SubmitWeeklyCheckin" }.payload

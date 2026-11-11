@@ -23,9 +23,17 @@ fn standing_start(stand_s: i64, first_stride_m: f64, run_s: i64) -> (Vec<GpsPoin
     (pts, t)
 }
 
-fn saved_card(points: Vec<GpsPoint>) -> RunResultView {
+/// The run card of `points`, its splits in `unit` (a miles profile when `Mi`).
+fn saved_card(points: Vec<GpsPoint>, unit: DistanceUnit) -> RunResultView {
     let app = Engine;
     let mut model = Model::default();
+    if unit == DistanceUnit::Mi {
+        let p = Profile {
+            distance_unit: unit,
+            ..base_profile()
+        };
+        let _ = app.update(Event::SetProfile(p), &mut model);
+    }
     let _ = app.update(log_run_track(points, 0.0, 0.0, 1, 1), &mut model);
     let vm = app.view(&model);
     assert_eq!(vm.runs.len(), 1);
@@ -53,11 +61,11 @@ fn splits_account_for_exactly_the_headline_moving_time_after_a_standing_start() 
     // fix (the first split would read slow and the splits add up to more
     // time than the run's moving time).
     let (pts, _) = standing_start(10, 6.0, 400);
-    let card = saved_card(pts);
-    let moving_s = card.duration_min * 60.0;
-    for (splits, unit_km) in [(&card.splits_km, 1.0), (&card.splits_mi, 1.609_344)] {
-        assert!(!splits.is_empty());
-        let clock = split_clock_s(splits, unit_km);
+    for (unit, unit_km) in [(DistanceUnit::Km, 1.0), (DistanceUnit::Mi, 1.609_344)] {
+        let card = saved_card(pts.clone(), unit);
+        let moving_s = card.duration_min * 60.0;
+        assert!(!card.splits.is_empty());
+        let clock = split_clock_s(&card.splits, unit_km);
         assert!(
             (clock - moving_s).abs() <= 2.0,
             "splits account for {clock:.1} s, headline moving time {moving_s:.1} s ({unit_km} km unit)"
@@ -70,13 +78,13 @@ fn constant_pace_run_without_stops_has_matching_splits_and_pace() {
     // Control for the test above: with no standing spell the three figures
     // agree, so a failure above is the standing spell and not the fixture.
     let (pts, end) = standing_start(1, 3.0, 400);
-    let card = saved_card(pts);
+    let card = saved_card(pts, DistanceUnit::Km);
     let moving_s = card.duration_min * 60.0;
     assert!(
         (moving_s - end as f64).abs() <= 1.0,
         "moving {moving_s} s vs {end} s"
     );
-    let clock = split_clock_s(&card.splits_km, 1.0);
+    let clock = split_clock_s(&card.splits, 1.0);
     assert!(
         (clock - moving_s).abs() <= 2.0,
         "splits {clock:.1} s vs moving {moving_s:.1} s"
@@ -111,7 +119,7 @@ fn distance_and_moving_time_cover_the_same_legs_across_traffic_light_stops() {
         x += 3.0;
     }
     let preview = preview_track_figures(pts.clone(), &[]);
-    let card = saved_card(pts);
+    let card = saved_card(pts, DistanceUnit::Km);
     // The Finish review's figures (the core's preview of the unsaved track)
     // are the saved run's, bit for bit.
     assert_eq!(preview, (card.distance_km, card.duration_min));

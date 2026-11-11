@@ -34,7 +34,7 @@ class DeepLinkPropertyTest {
     private fun lift(name: String) = PrescriptionView(exercise = name, sets = 3, face_lead = "3 × 5")
 
     private fun runItem() =
-        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"))
+        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"))
 
     /** A model of one day of [kind] (0..10) as the core publishes it, and its name. */
     private fun dayModel(kind: Int, r: Random): Pair<String, ViewModel> {

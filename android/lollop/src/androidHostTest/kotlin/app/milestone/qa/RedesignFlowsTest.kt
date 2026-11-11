@@ -581,15 +581,15 @@ class RedesignFlowsTest {
         rule.selectTab(str(R.string.main_dest_history))
         rule.scrollToText(yesterdaysRunTitle)
         val held = java.util.concurrent.CountDownLatch(1)
-        val fetch = app.milestone.runGpxFetch
-        app.milestone.runGpxFetch = { id, at -> held.await(); fetch(id, at) }
+        val fetch = app.milestone.runTrackFetch
+        app.milestone.runTrackFetch = { id, at -> held.await(); fetch(id, at) }
         try {
             rule.onAllNodes(hasText(yesterdaysRunTitle) and hasClickAction())[0].performClick()
             rule.waitForIdle()
             assertEquals("no sheet while the route loads", 0, rule.countOf(hasTestTag("run-delete")))
         } finally {
             held.countDown()
-            app.milestone.runGpxFetch = fetch
+            app.milestone.runTrackFetch = fetch
         }
         waitForAny(hasTestTag("run-delete"))
         assertEquals("the sheet opens with its route: Trim is there", 1, rule.countOf(hasTestTag("run-trim")))
@@ -1145,7 +1145,8 @@ class ReviewSheetsSaveGateTest {
     val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     private var sheet by androidx.compose.runtime.mutableIntStateOf(0)
-    private var dirty = false
+    private val guard = app.milestone.EditorGuard()
+    private val dirty: Boolean get() = guard.dirty
 
     private class Answer(val name: String, val give: () -> Unit, val takeBack: (() -> Unit)? = null)
 
@@ -1156,12 +1157,15 @@ class ReviewSheetsSaveGateTest {
 
     private fun show(weekly: Boolean) = rule.setContent {
         app.milestone.MilestoneTheme {
-            androidx.compose.runtime.CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                app.milestone.LocalEditorPinnedActions provides true,
+                app.milestone.LocalEditorGuard provides guard,
+            ) {
                 androidx.compose.runtime.key(sheet) {
                     if (weekly) {
-                        app.milestone.WeeklyCheckinSheet(onDirtyChange = { dirty = it }, onSubmit = {})
+                        app.milestone.WeeklyCheckinSheet(onSubmit = {})
                     } else {
-                        app.milestone.SessionReviewSheet(onDirtyChange = { dirty = it }, showRun = true, onSubmit = {})
+                        app.milestone.SessionReviewSheet(showRun = true, onSubmit = {})
                     }
                 }
             }

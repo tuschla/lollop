@@ -8,6 +8,7 @@ use crate::app::view_types::{
 use crate::feedback::FeedbackCategory;
 use crate::gps::GpsPoint;
 use crate::memo::{MemoId, fingerprint, memoized};
+use crate::profile::DistanceUnit;
 use crate::schema::ThreeZone;
 use crate::{feedback, gps, load, running};
 
@@ -39,35 +40,58 @@ pub(in crate::app) fn run_split_views(
 }
 
 /// The ordered runs list for the ViewModel, memoized ([`MemoId::RunViews`]) on
-/// the run keys so an event that touches no run skips the sort and per-run
-/// lookups, in [`RunFacts::chrono`] order: chronological, tie-broken by
+/// the run keys and `unit` so an event that touches no run skips the sort and
+/// per-run lookups, in [`RunFacts::chrono`] order: chronological, tie-broken by
 /// `entry_id` (shell epoch-MILLIS log id)
 /// so same-second runs keep a deterministic order across an `AmendRun`
 /// remove+push (the amended run carries its original `entry_id` to the Vec
-/// tail). Legacy rows (`entry_id == 0`) keep insertion order; a backdated run
-/// slots into its true position.
-pub(in crate::app) fn run_views(runs: &[LoggedRun], facts: &RunFacts) -> Vec<RunResultView> {
-    memoized(MemoId::RunViews, &fingerprint(&facts.keys), || {
+/// tail). Same-second rows sharing an id (an old build's id-less pair) keep
+/// insertion order; a backdated run slots into its true position.
+pub(in crate::app) fn run_views(
+    runs: &[LoggedRun],
+    facts: &RunFacts,
+    unit: DistanceUnit,
+) -> Vec<RunResultView> {
+    memoized(MemoId::RunViews, &(fingerprint(&facts.keys), unit), || {
         facts
             .chrono
             .iter()
-            .map(|&i| to_run_view(&runs[i], facts.keys[i], facts.qc[i].as_deref()))
+            .map(|&i| run_card(&runs[i], facts.keys[i], facts.qc[i].as_deref(), unit).view)
             .collect()
     })
 }
 
-/// One run's card, memoized on its content key ([`MemoId::RunCard`]): the
-/// derivation (QC'd splits per km and per mile, variability index, copy) runs
-/// once per distinct run rather than on every `view()`; an amend changes the
-/// key and misses. `qc` is the run's QC'd track (`None` for a hand-entered
-/// run).
-pub(in crate::app) fn to_run_view(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunResultView {
-    memoized(MemoId::RunCard, &key, || to_run_view_uncached(r, qc))
+/// A run's card with its splits in km, plus its per-mile splits and the
+/// measured split behind its pacing verdict: what [`MemoId::RunCard`] holds,
+/// so a unit change re-uses the derivation.
+#[derive(Clone)]
+pub(in crate::app) struct RunCard {
+    pub(in crate::app) view: RunResultView,
+    splits_mi: Vec<RunSplitView>,
+    /// Second-half pace slowdown percent of a GPS track (a positive split;
+    /// positive = slowed in the back half). `None` for a hand-entered run or a
+    /// track too short/degenerate to split. Feeds `split` and the pacing
+    /// feedback.
+    pub(in crate::app) split_pct: Option<f64>,
 }
 
-/// Physiological ceiling for an echoed/classified average %HRmax; the core
-/// clamps regardless of the shell's import clamp.
-const MAX_HR_PCT_MAX: f64 = 100.0;
+/// One run's card with its splits in `unit`, memoized on its content key
+/// ([`MemoId::RunCard`]): the derivation (QC'd splits per km and per mile,
+/// variability index, copy) runs once per distinct run rather than on every
+/// `view()`; an amend changes the key and misses. `qc` is the run's QC'd track
+/// (`None` for a hand-entered run).
+pub(in crate::app) fn run_card(
+    r: &LoggedRun,
+    key: u64,
+    qc: Option<&QcTrack>,
+    unit: DistanceUnit,
+) -> RunCard {
+    let mut card = memoized(MemoId::RunCard, &key, || to_run_view_uncached(r, qc));
+    if unit == DistanceUnit::Mi {
+        card.view.splits = std::mem::take(&mut card.splits_mi);
+    }
+    card
+}
 
 /// The uncached run-view derivation over the run's QC'd track (`None` for a
 /// hand-entered run). The run CARD's spike chip judges against the per-row
@@ -76,7 +100,7 @@ const MAX_HR_PCT_MAX: f64 = 100.0;
 /// `ingest::refresh_spike_baselines`). The SAFETY GATE that can defer training
 /// derives its baseline at view() time from `model.runs` (see
 /// [`latest_run_spike`]).
-fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
+fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
     // The feedback gate's baseline rule (`is_ratio_base_km`): a base under it
     // is no earlier run, so card and gate always give one spike verdict.
     let has_baseline = is_ratio_base_km(r.longest_recent_km);
@@ -85,8 +109,9 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     } else {
         0.0
     };
-    // A negative figure is no reading, like the 0 sentinel.
-    let hr_pct_max = r.hr_pct_max.clamp(0.0, MAX_HR_PCT_MAX);
+    // A negative figure is no reading, like the 0 sentinel; the core clamps
+    // regardless of the shell's import clamp.
+    let hr_pct_max = r.hr_pct_max.clamp(0.0, crate::running::HR_PCT_MAX_CEILING);
     // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,
@@ -101,7 +126,11 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     // "0.0km @ -" entry *and* trip the spike gate against a phantom baseline.
     // Report the signal problem honestly instead of fabricating a null run.
     if gps && track.len() < 2 {
-        return unmeasurable_gps_view(r, hr_pct_max);
+        return RunCard {
+            view: unmeasurable_gps_view(r, hr_pct_max),
+            splits_mi: Vec::new(),
+            split_pct: None,
+        };
     }
 
     // GPS duration is MOVING time (the `gps` auto-pause gate excludes stopped
@@ -136,7 +165,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     // A pacing verdict judges the run's halves against each other; with fewer
     // than two full km splits there is too little run to praise or fault the
     // pacing, so no verdict or pacing note is shown (the measured `split_pct`
-    // still is).
+    // is still kept).
     let full_km_splits = splits_km.iter().filter(|s| !s.partial).count();
     let split = split_pct
         .filter(|_| full_km_splits >= MIN_FULL_SPLITS_FOR_PACING_VERDICT)
@@ -160,7 +189,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         format!(": {spike_note}")
     };
 
-    RunResultView {
+    let view = RunResultView {
         zone: shown_zone,
         pace: pace.clone(),
         distance_km,
@@ -171,7 +200,6 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         utc_offset_sec: r.logged_utc_offset_sec,
         spike_flag: spike.value,
         spike_note: spike_note.to_string(),
-        split_pct,
         split,
         interval: variability_index.map(interval_verdict_view),
         workout_type: r.workout_type,
@@ -185,8 +213,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
             split_note,
         ),
         evidence: EvidenceTagView::of(&spike),
-        splits_km,
-        splits_mi,
+        splits: splits_km,
         // The ~0.5 MB GPX document never rides the list payload. A GPS run
         // reaching here has ≥2 usable fixes (the degenerate case returned
         // above), so it HAS an exportable route; the shell fetches the document
@@ -208,6 +235,11 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         // so they are filled after the per-run memo by `annotate_run_views`.
         best_effort_labels: Vec::new(),
         started_at: run_started_at(r, qc),
+    };
+    RunCard {
+        view,
+        splits_mi,
+        split_pct,
     }
 }
 
@@ -222,7 +254,6 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         hr_pct_max,
         spike_flag: false,
         spike_note: String::new(),
-        split_pct: None,
         split: None,
         interval: None,
         workout_type: r.workout_type,
@@ -234,8 +265,7 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         gps_unmeasurable: true,
         observed_at: r.observed_at,
         entry_id: r.entry_id,
-        splits_km: Vec::new(),
-        splits_mi: Vec::new(),
+        splits: Vec::new(),
         spike_has_baseline: is_ratio_base_km(r.longest_recent_km),
         hr_label: hr_card_label(r.avg_hr_bpm, hr_pct_max, None),
         avg_hr_bpm: r.avg_hr_bpm,

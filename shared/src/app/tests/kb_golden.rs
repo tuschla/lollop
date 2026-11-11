@@ -30,7 +30,7 @@ fn week_of(d: i64) -> usize {
 #[derive(Clone, Debug)]
 struct WeekRec {
     monday: i64,
-    rows: Vec<SessionPlanView>,
+    rows: Vec<PlanRow>,
     program: Option<ProgramSummaryView>,
 }
 
@@ -38,7 +38,7 @@ struct WeekRec {
 #[derive(Clone, Debug)]
 struct DayRec {
     day: i64,
-    row: SessionPlanView,
+    row: PlanRow,
     /// Warm-up sets logged before each exercise's first work set.
     warm_ups: BTreeMap<String, usize>,
     /// Performance-drop cuts in force after the day's sets: lifts the anchors
@@ -127,14 +127,14 @@ fn wucd_km(it: &PrescriptionView) -> f64 {
     })
 }
 
-fn run_kind(row: &SessionPlanView) -> Option<RunSessionType> {
+fn run_kind(row: &PlanRow) -> Option<RunSessionType> {
     match row.session_type {
         SessionType::Run(k) => Some(k),
         _ => None,
     }
 }
 
-fn is_lift(row: &SessionPlanView) -> bool {
+fn is_lift(row: &PlanRow) -> bool {
     matches!(row.session_type, SessionType::Lift(_))
 }
 
@@ -188,7 +188,7 @@ fn simulate(a: Athlete) -> Life {
         if mon0_weekday(d) == 0 {
             weeks.push(WeekRec {
                 monday: d,
-                rows: vm.week_plan.clone(),
+                rows: working_plan(&m).week_plan,
                 program: vm.program.clone(),
             });
         }
@@ -243,8 +243,11 @@ fn simulate(a: Athlete) -> Life {
                 t += i64::from(it.rest_sec.max(60));
             }
         }
-        let vm = app.view(&m);
-        if let Some(row) = vm.week_plan.into_iter().find(|r| r.epoch_day == d) {
+        if let Some(row) = working_plan(&m)
+            .week_plan
+            .into_iter()
+            .find(|r| r.epoch_day == d)
+        {
             days.push(DayRec {
                 day: d,
                 row,
@@ -537,11 +540,11 @@ struct RunWeek {
     longest_easy_km: f64,
 }
 
-fn run_week(rows: &[SessionPlanView]) -> RunWeek {
+fn run_week(rows: &[PlanRow]) -> RunWeek {
     let mut w = RunWeek::default();
     for row in rows {
         let Some(kind) = run_kind(row) else { continue };
-        if row.items.iter().any(PrescriptionView::is_run) {
+        if row.items.iter().any(|i| i.is_run()) {
             w.run_days += 1;
         }
         for it in row.items.iter().filter(|i| i.is_run()) {
@@ -1053,7 +1056,7 @@ fn couch_to_5k_follows_the_nhs_table() {
 // ── Lifting ────────────────────────────────────────────────────────────────
 
 /// The %e1RM a lift item is prescribed at, if any.
-fn pct(it: &PrescriptionView) -> Option<u32> {
+fn pct(it: &PlanItem) -> Option<u32> {
     match it.intensity {
         PlanIntensity::PercentE1rm { pct, .. } => Some(pct),
         _ => None,
@@ -1061,14 +1064,14 @@ fn pct(it: &PrescriptionView) -> Option<u32> {
 }
 
 /// The reps in reserve a lift item targets, if stated.
-fn rir(it: &PrescriptionView) -> Option<i32> {
+fn rir(it: &PlanItem) -> Option<i32> {
     match it.intensity {
         PlanIntensity::Rir { rir } => Some(rir),
         _ => it.target_rpe.map(|r| (10.0 - r).round() as i32),
     }
 }
 
-fn lift_items(row: &SessionPlanView) -> impl Iterator<Item = &PrescriptionView> {
+fn lift_items(row: &PlanRow) -> impl Iterator<Item = &PlanItem> {
     row.items
         .iter()
         .filter(|i| !i.is_run() && i.calis.is_none())
@@ -1246,7 +1249,7 @@ const TABLE1_MAV_HIGH: &[(&str, u8)] = &[
     ("Calves", 16),
 ];
 
-fn is_compound(it: &PrescriptionView) -> bool {
+fn is_compound(it: &PlanItem) -> bool {
     crate::exercise::is_barbell_lift(&it.exercise)
 }
 
@@ -1560,7 +1563,7 @@ fn powerlifter_plan_follows_the_strength_tables_and_peaks_for_the_meet() {
     // ~4–5+ days out (02-strength-power.md:318, safety-critical); volume cut
     // over the last two weeks with intensity held ≥85 % on the heavy day
     // (02-strength-power.md:285, :493-495).
-    let heavy = |it: &PrescriptionView| pct(it).is_some_and(|p| p >= 80);
+    let heavy = |it: &PlanItem| pct(it).is_some_and(|p| p >= 80);
     for d in life.days.iter().filter(|d| d.day < MEET) {
         for it in lift_items(&d.row).filter(|it| heavy(it)) {
             let out = MEET - d.day;
@@ -1756,7 +1759,7 @@ fn hybrid_plan_keeps_lift_and_run_days_apart() {
         );
         for row in &w.rows {
             assert!(
-                !(is_lift(row) && row.items.iter().any(PrescriptionView::is_run)),
+                !(is_lift(row) && row.items.iter().any(|i| i.is_run())),
                 "week {i}: lift and run on one day"
             );
         }

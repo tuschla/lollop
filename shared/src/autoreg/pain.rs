@@ -246,9 +246,9 @@ fn pain_location(d: &PainDetail) -> Option<&str> {
 /// Human display string for a characterized pain report, the safety-banner
 /// sub-line context, e.g. `"Left knee · sharp or joint pain · 6/10"` or, with
 /// no location reported, `"dull ache · 3/10"`. Location is included only when
-/// the user supplied one; a "not sure" kind adds no kind part. Empty for a bare
-/// (detail-less) report; the caller renders that generic case itself.
-pub(super) fn pain_context(d: &PainDetail) -> String {
+/// the user supplied one; a "not sure" kind adds no kind part; both worsening
+/// trends read "worsening". Empty when it names nothing.
+pub fn pain_context(d: &PainDetail) -> String {
     let kind = match d.kind {
         PainKind::SharpJoint => Some("sharp or joint pain"),
         PainKind::TendonLoadRelated => Some("dull ache"),

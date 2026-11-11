@@ -29,7 +29,6 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
 import app.milestone.AppSettings
 import app.milestone.Core
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
@@ -87,7 +86,7 @@ class LongHistoryUiTest {
         QaHarness.reset(ctx)
         // Robolectric has no tiles: the plain-card route (as the route screenshots do).
         AppSettings.setShowRouteMaps(ctx, false)
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Km)
     }
 
     @After
@@ -131,7 +130,7 @@ class LongHistoryUiTest {
             assertTrue("moving time of ${r.source} run: $sec s vs elapsed ${r.durationSec}", sec <= r.durationSec + 1 && sec >= r.durationSec - 300)
             if (r.source == RunSource.Manual) {
                 assertFalse(v.has_gpx)
-                assertTrue(v.splits_km.isEmpty())
+                assertTrue(v.splits.isEmpty())
             } else {
                 assertTrue("GPS run exports a route", v.has_gpx)
                 assertSplitsSane(v)
@@ -284,7 +283,7 @@ class LongHistoryUiTest {
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("run-trim").fetchSemanticsNodes().isNotEmpty() }
         }
         val run = model().runs.first { it.entry_id == h.longestRun.entryId }
-        val n = run.splits_km.size
+        val n = run.splits.size
         assertEquals("34.2 km = 34 full kilometres + the partial", 35, n)
         assertEquals("folded: 10 rows", 10, splitRows().size)
         val showAll = hasText(str(R.string.run_splits_show_all, n)) and hasClickAction()
@@ -342,7 +341,7 @@ class LongHistoryUiTest {
         val trimmed = after.runs.first { it.entry_id == h.longestRun.entryId }
         assertEquals("trimming keeps every run", h.runs.size, after.runs.size)
         assertTrue("trim removed about a fifth: ${trimmed.distance_km} of ${run.distance_km}", trimmed.distance_km in run.distance_km * 0.7..run.distance_km * 0.9)
-        assertEquals("splits follow the trimmed distance", Math.ceil(trimmed.distance_km - 1e-6).toInt(), trimmed.splits_km.size)
+        assertEquals("splits follow the trimmed distance", Math.ceil(trimmed.distance_km - 1e-6).toInt(), trimmed.splits.size)
         assertSplitsSane(trimmed)
         val newLongest = after.runs.maxBy { it.distance_km }
         val p = after.run_progress!!
@@ -477,7 +476,7 @@ class LongHistoryUiTest {
 
     @Test
     fun milesAndPounds_tilesChartsRecordsListAndSheetsNeverShowKmOrKg() {
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
         val h = imperial
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
@@ -518,11 +517,11 @@ class LongHistoryUiTest {
         rule.onNode(hasTestTag("history-record") and hasText(str(R.string.history_longest_run), substring = true, ignoreCase = true)).performClick()
         rule.waitUntil(15_000) { rule.onAllNodesWithTag("run-trim").fetchSemanticsNodes().isNotEmpty() }
         val run = m.runs.first { it.entry_id == h.longestRun.entryId }
-        assertEquals("21.25 mi = 21 full miles + the partial", 22, run.splits_mi.size)
-        val showAll = hasText(str(R.string.run_splits_show_all, run.splits_mi.size)) and hasClickAction()
+        assertEquals("21.25 mi = 21 full miles + the partial", 22, run.splits.size)
+        val showAll = hasText(str(R.string.run_splits_show_all, run.splits.size)) and hasClickAction()
         rule.onNode(showAll).performScrollTo().performClick()
         rule.waitForIdle()
-        assertEquals(run.splits_mi.size, splitRows().size)
+        assertEquals(run.splits.size, splitRows().size)
         assertTrue(splitRows().all { "per mile" in it })
         rule.onNodeWithTag("run-delete").performScrollTo()
         sheetChecks("run sheet in miles")
@@ -629,7 +628,7 @@ class LongHistoryUiTest {
 
     /** Splits are cumulative, end at the run's distance, and every pace is a running pace. */
     private fun assertSplitsSane(v: RunResultView) {
-        val s = v.splits_km
+        val s = v.splits
         assertEquals("km splits at ${v.observed_at}", Math.ceil(v.distance_km - 1e-6).toInt(), s.size)
         assertTrue("cumulative split ends rise", s.zipWithNext().all { (a, b) -> b.distance_km > a.distance_km })
         assertEquals("last split ends at the distance", v.distance_km, s.last().distance_km, 0.02)
@@ -638,7 +637,6 @@ class LongHistoryUiTest {
             assertTrue("split pace ${x.seconds_per_unit}s/km at ${v.observed_at}", x.seconds_per_unit in 200..480)
         }
         assertTrue("only the last split may be partial", s.dropLast(1).none { it.partial })
-        assertEquals("mi splits end at the same distance", v.distance_km, v.splits_mi.last().distance_km, 0.02)
     }
 
     // ── Helpers: History list walking ─────────────────────────────────────────

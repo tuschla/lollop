@@ -281,27 +281,27 @@ internal fun trimKeptMovingSec(points: List<TimedTrackPoint>, firstKept: Int, la
 data class TimedTrackPoint(val timeSec: Long, val cumKm: Double, val movingSec: Double)
 
 /**
- * Parsed route [segments] reshaped for the trim preview: every fix flattened into one
+ * A route's [segments] reshaped for the trim preview: every fix flattened into one
  * time-ordered list carrying its epoch-second time, the cumulative distance in km
  * (the same running haversine sum [RouteTrack] colours by) and the cumulative moving
- * time. A segment gap (a GPS pause between `<trkseg>`s) adds neither; within a
- * segment a leg adds its seconds only when it clears [MIN_MOVING_SPEED_MPS], the
- * core's moving-leg rule (`running::leg`), so standing still counts no time either.
+ * time. A segment gap (a GPS pause) adds neither; within a segment a leg adds its
+ * seconds only when it clears the core's moving-leg rule ([movingLegKm]), so
+ * standing still counts no time either.
  */
-fun timedTrackFromSegments(segments: List<List<GpxFix>>): List<TimedTrackPoint> {
+fun timedTrackFromSegments(segments: List<List<GpsPoint>>): List<TimedTrackPoint> {
     val out = ArrayList<TimedTrackPoint>()
     var runningM = 0.0
     var movingSec = 0.0
     for (seg in segments) {
-        var prev: GpxFix? = null
+        var prev: GpsPoint? = null
         for (fix in seg) {
             if (prev != null) {
                 val legM = haversineM(prev.lat, prev.lon, fix.lat, fix.lon)
                 runningM += legM
-                val dt = (fix.timeSec - prev.timeSec).toDouble()
+                val dt = (fix.observedAt - prev.observedAt).toDouble()
                 if (movingLegKm(legM / 1000.0, dt) != null) movingSec += dt
             }
-            out += TimedTrackPoint(fix.timeSec, runningM / 1000.0, movingSec)
+            out += TimedTrackPoint(fix.observedAt, runningM / 1000.0, movingSec)
             prev = fix
         }
     }

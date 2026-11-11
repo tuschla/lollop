@@ -362,7 +362,6 @@ claim_group! {
         Moderate,
         &[CITE_BOSQUET_2013],
     ),
-    #[kb_only]
     STR_WARMUP_001 => claim(
         "Before heavy compound sets, warm up on the same exercise and finish with a heavier warm-up set at around 80% of the working weight; light-only warm-ups may not improve the work sets. A typical ramp is about 40% for 5-8 reps, 60% for 3-5 and 80% for 1-3 of the working weight, and warm-up sets do not count as work sets.",
         Moderate,

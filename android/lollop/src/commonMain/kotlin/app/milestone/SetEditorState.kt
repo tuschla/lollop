@@ -15,61 +15,14 @@ import app.milestone.resources.log_set_line_hold_loaded
 import app.milestone.resources.log_set_line_reps
 import app.milestone.resources.log_value_with_unit
 
-/** How many quick-pick chips show with nothing (or an exact pick) typed. */
-private const val QuickPickBase = 6
-/** How many filtered matches show while typing. */
-private const val QuickPickFiltered = 8
-
-/**
- * Exercise quick-pick chips: today's open plan items, then the user's recent
- * exercises, then the rest of the week's plan, so a busy plan week can't crowd
- * out the lifts the user actually logs. Pure.
- */
-internal fun quickPickCandidates(
-    query: String,
-    todayOpen: List<String>,
-    recents: List<String>,
-    weekPlanned: List<String>,
-): List<String> {
-    val all = (todayOpen + recents + weekPlanned)
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .distinctBy(::nameKey)
-    val q = nameKey(query)
-    if (q.isEmpty() || all.any { nameKey(it) == q }) return all.take(QuickPickBase)
-    return all.filter { q in nameKey(it) }.take(QuickPickFiltered)
-}
-
-/** A typed exercise name as it is saved: trimmed, inner runs of spaces collapsed,
- *  and an all-lower-case entry in sentence case ("dumbbell curl" → "Dumbbell
- *  curl"); a name the user cased themselves ("RDL", "McGill curl-up") is kept.
- *  Pure. */
-internal fun exerciseDisplayName(typed: String): String {
-    val t = typed.trim().replace(Regex("""\s+"""), " ")
-    if (t.isEmpty() || t.any { it.isUpperCase() }) return t
-    return t.replaceFirstChar { it.uppercaseChar() }
-}
-
-/** The name a set is saved under: the known spelling (plan item / own history)
- *  of a name typed in any case, else [exerciseDisplayName] of what was typed. Pure. */
-internal fun resolveExerciseName(typed: String, known: List<String>): String =
-    known.firstOrNull { sameExercise(it, typed) }?.trim() ?: exerciseDisplayName(typed)
-
-/** The new exercise the search offers to add ("+ Add 'Dumbbell curl'"): the
- *  typed name in its saved form when it matches no known exercise; null while
- *  nothing is typed or the name is already known. Pure. */
-internal fun newExerciseToAdd(typed: String, known: List<String>): String? {
-    if (typed.isBlank() || known.any { sameExercise(it, typed) }) return null
-    return exerciseDisplayName(typed)
-}
-
 /** The plan item a set of [exercise] belongs to: a lift or calisthenics item of
  *  that name (by [sameExercise]). Never a run item, whose exercise is blank, so a
  *  free set opened from the Log chooser on a run day carries no run prescription.
  *  Null while no exercise is named. Pure. */
 internal fun planItemFor(items: List<PrescriptionView>, exercise: String): PrescriptionView? {
     if (exercise.isBlank()) return null
-    return items.firstOrNull { it.exercise.isNotBlank() && sameExercise(it.exercise, exercise) }
+    val named = items.filter { it.exercise.isNotBlank() }
+    return named.getOrNull(indexOfExercise(named.map { it.exercise }, exercise))
 }
 
 /** Whether the set editor's exercise is settled, so its weight, reps and effort
@@ -79,7 +32,7 @@ internal fun planItemFor(items: List<PrescriptionView>, exercise: String): Presc
 internal fun exerciseChosen(exercise: String, known: List<String>, added: String?, preset: String?, editing: Boolean): Boolean {
     if (exercise.isBlank()) return false
     if (editing) return true
-    return (known + listOfNotNull(added, preset)).any { sameExercise(it, exercise) }
+    return indexOfExercise(known + listOfNotNull(added, preset), exercise) >= 0
 }
 
 /** The sets logged today (since [dayStartSec]) for the loop's exercise, oldest
@@ -92,85 +45,17 @@ internal fun todaySetsFor(
     lifts: List<LiftResultView>,
     dayStartSec: Long,
 ): List<LiftResultView> {
-    val ids = item?.logged_sets.orEmpty().map { it.entry_id }.filter { it != 0L }.toSet()
-    return lifts.filter { l ->
-        l.observed_at >= dayStartSec && (
-            (l.entry_id != 0L && l.entry_id in ids) ||
-                (exercise.isNotBlank() && sameExercise(l.exercise, exercise))
-            )
+    val ids = item?.logged_sets.orEmpty().map { it.entry_id }.toSet()
+    val today = lifts.filter { it.observed_at >= dayStartSec }
+    val keys = if (exercise.isNotBlank()) nameKeys(today.map { it.exercise } + exercise) else emptyList()
+    return today.filterIndexed { i, l ->
+        l.entry_id in ids || (exercise.isNotBlank() && keys[i] == keys.last())
     }.sortedBy { it.observed_at }
 }
 
 /** Reps left in reserve at effort [rpe] on the RIR-based scale (10 − RPE, never
  *  negative). Pure. */
 internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
-
-/** An exercise name as a match key, the core's `names::exercise_key`: trimmed of
- *  Unicode White_Space as Rust's `str::trim` ([isCoreSpace]), then each code point
- *  folded on its own: upper-cased, then lower-cased, as `equals(ignoreCase = true)`
- *  compares; a Latin letter with a diacritic, a ligature or the Turkish İ/ı,
- *  before or after that step, becomes its ASCII letters ([asciiFold]: "İncline" →
- *  "incline", "Straße" → "strasse", the Ångström sign → "a"). The quick-pick and
- *  [sameExercise] both match on it; `shared/tests/fixtures/names/fold.tsv` pins it
- *  to the core's. Pure. */
-internal fun nameKey(name: String): String {
-    val t = name.trim(::isCoreSpace)
-    return buildString(t.length) {
-        var i = 0
-        while (i < t.length) {
-            val ch = t[i]
-            if (ch.isHighSurrogate() && i + 1 < t.length && t[i + 1].isLowSurrogate()) {
-                // A supplementary code point: no [asciiFold] spelling, and no case
-                // mapping of one expands, so the string round trip is its simple mapping.
-                append(t.substring(i, i + 2).uppercase().lowercase())
-                i += 2
-                continue
-            }
-            i++
-            val low = ch.uppercaseChar().lowercaseChar()
-            val folded = asciiFold(ch.code) ?: asciiFold(low.code)
-            if (folded != null) append(folded) else append(low)
-        }
-    }
-}
-
-/** Unicode White_Space, what Rust's `char::is_whitespace` (and so `str::trim`)
- *  strips: Kotlin's [Char.isWhitespace] plus U+0085, minus U+001C–U+001F. */
-private fun isCoreSpace(c: Char): Boolean = c == '\u0085' || (c.isWhitespace() && c !in '\u001C'..'\u001F')
-
-/** The lowercase ASCII spelling of a Latin-1 / Latin Extended-A letter with a
- *  diacritic, a ligature, the capital sharp s or the Turkish dotted/dotless i;
- *  null for any other character, ASCII included. The core's `names::ascii_fold`. */
-private fun asciiFold(c: Int): String? = if (c > 0xFFFF) null else when (c.toChar()) {
-    in 'À'..'Å', in 'à'..'å', in 'Ā'..'ą' -> "a"
-    'Æ', 'æ' -> "ae"
-    'Ç', 'ç', in 'Ć'..'č' -> "c"
-    'Ð', 'ð', in 'Ď'..'đ' -> "d"
-    in 'È'..'Ë', in 'è'..'ë', in 'Ē'..'ě' -> "e"
-    in 'Ĝ'..'ģ' -> "g"
-    in 'Ĥ'..'ħ' -> "h"
-    in 'Ì'..'Ï', in 'ì'..'ï', in 'Ĩ'..'ı' -> "i"
-    'Ĳ', 'ĳ' -> "ij"
-    'Ĵ', 'ĵ' -> "j"
-    in 'Ķ'..'ĸ' -> "k"
-    in 'Ĺ'..'ł' -> "l"
-    'Ñ', 'ñ', in 'Ń'..'ŋ' -> "n"
-    in 'Ò'..'Ö', 'Ø', in 'ò'..'ö', 'ø', in 'Ō'..'ő' -> "o"
-    'Œ', 'œ' -> "oe"
-    in 'Ŕ'..'ř' -> "r"
-    in 'Ś'..'š', 'ſ', 'Ș', 'ș' -> "s"
-    'ß', 'ẞ' -> "ss"
-    in 'Ţ'..'ŧ', 'Ț', 'ț' -> "t"
-    'Þ', 'þ' -> "th"
-    in 'Ù'..'Ü', in 'ù'..'ü', in 'Ũ'..'ų' -> "u"
-    'Ŵ', 'ŵ' -> "w"
-    'Ý', 'ý', 'ÿ', in 'Ŷ'..'Ÿ' -> "y"
-    in 'Ź'..'ž' -> "z"
-    else -> null
-}
-
-/** Whether two exercise names name the same exercise ([nameKey] on both). Pure. */
-internal fun sameExercise(a: String, b: String): Boolean = nameKey(a) == nameKey(b)
 
 /** What the set loop's pinned primary action does. */
 internal enum class LoopPrimary { Save, LogPlannedSet, LogOffPlanSet, LogBlank, LogExtraSet, Next, FinishSession }
@@ -207,60 +92,19 @@ internal fun inSessionCue(
     adjustments: List<AdjustmentView>,
     reviewAdjustments: List<AdjustmentView>,
 ): AdjustmentView? {
-    return adjustments.firstOrNull {
-        it.exercise?.let { e -> sameExercise(e, exercise) } == true &&
-            (it.suggested_load_kg != null || it.suggests_end_exercise)
-    } ?: reviewAdjustments.firstOrNull { it.exercise == null && it.suggests_end_exercise }
+    val named = adjustments.filter { it.exercise != null }
+    val keys = nameKeys(named.map { it.exercise.orEmpty() } + exercise)
+    return named.filterIndexed { i, _ -> keys[i] == keys.last() }
+        .firstOrNull { it.suggested_load_kg != null || it.suggests_end_exercise }
+        ?: reviewAdjustments.firstOrNull { it.exercise == null && it.suggests_end_exercise }
 }
 
-/** The standard bar the core's plates-per-side breakdown assumes. */
-private const val BarKg = 20.0
-private const val BarLb = 45.0
-
-/** Where a pull from the floor starts: the bar with one full-size plate a side
- *  (60 kg / 135 lb), the height a deadlift is set up at. */
-private const val FloorStartKg = 60.0
-private const val FloorStartLb = 135.0
-
-/** The specific warm-up ramp of the knowledge base (warmup-001, STR-WARMUP-001):
- *  about 40% × 5, 60% × 3 and 80% × 2 of the WORKING load, ending on a high-load
- *  set; the exact steps are expert opinion. */
-private val WarmUpRamp = listOf(0.4 to 5, 0.6 to 3, 0.8 to 2)
-
-/** One one-tap warm-up step: its load (wire kg) and reps; [bar] marks the empty
- *  bar, labelled "Bar" rather than its figure. */
-internal data class WarmUpStep(val kg: Double, val reps: Int, val bar: Boolean = false)
-
-/** Whether [exercise] starts each rep from the floor (a deadlift, a clean or
- *  snatch from the floor, a Pendlay row). A Romanian or stiff-leg deadlift and a
- *  hang variant start from the top. Pure. */
-internal fun isFloorLift(exercise: String): Boolean {
-    val e = nameKey(exercise)
-    if ("romanian" in e || "rdl" in e || "stiff" in e || "hang" in e) return false
-    return "deadlift" in e || "clean" in e || "snatch" in e || "pendlay" in e
-}
-
-/** One-tap warm-up steps before the first work set at [workKg] of a barbell
- *  lift: a first step (the empty bar × 5, or for a floor pull the plate-loaded
- *  start × 5), then the [WarmUpRamp] on the unit's plate grid (2.5 kg / 5 lb).
- *  A ramp step that rounds to the first step or up to the work load is dropped.
- *  Empty when the work load is at or below the first step. Pure. */
-internal fun warmUpSteps(workKg: Double, unit: WeightUnit, exercise: String): List<WarmUpStep> {
-    val lb = unit == WeightUnit.Lb
-    val floor = isFloorLift(exercise)
-    val firstKg = when {
-        floor && lb -> lbToKgWire(FloorStartLb)
-        floor -> FloorStartKg
-        lb -> lbToKgWire(BarLb)
-        else -> BarKg
-    }
-    if (workKg <= firstKg + 1e-6) return emptyList()
-    val ramp = WarmUpRamp.map { (f, reps) ->
-        val kg = if (lb) lbToKgWire((kgToLb(workKg * f) / 5.0).roundOrZero() * 5.0) else (workKg * f / 2.5).roundOrZero() * 2.5
-        WarmUpStep(kg, reps)
-    }.filter { it.kg > firstKg + 1e-6 && it.kg < workKg - 1e-6 }.distinctBy { it.kg }
-    return listOf(WarmUpStep(firstKg, 5, bar = !floor)) + ramp
-}
+/** One-tap warm-up steps before the first work set at [workKg] of [exercise], on
+ *  [unit]'s plate grid: the core's ramp (`strength::warm_up_ramp`,
+ *  STR-WARMUP-001). Empty for a lift off the straight barbell, at or below the
+ *  first step, or when the core can't answer. */
+internal fun warmUpSteps(workKg: Double, unit: WeightUnit, exercise: String): List<WarmUpStep> =
+    AppRuntime.engine.warmUpRamp(WarmUpQuery(exercise, workKg, unit == WeightUnit.Lb)).orEmpty()
 
 /** [kg] in lb rounded to the nearest half pound, without trailing zeros. */
 private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill((kgToLb(kg) * 2.0).roundOrZero() / 2.0)
@@ -484,7 +328,14 @@ internal fun SetEditorState.reseededTo(
     cueFor: (PrescriptionView) -> AppliedCue?,
 ): SetEditorState {
     val open = planItemFor(items.filter { !it.done }, name)
-    val last = if (open == null) recentLifts.lastOrNull { sameExercise(it.exercise, name) } else null
+    val last = if (open == null) {
+        val spellings = recentLifts.map { it.exercise }.distinct()
+        val keys = nameKeys(spellings + name)
+        val same = spellings.filterIndexedTo(HashSet()) { i, _ -> keys[i] == keys.last() }
+        recentLifts.lastOrNull { it.exercise in same }
+    } else {
+        null
+    }
     val seeded = when {
         open != null -> {
             val rx = prescriptionPrefill(open, weightUnit, cueFor(open))
@@ -563,8 +414,11 @@ internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =
 /** The next open lift item to move to once [exercise] completes: the first
  *  not-done named item that is not [exercise] itself (a run item has no name and
  *  is logged elsewhere). Null when nothing else is open. */
-internal fun nextOpenItem(items: List<PrescriptionView>, exercise: String): PrescriptionView? =
-    items.firstOrNull { !it.done && it.exercise.isNotBlank() && !sameExercise(it.exercise, exercise) }
+internal fun nextOpenItem(items: List<PrescriptionView>, exercise: String): PrescriptionView? {
+    val open = items.filter { !it.done && it.exercise.isNotBlank() }
+    val keys = nameKeys(open.map { it.exercise } + exercise)
+    return open.filterIndexed { i, _ -> keys[i] != keys.last() }.firstOrNull()
+}
 
 /** Whether [kg] sits on the 0.01 kg wire grid every typed load is saved on
  *  ([lbToKgWire] for lb, the kg field's two decimals). A load off it was never
@@ -593,8 +447,7 @@ internal fun resolveSaveWeightKg(
 }
 
 /** Build the set event for the editor: a fresh [Event.LogSet] when adding, or an
- *  [Event.AmendSet] targeting the logged set when editing. A legacy row (no
- *  entry_id) is matched on its ORIGINAL observed_at, so its stamp is preserved. */
+ *  [Event.AmendSet] targeting the logged set when editing. */
 internal fun setEditEvent(
     initial: LiftResultView?,
     exercise: String,
@@ -606,10 +459,8 @@ internal fun setEditEvent(
 ): Event = when {
     initial == null -> Event.LogSet(exercise, weightKg, reps, rpe, observedAt, holdSec = holdSec)
     // observedAtFallback is the row's ORIGINAL stamp, so the core replaces the
-    // matched row instead of duplicating it; especially a legacy row (id 0).
-    initial.entry_id != 0L ->
-        Event.AmendSet(initial.entry_id, exercise, weightKg, reps, rpe, observedAt, observedAtFallback = initial.observed_at, holdSec = holdSec)
-    else -> Event.AmendSet(0L, exercise, weightKg, reps, rpe, initial.observed_at, observedAtFallback = initial.observed_at, holdSec = holdSec)
+    // matched row instead of duplicating it.
+    else -> Event.AmendSet(initial.entry_id, exercise, weightKg, reps, rpe, observedAt, observedAtFallback = initial.observed_at, holdSec = holdSec)
 }
 
 /** Plain "reps left" for an RPE on the RIR-based scale: 10 → "0 reps left",
@@ -652,5 +503,37 @@ internal fun liftSetLine(
     } else {
         val base = res.getString(Res.string.log_set_line_reps, load, reps)
         if (rpeRecorded) res.getString(Res.string.log_set_line_effort, base, repsLeftText(res, rpe)) else base
+    }
+}
+
+/** What the set editor reads from the model, built once for every host (the Log
+ *  sheet, a History edit, the loop's nested edit), so each editor matches holds,
+ *  bodyweight rungs and quick picks the same way. */
+data class SetEditorInputs(
+    /** The user's own exercises, newest first (the wire list is oldest first). */
+    val recentExercises: List<String> = emptyList(),
+    /** Today's and this week's prescribed exercises: the quick picks' tail, after
+     *  today's open items and the recents. */
+    val plannedExercises: List<String> = emptyList(),
+    /** Prescribed timed-hold rungs (plan items and the ladders' rungs): a set of
+     *  one of them is a hold (seconds), its weight the added load. */
+    val holdExercises: Set<String> = emptySet(),
+    /** Prescribed pure-bodyweight rungs (added load 0, a rung that takes no belt
+     *  or vest): no load to enter. A load-capable rung keeps its field even at 0. */
+    val bodyweightExercises: Set<String> = emptySet(),
+) {
+    companion object {
+        fun from(model: ViewModel): SetEditorInputs {
+            val planItems = model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items }
+            return SetEditorInputs(
+                recentExercises = model.lifts.asReversed().map { it.exercise }.distinct(),
+                plannedExercises = planItems.map { it.exercise }.filter { it.isNotEmpty() }.distinct(),
+                holdExercises = (
+                    planItems.filter { it.timed_hold }.map { it.exercise } +
+                        model.calisthenics_ladders.flatMap { it.rungs }.filter { it.timed_hold }.map { it.name }
+                    ).toSet(),
+                bodyweightExercises = planItems.filter { it.added_kg == 0.0 && it.calis?.load_capable != true }.map { it.exercise }.toSet(),
+            )
+        }
     }
 }

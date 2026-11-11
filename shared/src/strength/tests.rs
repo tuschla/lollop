@@ -414,3 +414,79 @@ fn heavy_volume_day_is_the_transmutation_low_end() {
     assert_eq!(hv.value.reps.0, 5);
     assert_eq!(hv.claim_id(), claims::STR_BLOCK_001);
 }
+
+/// `(kg, reps)` of each step of [`warm_up_ramp`].
+fn ramp(exercise: &str, work_kg: f64, weight_lb: bool) -> Vec<(f64, u32)> {
+    warm_up_ramp(exercise, work_kg, weight_lb)
+        .value
+        .iter()
+        .map(|s| (s.kg, s.reps))
+        .collect()
+}
+
+/// A lb figure as the set screen stores it: kg kept to 0.01.
+fn lb(figure: f64) -> f64 {
+    (figure / crate::plates::LB_PER_KG * 100.0).round() / 100.0
+}
+
+#[test]
+fn warm_ups_ramp_forty_sixty_eighty_after_the_empty_bar() {
+    let r = warm_up_ramp("Back squat", 100.0, false);
+    assert_eq!(r.claim_id(), claims::STR_WARMUP_001);
+    let bars: Vec<bool> = r.value.iter().map(|s| s.bar).collect();
+    assert_eq!(
+        bars,
+        [true, false, false, false],
+        "only the empty bar is the bar"
+    );
+    assert_eq!(
+        ramp("Back squat", 100.0, false),
+        [(20.0, 5), (40.0, 5), (60.0, 3), (80.0, 2)]
+    );
+    // lb: the 45 lb bar, then 115, 175 and 230 lb on the 5 lb grid for 290 lb.
+    let kgs: Vec<f64> = ramp("Back squat", lb(290.0), true)
+        .iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(kgs, [lb(45.0), lb(115.0), lb(175.0), lb(230.0)]);
+    // A light work set keeps only the ramp steps above the bar.
+    let kgs: Vec<f64> = ramp("Bench press", 40.0, false)
+        .iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(kgs, [20.0, 25.0, 32.5]);
+    assert_eq!(ramp("Bench press", 20.0, false), []);
+    assert_eq!(ramp("Back Squat", 20.0, false), []);
+}
+
+#[test]
+fn a_floor_pull_starts_plate_loaded_not_on_the_empty_bar() {
+    let r = warm_up_ramp("Deadlift", 140.0, false).value;
+    assert!(
+        r.iter().all(|s| !s.bar),
+        "a plate-loaded start is no empty bar"
+    );
+    assert_eq!(
+        ramp("Deadlift", 140.0, false),
+        [(60.0, 5), (85.0, 3), (112.5, 2)]
+    );
+    assert_eq!(ramp("Sumo deadlift", lb(390.0), true)[0].0, lb(135.0));
+    assert_eq!(ramp("Deadlift", 60.0, false), []);
+    // A Turkish keyboard's "DEADLİFT" is a floor pull too (the folded name).
+    assert_eq!(ramp("Deadlift", 62.5, false), [(60.0, 5)]);
+    assert_eq!(ramp("DEADLİFT", 62.5, false), [(60.0, 5)]);
+    assert!(crate::exercise::starts_from_floor("Power clean"));
+    assert!(!crate::exercise::starts_from_floor("Romanian deadlift"));
+    assert!(!crate::exercise::starts_from_floor("Hang clean"));
+    assert!(crate::exercise::starts_from_floor("DEADL\u{130}FT"));
+}
+
+/// The ramp is for a straight barbell only, and never for a load the shell
+/// could not have shown.
+#[test]
+fn no_ramp_off_the_barbell_or_for_a_non_finite_load() {
+    assert_eq!(ramp("Dumbbell bench press", 40.0, false), []);
+    assert_eq!(ramp("Goblet squat", 40.0, false), []);
+    assert_eq!(ramp("Back squat", f64::NAN, false), []);
+    assert_eq!(ramp("Back squat", f64::INFINITY, false), []);
+}

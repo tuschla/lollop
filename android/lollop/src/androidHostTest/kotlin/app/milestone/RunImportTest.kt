@@ -14,11 +14,12 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * Multi-file / Share-to run import ([planRunImport], [runImportSummary],
- * [parseRunFileSegments], [fitSegments], [RunImport.urisFrom]): every skipped file is
- * named with its reason, one bad file never blocks the rest, a non-running FIT or an
- * implausibly fast track never becomes running volume, duplicates are skipped and
- * counted, and every system entry point (VIEW, SEND, SEND_MULTIPLE) yields its files.
- * Robolectric for the real Intent and string resources.
+ * [parseRunFile] over the REAL core, [RunImport.urisFrom]): every skipped file is
+ * named with its reason, one bad file never blocks the rest, an implausibly fast or
+ * too short track never becomes running volume, duplicates are skipped and counted,
+ * and every system entry point (VIEW, SEND, SEND_MULTIPLE) yields its files.
+ * Robolectric for the real Intent and string resources. The core's gates themselves
+ * are core tests (`shared/src/import/tests.rs`).
  */
 @RunWith(RobolectricTestRunner::class)
 class RunImportTest {
@@ -28,20 +29,35 @@ class RunImportTest {
     /** Metres → degrees of latitude (1° ≈ 111.2 km). */
     private fun deg(metres: Double) = metres / 111_195.0
 
-    /** A 10-minute track ending at [endSec]: [metresPerFix] apart, one fix per 10 s,
-     *  heading north from the equator. */
-    private fun track(endSec: Long, metresPerFix: Double, fixes: Int = 61): List<List<GpxFix>> {
+    /** A GPX with one `<trkseg>` per segment of (lat, unix second) fixes on the meridian,
+     *  each `<trk>` typed [type] when given. */
+    private fun gpx(vararg tracks: List<List<Pair<Double, Long>>>, type: String? = null): ByteArray = buildString {
+        append("<?xml version=\"1.0\"?><gpx version=\"1.1\">")
+        for (segments in tracks) {
+            append("<trk>")
+            if (type != null) append("<type>$type</type>")
+            for (seg in segments) {
+                append("<trkseg>")
+                for ((lat, t) in seg) append("<trkpt lat=\"$lat\" lon=\"0.0\"><time>${java.time.Instant.ofEpochSecond(t)}</time></trkpt>")
+                append("</trkseg>")
+            }
+            append("</trk>")
+        }
+        append("</gpx>")
+    }.toByteArray()
+
+    /** A track ending at [endSec]: [metresPerFix] apart, one fix per 10 s, heading
+     *  north from the equator. */
+    private fun track(endSec: Long, metresPerFix: Double, fixes: Int = 61): List<List<Pair<Double, Long>>> {
         val start = endSec - (fixes - 1) * 10L
-        return listOf(List(fixes) { i -> GpxFix(lat = i * deg(metresPerFix), lon = 0.0, timeSec = start + i * 10L, hrBpm = null) })
+        return listOf(List(fixes) { i -> i * deg(metresPerFix) to start + i * 10L })
     }
 
     /** An easy 6:00 /km run: 27.8 m every 10 s. */
     private fun easyRun(endSec: Long) = track(endSec, metresPerFix = 27.8)
 
-    private fun ok(vararg runs: List<List<GpxFix>>) = Result.success(runs.map { ImportedRun(it) })
-
-    private fun failed(reason: ImportFailure, detail: String? = null) =
-        Result.failure<List<ImportedRun>>(ImportException(reason, detail))
+    /** What the import makes of [bytes], through the real core. */
+    private fun read(bytes: ByteArray) = runCatching { parseRunFile(bytes, Core::parseRunFile) }
 
     private fun plan(files: List<ParsedRunFile>, existing: Set<Long> = emptySet()) =
         planRunImport(files, existing) { run -> importedRunEvent(run, measuredHrMax = null) }
@@ -50,18 +66,20 @@ class RunImportTest {
     fun eachSkippedFileIsNamedWithItsReasonAndNeverBlocksTheOthers() {
         val p = plan(
             listOf(
-                ParsedRunFile("morning.gpx", ok(easyRun(10_000))),
-                ParsedRunFile("broken.gpx", ok(emptyList())),
-                ParsedRunFile("bike.fit", failed(ImportFailure.NotARun, "cycling")),
-                ParsedRunFile("evening.tcx", ok(easyRun(20_000), easyRun(30_000))),
+                ParsedRunFile("morning.gpx", read(gpx(easyRun(10_000)))),
+                ParsedRunFile("broken.gpx", read(gpx(listOf(emptyList())))),
+                ParsedRunFile("bike.gpx", read(gpx(easyRun(15_000), type = "cycling"))),
+                ParsedRunFile("unreadable.fit", Result.failure(ImportException(ImportFailure.ReadFailed))),
+                ParsedRunFile("evening.gpx", read(gpx(easyRun(20_000), easyRun(30_000)))),
             ),
         )
         assertEquals(listOf(10_000L, 20_000L, 30_000L), p.runs.map { it.event.observedAt })
-        assertEquals(listOf("morning.gpx", "evening.tcx", "evening.tcx"), p.runs.map { it.fileName })
+        assertEquals(listOf("morning.gpx", "evening.gpx", "evening.gpx"), p.runs.map { it.fileName })
         assertEquals(
             listOf(
                 RunImportFailure("broken.gpx", ImportFailure.NoTrack),
-                RunImportFailure("bike.fit", ImportFailure.NotARun, "cycling"),
+                RunImportFailure("bike.gpx", ImportFailure.NotARun, "cycling"),
+                RunImportFailure("unreadable.fit", ImportFailure.ReadFailed),
             ),
             p.failures,
         )
@@ -69,87 +87,36 @@ class RunImportTest {
     }
 
     @Test
-    fun anImplausiblyFastTrackIsSkippedNotLoggedAsARun() {
-        // 12 m/s ≈ 1:23 /km, far faster than the 2:50 /km plausibility gate: a ride
-        // or a drive, never running volume.
+    fun anImplausiblyFastTrackOrAFragmentIsSkippedNotLoggedAsARun() {
+        // 12 m/s ≈ 1:23 /km: a ride or a drive. A 13 s, 3 m blip; 0.6 km in 2:30.
         val p = plan(
             listOf(
-                ParsedRunFile("ride.gpx", ok(track(10_000, metresPerFix = 120.0))),
-                ParsedRunFile("run.gpx", ok(easyRun(20_000))),
-            ),
-        )
-        assertEquals(listOf("run.gpx"), p.runs.map { it.fileName })
-        assertEquals(listOf(RunImportFailure("ride.gpx", ImportFailure.ImplausiblePace)), p.failures)
-    }
-
-    @Test
-    fun aFragmentUnderTheKeepThresholdIsSkippedAsTooShort() {
-        // A 13 s, 3 m blip; 0.6 km in 2:30; and two 80 s pieces split by a long pause
-        // (the bridge counts neither distance nor time, so 2:40 in all).
-        val split = listOf(
-            List(9) { i -> GpxFix(lat = i * deg(30.0), lon = 0.0, timeSec = 40_000L + i * 10L, hrBpm = null) },
-            List(9) { i -> GpxFix(lat = (100 + i) * deg(30.0), lon = 0.0, timeSec = 41_000L + i * 10L, hrBpm = null) },
-        )
-        val p = plan(
-            listOf(
-                ParsedRunFile("blip.gpx", ok(listOf(listOf(GpxFix(0.0, 0.0, 9_987L, null), GpxFix(deg(3.0), 0.0, 10_000L, null))))),
-                ParsedRunFile("quick.tcx", ok(track(20_000, metresPerFix = 40.0, fixes = 16))),
-                ParsedRunFile("paused.gpx", ok(split)),
-                ParsedRunFile("run.gpx", ok(easyRun(30_000))),
+                ParsedRunFile("ride.gpx", read(gpx(track(10_000, metresPerFix = 120.0)))),
+                ParsedRunFile("blip.gpx", read(gpx(listOf(listOf(0.0 to 9_987L, deg(3.0) to 10_000L))))),
+                ParsedRunFile("quick.gpx", read(gpx(track(20_000, metresPerFix = 40.0, fixes = 16)))),
+                ParsedRunFile("run.gpx", read(gpx(easyRun(30_000)))),
             ),
         )
         assertEquals(listOf("run.gpx"), p.runs.map { it.fileName })
         assertEquals(
-            listOf("blip.gpx", "quick.tcx", "paused.gpx").map { RunImportFailure(it, ImportFailure.TooShort) },
+            listOf(
+                RunImportFailure("ride.gpx", ImportFailure.ImplausiblePace),
+                RunImportFailure("blip.gpx", ImportFailure.TooShort),
+                RunImportFailure("quick.gpx", ImportFailure.TooShort),
+            ),
             p.failures,
         )
-        // Just over both thresholds: kept.
-        assertEquals(listOf("long-enough.gpx"), plan(listOf(ParsedRunFile("long-enough.gpx", ok(track(50_000, metresPerFix = 30.0, fixes = 20))))).runs.map { it.fileName })
-    }
-
-    @Test
-    fun theGateJudgesMovingPaceSoStopsCannotHideASpeed() {
-        // 3:20 /km (5 m/s) is a fast but real run: it passes.
-        val brisk = track(10_000, metresPerFix = 50.0).flatten().map { GpsPoint(it.lat, it.lon, it.timeSec, 5.0) }
-        assertFalse(legTotals(brisk, emptyList()).implausiblyFast)
-        // 2:30 /km while moving, standing still every other 10 s: 5:00 /km elapsed, but
-        // the moving pace is what counts, so it is refused.
-        val stopStart = List(41) { i -> GpsPoint(lat = ((i + 1) / 2) * deg(66.7), lon = 0.0, observedAt = 1_000L + i * 10L, accuracyM = 5.0) }
-        assertTrue(legTotals(stopStart, emptyList()).implausiblyFast)
     }
 
     @Test
     fun eachGpxTrackIsItsOwnRunWithItsOwnSport() {
-        // A 10 km run and a 5 km ride in one GPX: the run imports, the ride is refused.
-        fun trkpts(n: Int, lat0: Double, t0: Long, mps: Double) = buildString {
-            for (i in 0 until n) {
-                append("<trkpt lat=\"${lat0 + i * deg(mps)}\" lon=\"8.54\"><time>${java.time.Instant.ofEpochSecond(t0 + i)}</time></trkpt>")
-            }
-        }
-        val t0 = 1_750_000_000L
-        val rideStart = t0 + 3000 + 60
-        val doc = "<?xml version=\"1.0\"?><gpx version=\"1.1\">" +
-            "<trk><type>running</type><trkseg>${trkpts(3000, 47.37, t0, 3.33)}</trkseg></trk>" +
-            "<trk><type>cycling</type><trkseg>${trkpts(720, 47.37 + deg(3000 * 3.33), rideStart, 7.0)}</trkseg></trk></gpx>"
-        val runs = parseRunFileSegments(doc.toByteArray()) { fail("not a FIT file"); null }
-        assertEquals(listOf("running", "cycling"), runs.map { it.sport })
-        val p = plan(listOf(ParsedRunFile("day.gpx", Result.success(runs))))
-        assertEquals(listOf(t0 + 2999), p.runs.map { it.event.observedAt })
+        // A run and a ride in one GPX: the run imports, the ride is refused.
+        val doc = gpx(easyRun(10_000)).decodeToString()
+            .replace("<trk>", "<trk><type>running</type>")
+            .replace("</gpx>", gpx(easyRun(20_000), type = "cycling").decodeToString().substringAfter("<gpx version=\"1.1\">"))
+        val p = plan(listOf(ParsedRunFile("day.gpx", read(doc.toByteArray()))))
+        assertEquals(listOf(10_000L), p.runs.map { it.event.observedAt })
         assertTrue(p.failures.isEmpty())
-    }
-
-    @Test
-    fun aFitOverItsCapIsRefusedBeforeTheCoreParsesIt() {
-        fun fitHeader(size: Int) = ByteArray(size).also { ".FIT".toByteArray().copyInto(it, destinationOffset = 8) }
-        try {
-            parseRunFileSegments(fitHeader(MAX_FIT_IMPORT_BYTES + 1)) { fail("parsed an oversized FIT"); null }
-            fail("an oversized FIT must not import")
-        } catch (e: ImportException) {
-            assertEquals(ImportFailure.TooLarge, e.reason)
-        }
-        var parsed = false
-        runCatching { parseRunFileSegments(fitHeader(MAX_FIT_IMPORT_BYTES)) { parsed = true; null } }
-        assertTrue("a FIT at the cap reaches the core", parsed)
     }
 
     @Test
@@ -158,8 +125,8 @@ class RunImportTest {
         // twice). Each must count once toward weekly volume, never twice.
         val p = plan(
             listOf(
-                ParsedRunFile("a.gpx", ok(easyRun(10_000), easyRun(20_000))),
-                ParsedRunFile("b.gpx", ok(easyRun(20_000), easyRun(40_000))),
+                ParsedRunFile("a.gpx", read(gpx(easyRun(10_000), easyRun(20_000)))),
+                ParsedRunFile("b.gpx", read(gpx(easyRun(20_000), easyRun(40_000)))),
             ),
             existing = setOf(10_000L),
         )
@@ -169,45 +136,22 @@ class RunImportTest {
     }
 
     @Test
-    fun aFitErrorEnvelopeIsRefusedWithItsNamedReason() {
-        val cases = listOf(
-            """{"error":{"kind":"not_a_run","context":"cycling","message":"This FIT file records cycling, not a run"}}""" to ImportFailure.NotARun,
-            // A 13 s fragment under the keep threshold.
-            """{"error":{"kind":"too_short","context":"","message":""}}""" to ImportFailure.TooShort,
-            """{"error":{"kind":"no_track","context":"","message":"No GPS points"}}""" to ImportFailure.NoTrack,
-            // The legacy plain-string error and a null JNI result read as a damaged file.
-            """{"error":"Couldn't read this FIT file"}""" to ImportFailure.Damaged,
-            null to ImportFailure.Damaged,
-        )
-        for ((json, reason) in cases) {
-            val e = runCatching { fitSegments(json) }.exceptionOrNull()
-            assertEquals(json, reason, (e as? ImportException)?.reason)
-        }
-        val sport = runCatching { fitSegments(cases[0].first) }.exceptionOrNull() as ImportException
-        assertEquals("cycling", sport.detail)
-    }
-
-    @Test
     fun theTooShortReasonReadsInTheDisplayUnit() {
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        EventDispatcher.model.value = ViewModel(profile = Profile(distance_unit = DistanceUnit.Mi))
         try {
             assertEquals(
                 "too short for a run, under 0.3 mi or 3 minutes",
                 importFailureReason(ctx.resources, RunImportFailure("Activity.fit", ImportFailure.TooShort)),
             )
         } finally {
-            AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.System)
+            EventDispatcher.model.value = null
         }
     }
 
     @Test
     fun aFileThatIsNeitherFitNorGpxNorTcxIsRefusedFromItsHeader() {
-        try {
-            parseRunFileSegments("name,distance\nmonday,5".encodeToByteArray()) { fail("not a FIT file"); null }
-            fail("a CSV must not import")
-        } catch (e: ImportException) {
-            assertEquals(ImportFailure.WrongType, e.reason)
-        }
+        val e = read("name,distance\nmonday,5".encodeToByteArray()).exceptionOrNull() as ImportException
+        assertEquals(ImportFailure.WrongType, e.reason)
     }
 
     @Test

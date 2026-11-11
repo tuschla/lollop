@@ -1,12 +1,13 @@
 //! Flattening a `Prescription::Lift` arm.
 
-use crate::app::evidence_views::{grade_note_str, reps_word, why_from};
+use crate::app::evidence_views::{grade_note_str, why_from};
 use crate::app::format::{fmt_rounded, fmt_weight};
+use crate::app::plan_views::basis::planned_text;
 use crate::app::plan_views::item_render::{
     derate_reason, face_rir, range_text, refresh_lift_summary, round_load_or_drop, sets_reps_lead,
-    with_reps_left,
 };
-use crate::app::view_types::{BasisRx, EvidenceTagView, PlanIntensity, PrescriptionView};
+use crate::app::plan_views::plan_item::{BasisPiece, BasisRx, PlanItem};
+use crate::app::view_types::{EvidenceTagView, PlanIntensity, PrescriptionView};
 use crate::evidence::{ClaimId, claims};
 use crate::plates::{f32_load_ceil, round_load_grid};
 use crate::schema::{LiftIntensity, Recommended, Rx, RxBasis};
@@ -24,7 +25,7 @@ struct LiftArm {
     /// 7"` is 3); 0 when it is no last-time line.
     anchored_sets: usize,
     /// The "why?" basis; `None` keeps the claim statement.
-    basis: Option<String>,
+    basis: Option<Vec<BasisPiece>>,
     /// The "why?" `improves` line: an honest ENGINE data-need (which input
     /// would sharpen this load), never a training claim (HARD RULE 1). It
     /// overrides the claim-keyed default so a prescription card carries the
@@ -43,7 +44,7 @@ pub(super) fn flatten_lift_prescription(
     anchors: &crate::plan::LiftAnchors,
     rx: &Rx,
     weight_lb: bool,
-) -> PrescriptionView {
+) -> PlanItem {
     let LiftArm {
         load_kg,
         intensity,
@@ -62,8 +63,7 @@ pub(super) fn flatten_lift_prescription(
     };
     let intensity_label = intensity.label().unwrap_or(prose_label);
     // An arm's own basis states the prescription; restated if the face moves.
-    let states_rx = basis.is_some();
-    let mut why = why_from(basis, rx);
+    let mut why = why_from(basis.as_deref().map(|b| planned_text(b, weight_lb)), rx);
     if let Some(imp) = improves {
         why.improves = imp;
     }
@@ -86,31 +86,35 @@ pub(super) fn flatten_lift_prescription(
         evidence = EvidenceTagView::of(&re);
         why.grade_note = grade_note_str(re.grade(), re.contested());
     }
-    let mut it = PrescriptionView {
-        exercise: l.exercise.clone(),
-        sets: l.sets,
-        reps_low: l.reps,
-        reps_high: l.reps_max.unwrap_or(l.reps).max(l.reps),
-        load_kg,
-        intensity_label,
+    let mut it = PlanItem {
+        view: PrescriptionView {
+            exercise: l.exercise.clone(),
+            sets: l.sets,
+            reps_low: l.reps,
+            reps_high: l.reps_max.unwrap_or(l.reps).max(l.reps),
+            load_kg,
+            intensity_label,
+            rest_sec: l.rest_sec,
+            target_rpe,
+            anchored_on,
+            anchored_on_last: anchored_sets > 0,
+            evidence,
+            why,
+            effort_cue,
+            ..PrescriptionView::default()
+        },
         intensity,
-        rest_sec: l.rest_sec,
-        target_rpe,
-        anchored_on,
-        anchored_on_last: anchored_sets > 0,
         anchored_on_single_set: anchored_sets == 1,
-        evidence,
-        why,
-        effort_cue,
         rpe_target: matches!(l.intensity, LiftIntensity::Rpe(_)),
-        ..PrescriptionView::default()
+        ..PlanItem::default()
     };
     refresh_lift_summary(&mut it, weight_lb);
-    if states_rx {
+    if let Some(pieces) = basis {
         it.basis_rx = Some(BasisRx {
             load_kg,
             lead: sets_reps_lead(&it),
             rir: face_rir(&it),
+            pieces,
         });
     }
     it
@@ -160,10 +164,12 @@ fn percent_arm(
         let rir = effort_rir as i32;
         return LiftArm {
             intensity: PlanIntensity::Rir { rir },
-            basis: Some(format!(
-                "{}×{} {}: {:.0}% of your estimated max is lighter than any weight you can load, so go by effort. Log a heavier set and the plan sets your weight from it.",
-                l.sets, reps_txt, with_reps_left(i64::from(rir)), p
-            )),
+            basis: Some(vec![
+                lead(l.sets, &reps_txt),
+                text(" "),
+                BasisPiece::RepsLeft(i64::from(rir)),
+                text(&format!(": {p:.0}% of your estimated max is lighter than any weight you can load, so go by effort. Log a heavier set and the plan sets your weight from it.")),
+            ]),
             improves: Some(
                 "Log a heavier set of this lift so its weights follow your estimated max instead of an effort target."
                     .to_string(),
@@ -181,10 +187,13 @@ fn percent_arm(
             )
         })
         .unwrap_or_default();
-    let effort = format!(
-        "Stop each set {}. If a set feels much harder, you're below your estimate today: end the exercise there.",
-        with_reps_left(i64::from(effort_rir))
-    );
+    let effort = [
+        text(". Stop each set "),
+        BasisPiece::RepsLeft(i64::from(effort_rir)),
+        text(
+            ". If a set feels much harder, you're below your estimate today: end the exercise there.",
+        ),
+    ];
     let (basis, improves) = match (load, e1) {
         (Some(kg), Some(e)) => {
             let scaled = match derate {
@@ -196,24 +205,30 @@ fn percent_arm(
                 None => String::new(),
             };
             (
-                format!(
-                    "{}×{} at {:.0}% of your estimated max ({}){scaled}: {}. {effort}",
-                    l.sets,
-                    reps_txt,
-                    p,
-                    fmt_weight(e, weight_lb),
-                    fmt_weight(kg, weight_lb)
-                ),
+                [
+                    lead(l.sets, &reps_txt),
+                    text(&format!(
+                        " at {p:.0}% of your estimated max ({}){scaled}: ",
+                        fmt_weight(e, weight_lb)
+                    )),
+                    BasisPiece::Load(kg),
+                ]
+                .into_iter()
+                .chain(effort)
+                .collect::<Vec<_>>(),
                 // Anchored: the load is only as fresh as the e1RM behind it. A
                 // rated session keeps it current.
                 "Rate how hard each set felt so your estimated max, and next week's weights, stay current.",
             )
         }
         _ => (
-            format!(
-                "{}×{} at {:.0}% of your estimated max. {effort}",
-                l.sets, reps_txt, p
-            ),
+            [
+                lead(l.sets, &reps_txt),
+                text(&format!(" at {p:.0}% of your estimated max")),
+            ]
+            .into_iter()
+            .chain(effort)
+            .collect(),
             // No anchor yet: a logged set replaces the estimate with a
             // measured e1RM the load can key off.
             "Log a set of this lift so its weights follow your estimated max instead of a typical value.",
@@ -251,12 +266,12 @@ fn rir_arm(
         Some(top) => rep_range_arm(l, n, top, anchors, rx, weight_lb),
         None => LiftArm {
             intensity: PlanIntensity::Rir { rir: n as i32 },
-            basis: Some(format!(
-                "{}×{} {}. Log a set and the plan sets your weight from it.",
-                l.sets,
-                l.reps,
-                with_reps_left(i64::from(n))
-            )),
+            basis: Some(vec![
+                lead(l.sets, &l.reps.to_string()),
+                text(" "),
+                BasisPiece::RepsLeft(i64::from(n)),
+                text(". Log a set and the plan sets your weight from it."),
+            ]),
             // No e1RM anchor: loads are RIR-based until a set is logged.
             improves: Some(
                 "Log a set of this lift so its weights follow your estimated max instead of an effort target."
@@ -332,52 +347,86 @@ fn rep_range_arm(
             )
         })
         .unwrap_or_default();
-    let rule = format!(
-        "Add a rep each session. Once every set reaches {top} reps with at least {} left, the weight goes up a small step (at most a tenth) and you start again at {bottom}.",
-        reps_word(n)
-    );
+    let rule = [
+        text(&format!(
+            "Add a rep each session. Once every set reaches {top} reps with "
+        )),
+        BasisPiece::AtLeast(i64::from(n)),
+        text(&format!(
+            ", the weight goes up a small step (at most a tenth) and you start again at {bottom}."
+        )),
+    ];
     let reps_txt = range_text(l.reps, top);
     let step = crate::hypertrophy::SMALLEST_LOAD_STEP_KG;
     let deload = rx.kind() == RxBasis::HypertrophyDeload;
-    let effort = with_reps_left(i64::from(effort_rir));
+    let effort = BasisPiece::RepsLeft(i64::from(effort_rir));
+    // "3×8–12 at 60 kg with ~2 reps left<why>. <rule>"
+    let loaded = |kg: f64, why: String| {
+        [
+            lead(l.sets, &reps_txt),
+            text(" at "),
+            BasisPiece::Load(kg),
+            text(" "),
+            effort.clone(),
+            text(&why),
+        ]
+        .into_iter()
+        .chain(rule.clone())
+        .collect::<Vec<_>>()
+    };
     let basis = match (load, last) {
-        _ if deload => format!(
-            "Lighter week: {}×{reps_txt}{} with at least {} left, about half your usual sets at a lighter weight.",
-            l.sets,
-            load.map(|kg| format!(" at {}", fmt_weight(kg, weight_lb)))
-                .unwrap_or_default(),
-            reps_word(n)
-        ),
+        _ if deload => {
+            let mut b = vec![text("Lighter week: "), lead(l.sets, &reps_txt)];
+            if let Some(kg) = load {
+                b.extend([text(" at "), BasisPiece::Load(kg)]);
+            }
+            b.extend([
+                text(" with "),
+                BasisPiece::AtLeast(i64::from(n)),
+                text(", about half your usual sets at a lighter weight."),
+            ]);
+            b
+        }
         (Some(kg), Some(w)) if kg > w.weight_kg + 0.01 && kg <= w.weight_kg + step + 0.01 => {
-            format!(
-                "{}×{reps_txt} at {} {effort}: every set reached the top of the range last time, so the weight goes up. {rule}",
-                l.sets,
-                fmt_weight(kg, weight_lb)
+            loaded(
+                kg,
+                ": every set reached the top of the range last time, so the weight goes up. "
+                    .to_string(),
             )
         }
-        (Some(kg), Some(w)) if (kg - w.weight_kg).abs() < 0.01 => format!(
-            "{}×{reps_txt} at {} {effort}: same weight as last time, aim for {} reps per set. {rule}",
-            l.sets,
-            fmt_weight(kg, weight_lb),
-            l.reps
+        (Some(kg), Some(w)) if (kg - w.weight_kg).abs() < 0.01 => loaded(
+            kg,
+            format!(
+                ": same weight as last time, aim for {} reps per set. ",
+                l.reps
+            ),
         ),
-        (Some(kg), _) if drop_cut => format!(
-            "{}×{reps_txt} at {} {effort}, scaled to {:.0}% {}. {rule}",
-            l.sets,
-            fmt_weight(kg, weight_lb),
-            frac * 100.0,
-            derate_reason(crate::plan::DerateCause::E1rmDrop)
+        (Some(kg), _) if drop_cut => loaded(
+            kg,
+            format!(
+                ", scaled to {:.0}% {}. ",
+                frac * 100.0,
+                derate_reason(crate::plan::DerateCause::E1rmDrop)
+            ),
         ),
-        (Some(kg), _) => format!(
-            "{}×{reps_txt} at {} {effort}: worked out for this rep range from your last session of this lift. {rule}",
-            l.sets,
-            fmt_weight(kg, weight_lb)
+        (Some(kg), _) => loaded(
+            kg,
+            ": worked out for this rep range from your last session of this lift. ".to_string(),
         ),
-        (None, _) => format!(
-            "{}×{reps_txt} {effort}: pick a weight you could lift about {} times. Log it and the next session carries your weight forward. {rule}",
-            l.sets,
-            u32::from(l.reps) + u32::from(n)
-        ),
+        (None, _) => [
+            lead(l.sets, &reps_txt),
+            text(" "),
+            effort.clone(),
+            text(": pick a weight you "),
+            BasisPiece::CouldLift {
+                reps: i64::from(l.reps),
+                rir: i64::from(n),
+            },
+            text(". Log it and the next session carries your weight forward. "),
+        ]
+        .into_iter()
+        .chain(rule.clone())
+        .collect(),
     };
     LiftArm {
         load_kg: load,
@@ -405,17 +454,32 @@ fn rpe_arm(
 ) -> LiftArm {
     let rir = crate::strength::rpe_to_rir(r as f64).round();
     let calibration = anchors.e1rm_for(&l.exercise).is_none();
-    let effort = with_reps_left(rir as i64);
+    let effort = BasisPiece::RepsLeft(rir as i64);
     let basis = if calibration {
-        format!(
-            "Warm up, then work up to {} set{} of {} {effort} (a weight you could lift about {:.0} times). Log it with how hard it felt; your working weights for this lift are set from it.",
-            l.sets,
-            if l.sets == 1 { "" } else { "s" },
-            l.reps,
-            l.reps as f64 + rir
-        )
+        vec![
+            text(&format!(
+                "Warm up, then work up to {} set{} of {} ",
+                l.sets,
+                if l.sets == 1 { "" } else { "s" },
+                l.reps
+            )),
+            effort,
+            text(" (a weight you "),
+            BasisPiece::CouldLift {
+                reps: i64::from(l.reps),
+                rir: rir as i64,
+            },
+            text(
+                "). Log it with how hard it felt; your working weights for this lift are set from it.",
+            ),
+        ]
     } else {
-        format!("{}×{} {effort}.", l.sets, l.reps)
+        vec![
+            lead(l.sets, &l.reps.to_string()),
+            text(" "),
+            effort,
+            text("."),
+        ]
     };
     LiftArm {
         intensity: PlanIntensity::Prose,
@@ -435,13 +499,22 @@ fn max_intent_arm(l: &crate::schema::LiftPrescription) -> LiftArm {
     LiftArm {
         intensity: PlanIntensity::Prose,
         prose_label: "max height".to_string(),
-        basis: Some(format!(
+        basis: Some(vec![text(&format!(
             "{} sets of {} jumps ({} in total), each as high as you can, landing softly; rest about {} min between sets. End a set early if a jump is clearly lower than your first. Jumps come first, while you are fresh.",
             l.sets,
             l.reps,
             u32::from(l.sets) * u32::from(l.reps),
             (l.rest_sec as f64 / 60.0).round()
-        )),
+        ))]),
         ..LiftArm::default()
     }
+}
+
+fn text(t: &str) -> BasisPiece {
+    BasisPiece::Text(t.to_string())
+}
+
+/// A `"3×5"` sets×reps lead.
+fn lead(sets: u8, reps: &str) -> BasisPiece {
+    BasisPiece::Lead(format!("{sets}×{reps}"))
 }

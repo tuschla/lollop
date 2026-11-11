@@ -121,6 +121,16 @@ const PROGRESS_WEEKS: i64 = 16;
 /// the window interpolation), so the earlier run keeps the record.
 const BEST_EFFORT_TIE_SEC: f64 = 1e-9;
 
+/// The running-progress view and the rated runs behind its session-RPE series
+/// ([`build_srpe_load`](crate::app::calculators)).
+pub(in crate::app) struct RunProgress {
+    pub(in crate::app) view: RunProgressView,
+    /// Some week of the series counted a rated run.
+    pub(in crate::app) any_rated: bool,
+    /// Rated runs counted in this week's `srpe_load_au`.
+    pub(in crate::app) rated_this_week: u32,
+}
+
 /// The running-progress view (self-monitoring, ADH-SELFMON-001): the last
 /// [`PROGRESS_WEEKS`] Monday-start local weeks of volume (with the separate
 /// session-RPE load series, LOAD-SRPE-001), the longest run and best efforts,
@@ -133,7 +143,7 @@ pub(in crate::app) fn build_run_progress(
     model: &Model,
     facts: &RunFacts,
     planned_run_km: f64,
-) -> Option<RunProgressView> {
+) -> Option<RunProgress> {
     let offset = model.today_utc_offset_sec;
     // Chronological ([`RunFacts::chrono`]): the weekly float sums are rounded
     // to 0.1, so summing in storage order would let an Undo (the re-logged row
@@ -161,6 +171,7 @@ pub(in crate::app) fn build_run_progress(
             ..Default::default()
         })
         .collect();
+    let mut rated = [0u32; PROGRESS_WEEKS as usize];
     let mut longest = (0.0_f64, 0_i64);
     let mut bests = [None::<(f64, u64, i64)>; BEST_EFFORT_DISTANCES.len()];
     for (i, r, day) in &live {
@@ -170,14 +181,15 @@ pub(in crate::app) fn build_run_progress(
         }
         let monday = monday_of(*day);
         if monday >= first_monday {
-            let w = &mut weekly[((monday - first_monday) / 7) as usize];
+            let w_i = ((monday - first_monday) / 7) as usize;
+            let w = &mut weekly[w_i];
             w.km += km;
             w.runs += 1;
             if let Some(rpe) = r.session_rpe
                 && min > 0.0
             {
                 w.srpe_load_au += load::srpe_load_au(min, rpe);
-                w.rated_runs += 1;
+                rated[w_i] += 1;
             }
         }
         let efforts = run_best_efforts(r, facts.keys[*i], facts.qc[*i].as_deref());
@@ -210,13 +222,17 @@ pub(in crate::app) fn build_run_progress(
         })
         .collect();
     let g = Recommended::new((), claims::ADH_SELFMON_001);
-    Some(RunProgressView {
-        weekly,
-        planned_weekly_km: planned_run_km,
-        longest_run_km: round_tenths(longest.0),
-        longest_run_observed_at: longest.1,
-        best_efforts,
-        evidence: EvidenceTagView::of(&g),
+    Some(RunProgress {
+        view: RunProgressView {
+            weekly,
+            planned_weekly_km: planned_run_km,
+            longest_run_km: round_tenths(longest.0),
+            longest_run_observed_at: longest.1,
+            best_efforts,
+            evidence: EvidenceTagView::of(&g),
+        },
+        any_rated: rated.iter().any(|&n| n > 0),
+        rated_this_week: rated.last().copied().unwrap_or(0),
     })
 }
 

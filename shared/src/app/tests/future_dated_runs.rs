@@ -106,6 +106,7 @@ fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load() {
         .training_load
         .clone()
         .expect("training load present");
+    let fig = load_figures_of(&model).expect("load figures present");
     assert_eq!(
         tl.sessions_counted, 1,
         "the future run must be excluded from CTL/ATL"
@@ -130,6 +131,7 @@ fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load() {
     // CTL/ATL/TSB + counted are identical whether or not the future run is
     // present: it only ever contributes to the `skipped` tally.
     let tl2 = without.training_load.expect("training load present");
-    assert_eq!((tl.ctl, tl.atl, tl.tsb), (tl2.ctl, tl2.atl, tl2.tsb));
+    let fig2 = load_figures_of(&model).expect("load figures present");
+    assert_eq!((fig.ctl, fig.atl, fig.tsb), (fig2.ctl, fig2.atl, fig2.tsb));
     assert_eq!(tl.sessions_counted, tl2.sessions_counted);
 }

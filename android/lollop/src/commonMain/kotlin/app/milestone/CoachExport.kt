@@ -169,7 +169,7 @@ internal fun coachSummaryText(res: PlatformResources, model: ViewModel): String 
     today = model.today(),
     zone = TimeZone.currentSystemDefault(),
     weightUnit = model.weightUnit(),
-    distanceUnit = resolveDistanceUnit(AppSettings.distanceUnitOverride.value),
+    distanceUnit = model.distanceUnit(),
 )
 
 /** Open the share sheet with [model]'s coach summary ([coachSummaryText]) as plain text. */

@@ -69,36 +69,36 @@ fn no_age_is_never_masters() {
 
 #[test]
 fn no_age_run_targets_carry_no_age_estimated_heart_rate() {
-    let (app, model) = planned(no_age(running_profile()));
-    let vm = app.view(&model);
-    let targets: Vec<RunTargetView> = vm
+    let (_, model) = planned(no_age(running_profile()));
+    let plan = working_plan(&model);
+    let targets: Vec<(&RunTargetView, f64)> = plan
         .week_plan
         .iter()
         .flat_map(|s| s.items.iter())
-        .filter_map(|it| it.run_target.clone())
+        .filter_map(|it| Some((it.run_target.as_ref()?, it.target_anchor?.hr.max_bpm)))
         .collect();
     assert!(!targets.is_empty(), "the running week has run targets");
-    for t in &targets {
+    for (t, hr_max) in &targets {
         assert!(t.hr_label.is_empty(), "no HRmax, no bpm: {t:?}");
-        assert_eq!(t.hr_max_bpm, 0.0, "{t:?}");
+        assert_eq!(*hr_max, 0.0, "{t:?}");
         assert!(!t.effort_cue.is_empty(), "the effort cue stays: {t:?}");
     }
-    let long = planned_long_run_item(&app, &model);
-    let t = long.run_target.expect("the long run has a target");
+    let long = planned_long_run_item(&model);
+    let t = long.run_target.as_ref().expect("the long run has a target");
     assert!(t.effort_cue.contains("talk in full sentences"), "{t:?}");
 }
 
 #[test]
 fn no_age_run_targets_use_a_measured_hrmax() {
-    let (app, model) = planned(Profile {
+    let (_, model) = planned(Profile {
         measured_hr_max: Some(190.0),
         ..no_age(running_profile())
     });
-    let t = planned_long_run_item(&app, &model)
-        .run_target
-        .expect("the long run has a target");
-    assert!(t.hr_max_measured, "{t:?}");
-    assert_eq!(t.hr_max_bpm, 190.0);
+    let long = planned_long_run_item(&model);
+    let t = long.run_target.as_ref().expect("the long run has a target");
+    let hr = long.target_anchor.expect("a resolved target").hr;
+    assert!(hr.measured, "{t:?}");
+    assert_eq!(hr.max_bpm, 190.0);
     let high: u32 = t
         .hr_label
         .strip_suffix(" bpm")
@@ -106,4 +106,43 @@ fn no_age_run_targets_use_a_measured_hrmax() {
         .and_then(|h| h.parse().ok())
         .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
     assert!(high > 0 && high <= 190, "{t:?}");
+}
+
+#[test]
+fn the_masters_protein_context_and_bpm_conversion_follow_the_stated_age() {
+    let view = |profile: Option<Profile>| {
+        let app = Engine;
+        let mut model = Model::default();
+        if let Some(p) = profile {
+            app.update(Event::SetProfile(p), &mut model)
+                .expect_only_render();
+        }
+        let vm = app.view(&model);
+        (vm.protein_masters_offered, vm.hr_max_known)
+    };
+    let aged = |age_years, measured_hr_max| {
+        Some(Profile {
+            age_years,
+            measured_hr_max,
+            ..no_age(strength_profile())
+        })
+    };
+    // MASTERS-001: the masters target is offered unless a stated age is under
+    // 65; an unknown age leaves both protein contexts open.
+    assert_eq!(view(None), (true, false), "no profile");
+    assert_eq!(view(aged(None, None)), (true, false), "no age");
+    assert_eq!(view(aged(Some(64.0), None)), (false, true));
+    assert_eq!(view(aged(Some(65.0), None)), (true, true));
+    // The bpm → %HRmax anchor: a measured max, else an age Tanaka covers.
+    assert_eq!(
+        view(aged(None, Some(190.0))),
+        (true, true),
+        "a measured max"
+    );
+    assert_eq!(
+        view(aged(None, Some(250.0))),
+        (true, false),
+        "an implausible max"
+    );
+    assert!(!view(aged(Some(101.0), None)).1, "past Tanaka's ages");
 }

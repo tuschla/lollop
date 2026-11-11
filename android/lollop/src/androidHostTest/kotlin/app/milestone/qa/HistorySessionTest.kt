@@ -19,7 +19,6 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
@@ -173,7 +172,7 @@ class HistorySessionTest {
 
     @Test
     fun milesUser_seesMilesInTheHistoryTileAndChart() {
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
         QaHarness.seedLog(
             ctx,
             listOf(QaHarness.strengthProfile(), QaHarness.loggedRun(QaHarness.daysAgoAtMidday(1))),

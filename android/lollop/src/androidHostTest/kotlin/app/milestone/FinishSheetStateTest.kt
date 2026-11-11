@@ -87,7 +87,7 @@ class FinishSheetStateTest {
         // run-type picks) when EITHER the distance or the moving time is under the bar.
         assertTrue(isShortRun(km = 0.2, movingSec = 600))
         assertTrue(isShortRun(km = 2.0, movingSec = 120))
-        assertFalse(isShortRun(km = MIN_RUN_KM, movingSec = MIN_RUN_SEC))
+        assertFalse(isShortRun(km = CoreConstants.MIN_RUN_KM, movingSec = CoreConstants.MIN_RUN_SEC.toLong()))
         assertFalse(isShortRun(km = 5.0, movingSec = 1_800))
     }
 

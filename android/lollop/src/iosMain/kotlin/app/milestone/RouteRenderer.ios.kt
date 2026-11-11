@@ -159,7 +159,7 @@ internal class ComposeRoutePainter(
 
     /** Strokes the runs of consecutive legs of segment [si] that are kept ([keptLegs]) or cut. */
     private fun strokeLegs(
-        scope: DrawScope, si: Int, seg: List<GpxFix>, o: RouteDrawOptions, keptLegs: Boolean, color: Color, stroke: Stroke,
+        scope: DrawScope, si: Int, seg: List<GpsPoint>, o: RouteDrawOptions, keptLegs: Boolean, color: Color, stroke: Stroke,
     ) {
         val xs = layout.xs[si]
         val ys = layout.ys[si]

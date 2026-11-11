@@ -62,13 +62,19 @@ class AppSettingsThemeTest {
         log.delete()
     }
 
+    /** What [AppRuntime.start] does with the settings. */
+    private fun boot() {
+        AppSettings.migrate(ctx)
+        AppSettings.load(ctx)
+    }
+
     @Test
     fun freshInstall_bootsIntoPaperWithSystemAccent_andKeepsItOnReload() {
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Paper, AppSettings.theme.value)
         assertTrue(AppSettings.dynamicAccent.value)
         log.writeText("")
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Paper, AppSettings.theme.value)
         assertTrue(AppSettings.dynamicAccent.value)
     }
@@ -76,14 +82,14 @@ class AppSettingsThemeTest {
     @Test
     fun existingInstallWithoutSavedTheme_keepsRoseAndItsAccent() {
         log.writeText("")
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Rose, AppSettings.theme.value)
         assertFalse(AppSettings.dynamicAccent.value)
 
         reset()
         log.writeText("")
         prefs.edit().putBoolean("dynamic_accent", true).commit()
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Rose, AppSettings.theme.value)
         assertTrue(AppSettings.dynamicAccent.value)
     }
@@ -91,14 +97,14 @@ class AppSettingsThemeTest {
     @Test
     fun savedChoice_survivesTheNewDefaults() {
         prefs.edit().putString("app_theme", "Paper").putBoolean("dynamic_accent", false).commit()
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Paper, AppSettings.theme.value)
         assertFalse(AppSettings.dynamicAccent.value)
     }
 
     @Test
     fun switchingTheme_setsTheSystemAccent_butTheToggleStaysTheUsers() {
-        AppSettings.load(ctx)
+        boot()
         for (tinted in listOf(AppTheme.Rose, AppTheme.Meadow, AppTheme.Iris)) {
             AppSettings.setTheme(ctx, AppTheme.Paper)
             AppSettings.setTheme(ctx, tinted)
@@ -112,7 +118,7 @@ class AppSettingsThemeTest {
         assertFalse("re-picking the current theme keeps the user's toggle", AppSettings.dynamicAccent.value)
         AppSettings.setTheme(ctx, AppTheme.Iris)
         AppSettings.setDynamicAccent(ctx, true)
-        AppSettings.load(ctx)
+        boot()
         assertEquals(AppTheme.Iris, AppSettings.theme.value)
         assertTrue("a flip after switching persists", AppSettings.dynamicAccent.value)
     }

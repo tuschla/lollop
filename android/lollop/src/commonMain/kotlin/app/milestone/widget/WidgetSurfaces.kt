@@ -10,7 +10,7 @@ import app.milestone.EventDispatcher
 import app.milestone.PlatformContext
 import app.milestone.RunSession
 import app.milestone.ViewModel
-import app.milestone.resolveDistanceUnit
+import app.milestone.distanceUnit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
@@ -47,15 +47,15 @@ internal data class WidgetInputs(
         other != null && model === other.model && unit == other.unit && ticks == other.ticks
 }
 
-/** The [WidgetInputs], on every change of any of them. */
+/** The [WidgetInputs], on every change of any of them; the unit is the model's
+ *  ([distanceUnit]). */
 internal fun widgetInputs(): Flow<WidgetInputs> =
     combine(
         EventDispatcher.model,
-        AppSettings.distanceUnitOverride,
         RunSession.tracking,
         surfaceLooks(),
         widgetSurfacePort.ticks,
-    ) { model, unit, recording, look, ticks -> WidgetInputs(model, resolveDistanceUnit(unit), recording, look, ticks) }
+    ) { model, recording, look, ticks -> WidgetInputs(model, model.distanceUnit(), recording, look, ticks) }
 
 /**
  * Keeps the surfaces outside the app's window in step with it: the home and lock

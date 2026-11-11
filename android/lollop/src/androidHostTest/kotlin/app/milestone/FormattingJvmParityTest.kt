@@ -22,8 +22,8 @@ class FormattingJvmParityTest {
         for (i in 0..20_000) out += -i / 1000.0
         // Values the app derives by arithmetic (lb ↔ kg, mi ↔ km, paces).
         for (i in 0..5_000) {
-            out += i * LB_PER_KG
-            out += i / LB_PER_KG
+            out += i * CoreConstants.LB_PER_KG
+            out += i / CoreConstants.LB_PER_KG
             out += kmToMi(i / 10.0)
             out += miToKm(i / 10.0)
             out += i / 60.0

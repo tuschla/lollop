@@ -4,7 +4,10 @@ use std::fmt::Write as _;
 
 use crate::app::evidence_views::why_from;
 use crate::app::format::{fmt_frac_pct_range, fmt_weight};
-use crate::app::plan_views::item_render::{hold_band, rir_band_left, set_named_summary};
+use crate::app::plan_views::item_render::{
+    FaceClause, hold_band, rir_band_left, set_named_summary,
+};
+use crate::app::plan_views::plan_item::PlanItem;
 use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{
     CalisItemView, CalisLadderView, CalisRungView, EvidenceTagView, PlanIntensity, PrescriptionView,
@@ -14,7 +17,7 @@ use crate::schema::Rx;
 /// The face cue for a row done with no bar or rings (CAL-EQUIP-001).
 const TABLE_ROW_CUE: &str = "use a sturdy table edge";
 
-/// Flatten a `Prescription::Calisthenics` arm into its `PrescriptionView`.
+/// Flatten a `Prescription::Calisthenics` arm into its [`PlanItem`].
 /// Load is the leverage tier (never a settable bar weight), so `load_kg` stays
 /// `None`; a MEASURED-fraction rung surfaces its honest %BW line (and an
 /// effective-kg estimate when bodyweight is known) in `anchored_on`, and inferred
@@ -25,7 +28,7 @@ pub(super) fn flatten_calisthenics_prescription(
     anchors: &crate::plan::Anchors,
     bodyweight_kg: Option<f64>,
     weight_lb: bool,
-) -> PrescriptionView {
+) -> PlanItem {
     use crate::calisthenics as cal;
     let sh = CalisShape::of(c);
     let CalisShape {
@@ -103,13 +106,12 @@ pub(super) fn flatten_calisthenics_prescription(
         Some(crate::strength::rir_to_rpe(c.rir.1 as f64))
     };
 
-    let mut it = PrescriptionView {
+    let mut view = PrescriptionView {
         exercise: c.exercise.clone(),
         sets: c.sets,
         reps_low,
         reps_high,
         intensity_label,
-        intensity,
         rest_sec: c.rest_sec,
         rep_volume,
         timed_hold: timed,
@@ -139,8 +141,12 @@ pub(super) fn flatten_calisthenics_prescription(
         }),
         ..Default::default()
     };
-    set_named_summary(&mut it, ": ", lead, &clauses);
-    it
+    set_named_summary(&mut view, ": ", &[lead], &clauses);
+    PlanItem {
+        view,
+        intensity,
+        ..PlanItem::default()
+    }
 }
 
 /// The facts about a calisthenics prescription every part of its card reads.
@@ -395,7 +401,7 @@ fn calis_summary(
     sh: &CalisShape,
     intensity: &PlanIntensity,
     weight_lb: bool,
-) -> (String, Vec<String>) {
+) -> (FaceClause, Vec<FaceClause>) {
     let CalisShape {
         c,
         timed,
@@ -434,9 +440,9 @@ fn calis_summary(
     let mut clauses = Vec::with_capacity(1);
     // A dynamic rung's effort, in the same "reps left" words as every lift.
     if let PlanIntensity::RirRange { lo: rlo, hi: rhi } = *intensity {
-        clauses.push(rir_band_left(rlo, rhi));
+        clauses.push(FaceClause::effort(rir_band_left(rlo, rhi)));
     }
-    (lead, clauses)
+    (FaceClause::plain(lead), clauses)
 }
 
 /// One rung as a picker row: canonical name, band label, equipment availability.

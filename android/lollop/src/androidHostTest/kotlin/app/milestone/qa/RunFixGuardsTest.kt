@@ -23,7 +23,6 @@ import app.milestone.ActiveRunStore
 import app.milestone.AppClock
 import app.milestone.AppSettings
 import app.milestone.DistanceUnit
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
@@ -75,7 +74,7 @@ class RunFixGuardsTest {
             Manifest.permission.POST_NOTIFICATIONS,
         )
         AppSettings.setShowRouteMaps(ctx, false)
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Km)
     }
 
     @After

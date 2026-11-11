@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -21,18 +22,23 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +54,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.milestone.resources.Res
 import app.milestone.resources.ic_ui_close
-import app.milestone.resources.log_backdate_locked
 import app.milestone.resources.log_discard_confirm
 import app.milestone.resources.log_discard_title
 import app.milestone.resources.log_future_clamped
@@ -60,6 +65,7 @@ import app.milestone.resources.log_today
 import app.milestone.resources.main_close
 import app.milestone.resources.main_save
 import kotlin.time.Instant
+import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.offsetAt
@@ -68,9 +74,9 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 /** True under a host that pins the editors' primary action to a bottom bar and
- *  lets the editor scroll its own body (the Log sheet). A host that scrolls the
- *  whole editor itself (the History edit sheet) leaves it false: nesting the
- *  editor's scroll inside a scrolling host would measure it at infinite height. */
+ *  lets the editor scroll its own body (the Log and History edit sheets). A host
+ *  that scrolls the whole editor itself leaves it false: nesting the editor's
+ *  scroll inside a scrolling host would measure it at infinite height. */
 internal val LocalEditorPinnedActions = staticCompositionLocalOf { false }
 
 /** Minimum gap between two committed loop saves. A chalky or gloved double tap
@@ -119,8 +125,15 @@ fun EditorScaffold(
     // action stand in a column beside the form instead of under it, so a short
     // window never scrolls the keypad or Save away.
     controlsBeside: Boolean = false,
+    // The host sheet must refuse a swipe or scrim tap (a set loop in progress).
+    locksSheet: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val guard = LocalEditorGuard.current
+    DisposableEffect(guard, dirty, locksSheet) {
+        guard?.report(dirty, locksSheet)
+        onDispose { guard?.release() }
+    }
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     // In-flight latch for the closing path: the host's Save callback is
     // `{ ev -> onEvent(ev); onDismiss() }`, and the sheet takes ~300 ms to hide. A
@@ -290,11 +303,84 @@ internal fun DiscardEntryDialog(onKeepEditing: () -> Unit, onDiscard: () -> Unit
         dismissLabel = stringResource(Res.string.log_keep_editing),
     )
 
-/** Mirrors an editor's unsaved-edits flag up to its host, so the host sheet's
- *  swipe-down dismissal can guard it. */
+/**
+ * What an editor host guards, as its [EditorScaffold] reports it: unsaved edits
+ * ([dirty]) and a set loop the host must not let go of ([locked]). Both clear
+ * when the editor leaves.
+ */
+@Stable
+internal class EditorGuard {
+    var dirty by mutableStateOf(false)
+        private set
+    var locked by mutableStateOf(false)
+        private set
+
+    /** What a sheet close or an open intent must not drop. */
+    val busy: Boolean get() = dirty || locked
+
+    fun report(dirty: Boolean, locked: Boolean) {
+        this.dirty = dirty
+        this.locked = locked
+    }
+
+    fun release() = report(dirty = false, locked = false)
+}
+
+/** The [EditorGuard] of the sheet or dialog an editor sits in; null outside one. */
+internal val LocalEditorGuard = staticCompositionLocalOf<EditorGuard?> { null }
+
+/**
+ * The bottom sheet that hosts editors (the Log sheet, History's edit sheet):
+ * fully expanded, growing with the keyboard (the exercise search is the one
+ * IME-summoning field), and guarding its editor through [guard]. A locked set
+ * loop refuses to be swiped or scrim-tapped away; a dirty editor blocks the
+ * swipe and raises "Discard this entry?" instead, the sheet staying visible
+ * under the dialog so "Keep editing" leaves it in place. [content] gets the
+ * animated close for after a save; [onClosed] runs once the sheet is gone.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ReportDirty(dirty: Boolean, onDirtyChange: (Boolean) -> Unit) {
-    LaunchedEffect(dirty) { onDirtyChange(dirty) }
+internal fun EditorSheet(
+    guard: EditorGuard,
+    onClosed: () -> Unit,
+    content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+) {
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { target ->
+            when {
+                target != SheetValue.Hidden -> true
+                guard.locked -> false
+                guard.dirty -> {
+                    confirmDiscard = true
+                    false
+                }
+                else -> true
+            }
+        },
+    )
+    val scope = rememberCoroutineScope()
+    val close: () -> Unit = {
+        guard.release()
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) onClosed()
+        }
+    }
+    // The guards above already kept a dirty or locked sheet up; by the time this
+    // fires the hide is committed, so it just finishes the close.
+    AppSheet(onDismiss = { guard.release(); onClosed() }, sheetState = sheetState, sheetGesturesEnabled = !guard.locked) {
+        Column(Modifier.fillMaxWidth().imePadding()) {
+            CompositionLocalProvider(LocalEditorGuard provides guard) { content(close) }
+        }
+    }
+    if (confirmDiscard) {
+        DiscardEntryDialog(onKeepEditing = { confirmDiscard = false }) {
+            confirmDiscard = false
+            guard.release()
+            onClosed()
+        }
+    }
 }
 
 /** An editor's top row: `ui-close` (a 48dp target) and the centered title. The
@@ -335,10 +421,6 @@ internal fun EditorTitleRow(title: String, onClose: () -> Unit) {
 fun ObservedAtRow(
     epochSec: Long,
     withTime: Boolean,
-    // Legacy entries (entry_id == 0) are amended by matching their ORIGINAL
-    // observed_at, so a changed date can't be honored without orphaning the row;
-    // rather than silently discard the edit, the caller disables the chip.
-    enabled: Boolean = true,
     onChange: (Long) -> Unit,
 ) {
     // Device 12/24-hour preference (needs a Context) drives both the chip's rendered
@@ -373,28 +455,15 @@ fun ObservedAtRow(
             val changeLabel = stringResource(Res.string.log_logged_change_cd)
             Text(
                 shown,
-                color = if (enabled) Accent else OnBgFaint,
+                color = Accent,
                 style = Type.Body.merge(TabularFigures),
                 modifier = Modifier
                     .heightIn(min = ActionMinHeight)
                     .clip(RoundedCornerShape(Space.Md.dp))
                     .background(BgTop)
-                    .then(
-                        if (enabled) {
-                            Modifier.clickable(role = Role.Button, onClickLabel = changeLabel) { showDate = true }
-                        } else {
-                            Modifier
-                        },
-                    )
+                    .clickable(role = Role.Button, onClickLabel = changeLabel) { showDate = true }
                     .wrapContentHeight(Alignment.CenterVertically)
                     .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-            )
-        }
-        if (!enabled) {
-            Text(
-                stringResource(Res.string.log_backdate_locked),
-                color = OnBgFaint,
-                style = Type.Caption,
             )
         }
         // Always-composed single-line slot: empty until a future pick is clamped,

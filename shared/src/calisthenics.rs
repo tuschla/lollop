@@ -557,11 +557,17 @@ impl Kit {
     /// The athlete's stated equipment (`Profile::calis_equipment`); `None`
     /// (unstated) assumes every piece is available.
     pub fn from_profile(profile: &crate::profile::Profile) -> Kit {
-        profile.calis_equipment.map_or(Kit::ALL, |e| Kit {
+        profile
+            .calis_equipment
+            .map_or(Kit::ALL, Kit::from_equipment)
+    }
+    /// Exactly the stated equipment.
+    pub fn from_equipment(e: crate::profile::CalisEquipment) -> Kit {
+        Kit {
             pull_up_bar: e.pull_up_bar,
             dip_bars: e.dip_bars,
             rings: e.rings,
-        })
+        }
     }
     /// Every piece available (the default when the athlete states nothing).
     pub const ALL: Kit = Kit {

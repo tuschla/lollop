@@ -57,6 +57,27 @@ fn move_session_moves_todays_session_and_blocks_a_spacing_violation() {
     assert!(model.session_moves.is_empty());
 }
 
+/// "Remove plan" is a fact of the log: the view says so until the next
+/// GeneratePlan, so a shell never re-generates a plan the user removed.
+#[test]
+fn a_removed_plan_stays_removed_until_the_next_generate() {
+    let (app, mut model) = planned_strength_model(true);
+    assert!(!app.view(&model).plan_removed, "a plan in force");
+    app.update(Event::ClearPlan, &mut model)
+        .expect_only_render();
+    let vm = app.view(&model);
+    assert!(vm.program.is_none() && vm.plan_removed);
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: MON,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    assert!(vm.program.is_some() && !vm.plan_removed);
+}
+
 #[test]
 fn a_week_with_too_few_sessions_repeats_without_penalty() {
     let (app, mut model) = planned_strength_model(true);
@@ -552,7 +573,11 @@ fn a_session_credited_from_a_lighter_day_reads_done_lighter() {
     )
     .expect_only_render();
     set_today(&app, &mut model, first);
-    let run_item = day_row(&app, &model, run_day)
+    let run_item = working_plan(&model)
+        .week_plan
+        .into_iter()
+        .find(|s| s.epoch_day == run_day)
+        .expect("a week-strip row for the day")
         .items
         .into_iter()
         .find(|i| i.is_run())

@@ -3,6 +3,7 @@
 //! applied to an item's shown numbers, shared by the hero and every judged day.
 
 use crate::app::plan_views::item_render::{resync_intensity, round_load_or_drop, set_run_summary};
+use crate::app::plan_views::plan_item::PlanItem;
 use crate::app::view_types::{PlanIntensity, PrescriptionView};
 use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, PainRegion};
 
@@ -143,7 +144,7 @@ pub(super) fn reduce_percent_intensity(intensity: &mut PlanIntensity, frac: f64)
 /// label and summary are re-rendered from the folded numbers. An unadjusted
 /// fold leaves the item untouched. The single numeric fold shared by the hero
 /// and every judged week row.
-pub(super) fn fold_item_numbers(it: &mut PrescriptionView, fold: AdjustFold, weight_lb: bool) {
+pub(super) fn fold_item_numbers(it: &mut PlanItem, fold: AdjustFold, weight_lb: bool) {
     if it.is_run() {
         if fold.vol_frac > 0.0 {
             cut_run_volume(it, fold.vol_frac);
@@ -184,7 +185,7 @@ pub(super) fn required_sets(sets: u8, vol_frac: f64) -> u8 {
 /// interval day drops reps, a continuous run its minutes or kilometres, a
 /// run/walk day its bouts. The summary and the tracker's structure are rebuilt
 /// from the cut numbers, so the guided run walks the same session the card shows.
-fn cut_run_volume(it: &mut PrescriptionView, frac: f64) {
+fn cut_run_volume(it: &mut PlanItem, frac: f64) {
     let keep = (1.0 - frac).clamp(0.0, 1.0);
     if let Some(rs) = it.run_structure.as_mut() {
         if rs.reps > 0 {
@@ -209,13 +210,20 @@ fn cut_run_volume(it: &mut PrescriptionView, frac: f64) {
         .run_volume
         .and_then(|v| Some((v.label()?, v.scaled(keep)?)));
     if let Some((old, cut)) = shown
-        && let Some(rest) = it.summary.strip_prefix(old.as_str())
+        && it.run_head == old
         && let Some(new) = cut.label()
     {
-        it.summary = format!("{new}{rest}");
-        it.face_lead.clone_from(&new);
-        it.run_head = new;
-        it.run_head_km = cut.shown_km();
+        // The summary after its head: the target line, and once a target is
+        // resolved the structure notes after it (`run_targets::apply_target`).
+        let rest = match it.run_target {
+            Some(_) => format!(
+                "{}{}",
+                it.intensity_label,
+                crate::app::run_targets::structure_suffix(it)
+            ),
+            None => it.intensity_label.clone(),
+        };
+        set_run_summary(it, Some(new), cut.shown_km(), &rest, "");
         it.run_volume = Some(cut);
     }
     if it.adjusted_note.is_empty() {

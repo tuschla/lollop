@@ -221,13 +221,13 @@ impl LineFacts {
     }
 
     /// Whether this line stores the row an edit of `kind` naming `target`
-    /// finds ([`EntryRef::names`], as `update`'s `find_entry`).
+    /// finds (as `update`'s `find_entry`).
     fn stores(&self, kind: EntryKind, target: EntryRef) -> bool {
         self.entry()
-            .is_some_and(|e| e.stored && e.kind == kind && target.names(e.row))
+            .is_some_and(|e| e.stored && e.kind == kind && e.row == target)
     }
 
-    /// The `entry_id` the line carries (0 when none), kept or not.
+    /// The row id the line carries (0 when none), kept or not.
     fn entry_id(&self) -> u64 {
         match &self.0 {
             Line::Opaque { entry_id } => *entry_id,
@@ -243,8 +243,9 @@ pub struct Compaction {
     pub dropped: Vec<usize>,
     /// Lines that are not JSON (a tail torn by a kill mid-append), ascending.
     pub torn: Vec<usize>,
-    /// The largest `entry_id` any intact line carries, kept or not (0 when
-    /// none), so a shell never reuses one.
+    /// The largest row id any intact line carries, kept or not (0 when
+    /// none; a row logged without an id counts with the id it is given), so a
+    /// shell never reuses one.
     pub max_entry_id: u64,
     /// The last surviving plan line is a `ClearPlan`: the user removed their plan.
     pub plan_removed: bool,
@@ -368,10 +369,10 @@ fn rule0_readiness_removes(lines: &[LineFacts], remove: &mut [bool]) {
 ///   dropped alone.
 ///
 /// Runs before Rule 1, which sweeps any line matched across a clear anyway.
-/// The chain-walk keys a legacy (`entry_id == 0`) chain by one `observed_at`,
-/// which holds only while the shell never re-dates a legacy row (it pins
-/// `observed_at == observed_at_fallback` for id-0 rows; see
-/// `rule3_walk_assumes_legacy_rows_are_never_redated`).
+/// An amend an old build wrote for a row without an id that also moved its
+/// date stores the row under a new id ([`crate::event::entry::row_id`] of
+/// the new date): a later amend never supersedes that link, and a delete
+/// walks the chain through each link's own target.
 fn rule3_entry_edits(lines: &[LineFacts], remove: &mut [bool]) {
     for j in 0..lines.len() {
         let Some(e) = lines[j].entry() else {
@@ -390,11 +391,14 @@ fn rule3_entry_edits(lines: &[LineFacts], remove: &mut [bool]) {
             continue;
         };
         if e.op == EntryOp::Delete {
-            for k in delete_chain(lines, remove, i, e.kind, target) {
+            for k in delete_chain(lines, remove, i, e.kind) {
                 remove[k] = true;
             }
             remove[j] = true;
-        } else if lines[i].entry().is_some_and(|m| m.op == EntryOp::Amend) {
+        } else if lines[i]
+            .entry()
+            .is_some_and(|m| m.op == EntryOp::Amend && m.target == Some(m.row))
+        {
             remove[i] = true;
         }
     }
@@ -414,18 +418,22 @@ fn newest_match(
 }
 
 /// The lines a delete cancels: its match `newest` and, while that is an amend
-/// or a trim, further prior matches down to and including the base log line.
-/// A bare log stops at itself, as `update` removes only the newest row.
+/// or a trim, further prior matches of the row that line names down to and
+/// including the base log line. A bare log stops at itself, as `update`
+/// removes only the newest row.
 fn delete_chain(
     lines: &[LineFacts],
     remove: &[bool],
     newest: usize,
     kind: EntryKind,
-    target: EntryRef,
 ) -> Vec<usize> {
     let mut removal = vec![newest];
     let mut last = newest;
-    while lines[last].entry().map(|e| e.op) != Some(EntryOp::Log) {
+    while let Some(target) = lines[last]
+        .entry()
+        .filter(|e| e.op != EntryOp::Log)
+        .and_then(|e| e.target)
+    {
         match newest_match(lines, remove, last, kind, target) {
             Some(p) => {
                 removal.push(p);

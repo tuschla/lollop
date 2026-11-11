@@ -1,6 +1,7 @@
 package app.milestone
 
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -56,8 +57,8 @@ internal const val LoopRingGapDp = 2f
  * A run's route ready to draw: the segments with ≥2 fixes, the cumulative distance
  * in metres at every fix (a segment gap, a GPS pause, adds none) and the framing box.
  */
-internal class RouteTrack(segments: List<List<GpxFix>>) {
-    val segs: List<List<GpxFix>> = segments.filter { it.size >= 2 }
+internal class RouteTrack(segments: List<List<GpsPoint>>) {
+    val segs: List<List<GpsPoint>> = segments.filter { it.size >= 2 }
     val cumM: List<DoubleArray>
     val totalM: Double
     val north: Double
@@ -250,8 +251,8 @@ internal class RouteLayout(
 
     fun kept(t: Long, o: RouteDrawOptions) = !o.trim || t in o.keepFromSec..o.keepUntilSec
 
-    fun legKept(seg: List<GpxFix>, i: Int, o: RouteDrawOptions) =
-        kept(seg[i].timeSec, o) && kept(seg[i + 1].timeSec, o)
+    fun legKept(seg: List<GpsPoint>, i: Int, o: RouteDrawOptions) =
+        kept(seg[i].observedAt, o) && kept(seg[i + 1].observedAt, o)
 
     /** Lays out a non-empty [track] projected through [projector], labels kept inside [bounds]. */
     fun layout(track: RouteTrack, projector: RouteProjector, bounds: RouteRect, o: RouteDrawOptions) {
@@ -274,7 +275,7 @@ internal class RouteLayout(
         lastS = -1
         lastI = -1
         for (si in segs.indices) for (i in segs[si].indices) {
-            if (kept(segs[si][i].timeSec, o)) {
+            if (kept(segs[si][i].observedAt, o)) {
                 if (firstS < 0) { firstS = si; firstI = i }
                 lastS = si
                 lastI = i
@@ -535,3 +536,23 @@ internal fun frameLongitudes(lons: List<Double>): LonBounds {
     fun wrap(v: Double) = if (v > 180.0) v - 360.0 else v
     return LonBounds(west = wrap(minShift), east = wrap(maxShift))
 }
+
+/**
+ * Route markers (map, trim, finish review). Start: an [StartSize] disc with an
+ * [StartRing] `Accent` ring and a `BgElevated` centre. Finish: a solid `Accent`
+ * [FinishSize] disc holding a [FinishGlyph] OnAccent flag
+ * (`R.drawable.ic_route_finish_flag`). Distance: a [DistanceSize] `BgElevated`
+ * disc with a [DistanceRing] `Accent` ring and a `Type.Chip` tnum `OnBgBody`
+ * numeral at every whole km/mi. Every marker sits on a [Halo] casing in the
+ * polyline's ground-casing colour so it reads on any tile.
+ */
+object RouteMarker {
+    val StartSize = 18.dp
+    val StartRing = 4.dp
+    val FinishSize = 26.dp
+    val FinishGlyph = 16.dp
+    val DistanceSize = 22.dp
+    val DistanceRing = 1.5.dp
+    val Halo = 3.dp
+}
+

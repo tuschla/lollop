@@ -101,9 +101,7 @@ internal actual object RestAlarmPlatform {
         val leftMs = run.endAtMillis - AppClock.nowMillis()
         if (leftMs <= 0 || !canPostNotifications(app)) return
         ensureChannels(app)
-        // Every argument is a name or a detail the set loop already formatted, so the
-        // app's own resources do (no digits are formatted here).
-        val res = app.resources
+        val res = app.appResources()
         val text = countdownText(res, run.exercise, next)
         val b = NotificationCompat.Builder(app, CHANNEL_COUNTDOWN)
             .setSmallIcon(R.drawable.ic_stat_mark)
@@ -149,10 +147,11 @@ internal actual object RestAlarmPlatform {
         }
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
         ensureChannels(app)
+        val res = app.appResources()
         val b = NotificationCompat.Builder(app, CHANNEL_DONE)
             .setSmallIcon(R.drawable.ic_stat_mark)
             .setColor(notificationAccent(app))
-            .setContentTitle(app.getString(R.string.log_rest_notif_done_title))
+            .setContentTitle(res.getString(R.string.log_rest_notif_done_title))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -162,7 +161,7 @@ internal actual object RestAlarmPlatform {
             // Profile "Rest timer alert" off: still say the rest is done, but
             // without the channel's sound or vibration.
             .setSilent(!AppSettings.restAlert.value)
-        if (next.isNotEmpty()) b.setContentText(app.getString(R.string.log_rest_notif_done_body, next))
+        if (next.isNotEmpty()) b.setContentText(res.getString(R.string.log_rest_notif_done_body, next))
         nm.notify(AndroidIds.REST_DONE_NOTIFICATION, b.build())
     }
 
@@ -191,11 +190,12 @@ internal actual object RestAlarmPlatform {
     private fun ensureChannels(app: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
-        ensureLiveChannel(app, CHANNEL_COUNTDOWN, app.getString(R.string.log_rest_channel_countdown), RETIRED_CHANNEL_COUNTDOWN)
+        val res = app.appResources()
+        ensureLiveChannel(app, CHANNEL_COUNTDOWN, res.getString(R.string.log_rest_channel_countdown), RETIRED_CHANNEL_COUNTDOWN)
         nm.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_DONE,
-                app.getString(R.string.log_rest_channel_done),
+                res.getString(R.string.log_rest_channel_done),
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply { enableVibration(true) },
         )

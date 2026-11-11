@@ -8,7 +8,7 @@ use crate::event::entry::{EntryRef, LoggedEntry};
 use crate::event::rules::{Family, PlanStep};
 use crate::event::{ActivityKind, SessionReview};
 use crate::gps::GpsPoint;
-use crate::profile::Profile;
+use crate::profile::{DistanceUnit, Profile};
 use crate::schema::{CheckinInput, ReadinessInput, WorkoutType};
 
 // `Serialize` derives the content fingerprint that keys the view caches
@@ -24,7 +24,8 @@ pub(super) struct LoggedSet {
     /// Stable per-entry identity: a shell-assigned monotonic id
     /// (epoch-millis at first log) that survives edits so `AmendSet`/`DeleteEntry`
     /// target THIS row even when its `observed_at` was backdated to collide with
-    /// another. 0 = no id; such a row is matched on `observed_at`.
+    /// another. A row an old build logged without an id carries the one its
+    /// `observed_at` gives (`event::entry::row_id`).
     pub(super) entry_id: u64,
     /// Timed-hold duration, seconds — `Some` for a static/hold set (plank,
     /// dead hang, lever), `None` for a reps×load set. History renders a hold row
@@ -36,7 +37,8 @@ impl LoggedSet {
     /// The one log order for sets, never their storage slot (an Undo or amend
     /// re-pushes a row at the tail): log time, then the stable `entry_id`,
     /// then the set's content, so two same-second sets (an import, a double
-    /// tap, a legacy `entry_id == 0` pair) still order the same way every time.
+    /// tap, a pair an old build logged without ids) still order the same way
+    /// every time.
     pub(super) fn chrono_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.observed_at
             .cmp(&other.observed_at)
@@ -83,8 +85,7 @@ pub(super) struct LoggedRun {
     pub(super) track_segment_starts: Vec<u32>,
     /// Log time, unix seconds; 0 when undated.
     pub(super) observed_at: i64,
-    /// Stable per-entry identity; see [`LoggedSet::entry_id`]. 0 =
-    /// legacy/absent → matched on `observed_at` instead.
+    /// Stable per-entry identity; see [`LoggedSet::entry_id`].
     pub(super) entry_id: u64,
     /// The device's UTC offset when the row was logged (the wire
     /// `utc_offset_sec` the shell stamps; an amend keeps the original row's).
@@ -95,7 +96,8 @@ pub(super) struct LoggedRun {
     /// A legacy undated `SetProfile` arrived after this row was logged: its
     /// `hr_pct_max` stays the figure it had then (the edit applies from its
     /// position in the log, not to runs already logged). Cleared by
-    /// `ClearProfile`.
+    /// `ClearProfile`. Kept as row state: the edit carries no date to stamp it
+    /// with that a compacted log would reproduce.
     pub(super) hr_pinned: bool,
     /// User-declared run-intent label. USER DATA, carries no evidence of its
     /// own: history display, and the weekly hard-session checks honor it as
@@ -125,8 +127,7 @@ pub(super) struct LoggedActivity {
     pub(super) strengthening: bool,
     /// Log time, unix seconds; 0 when undated.
     pub(super) observed_at: i64,
-    /// Stable per-entry identity; see [`LoggedSet::entry_id`]. 0 =
-    /// legacy/absent → matched on `observed_at` instead.
+    /// Stable per-entry identity; see [`LoggedSet::entry_id`].
     pub(super) entry_id: u64,
 }
 
@@ -134,10 +135,7 @@ macro_rules! impl_entry {
     ($($t:ty),*) => {$(
         impl LoggedEntry for $t {
             fn entry(&self) -> EntryRef {
-                EntryRef {
-                    id: self.entry_id,
-                    observed_at: self.observed_at,
-                }
+                EntryRef { id: self.entry_id }
             }
         }
     )*};
@@ -243,6 +241,8 @@ pub struct Model {
     /// removal order, so their planned deload weeks stay known after the plan
     /// is removed and set up again (`logged_days::lift_deload_days`).
     pub(super) past_plans: Vec<(i64, i64)>,
+    /// `ClearPlan` was the last plan event (`GeneratePlan` resets it).
+    pub(super) plan_removed: bool,
     /// The shell's clock, entering as event data: the current
     /// epoch-day, sent on foreground so `view()` can date the week and pick the
     /// next session without reading a clock. `None`
@@ -266,6 +266,12 @@ impl Model {
     /// The athlete's current programming profile: the latest applied.
     pub(super) fn profile(&self) -> Option<&Profile> {
         self.profile_history.last()
+    }
+
+    /// The unit core-rendered distances read in: the profile's, km before one
+    /// exists.
+    pub(super) fn distance_unit(&self) -> DistanceUnit {
+        self.profile().map_or(DistanceUnit::Km, |p| p.distance_unit)
     }
 
     /// The weekly check-in in force: the latest one, unless cleared since.
@@ -325,6 +331,7 @@ impl Model {
                     self.past_plans.push((req.start_epoch_day, end));
                 }
                 self.session_moves.clear();
+                self.plan_removed = true;
             }
             Family::Review | Family::Today => {}
         }

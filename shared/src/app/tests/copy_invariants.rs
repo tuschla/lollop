@@ -92,7 +92,7 @@ fn number_pairs(s: &str) -> Vec<(&str, &str, &str)> {
 /// A unit word right after a number (`"5 km"`, `"5km"`).
 fn number_then_unit(s: &str, unit: &str) -> bool {
     number_spans(s).into_iter().any(|(_, e)| {
-        let rest = s[e..].trim_start_matches(' ');
+        let rest = s[e..].trim_start_matches([' ', '\u{a0}']);
         rest.starts_with(unit) && !rest[unit.len()..].starts_with(char::is_alphanumeric)
     })
 }
@@ -180,12 +180,49 @@ fn kg_for_lb_user(s: &str) -> bool {
     })
 }
 
+/// Registry claim ids and claim-id-shaped parentheticals ("(AUTOREG-RIR-001)":
+/// uppercase groups ending in a number) in `s`: engine bookkeeping, never copy.
+/// An abbreviation ("(RED-S)") or a "(-)" zone is copy.
+fn claim_id_leaks(s: &str) -> Vec<String> {
+    static IDS: std::sync::LazyLock<Vec<&'static str>> =
+        std::sync::LazyLock::new(|| crate::evidence::all_claims().map(|c| c.claim_id).collect());
+    let mut leaks: Vec<String> = IDS
+        .iter()
+        .filter(|id| s.contains(**id))
+        .map(|id| (*id).to_string())
+        .collect();
+    let id_shaped = |inner: &str| {
+        let groups: Vec<&str> = inner.split('-').collect();
+        groups.len() >= 2
+            && inner.starts_with(|c: char| c.is_ascii_uppercase())
+            && groups
+                .last()
+                .is_some_and(|g| !g.is_empty() && g.chars().all(|c| c.is_ascii_digit()))
+            && groups.iter().all(|g| {
+                !g.is_empty()
+                    && g.chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            })
+    };
+    for (open, _) in s.match_indices('(') {
+        if let Some(len) = s[open + 1..].find(')')
+            && id_shaped(&s[open + 1..open + 1 + len])
+        {
+            leaks.push(s[open..open + len + 2].to_string());
+        }
+    }
+    leaks
+}
+
 /// The copy rules every string obeys, each tagged with its family
-/// (`number:`, `spacing:`, `bracket:`, `placeholder:`, `banned:`, `unit:`).
-/// `key` is the JSON field the string sits in: `citation` rows are paper
-/// references and keep their DOIs and titles verbatim.
+/// (`number:`, `spacing:`, `bracket:`, `placeholder:`, `banned:`, `unit:`,
+/// `claim-id:`). `key` is the JSON field the string sits in: `citation` rows
+/// are paper references and keep their DOIs and titles verbatim.
 fn string_violations(key: &str, s: &str, lb: bool) -> Vec<String> {
-    let mut v = Vec::new();
+    let mut v: Vec<String> = claim_id_leaks(s)
+        .into_iter()
+        .map(|id| format!("claim-id: `{id}`"))
+        .collect();
     let citation = key == "citation";
     if s.contains("NaN") {
         v.push("number: NaN".into());
@@ -307,13 +344,18 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
         Value::String(s) => {
             let dormant = is_dormant(path);
             for rule in string_violations(key, s, lb) {
-                if dormant && !rule.starts_with("number:") {
+                // A spoken subject is cut at a length, mid-word and mid-bracket.
+                let cut = key == "subject" && !rule.starts_with("claim-id:");
+                if cut
+                    || (dormant && !rule.starts_with("number:") && !rule.starts_with("claim-id:"))
+                {
                     continue;
                 }
                 record(out, path.clone(), rule, s, scenario);
             }
-            // Tone (`copy_tone`): rendered copy only, references verbatim.
-            if !dormant && key != "citation" {
+            // Tone (`copy_tone`): rendered copy only, references verbatim; a
+            // spoken subject is the summary's own words, cut at a length.
+            if !dormant && key != "citation" && key != "subject" {
                 for rule in super::copy_tone::tone_hits(path, s) {
                     record(out, path.clone(), rule, s, scenario);
                 }
@@ -359,61 +401,187 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
                 path.truncate(len);
             }
             if !is_dormant(path) {
-                twin_violations(map, path, scenario, out);
+                run_head_violations(map, path, scenario, out);
+                marks_violations(map, path, scenario, out);
             }
         }
         _ => {}
     }
 }
 
-/// The miles twins: where a km line has a `*_mi` sibling, the shell shows the
-/// twin to a miles user (`summary_mi.ifBlank { summary }`), so a km line with
-/// an empty twin leaks km, and a twin must never say km itself.
-fn twin_violations(
+/// The structured text parts of a row match its final text: the glossary
+/// spans, spoken subject and prose mark of its `summary` (`message`), and a
+/// lift face's effort-free line is the face line without the clauses the
+/// shell used to drop (`withoutEffortClause`, kept here as the oracle).
+fn marks_violations(
     map: &serde_json::Map<String, Value>,
     path: &str,
     scenario: &str,
     out: &mut Hits,
 ) {
-    let at_path = |field: &str| {
+    use crate::app::text_parts::{glossary_spans, spoken_subject};
+    let at = |field: &str| {
         if path.is_empty() {
             field.to_string()
         } else {
             format!("{path}.{field}")
         }
     };
-    for (base, twin) in [
-        ("summary", "summary_mi"),
-        ("message", "message_mi"),
-        ("safety_reason", "safety_reason_mi"),
-        ("pace_label_km", "pace_label_mi"),
-    ] {
-        let (Some(Value::String(b)), Some(Value::String(t))) = (map.get(base), map.get(twin))
-        else {
-            continue;
-        };
-        let km_line = number_then_unit(b, "km") || b.contains("/km");
-        if km_line && t.is_empty() {
-            let rule = "unit: km line without its miles twin".to_string();
-            record(out, at_path(twin), rule, b, scenario);
-        }
-        if number_then_unit(t, "km") || t.contains("/km") || has_word(t, "km") {
+    let text = ["summary", "message"]
+        .into_iter()
+        .find_map(|k| map.get(k).and_then(Value::as_str));
+    let marked = ["subject", "face_detail", "goal_label"]
+        .iter()
+        .any(|k| map.contains_key(*k));
+    if let (Some(text), true) = (text, marked) {
+        let want = serde_json::to_value(glossary_spans(text)).expect("spans serialize");
+        let have = map
+            .get("glossary")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new()));
+        if have != want {
             record(
                 out,
-                at_path(twin),
-                "unit: miles twin says km".into(),
-                t,
+                at("glossary"),
+                "marks: glossary spans".into(),
+                text,
+                scenario,
+            );
+        }
+        if let Some(subject) = map.get("subject").and_then(Value::as_str)
+            && subject != spoken_subject(text)
+        {
+            record(
+                out,
+                at("subject"),
+                "marks: spoken subject".into(),
+                text,
+                scenario,
+            );
+        }
+        // The shell's old rule is the oracle: over 90 UTF-16 units is prose.
+        if map.contains_key("subject")
+            && map.get("prose").and_then(Value::as_bool).unwrap_or(false)
+                != (text.encode_utf16().count() > 90)
+        {
+            record(out, at("prose"), "marks: prose".into(), text, scenario);
+        }
+    }
+    // A why? panel always states its grade in the core's words: the shell
+    // has no label fallback of its own.
+    if let (Some(Value::Array(basis)), Some(Value::String(note))) =
+        (map.get("basis"), map.get("grade_note"))
+        && !basis.is_empty()
+        && note.is_empty()
+    {
+        let first = basis.first().and_then(Value::as_str).unwrap_or_default();
+        record(
+            out,
+            at("grade_note"),
+            "marks: why without a grade note".into(),
+            first,
+            scenario,
+        );
+    }
+    if let (Some(Value::String(detail)), Some(Value::String(without))) = (
+        map.get("face_detail"),
+        map.get("face_detail_without_effort"),
+    ) {
+        let oracle = detail
+            .split(" · ")
+            .filter(|c| {
+                !(c.starts_with('~') || c.ends_with(" left") || *c == "to your last good rep")
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if *without != oracle {
+            record(
+                out,
+                at("face_detail_without_effort"),
+                format!("effort: `{without}` vs `{oracle}`"),
+                detail,
                 scenario,
             );
         }
     }
-    // A run head in km is converted by the shell from `run_head_km`.
+}
+
+/// A run head in km is converted by the shell from `run_head_km`, so a km
+/// head without it would leak km to a miles user.
+fn run_head_violations(
+    map: &serde_json::Map<String, Value>,
+    path: &str,
+    scenario: &str,
+    out: &mut Hits,
+) {
     if let (Some(Value::String(h)), Some(km)) = (map.get("run_head"), map.get("run_head_km"))
         && number_then_unit(h, "km")
         && km.is_null()
     {
         let rule = "unit: km run head without run_head_km".to_string();
-        record(out, at_path("run_head_km"), rule, h, scenario);
+        let at = if path.is_empty() {
+            "run_head_km".to_string()
+        } else {
+            format!("{path}.run_head_km")
+        };
+        record(out, at, rule, h, scenario);
+    }
+}
+
+/// The lines a miles profile reads in miles never state km: a guidance or
+/// calculator row's `summary` (a `section` row), the feedback `message`, a
+/// run's `safety_reason` and its target's `pace_label`. A plan item's own
+/// `summary` and `run_head` stay km by design (the shell converts the head).
+fn miles_violations(v: &Value, path: &mut String, scenario: &str, out: &mut Hits) {
+    match v {
+        Value::Array(items) => {
+            let len = path.len();
+            path.push_str("[]");
+            for item in items {
+                miles_violations(item, path, scenario, out);
+            }
+            path.truncate(len);
+        }
+        Value::Object(map) => {
+            let fields = [
+                ("summary", map.contains_key("section")),
+                ("message", map.contains_key("category")),
+                ("safety_reason", true),
+                ("pace_label", true),
+            ];
+            for (field, unit_aware) in fields {
+                let Some(Value::String(t)) = map.get(field).filter(|_| unit_aware) else {
+                    continue;
+                };
+                if number_then_unit(t, "km") || t.contains("/km") || has_word(t, "km") {
+                    let at = if path.is_empty() {
+                        field.to_string()
+                    } else {
+                        format!("{path}.{field}")
+                    };
+                    record(
+                        out,
+                        at,
+                        "unit: km shown to a miles user".into(),
+                        t,
+                        scenario,
+                    );
+                }
+            }
+            for (k, child) in map {
+                if path.is_empty() && k == "profile" {
+                    continue;
+                }
+                let len = path.len();
+                if !path.is_empty() {
+                    path.push('.');
+                }
+                path.push_str(k);
+                miles_violations(child, path, scenario, out);
+                path.truncate(len);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -623,8 +791,10 @@ fn calculators(app: &Engine, model: &mut Model) {
 }
 
 fn archetypes(end: i64) -> Vec<(&'static str, Profile)> {
+    // An imperial profile: pounds and miles.
     let lb = |p: Profile| Profile {
         weight_lb: true,
+        distance_unit: DistanceUnit::Mi,
         ..p
     };
     vec![
@@ -848,11 +1018,18 @@ fn overlays(end: i64) -> Vec<(&'static str, Vec<Event>)> {
 fn collect(app: &Engine, model: &Model, scenario: &str, stale: bool, out: &mut Hits) {
     let vm = app.view(model);
     let lb = vm.profile.as_ref().is_some_and(|p| p.weight_lb);
+    let mi = vm
+        .profile
+        .as_ref()
+        .is_some_and(|p| p.distance_unit == DistanceUnit::Mi);
     let json = serde_json::to_value(&vm).expect("view serializes");
     if stale {
         today_on_stale(&vm, &json, scenario, out);
     }
     walk(&json, &mut String::new(), "", lb, scenario, out);
+    if mi {
+        miles_violations(&json, &mut String::new(), scenario, out);
+    }
 }
 
 /// Every string of `v` with its collapsed path.
@@ -971,6 +1148,7 @@ fn sweep_empty(hits: &mut Hits) {
         if lb {
             let p = Profile {
                 weight_lb: true,
+                distance_unit: DistanceUnit::Mi,
                 ..model.profile().cloned().expect("a profile")
             };
             let _ = app.update(Event::SetProfile(p), &mut model);
@@ -1036,6 +1214,7 @@ fn sweep_long_history() -> Hits {
     }
     let p = Profile {
         weight_lb: true,
+        distance_unit: DistanceUnit::Mi,
         ..model.profile().cloned().expect("big history has a profile")
     };
     let _ = app.update(Event::SetProfile(p), &mut model);
@@ -1130,6 +1309,7 @@ fn the_scanner_flags_each_rule_and_passes_clean_copy() {
         "Effort load 1179 this week · training load rising",
         "The ratio of this week's load to your usual load; your running load",
         "Progress only while bending the wrist back under load is pain-free",
+        "Top set (RPE 8) · Last: 80 kg × 5 (Tue) · (HR zones)",
     ] {
         assert!(
             flagged(clean, false).is_empty(),
@@ -1160,6 +1340,10 @@ fn the_scanner_flags_each_rule_and_passes_clean_copy() {
         ("load −10% today", false, "load"),
         ("a Recovery week", false, "recovery week"),
         ("5×3 @ 85 kg", true, "kg shown"),
+        ("load −10%: readiness (AUTOREG-RIR-001)", false, "claim-id"),
+        ("modify & monitor: pain (SAFE-PAIN-001)", false, "claim-id"),
+        ("load −10%: readiness (SAFE-RED-S-001)", false, "claim-id"),
+        ("see SAFE-PAIN-001 for why", false, "claim-id"),
     ] {
         let v = flagged(s, lb);
         assert!(
@@ -1199,6 +1383,20 @@ fn copy_units_follow_the_user() {
 #[test]
 fn copy_never_pins_today_on_an_earlier_reading() {
     assert_family(&["today:"]);
+}
+
+/// Claim ids are engine bookkeeping: no string the core sends carries one
+/// (the shells render core text verbatim, with no id scrub of their own).
+#[test]
+fn copy_carries_no_claim_ids() {
+    assert_family(&["claim-id:"]);
+}
+
+/// Every row's glossary spans, spoken subject and effort-free face line are
+/// those of its final text.
+#[test]
+fn copy_text_parts_match_the_text() {
+    assert_family(&["marks:", "effort:"]);
 }
 
 // ── Single rules pinned at one path ───────────────────────────────────────

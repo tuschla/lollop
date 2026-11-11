@@ -4,8 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /** The set loop's pure field reducers ([SetEditorState]). */
+@RunWith(RobolectricTestRunner::class)
 class SetEditorStateTest {
 
     private val noCue: (PrescriptionView) -> AppliedCue? = { null }
@@ -65,28 +68,19 @@ class SetEditorStateTest {
         assertEquals(typed, typed.withWorkingLoad(unloaded, holdMode = false, WeightUnit.Kg, noCue))
     }
 
-    /** [nameKey] keys every row of the fixture the core's `names::exercise_key`
-     *  test reads, so the shell and the core agree on which spellings are one
-     *  exercise (a Turkish keyboard's "İncline", "Straße" / "STRASSE"). */
+    /** The editor matches names through the core's `names::exercise_key` (its
+     *  spelling rules are pinned in `names::tests`): the keys come back in order,
+     *  and spellings the fold joins (a Turkish keyboard's "Inclıne", "Straße" /
+     *  "STRASSE") match. */
     @Test
-    fun nameKeyMatchesTheCoresExerciseKey() {
-        val rows = checkNotNull(javaClass.classLoader!!.getResourceAsStream("names/fold.tsv")) { "names/fold.tsv not on the test classpath" }
-            .bufferedReader().readLines()
-            .filter { it.isNotEmpty() && !it.startsWith("#") }
-        assertTrue("${rows.size} rows", rows.size >= 10)
-        for (row in rows) {
-            val (name, key) = row.split('\t', limit = 2)
-            assertEquals(name, key, nameKey(name))
-        }
-    }
-
-    /** Spelled with escapes, as the fixture's rows are invisible: a supplementary
-     *  letter folds per code point, and the trim strips U+0085 but keeps
-     *  U+001C–U+001F, as the core's `str::trim`. */
-    @Test
-    fun nameKeyFoldsCodePointsAndTrimsLikeTheCore() {
-        assertEquals("\uD801\uDC28 curl", nameKey("\uD801\uDC00 curl"))
-        assertEquals("squat", nameKey("\u0085squat"))
-        assertEquals("\u001Fsquat", nameKey("\u001Fsquat"))
+    fun nameMatchingAsksTheCore() {
+        assertEquals(
+            listOf("incline bench press", "strasse", "\uD801\uDC28 curl", "squat"),
+            nameKeys(listOf("İNCLİNE BENCH PRESS", "Straße", "\uD801\uDC00 curl", "\u0085squat")),
+        )
+        assertTrue(sameExercise("Inclıne bench press", "incline bench press"))
+        assertEquals(1, indexOfExercise(listOf("Back squat", "STRASSE"), "Straße"))
+        assertEquals(-1, indexOfExercise(emptyList(), "Straße"))
+        assertEquals(emptyList<String>(), nameKeys(emptyList()))
     }
 }

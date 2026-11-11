@@ -20,7 +20,7 @@ enum class DarkMode {
 
 /**
  * Shell preferences persisted outside the core: appearance (theme, dark mode,
- * dynamic accent), units, route maps, the tracker's pace bucket and keep-screen-on,
+ * dynamic accent), route maps, the tracker's pace bucket and keep-screen-on,
  * and the rest alert. They are shell chrome, not coaching state, so they do not
  * belong in the event log. Backed by a [KeyValueStore] (SharedPreferences on
  * Android, NSUserDefaults on iOS); each one is exposed as a
@@ -51,12 +51,11 @@ object AppSettings {
         { k, v -> putString(k, v.name) },
     )
 
-    // The defaults table. A fresh install pins its first theme ([pinFirstTheme]).
+    // The defaults table.
     private val DYNAMIC = bool("dynamic_accent", true)
-    private val THEME = Pref("app_theme", AppTheme.Paper, { k, _ -> AppTheme.from(getString(k, null)) }, { k, v -> putString(k, v.name) })
+    private val THEME = Pref("app_theme", AppTheme.Default, { k, _ -> AppTheme.from(getString(k, null)) }, { k, v -> putString(k, v.name) })
     private val DARK_MODE = enum("dark_mode", DarkMode.System) { n -> DarkMode.entries.firstOrNull { it.name == n } }
     private val PACE_BUCKET = int("pace_bucket_minutes", DEFAULT_PACE_BUCKET_MINUTES)
-    private val DISTANCE_UNIT = enum("distance_unit_override", DistanceUnitOverride.System) { n -> DistanceUnitOverride.entries.firstOrNull { it.name == n } }
 
     // Route maps (OSM tiles) are the app's only network egress; when off, no
     // MapView is attached or drawn, so no tile request is made.
@@ -75,7 +74,6 @@ object AppSettings {
         val theme = MutableStateFlow(THEME.default)
         val darkMode = MutableStateFlow(DARK_MODE.default)
         val paceBucketMinutes = MutableStateFlow(PACE_BUCKET.default)
-        val distanceUnitOverride = MutableStateFlow(DISTANCE_UNIT.default)
         val showRouteMaps = MutableStateFlow(SHOW_MAPS.default)
         val keepScreenOn = MutableStateFlow(KEEP_SCREEN_ON.default)
         val restAlert = MutableStateFlow(REST_ALERT.default)
@@ -93,21 +91,17 @@ object AppSettings {
     /** The live tracker's pace window, in minutes. */
     val paceBucketMinutes: StateFlow<Int> get() = values.paceBucketMinutes
 
-    /** System defers to the locale ([resolveDistanceUnit]); Km/Mi force one. */
-    val distanceUnitOverride: StateFlow<DistanceUnitOverride> get() = values.distanceUnitOverride
     val showRouteMaps: StateFlow<Boolean> get() = values.showRouteMaps
     val keepScreenOn: StateFlow<Boolean> get() = values.keepScreenOn
     val restAlert: StateFlow<Boolean> get() = values.restAlert
 
     internal fun load(ctx: PlatformContext) {
         val prefs = prefs(ctx)
-        if (!prefs.contains(THEME.key)) pinFirstTheme(ctx)
         val v = values
         v.dynamicAccent.value = prefs.read(DYNAMIC)
         v.theme.value = prefs.read(THEME)
         v.darkMode.value = prefs.read(DARK_MODE)
         v.paceBucketMinutes.value = prefs.read(PACE_BUCKET)
-        v.distanceUnitOverride.value = prefs.read(DISTANCE_UNIT)
         v.showRouteMaps.value = prefs.read(SHOW_MAPS)
         v.keepScreenOn.value = prefs.read(KEEP_SCREEN_ON)
         v.restAlert.value = prefs.read(REST_ALERT)
@@ -115,18 +109,34 @@ object AppSettings {
 
     private fun <T> KeyValueStore.read(pref: Pref<T>): T = pref.read(this, pref.key, pref.default)
 
+    /** The settings version [migrate] brings a store to. */
+    private const val VERSION_KEY = "settings_version"
+    private const val VERSION = 2
+
     /**
-     * Persist the appearance an install starts from, once. A fresh install (no
-     * event log yet) gets Paper with the system accent; an install already in use
-     * from before Paper became the default, that never saved a theme, keeps what
-     * it rendered: Rose with its saved (or the old default-off) accent.
+     * Bring the stored settings up to [VERSION], once per install, before the
+     * first [load]. A fresh install reads the defaults table. For an install
+     * already in use (an event log):
+     * - version 1: from before Paper became the default (no saved theme), it keeps
+     *   what it rendered, Rose with its saved (or the old default-off) accent;
+     * - version 2: a distance unit left to follow the phone ([LEGACY_DISTANCE_UNIT_KEY]
+     *   unset) is pinned to the locale's, so [bootTurn] moves the unit the app
+     *   showed into the profile.
      */
-    private fun pinFirstTheme(ctx: PlatformContext) {
+    internal fun migrate(ctx: PlatformContext) {
         val prefs = prefs(ctx)
-        val existingInstall = ctx.hasEventLog()
+        val from = prefs.getInt(VERSION_KEY, 0)
+        if (from >= VERSION) return
+        val inUse = ctx.hasEventLog()
+        val legacyTheme = from < 1 && inUse && !prefs.contains(THEME.key)
+        val pinUnit = from < 2 && inUse && !prefs.contains(LEGACY_DISTANCE_UNIT_KEY)
         prefs.edit {
-            putString(THEME.key, (if (existingInstall) AppTheme.Rose else AppTheme.Paper).name)
-            putBoolean(DYNAMIC.key, prefs.getBoolean(DYNAMIC.key, !existingInstall))
+            if (legacyTheme) {
+                putString(THEME.key, AppTheme.Rose.name)
+                putBoolean(DYNAMIC.key, prefs.getBoolean(DYNAMIC.key, false))
+            }
+            if (pinUnit) putString(LEGACY_DISTANCE_UNIT_KEY, localeDistanceUnit().name)
+            putInt(VERSION_KEY, VERSION)
         }
     }
 
@@ -145,7 +155,7 @@ object AppSettings {
      */
     fun setTheme(ctx: PlatformContext, selected: AppTheme) {
         val prefs = prefs(ctx)
-        val changed = prefs.getString(THEME.key, null) != selected.name
+        val changed = prefs.read(THEME) != selected
         val dynamic = selected.takesSystemAccent
         val v = values
         if (changed) v.dynamicAccent.value = dynamic
@@ -159,9 +169,6 @@ object AppSettings {
     fun setDarkMode(ctx: PlatformContext, mode: DarkMode) = set(ctx, DARK_MODE, values.darkMode, mode)
 
     fun setPaceBucketMinutes(ctx: PlatformContext, n: Int) = set(ctx, PACE_BUCKET, values.paceBucketMinutes, n)
-
-    fun setDistanceUnitOverride(ctx: PlatformContext, override: DistanceUnitOverride) =
-        set(ctx, DISTANCE_UNIT, values.distanceUnitOverride, override)
 
     fun setShowRouteMaps(ctx: PlatformContext, enabled: Boolean) = set(ctx, SHOW_MAPS, values.showRouteMaps, enabled)
 

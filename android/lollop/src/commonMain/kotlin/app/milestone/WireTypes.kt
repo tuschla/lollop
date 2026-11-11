@@ -23,12 +23,103 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Rust constants the shell reads. */
 object CoreConstants {
-    /** PAR-Q+ Q1/Q4/Q5/Q7 (doctor follow-up items, clearable) as a `parq_yes` mask. */
-    const val PARQ_FOLLOWUP_BITS: Int = 89
-    /** PAR-Q+ Q2/Q3 (symptoms, never clearable) as a `parq_yes` mask. */
-    const val PARQ_SYMPTOM_BITS: Int = 6
-    /** PAR-Q+ Q6 (bone or joint problem, the injury gate) as a `parq_yes` bit. */
-    const val PARQ_INJURY_BIT: Int = 32
+    /** Longest single activity `LogActivity` stores, minutes. */
+    const val ACTIVITY_MAX_MINUTES: Double = 600.0
+    /** Lowest plausible resting HR, bpm (the Karvonen anchor's band). */
+    const val RESTING_HR_MIN_BPM: Double = 25.0
+    /** Highest plausible resting HR, bpm (the Karvonen anchor's band). */
+    const val RESTING_HR_MAX_BPM: Double = 120.0
+    /** Youngest age the Tanaka HRmax estimate covers, years. */
+    const val TANAKA_AGE_MIN_YEARS: Double = 5.0
+    /** Oldest age the Tanaka HRmax estimate covers, years. */
+    const val TANAKA_AGE_MAX_YEARS: Double = 100.0
+    /** The highest average heart rate a logged run states, % of HRmax. */
+    const val HR_PCT_MAX_CEILING: Double = 100.0
+    /** Fewest lift days a week a chosen count is held to. */
+    const val LIFT_DAYS_MIN: Int = 2
+    /** Most lift days a week a chosen count is held to. */
+    const val LIFT_DAYS_MAX: Int = 5
+    /** Lift days a lifting-only profile that chose none trains. */
+    const val LIFT_ONLY_DEFAULT_LIFT_DAYS: Int = 3
+    /** Lift days a lifting-and-running profile that chose none trains. */
+    const val HYBRID_DEFAULT_LIFT_DAYS: Int = 2
+    /** Most lift days of a run-led hybrid week (maintenance dose, CONC-RE-001). */
+    const val MAINTENANCE_LIFT_SESSIONS_MAX: Int = 3
+    /** Most run days of a lift-led hybrid week (HYB-RUNCAP-001). */
+    const val ENDURANCE_FREQUENCY_CAP_DAYS: Int = 3
+    /** One international mile, metres (exact). */
+    const val MILE_M: Double = 1609.344
+    /** Race distances, metres (the half marathon is half the marathon). */
+    const val FIVE_K_M: Double = 5000.0
+    const val TEN_K_M: Double = 10000.0
+    const val MARATHON_M: Double = 42195.0
+    /** Pounds per kilogram. */
+    const val LB_PER_KG: Double = 2.2046226218
+    /** Worst horizontal accuracy (m) a fix may carry to count (the QC gate). */
+    const val MAX_GPS_ACCURACY_M: Double = 30.0
+    /** A ground speed above this (m/s) is GPS jitter, not running. */
+    const val MAX_PLAUSIBLE_SPEED_MPS: Double = 12.0
+    /** A leg slower than this (m/s) is standing still: no moving time or distance. */
+    const val MIN_MOVING_SPEED_MPS: Double = 0.5
+    /** Mean Earth radius (m) of the haversine distance. */
+    const val EARTH_RADIUS_M: Double = 6371000.0
+    /** A gap between fixes longer than this (s) opens a new recording segment. */
+    const val MAX_FIX_GAP_SEC: Int = 30
+    /** Most GPS fixes a saved run keeps. */
+    const val TRACK_DECIMATION_CAP: Int = 5400
+    /** A run under this distance (km) or [MIN_RUN_SEC] is too short to keep. */
+    const val MIN_RUN_KM: Double = 0.5
+    const val MIN_RUN_SEC: Int = 180
+    /** The largest run file an import reads, bytes. */
+    const val MAX_RUN_IMPORT_BYTES: Int = 33554432
+    /** RPE above target (actual − target) that trims the load (autoreg-001/002). */
+    const val RPE_DELTA_ABOVE: Double = 1.0
+    /** RPE above target (actual − target) that trims the load further (autoreg-001/002). */
+    const val RPE_DELTA_WELL_ABOVE: Double = 2.0
+    /**
+     * e1RM ratio (today ÷ baseline) below which the e1RM gate trims the top-set
+     *  load (autoreg-006).
+     */
+    const val E1RM_REDUCE_RATIO: Double = 0.95
+    /** e1RM ratio (today ÷ baseline) above which the e1RM gate adds load (autoreg-007). */
+    const val E1RM_INCREASE_RATIO: Double = 1.05
+    /** Velocity-loss fraction ending a power set, the lowest goal threshold (AUTOREG-VL-001). */
+    const val VL_STOP_POWER_FRAC: Double = 0.1
+    /**
+     * Velocity-loss fraction ending a hypertrophy set, the highest goal threshold
+     *  (AUTOREG-VL-001).
+     */
+    const val VL_STOP_HYPERTROPHY_FRAC: Double = 0.4
+    /**
+     * Wellness composite z-score at or below which one day eases the session
+     *  (autoreg-030).
+     */
+    const val WELLNESS_SINGLE_DAY_Z: Double = -1.5
+    /** HRV lnRMSSD z-score below which the session eases (autoreg-028). */
+    const val HRV_SWC_LOWER_Z: Double = -0.5
+    /** Aerobic-decoupling drift, %, at which the run stays easy (RUN-DECOUPLE-001). */
+    const val DECOUPLING_HIGH_PCT: Double = 10.0
+    /**
+     * Resting-HR elevation, bpm above baseline, that eases training once it
+     *  lasts [RHR_DOWNGRADE_STREAK] days (autoreg-040/041).
+     */
+    const val RHR_DOWNGRADE_FLOOR_BPM: Double = 5.0
+    const val RHR_DOWNGRADE_STREAK: Int = 2
+    /** Resting-HR elevation, bpm above baseline, that stops training (autoreg-040/041). */
+    const val RHR_STOP_BPM: Double = 10.0
+    /** Soreness (1–7) at or above which intensity eases (autoreg-030). */
+    const val SORENESS_HIGH: Double = 6.0
+    /** Shortest steady effort, minutes, whose decoupling counts (File 06 signal spec). */
+    const val DECOUPLING_MIN_EFFORT_MIN: Double = 20.0
+    /** Age, years, where the masters bracket begins (MASTERS-001). */
+    const val MASTERS_AGE_YEARS: Double = 65.0
+    /** Weeks the overtraining signs must last for the recovery concern (feedback-036). */
+    const val OVERTRAINING_MIN_WEEKS: Double = 1.0
+    /**
+     * Weeks of unexplained performance decline at which the overtraining
+     *  referrals fire (safety-042, autoreg-042).
+     */
+    const val NFOR_DECLINE_WEEKS: Int = 2
 }
 
 /** The core's JSON: serde's shapes, unknown keys ignored as serde does. */
@@ -73,6 +164,11 @@ data class ViewModel(
     val runs: List<RunResultView> = emptyList(),
     /** Evidence-cited programming guidance derived from the profile. */
     val guidance: List<GuidanceView> = emptyList(),
+    /**
+     * The profile-context rows (the training age), shown with the profile
+     * rather than in the reference library; not part of `guidance`.
+     */
+    val profile_guidance: List<GuidanceView> = emptyList(),
     /**
      * The single resolved coaching message: a weekly-check-in safety concern,
      * a run-spike warning, or one takeaway on the latest session (from the
@@ -144,6 +240,13 @@ data class ViewModel(
     val hr_zone_input: HrZoneInputView? = null,
     val protein_input: ProteinInputView? = null,
     val hypertrophy_input: HypertrophyInputView? = null,
+    /**
+     * Whether the Protein calculator offers its masters context
+     * (`ComputeProtein.masters`, MASTERS-001, 65+): false only for a stated
+     * age under 65 (then the deficit context alone applies); an unknown age
+     * leaves it open.
+     */
+    val protein_masters_offered: Boolean = false,
     /**
      * The weekly direct-set counts of the hypertrophy plan's ramp row (e.g.
      * `[12, 16, 20, 22]`), for a compact summary of the last plan. Empty when no
@@ -227,11 +330,21 @@ data class ViewModel(
     /** The active program summary card (name/goal/phase/week), when a plan is set. */
     val program: ProgramSummaryView? = null,
     /**
+     * The user removed the plan (`ClearPlan` is the last plan event): a shell
+     * does not generate one on its own until the user asks again.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val plan_removed: Boolean = false,
+    /**
      * Structured HRmax figure (bpm + measured/estimate + Tanaka split) for
      * the last HR-zone query, so no shell regex-scrapes `hr_zones`.
      * `None` until an HR-zone query is made (or the age is out of range).
      */
     val hr_max: HrMaxView? = null,
+    /**
+     * True when the current profile anchors %HRmax (a plausible measured HRmax,
+     * or an age the Tanaka estimate covers), so a run's average bpm converts.
+     */
+    val hr_max_known: Boolean = false,
     /**
      * Structured protein g/day figures paralleling `protein_targets`, so no
      * shell regex-scrapes those rows. Empty until a protein query is made.
@@ -308,6 +421,14 @@ data class ViewModel(
      * (`SetToday`). Tracking and information only; the plan hold stays.
      */
     val youth_activity: YouthActivityView? = null,
+    /**
+     * The pain report in force (the one the pain gate holds on), `None` when
+     * none is: its area and context line for the shell's pain surfaces, and
+     * the report itself to restore after a "Remove report" undo.
+     */
+    val active_pain: ActivePainView? = null,
+    /** Today as every surface (Today, widget, tile, Log sheet) reads it. */
+    val today_surface: TodaySurfaceView = TodaySurfaceView(state = TodayState.Setup),
 )
 
 /** Safety priority ladder (File 06 §5). Higher tier always overrides lower. */
@@ -395,6 +516,15 @@ enum class HoldReason {
 @Serializable
 data class AdjustmentView(
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
+    /**
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -420,6 +550,127 @@ data class AdjustmentView(
     val suggested_load_kg: Double? = null,
     /** The cue says to stop this exercise now (tap End exercise). */
     val suggests_end_exercise: Boolean = false,
+    /**
+     * Next-time advice for the lift today's win names (a coaching row, not an
+     * in-session cue), so the win and this advice share one card.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val win_advice: Boolean = false,
+    /**
+     * `summary` and `citation` are an adjustment headline's
+     * ([`ViewModel::today_headline`]): the headline already states this row.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val repeats_headline: Boolean = false,
+    /**
+     * `summary` and `citation` are the next session's `adjustment`'s: a
+     * card for this row already states the session's adjustment.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val repeats_session: Boolean = false,
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
+
+/**
+ * Where a glossary term sits in a text: `[start, end)` in UTF-16 code units
+ * (the indices of a Kotlin or Swift string).
+ */
+@Serializable
+data class GlossarySpan(
+    val term: GlossaryTerm = GlossaryTerm.E1rm,
+    val start: Int = 0,
+    val end: Int = 0,
+)
+
+/**
+ * A jargon term the glossary explains; the wire name is the key the shell
+ * opens the glossary at.
+ */
+@Serializable
+enum class GlossaryTerm {
+    @SerialName("e1rm")
+    E1rm,
+    @SerialName("1rm")
+    OneRm,
+    @SerialName("rpe")
+    Rpe,
+    @SerialName("rir")
+    Rir,
+    @SerialName("zscore")
+    ZScore,
+    @SerialName("vdot")
+    Vdot,
+    @SerialName("decoupling")
+    Decoupling,
+    @SerialName("vi")
+    VariabilityIndex,
+    @SerialName("tonnage")
+    Tonnage,
+    @SerialName("spike")
+    Spike,
+    @SerialName("hrmax")
+    HrMax,
+    @SerialName("deload")
+    Deload,
+    @SerialName("mesocycle")
+    Mesocycle,
+    @SerialName("ctl")
+    Ctl,
+    @SerialName("trimp")
+    Trimp,
+    @SerialName("hrzones")
+    HrZones,
+    @SerialName("volume")
+    Volume,
+    @SerialName("maf")
+    Maf,
+    @SerialName("pap")
+    Pap,
+    @SerialName("reds")
+    RedS,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            E1rm -> "e1rm"
+            OneRm -> "1rm"
+            Rpe -> "rpe"
+            Rir -> "rir"
+            ZScore -> "zscore"
+            Vdot -> "vdot"
+            Decoupling -> "decoupling"
+            VariabilityIndex -> "vi"
+            Tonnage -> "tonnage"
+            Spike -> "spike"
+            HrMax -> "hrmax"
+            Deload -> "deload"
+            Mesocycle -> "mesocycle"
+            Ctl -> "ctl"
+            Trimp -> "trimp"
+            HrZones -> "hrzones"
+            Volume -> "volume"
+            Maf -> "maf"
+            Pap -> "pap"
+            RedS -> "reds"
+        }
+}
+
+/**
+ * The evidence chrome every graded row carries, flattened onto its parent
+ * view so the wire keys stay `grade`/`citation`/`confidence`/
+ * `safety_critical`/`contested`. `Default` is the factual row with no claim:
+ * empty grade and citation.
+ */
+@Serializable
+data class EvidenceTagView(
+    /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
+    @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
+    /** Backing reference (author/year or DOI). */
+    val citation: String = "",
+    /** 0.05–0.90 confidence score. */
+    val confidence: Float = 0.0f,
+    val safety_critical: Boolean = false,
+    val contested: Boolean = false,
 )
 
 /** Canonical evidence grading scale (File 09). */
@@ -458,7 +709,12 @@ enum class EvidenceGrade {
  */
 @Serializable
 data class WhyView(
-    val basis: String = "",
+    /**
+     * What the call is based on, one sentence per entry (a decimal point
+     * never ends one), so a block that speaks for several items states what
+     * they share once. Rendered joined by a space.
+     */
+    val basis: List<String> = emptyList(),
     val grade_note: String = "",
     val improves: String = "",
 )
@@ -505,8 +761,8 @@ data class LiftResultView(
     val observed_at: Long = 0L,
     /**
      * Stable per-entry id echoed for the shell's edit/delete affordance: the
-     * shell sends it back in `AmendSet`/`DeleteEntry`. 0 for a legacy row (the
-     * shell then falls back to `observed_at`).
+     * shell sends it back in `AmendSet`/`DeleteEntry`. A row an old build
+     * logged without an id carries the one its date gives it.
      */
     val entry_id: Long = 0L,
     /**
@@ -545,7 +801,10 @@ data class E1rmRangeView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** One logged run with derived zone / pace / spike flag, flattened for shells. */
 @Serializable
@@ -604,9 +863,10 @@ data class RunResultView(
      */
     val spike_note: String = "",
     /**
-     * Core-owned pacing verdict + chip data for `split_pct` (feedback-016/017).
-     * `None` when `split_pct` is `None` and when the track has fewer than two
-     * full km splits (too short to judge pacing).
+     * Core-owned pacing verdict + chip data for a GPS track's second-half
+     * slowdown (feedback-016/017). `None` for a hand-entered run, a track too
+     * short/degenerate to split, and a track with fewer than two full km splits
+     * (too short to judge pacing).
      */
     val split: SplitVerdictView? = null,
     /**
@@ -655,21 +915,16 @@ data class RunResultView(
     val observed_at: Long = 0L,
     /**
      * Stable per-entry id echoed for the shell's edit/delete affordance; see
-     * [`LiftResultView::entry_id`]. 0 for a legacy row.
+     * [`LiftResultView::entry_id`].
      */
     val entry_id: Long = 0L,
     /**
-     * Per-kilometre splits for a GPS run (one entry per completed km + a final
-     * partial), derived core-side from the same QC-gated track as
-     * distance/pace. Empty for a hand-entered run or a track too short to split.
+     * Splits for a GPS run in the profile's distance unit (one entry per
+     * completed km or mile + a final partial), derived core-side from the same
+     * QC-gated track as distance/pace. Empty for a hand-entered run or a track
+     * too short to split.
      */
-    val splits_km: List<RunSplitView> = emptyList(),
-    /**
-     * Per-mile splits for a GPS run (same shape and track as
-     * [`splits_km`](Self::splits_km),
-     * unit = one international mile). Empty for a hand-entered run.
-     */
-    val splits_mi: List<RunSplitView> = emptyList(),
+    val splits: List<RunSplitView> = emptyList(),
     /**
      * Structured form of the spike-baseline provenance, so no shell scrapes it
      * from `spike_note` (`contains("no prior run")`). `true` when a
@@ -701,7 +956,10 @@ data class RunResultView(
      * A shell names, titles and captions a run by this.
      */
     val started_at: Long = 0L,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 @Serializable
 enum class ThreeZone {
@@ -747,7 +1005,10 @@ data class SplitVerdictView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** How a run's back half compared with its front half (wire: snake_case). */
 @Serializable
@@ -794,7 +1055,10 @@ data class IntervalVerdictView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** Whether a GPS run was paced as intervals or steadily (wire: snake_case). */
 @Serializable
@@ -897,12 +1161,17 @@ data class RunSplitView(
 data class GuidanceView(
     /** Grouping label, e.g. `"Strength"`, `"Running"`, `"Hybrid"`. */
     val section: String = "",
+    /** The row's text, distances in the profile's unit. */
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
     /**
-     * `summary` with its distances in miles, for a shell showing miles.
-     * Empty when the summary states no distance.
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
      */
-    val summary_mi: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -921,7 +1190,10 @@ data class GuidanceView(
      * empty on every other row.
      */
     val training_age: String = "",
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /**
  * The one resolved coaching message for a session, flattened for shells.
@@ -933,13 +1205,20 @@ data class FeedbackView(
     val category: FeedbackCategory = FeedbackCategory.ConcernInjury,
     /** Human overline for the card face; render verbatim. */
     val category_label: String = "",
-    /** Human-readable coaching copy for the category. */
-    val message: String = "",
     /**
-     * `message` with its distances in miles, for a shell showing miles.
-     * Empty when the message states no distance.
+     * Human-readable coaching copy for the category, distances in the
+     * profile's unit.
      */
-    val message_mi: String = "",
+    val message: String = "",
+    /** The glossary terms `message` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
+    /**
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -953,7 +1232,12 @@ data class FeedbackView(
      * improve it).
      */
     val why: WhyView = WhyView(),
-)
+    /** `message` and `citation` are the next session's `adjustment`'s. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val repeats_session: Boolean = false,
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** The message category the engine emits for a session (File 05 decision tree). */
 @Serializable
@@ -1127,6 +1411,12 @@ data class Profile(
      * `weight_suffix` / `fmt_weight` helpers).
      */
     val weight_lb: Boolean = false,
+    /**
+     * The unit distances and paces are rendered in (`DistanceUnit`). Like
+     * `weight_lb` it changes text only: plan, history and every numeric
+     * field stay km.
+     */
+    val distance_unit: DistanceUnit = DistanceUnit.Km,
     /**
      * Resistance-training modality: `Weights` (default) or `Calisthenics`.
      * A calisthenics profile routes lift days through the leverage-ladder
@@ -1357,7 +1647,7 @@ data class HealthScreen(
      * covers every current follow-up answer.
      */
     val cleared_parq_mask: Int = 0,
-) : JvmSerializable
+)
 
 /**
  * The training environment the session is performed in.
@@ -1380,6 +1670,25 @@ enum class Environment {
             Altitude -> "Altitude"
             Cold -> "Cold"
             Neutral -> "Neutral"
+        }
+}
+
+/**
+ * The distance unit every core-rendered distance and pace reads in: `Km`
+ * (default, so a profile line from before the choice replays metric) or
+ * `Mi`. Display-only, like `Profile::weight_lb`: numeric fields stay km.
+ */
+@Serializable
+enum class DistanceUnit {
+    Km,
+    Mi,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            Km -> "Km"
+            Mi -> "Mi"
         }
 }
 
@@ -1412,7 +1721,7 @@ data class RecentRace(
     val time_sec: Int = 0,
     /** Race date, local epoch day. `None` = undated. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val epoch_day: Long? = null,
-) : JvmSerializable
+)
 
 /** Calisthenics equipment the athlete has access to. */
 @Serializable
@@ -1420,7 +1729,7 @@ data class CalisEquipment(
     val pull_up_bar: Boolean = false,
     val dip_bars: Boolean = false,
     val rings: Boolean = false,
-) : JvmSerializable
+)
 
 /**
  * A goal-race finish prediction, flattened for shells. Combines a Daniels VDOT
@@ -1435,6 +1744,8 @@ data class RacePredictionView(
     /** Formatted finish time (`"41:30"`) or range (`"41:30–43:00"`). */
     val predicted: String = "",
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -1459,7 +1770,10 @@ data class RacePredictionView(
     val goal_distance_m: Double = 0.0,
     val weekly_km: Double = 0.0,
     val weeks_since_race: Int? = null,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /**
  * The CTL/ATL/TSB fitness–fatigue bookkeeping over the logged history,
@@ -1488,6 +1802,15 @@ data class TrainingLoadView(
     /** How daily load was quantified, e.g. `"Lucia TRIMP (3-zone HR)"`. */
     val method: String = "",
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
+    /**
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -1496,7 +1819,10 @@ data class TrainingLoadView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /**
  * Session-RPE training load (Foster: minutes × the 0–10 whole-session rating;
@@ -1508,6 +1834,15 @@ data class TrainingLoadView(
 data class SrpeLoadView(
     val method: String = "",
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
+    /**
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -1516,7 +1851,10 @@ data class SrpeLoadView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /**
  * Running progress over time (self-monitoring against the plan,
@@ -1553,7 +1891,10 @@ data class RunProgressView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** One Monday-start local week of running. */
 @Serializable
@@ -1643,12 +1984,6 @@ data class ReadinessSignalView(
     val streak: Int = 0,
     /** Qualitative state, e.g. `"below normal"`, `"high 2+ days"`. */
     val state: String = "",
-    /**
-     * Display-only sub-line context, e.g. a pain report's
-     * `"Left knee · sharp/joint · 6/10"`. Empty for signals without such
-     * detail.
-     */
-    val detail: String = "",
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -1665,7 +2000,10 @@ data class ReadinessSignalView(
      * shell adds no "earlier" qualifier of its own.
      */
     val stale: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** Normalized readiness signals the engine consumes (File 06 §2). */
 @Serializable
@@ -1775,6 +2113,15 @@ enum class SignalGroup {
 data class TodayHeadlineView(
     val kind: HeadlineKind = HeadlineKind.SafetyHold,
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** What the card is about, for its spoken "?" ("Details: <subject>"). */
+    val subject: String = "",
+    /**
+     * The summary reads as a paragraph: shells set it in the body weight,
+     * not bold (`text_parts::is_prose`).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val prose: Boolean = false,
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -1788,7 +2135,12 @@ data class TodayHeadlineView(
      * improve it).
      */
     val why: WhyView = WhyView(),
-)
+    /** `summary` and `citation` are the next session's `adjustment`'s. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val repeats_session: Boolean = false,
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** Which rung of the Today ranking produced the headline (wire: snake_case). */
 @Serializable
@@ -1896,8 +2248,6 @@ data class CheckinInput(
 data class BaselineStatusView(
     /** The signal this baseline feeds, e.g. `"WellnessZ"`. */
     val signal: ReadinessSignal = ReadinessSignal.Rpe,
-    /** Friendly channel label, e.g. `"Sleep, soreness, fatigue, stress & mood"`. */
-    val label: String = "",
     /** Check-in days collected so far. */
     val have: Int = 0,
     /** Days needed before a baseline is emitted. */
@@ -1945,8 +2295,6 @@ enum class BaselineKind {
 data class GradeDefView(
     /** Wire name matching the grade strings on every card, e.g. `"Strong"`. */
     val grade: EvidenceGrade = EvidenceGrade.MarketingMyth,
-    /** Friendly label, e.g. `"Expert opinion"`. */
-    val label: String = "",
     /** One-sentence KB definition of the grade (File 09 scale). */
     val definition: String = "",
     /** Default confidence this grade maps to (File 09), e.g. `0.90`. */
@@ -1999,6 +2347,17 @@ data class SessionPlanView(
      * shift) is credited to it.
      */
     val credited_from_epoch_day: Long? = null,
+    /**
+     * The index in `items` of a run session's run item: the first open item
+     * with a target or a structure, else the first open item. `None` for a
+     * lift or rest day, or once every item is done.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val run_item: Int? = null,
+    /**
+     * A return-check item states `adjustment` (its dose and stop list), so
+     * no card repeats it.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val adjustment_on_item: Boolean = false,
 )
 
 enum class SessionDiscipline { Lift, Run, Rest }
@@ -2116,6 +2475,8 @@ enum class SessionStatus {
 data class PrescriptionView(
     /** The full human line, e.g. `"Back squat: 5×3 @ 85 kg · ~2 reps left"`. */
     val summary: String = "",
+    /** The glossary terms `summary` uses. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
     val exercise: String = "",
     val sets: Int = 0,
     val reps_low: Int = 0,
@@ -2215,15 +2576,10 @@ data class PrescriptionView(
      * For a run held by the single-run spike ceiling (RUN-SPIKE-001 /
      * RUN-START-001): the plain reason the safety badge stands for, e.g.
      * `"Capped at 12.5 km: at most 10% over your longest recent run"`
-     * (distances in km like `summary`). The shell shows it inline instead
+     * (its distance in the profile's unit). The shell shows it inline instead
      * of a bare badge. Empty otherwise.
      */
     val safety_reason: String = "",
-    /**
-     * `safety_reason` with its distance in miles (`"Capped at 4 mi: …"`), for a
-     * shell showing miles. Empty when the reason states no distance.
-     */
-    val safety_reason_mi: String = "",
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
     /** Backing reference (author/year or DOI). */
@@ -2299,15 +2655,24 @@ data class PrescriptionView(
      */
     val face_detail: String = "",
     /**
+     * `face_detail` without its reps-left wording ("~2 reps left", "1–2 reps
+     * left", "to your last good rep", "pick a weight for ~3 reps left"), for
+     * a face whose newcomer guide states the effort itself.
+     */
+    val face_detail_without_effort: String = "",
+    /**
      * A compact row's one line: the first ` · ` clause of `face_detail`, else
-     * of `summary` (`"5×3 @ 85 kg"`, a run's `"8 km"`).
+     * of `summary` (`"5×3 @ 85 kg"`, a run's `"8 km"`). On the wire a figure
+     * and its unit, and "@" and its neighbours, are joined by non-breaking
+     * spaces (`text_parts::keep_units`).
      */
     val face_lead: String = "",
     /**
      * For a run item: the session volume its `summary` leads with, before the
      * target (`"6 × 800 m"`, `"8 km"`, run/walk bouts), distances in km like
      * `summary`. Empty when the summary leads with no volume (a pain stop, an
-     * easy cap of run/walk bouts) and for lifts.
+     * easy cap of run/walk bouts) and for lifts. Glued on the wire like
+     * `face_lead`.
      */
     val run_head: String = "",
     /**
@@ -2315,7 +2680,10 @@ data class PrescriptionView(
      * is a plain distance; `None` for reps, minutes and run/walk bouts.
      */
     val run_head_km: Double? = null,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /**
  * One logged set attributed to a plan item's session day, flattened for
@@ -2435,11 +2803,11 @@ data class RunTargetView(
     val pace_fast_sec_per_km: Int = 0,
     val pace_slow_sec_per_km: Int = 0,
     /**
-     * Rendered pace in km and miles, e.g. `"4:50–5:05 /km"` / `"7:47–8:11 /mi"`.
-     * Empty without a pace anchor.
+     * Rendered pace in the profile's unit, e.g. `"4:50–5:05 /km"` /
+     * `"7:47–8:11 /mi"`. Empty without a pace anchor. Glued on the wire like
+     * `PrescriptionView::face_lead`.
      */
-    val pace_label_km: String = "",
-    val pace_label_mi: String = "",
+    val pace_label: String = "",
     /**
      * e.g. `"150–162 bpm"` / `"≤ 143 bpm"`; empty when not given (interval /
      * repetition work, where pace governs and heart rate lags).
@@ -2463,7 +2831,10 @@ data class RunTargetView(
     val confidence: Float = 0.0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** Calisthenics-only data on a plan item. */
 @Serializable
@@ -2624,7 +2995,10 @@ data class ProgramSummaryView(
      * muscle the plan has no exercise for, deload week), or empty.
      */
     val muscle_volume_note: String = "",
-)
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
 
 /** Mesocycle phase (File 02 block model; File 04 base/build/peak/taper). */
 @Serializable
@@ -3070,7 +3444,198 @@ data class YouthActivityView(
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
     val why: WhyView = WhyView(),
+) {
+    val evidence: EvidenceTagView
+        get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
+
+/** The pain report in force ([`ViewModel::active_pain`]). */
+@Serializable
+data class ActivePainView(
+    /** The report as logged. */
+    val report: PainDetail = PainDetail(),
+    /** The preset body area its location names; `None` for free text or none. */
+    val area: PainArea? = null,
+    /**
+     * The report as one line, e.g. `"Left knee · sharp or joint pain ·
+     * 6/10"`; `None` when it names nothing (no area, kind, rating or trend).
+     */
+    val context: String? = null,
 )
+
+/** A characterized pain report attached to a `Pain` readiness input. */
+@Serializable
+data class PainDetail(
+    val kind: PainKind = PainKind.SharpJoint,
+    /**
+     * 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
+     * `None` = the user gave no rating; graded conservatively (outside the
+     * tolerable band). Old logs carrying a bare number decode to `Some`.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val severity: Int? = null,
+    val trend: PainTrend = PainTrend.Stable,
+    /**
+     * True when the pain has persisted across sessions despite modification -
+     * escalates STOP/REDUCE responses to DEFER (safety-038/039 "if persists").
+     */
+    val persists: Boolean = false,
+    /**
+     * Free-text body-part location (e.g. `"Left knee"`) for display context on
+     * the safety banner sub-line and pain history. For a non-persisting
+     * sharp/joint report it also scopes the stop: a location that maps to one
+     * body region stops only the movements that load it (File 08 safety-038
+     * "STOP that exercise"); anything unmapped keeps the
+     * whole-day stop. `None`, the wire default, keeps every existing log
+     * replaying unchanged (whole-day stop, no body part on the sub-line).
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val location: String? = null,
+)
+
+/** Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model). */
+@Serializable
+enum class PainKind {
+    /**
+     * Sharp, localized, or joint-line pain; alters movement/gait; or occurs
+     * with swelling → possible structural injury (safety-038). Hard stop.
+     */
+    SharpJoint,
+    /**
+     * Load-related tendon pain → graded by severity/trend per the Silbernagel
+     * pain-monitoring model (safety-039). "Avoid complete rest."
+     */
+    TendonLoadRelated,
+    /**
+     * Muscle burn during a set / DOMS 24–72 h easing with movement → normal
+     * training discomfort; continue.
+     */
+    Doms,
+    /** Uncharacterized pain → conservative hard stop (same as a bare report). */
+    Other,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            SharpJoint -> "SharpJoint"
+            TendonLoadRelated -> "TendonLoadRelated"
+            Doms -> "Doms"
+            Other -> "Other"
+        }
+}
+
+/** Week-to-week / post-session pain trajectory (File 08 Table 4.1). */
+@Serializable
+enum class PainTrend {
+    /** Stable during & 24 h after; returns to baseline next morning. */
+    Stable,
+    /** Worsening after sessions or rising week-to-week → reactive. */
+    Rising,
+    /**
+     * Pain that worsens in the 24 h AFTER load even if stable during → reactive
+     * (Silbernagel monitoring, File 08 Table 4.1). Treated like `Rising`.
+     */
+    WorseningAfter24h,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            Stable -> "Stable"
+            Rising -> "Rising"
+            WorseningAfter24h -> "WorseningAfter24h"
+        }
+}
+
+/**
+ * The preset body areas the pain triage offers. The wire name is the
+ * `PainDetail::location` the shell writes for it, a fixed English key that
+ * [`crate::autoreg::pain_region`] maps to a region (`Other` maps to none).
+ */
+@Serializable
+enum class PainArea {
+    @SerialName("Left knee")
+    LeftKnee,
+    @SerialName("Right knee")
+    RightKnee,
+    @SerialName("Ankle / Achilles")
+    Ankle,
+    Hip,
+    @SerialName("Lower back")
+    LowerBack,
+    Shoulder,
+    @SerialName("Elbow / wrist")
+    ElbowWrist,
+    Neck,
+    Foot,
+    Other,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            LeftKnee -> "Left knee"
+            RightKnee -> "Right knee"
+            Ankle -> "Ankle / Achilles"
+            Hip -> "Hip"
+            LowerBack -> "Lower back"
+            Shoulder -> "Shoulder"
+            ElbowWrist -> "Elbow / wrist"
+            Neck -> "Neck"
+            Foot -> "Foot"
+            Other -> "Other"
+        }
+}
+
+/** Today's facts every surface reads ([`ViewModel::today_surface`]). */
+@Serializable
+data class TodaySurfaceView(
+    val state: TodayState = TodayState.Paused,
+    /** Today is a plan rest day. */
+    val rest_today: Boolean = false,
+    /**
+     * Fewer than three days with a logged lift: the session card spells out
+     * each lift's prescription and how to pick a first weight.
+     */
+    val show_guide: Boolean = false,
+)
+
+/** What today is ([`TodaySurfaceView::state`], wire: snake_case). */
+@Serializable
+enum class TodayState {
+    /** Training is paused (`hold_reason`), the under-18 pause included. */
+    @SerialName("paused")
+    Paused,
+    /** No profile yet: guided setup has not run. */
+    @SerialName("setup")
+    Setup,
+    /** A profile but no plan (`plan_withheld` says why when withheld). */
+    @SerialName("no_plan")
+    NoPlan,
+    /** `next_session` is today's, still to train. */
+    @SerialName("session")
+    Session,
+    /**
+     * Today's session is finished: `next_session` moved on, today's
+     * `week_plan` row says what was done.
+     */
+    @SerialName("done")
+    Done,
+    /** A plan with no session today (`rest_today` says if it is a rest day). */
+    @SerialName("rest")
+    Rest,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            Paused -> "paused"
+            Setup -> "setup"
+            NoPlan -> "no_plan"
+            Session -> "session"
+            Done -> "done"
+            Rest -> "rest"
+        }
+}
 
 @Serializable(with = EventSerializer::class)
 sealed interface Event {
@@ -3360,15 +3925,17 @@ sealed interface Event {
 
     /**
      * Delete one logged set, run or activity. Targets the newest entry
-     * whose `entry_id` matches (or, for a row with no id, whose
-     * `observed_at` matches `observed_at_fallback`). A no-op when nothing
+     * whose id matches (`event::entry::row_id`). A no-op when nothing
      * matches. Compaction cancels it against its matched log line (Rule 3).
      */
     @Serializable
     data class DeleteEntry(
         val kind: EntryKind,
         @SerialName("entry_id") val entryId: Long,
-        /** Match target for a row with no entry id (`entry_id == 0`). */
+        /**
+         * The row's `observed_at`: names the row in a line an old build
+         * wrote with `entry_id` 0.
+         */
         @SerialName("observed_at_fallback") val observedAtFallback: Long = 0L,
     ) : Event
 
@@ -3390,10 +3957,8 @@ sealed interface Event {
          */
         @SerialName("observed_at") val observedAt: Long = 0L,
         /**
-         * The OLD `observed_at` of the row being amended. For a row with no id
-         * (`entry_id == 0`) whose date the user CHANGED, the original entry can
-         * only be located by its old timestamp; matching on the new one would
-         * find nothing and push a DUPLICATE. 0 = match on `observed_at`.
+         * The OLD `observed_at` of the row being amended: names the row in
+         * a line an old build wrote with `entry_id` 0. 0 = `observed_at`.
          */
         @SerialName("observed_at_fallback") val observedAtFallback: Long = 0L,
         /** Timed-hold duration, seconds (see [`Event::LogSet`]). */
@@ -3437,10 +4002,7 @@ sealed interface Event {
     @Serializable
     data class TrimRunTrack(
         @SerialName("entry_id") val entryId: Long,
-        /**
-         * The run's `observed_at`, so a run with no id (`entry_id == 0`) is
-         * located by timestamp; see [`Event::AmendRun`].
-         */
+        /** The run's `observed_at`; see [`Event::DeleteEntry`]. */
         @SerialName("observed_at_fallback") val observedAtFallback: Long = 0L,
         @SerialName("keep_from_sec") val keepFromSec: Long,
         @SerialName("keep_until_sec") val keepUntilSec: Long,
@@ -3456,10 +4018,7 @@ sealed interface Event {
     @Serializable
     data class AmendRunMeta(
         @SerialName("entry_id") val entryId: Long,
-        /**
-         * The run's `observed_at`, so a run with no id (`entry_id == 0`) is
-         * located by timestamp.
-         */
+        /** The run's `observed_at`; see [`Event::DeleteEntry`]. */
         @SerialName("observed_at_fallback") val observedAtFallback: Long = 0L,
         /** Whole-session effort, CR-10 (0–10); values above 10 clamp to 10. */
         @SerialName("session_rpe") val sessionRpe: Int? = null,
@@ -3541,6 +4100,12 @@ sealed interface Event {
          * `weight_suffix` / `fmt_weight` helpers).
          */
         @SerialName("weight_lb") @EncodeDefault(EncodeDefault.Mode.NEVER) val weightLb: Boolean = false,
+        /**
+         * The unit distances and paces are rendered in (`DistanceUnit`). Like
+         * `weight_lb` it changes text only: plan, history and every numeric
+         * field stay km.
+         */
+        @SerialName("distance_unit") @EncodeDefault(EncodeDefault.Mode.NEVER) val distanceUnit: DistanceUnit = DistanceUnit.Km,
         /**
          * Resistance-training modality: `Weights` (default) or `Calisthenics`.
          * A calisthenics profile routes lift days through the leverage-ladder
@@ -3645,7 +4210,7 @@ sealed interface Event {
          * defaults to `false` and gates nothing.
          */
         @EncodeDefault(EncodeDefault.Mode.NEVER) val health: HealthScreen = HealthScreen(),
-    ) : Event, JvmSerializable
+    ) : Event
 
     /** Drop the profile (clears the guidance section). */
     data object ClearProfile : Event
@@ -4344,89 +4909,6 @@ internal object EventSerializer : KSerializer<Event> {
     }
 }
 
-/** A characterized pain report attached to a `Pain` readiness input. */
-@Serializable
-data class PainDetail(
-    val kind: PainKind,
-    /**
-     * 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
-     * `None` = the user gave no rating; graded conservatively (outside the
-     * tolerable band). Old logs carrying a bare number decode to `Some`.
-     */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val severity: Int? = null,
-    val trend: PainTrend,
-    /**
-     * True when the pain has persisted across sessions despite modification -
-     * escalates STOP/REDUCE responses to DEFER (safety-038/039 "if persists").
-     */
-    val persists: Boolean = false,
-    /**
-     * Free-text body-part location (e.g. `"Left knee"`) for display context on
-     * the safety banner sub-line and pain history. For a non-persisting
-     * sharp/joint report it also scopes the stop: a location that maps to one
-     * body region stops only the movements that load it (File 08 safety-038
-     * "STOP that exercise"); anything unmapped keeps the
-     * whole-day stop. `None`, the wire default, keeps every existing log
-     * replaying unchanged (whole-day stop, no body part on the sub-line).
-     */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val location: String? = null,
-)
-
-/** Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model). */
-@Serializable
-enum class PainKind {
-    /**
-     * Sharp, localized, or joint-line pain; alters movement/gait; or occurs
-     * with swelling → possible structural injury (safety-038). Hard stop.
-     */
-    SharpJoint,
-    /**
-     * Load-related tendon pain → graded by severity/trend per the Silbernagel
-     * pain-monitoring model (safety-039). "Avoid complete rest."
-     */
-    TendonLoadRelated,
-    /**
-     * Muscle burn during a set / DOMS 24–72 h easing with movement → normal
-     * training discomfort; continue.
-     */
-    Doms,
-    /** Uncharacterized pain → conservative hard stop (same as a bare report). */
-    Other,
-    ;
-
-    /** The wire string. */
-    val wire: String
-        get() = when (this) {
-            SharpJoint -> "SharpJoint"
-            TendonLoadRelated -> "TendonLoadRelated"
-            Doms -> "Doms"
-            Other -> "Other"
-        }
-}
-
-/** Week-to-week / post-session pain trajectory (File 08 Table 4.1). */
-@Serializable
-enum class PainTrend {
-    /** Stable during & 24 h after; returns to baseline next morning. */
-    Stable,
-    /** Worsening after sessions or rising week-to-week → reactive. */
-    Rising,
-    /**
-     * Pain that worsens in the 24 h AFTER load even if stable during → reactive
-     * (Silbernagel monitoring, File 08 Table 4.1). Treated like `Rising`.
-     */
-    WorseningAfter24h,
-    ;
-
-    /** The wire string. */
-    val wire: String
-        get() = when (this) {
-            Stable -> "Stable"
-            Rising -> "Rising"
-            WorseningAfter24h -> "WorseningAfter24h"
-        }
-}
-
 /**
  * One GPS fix from a run track. Deterministic core input: wall-clock time
  * enters only as `observed_at` (unix seconds), never a live clock. Lat/lon in
@@ -4460,6 +4942,51 @@ enum class EntryKind {
             Activity -> "Activity"
         }
 }
+
+/**
+ * The safety screens of a weekly check-in, the part of the review wire
+ * payload the safety gate reads (`SessionReview` flattens it, so these are
+ * top-level wire fields). A new safety screen is added here once.
+ */
+@Serializable
+data class SafetyScreen(
+    /**
+     * Localized bone pain worsening through effort, night/rest pain, high-risk
+     * site, or mechanical joint symptoms (feedback-032/033/034).
+     */
+    @SerialName("bone_pain_red_flag") val bonePainRedFlag: Boolean,
+    /**
+     * Compulsive pattern: training through pain, distress at missed sessions,
+     * rapidly escalating volume (feedback-039).
+     */
+    @SerialName("compulsive_flag") val compulsiveFlag: Boolean,
+    /**
+     * Count of co-occurring NFOR signals (feedback-036; >=2 fires); the legacy
+     * wire count, overridden by `overtraining_signs` when present.
+     */
+    @SerialName("overtraining_signal_count") val overtrainingSignalCount: Int,
+    /**
+     * How long the NFOR signals have co-occurred, in weeks (feedback-036
+     * duration condition: ">=2 signals over >=1-2 wks; do not fire on a
+     * single noisy night"). `None` = duration untracked by the shell, the
+     * gate then errs protective and still fires on count alone; `Some(w)`
+     * requires w >= 1.
+     */
+    @SerialName("overtraining_signal_weeks") @EncodeDefault(EncodeDefault.Mode.NEVER) val overtrainingSignalWeeks: Double? = null,
+    /**
+     * Which of the four listed overtraining signs were ticked. `Some` → the
+     * effective signal count is the ticked count.
+     */
+    @SerialName("overtraining_signs") @EncodeDefault(EncodeDefault.Mode.NEVER) val overtrainingSigns: OvertrainingSigns? = null,
+    /**
+     * Weekly RED-S screen positive (File 13 ready-upd-005, REDS-SCREEN-001):
+     * missed or longer cycles over the last 3 months (not explained by
+     * pregnancy or contraception), or noticeably lower sex drive / fewer
+     * morning erections for several weeks. Routes to the RED-S referral
+     * feedback and the deficit refusal, never a programming variable.
+     */
+    @SerialName("reds_signal_reported") @EncodeDefault(EncodeDefault.Mode.NEVER) val redsSignalReported: Boolean = false,
+)
 
 /**
  * The four overtraining signs the weekly check-in asks about (feedback-036:
@@ -4554,8 +5081,7 @@ data class CoreError(
 /**
  * Why an op answered an [`ErrorEnvelope`]; serialised as the envelope's
  * `kind`. The shell keys on `panic_reset` (replay the log into the fresh
- * core) and on the FIT kinds (per-file import reason); any other kind reads
- * as a generic failure.
+ * core); any other kind reads as a generic failure.
  */
 @Serializable
 enum class ErrorKind {
@@ -4571,21 +5097,6 @@ enum class ErrorKind {
     /** The shell's input is not what the op takes. */
     @SerialName("bad_input")
     BadInput,
-    /** `FitError::NotFit`. */
-    @SerialName("not_fit")
-    NotFit,
-    /** `FitError::Damaged`. */
-    @SerialName("damaged")
-    Damaged,
-    /** `FitError::NoTrack`. */
-    @SerialName("no_track")
-    NoTrack,
-    /** `FitError::TooShort`. */
-    @SerialName("too_short")
-    TooShort,
-    /** `FitError::NotARun` (context: the sport). */
-    @SerialName("not_a_run")
-    NotARun,
     ;
 
     /** The wire string. */
@@ -4595,17 +5106,12 @@ enum class ErrorKind {
             Panic -> "panic"
             Unserializable -> "unserializable"
             BadInput -> "bad_input"
-            NotFit -> "not_fit"
-            Damaged -> "damaged"
-            NoTrack -> "no_track"
-            TooShort -> "too_short"
-            NotARun -> "not_a_run"
         }
 }
 
 /**
- * The run the GPX export reads, by the `(entry_id, observed_at)` identity
- * the delete/amend matcher uses.
+ * The run the GPX export and the route fixes read, by the
+ * `(entry_id, observed_at)` identity the delete/amend matcher uses.
  */
 @Serializable
 data class RunRef(
@@ -4620,6 +5126,193 @@ data class TrackFigures(
     val duration_min: Double = 0.0,
 )
 
+/**
+ * The lift the set screen asks the warm-up ramp for: its exercise, the work
+ * set's load (wire kg) and the display unit whose plate grid the steps land
+ * on.
+ */
+@Serializable
+data class WarmUpQuery(
+    val exercise: String,
+    @SerialName("work_kg") val workKg: Double,
+    @SerialName("weight_lb") val weightLb: Boolean,
+)
+
+/**
+ * A profile the shell is still editing (guided setup, Profile): the answers
+ * the safety gates and the setup's choices read, before any `SetProfile`.
+ */
+@Serializable
+data class ProfileDraft(
+    val health: HealthScreen = HealthScreen(),
+    /** Applied to `health` first: the answer the user just gave. */
+    val answer: HealthAnswer? = null,
+    /** A stated age, used when no birthday is given. */
+    @SerialName("age_years") val ageYears: Double? = null,
+    @SerialName("birth_epoch_day") val birthEpochDay: Long? = null,
+    /** The shell's local epoch day, which a birthday's age is counted to. */
+    val today: Long? = null,
+    @SerialName("calis_equipment") val calisEquipment: CalisEquipment? = null,
+)
+
+/** One answer on the health screen, applied by [`HealthScreen::answered`]. */
+@Serializable(with = HealthAnswerSerializer::class)
+sealed interface HealthAnswer {
+
+    /** A PAR-Q+ question answered Yes or No. */
+    @Serializable
+    data class Parq(
+        val question: ParqQuestion,
+        val yes: Boolean,
+    ) : HealthAnswer
+
+    /** The "cleared by a doctor" answer. */
+    @Serializable
+    data class Clearance(
+        val cleared: Boolean,
+    ) : HealthAnswer
+
+    companion object
+}
+
+private val HealthAnswerUnitTags = emptySet<String>()
+
+private val HealthAnswerPayloadTags = setOf("Parq", "Clearance")
+
+/** The wire tag of `element` when it is a [HealthAnswer] in a shape serde accepts
+ * (a unit variant's bare string, a payload variant's single-key object), else null. */
+fun HealthAnswer.Companion.tagOf(element: JsonElement): String? = when (element) {
+    is JsonPrimitive -> element.content.takeIf { element.isString && it in HealthAnswerUnitTags }
+    is JsonObject -> element.keys.singleOrNull()?.takeIf { it in HealthAnswerPayloadTags && element[it] is JsonObject }
+    else -> null
+}
+
+/** [HealthAnswer] in serde's external tagging. */
+internal object HealthAnswerSerializer : KSerializer<HealthAnswer> {
+    override val descriptor: SerialDescriptor = SerialDescriptor("app.milestone.HealthAnswer", JsonElement.serializer().descriptor)
+
+    override fun serialize(encoder: Encoder, value: HealthAnswer) {
+        val json = (encoder as JsonEncoder).json
+        encoder.encodeJsonElement(
+            when (value) {
+                is HealthAnswer.Parq -> JsonObject(mapOf("Parq" to json.encodeToJsonElement(HealthAnswer.Parq.serializer(), value)))
+                is HealthAnswer.Clearance -> JsonObject(mapOf("Clearance" to json.encodeToJsonElement(HealthAnswer.Clearance.serializer(), value)))
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): HealthAnswer {
+        val input = decoder as JsonDecoder
+        val element = input.decodeJsonElement()
+        val tag = HealthAnswer.tagOf(element) ?: throw SerializationException("not a HealthAnswer: $element")
+        if (element is JsonPrimitive) {
+            return when (tag) {
+                else -> throw SerializationException("not a HealthAnswer: $element")
+            }
+        }
+        val payload = (element as JsonObject).getValue(tag)
+        return when (tag) {
+            "Parq" -> input.json.decodeFromJsonElement(HealthAnswer.Parq.serializer(), payload)
+            "Clearance" -> input.json.decodeFromJsonElement(HealthAnswer.Clearance.serializer(), payload)
+            else -> throw SerializationException("not a HealthAnswer: $element")
+        }
+    }
+}
+
+/**
+ * The seven PAR-Q+ general health questions (onboard-051), in form order;
+ * question `n` is bit `n` of [`HealthScreen::parq_yes`].
+ */
+@Serializable
+enum class ParqQuestion {
+    /** Q1: a heart condition or high blood pressure (follow-up). */
+    HeartOrBloodPressure,
+    /** Q2: chest pain (symptom). */
+    ChestPain,
+    /** Q3: dizziness or fainting (symptom). */
+    DizzyOrFainting,
+    /** Q4: another chronic condition (follow-up). */
+    OtherCondition,
+    /** Q5: prescribed medication (follow-up). */
+    Medication,
+    /** Q6: a bone or joint problem (the injury / rehab gate). */
+    BoneOrJoint,
+    /** Q7: told to exercise only under supervision (follow-up). */
+    SupervisedOnly,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            HeartOrBloodPressure -> "HeartOrBloodPressure"
+            ChestPain -> "ChestPain"
+            DizzyOrFainting -> "DizzyOrFainting"
+            OtherCondition -> "OtherCondition"
+            Medication -> "Medication"
+            BoneOrJoint -> "BoneOrJoint"
+            SupervisedOnly -> "SupervisedOnly"
+        }
+}
+
+/**
+ * What a [`ProfileDraft`] means to the core: the gates it would raise and
+ * the PAR-Q+ answers as the form shows them.
+ */
+@Serializable
+data class DraftFacts(
+    /** The draft's health screen with its `answer` applied. */
+    val health: HealthScreen = HealthScreen(),
+    /** The PAR-Q+ questions answered Yes, in form order. */
+    val parq_yes: List<ParqQuestion> = emptyList(),
+    /** The first symptom question (Q2/Q3) answered Yes. */
+    val first_symptom: ParqQuestion? = null,
+    /** A doctor flag from the old single toggle, with no follow-up answer. */
+    val legacy_parq: Boolean = false,
+    /** The health answers hold training (the age gate apart). */
+    val health_defers: Boolean = false,
+    /** The birthday's whole years on `today`, else the stated age. */
+    val age_years: Double? = null,
+    /** Under 18: the pediatric hold (SAFE-PEDS-001). */
+    val youth: Boolean = false,
+    /**
+     * The stated equipment has something to hang from (every pull-up rung
+     * needs it); `None` when no equipment is stated.
+     */
+    val can_hang: Boolean? = null,
+)
+
+/**
+ * A recorded track the shell thins for its save or a crash recovery: how
+ * many fixes it holds, the most to keep and the indices of the fixes that
+ * opened a recording segment.
+ */
+@Serializable
+data class TrackThinning(
+    val fixes: Int,
+    @SerialName("max_points") val maxPoints: Int,
+    @SerialName("segment_starts") val segmentStarts: List<Int> = emptyList(),
+)
+
+/**
+ * A [`TrackThinning`]'s answer: the indices of the fixes kept (ascending),
+ * and the segment starts as positions among them.
+ */
+@Serializable
+data class ThinnedTrack(
+    val kept: List<Int> = emptyList(),
+    val segment_starts: List<Int> = emptyList(),
+)
+
+/**
+ * An imported run's heart rate as the import logs it: the file's average
+ * (`ImportedRun::avg_hr_bpm`) and the athlete's measured HRmax, if any.
+ */
+@Serializable
+data class ImportedHr(
+    @SerialName("avg_hr_bpm") val avgHrBpm: Double? = null,
+    @SerialName("measured_hr_max") val measuredHrMax: Double? = null,
+)
+
 /** [`compact_lines`]' verdict on a raw log, by line index. */
 @Serializable
 data class Compaction(
@@ -4628,8 +5321,9 @@ data class Compaction(
     /** Lines that are not JSON (a tail torn by a kill mid-append), ascending. */
     val torn: List<Int> = emptyList(),
     /**
-     * The largest `entry_id` any intact line carries, kept or not (0 when
-     * none), so a shell never reuses one.
+     * The largest row id any intact line carries, kept or not (0 when
+     * none; a row logged without an id counts with the id it is given), so a
+     * shell never reuses one.
      */
     val max_entry_id: Long = 0L,
     /** The last surviving plan line is a `ClearPlan`: the user removed their plan. */
@@ -4637,31 +5331,110 @@ data class Compaction(
 )
 
 /**
- * A parsed FIT activity: fixes grouped into segments by the recorder's
- * timer stop_all/start events (see [`parse_fit`] for the exact split rule).
+ * What an import file holds: its runs, or why it holds none. Exactly one of
+ * `runs` (non-empty) and `refusal` is set. Inside a multi-run file a run that
+ * fails is skipped as long as another imports; when none does, the first
+ * run's reason is the file's.
  */
 @Serializable
-data class FitTrack(
-    val segments: List<List<FitFix>> = emptyList(),
+data class ImportVerdict(
+    val runs: List<ImportedRun> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val refusal: ImportRefusal? = null,
+    /**
+     * The other sport a [`ImportRefusal::NotARun`] file names, as plain
+     * lowercase words ("cycling"); `None` when it names none.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val sport: String? = null,
+)
+
+/** One run read from an import file, ready to log as a `LogRunTrack`. */
+@Serializable
+data class ImportedRun(
+    /**
+     * The fixes to log: in range, timed, without GNSS dropouts, decimated to
+     * [`gps::TRACK_DECIMATION_CAP`] like a live save (segment boundaries and
+     * the ends kept). A fix whose file names no accuracy has the QC bound.
+     */
+    val points: List<GpsPoint> = emptyList(),
+    /** Indices into `points` that begin a new recording segment. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val segment_starts: List<Int> = emptyList(),
+    /**
+     * When the run happened: lollop's own export names the run's logged-at
+     * stamp, which may follow the last fix by up to a day; any other file is
+     * stamped at its last fix.
+     */
+    val observed_at: Long = 0L,
+    /**
+     * Time-weighted average of the file's heart-rate samples (bpm), each
+     * weighed by the seconds to the next fix; `None` without samples.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val avg_hr_bpm: Double? = null,
 )
 
 /**
- * One GPS+HR fix extracted from a FIT `record` message. Its serialization is
- * the per-fix wire shape of the `ParseFit` bridge op's payload.
+ * Why a file gave no run. The shell shows each as plain-language copy beside
+ * the file's name.
  */
 @Serializable
-data class FitFix(
-    val lat: Double = 0.0,
-    val lon: Double = 0.0,
-    val time_sec: Long = 0L,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val hr_bpm: Int? = null,
-    /**
-     * Horizontal position accuracy in metres from the FIT `record.gps_accuracy`
-     * field (field 31, `UInt8`, scale 1). `None` when the file has no such
-     * field; the shell picks the accuracy it hands the core's QC gate for a
-     * `None` fix (`Gpx.kt`'s `importedRunEvent`).
-     */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val accuracy_m: Float? = null,
+enum class ImportRefusal {
+    /** Over [`MAX_RUN_IMPORT_BYTES`] (a FIT file over its own smaller cap). */
+    @SerialName("too_large")
+    TooLarge,
+    /** Neither FIT nor GPX nor TCX. */
+    @SerialName("wrong_type")
+    WrongType,
+    /** No track with two GPS fixes. */
+    @SerialName("no_track")
+    NoTrack,
+    /** Under the keep threshold ([`gps::MIN_RUN_KM`] or [`gps::MIN_RUN_SEC`]). */
+    @SerialName("too_short")
+    TooShort,
+    /** Fixes without times: a planned route, not a recorded run. */
+    @SerialName("no_timestamps")
+    NoTimestamps,
+    /** Malformed or cut off. */
+    @SerialName("damaged")
+    Damaged,
+    /** Another sport ([`ImportVerdict::sport`] names it when the file does). */
+    @SerialName("not_a_run")
+    NotARun,
+    /** A moving pace faster than any run. */
+    @SerialName("implausible_pace")
+    ImplausiblePace,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            TooLarge -> "too_large"
+            WrongType -> "wrong_type"
+            NoTrack -> "no_track"
+            TooShort -> "too_short"
+            NoTimestamps -> "no_timestamps"
+            Damaged -> "damaged"
+            NotARun -> "not_a_run"
+            ImplausiblePace -> "implausible_pace"
+        }
+}
+
+/**
+ * A logged run's route fixes, one list per recording segment: the fixes the
+ * GPX export writes (the QC'd route, or for a run QC left unmeasurable its
+ * recorded fixes), for the shell's map, trim and Undo. Empty for a run with
+ * no track or an unknown run.
+ */
+@Serializable
+data class RunTrack(
+    val segments: List<List<GpsPoint>> = emptyList(),
+)
+
+/** One step of a warm-up ramp: its load (wire kg) and reps. */
+@Serializable
+data class WarmUpStep(
+    val kg: Double = 0.0,
+    val reps: Int = 0,
+    /** The empty bar: the set screen labels it "Bar" rather than its figure. */
+    val bar: Boolean = false,
 )
 
 /** `EvidenceGrade?` written as the variant's wire string, or "" for null. */

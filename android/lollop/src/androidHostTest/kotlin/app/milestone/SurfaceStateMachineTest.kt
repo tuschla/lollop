@@ -316,7 +316,7 @@ class SurfaceStateMachineTest {
                 when (s.kind) {
                     K.Run -> PrescriptionView(
                         run_head = "8 km", run_head_km = 8.0,
-                        run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"), done = done,
+                        run_target = RunTargetView(pace_label = "5:40–6:00 /km"), done = done,
                     )
                     else -> PrescriptionView(
                         exercise = LIFTS[i], sets = 3, face_lead = "3 × 5 @ 100 kg", done = done, sets_done = if (done) 3 else 0,
@@ -354,10 +354,25 @@ class SurfaceStateMachineTest {
                 return ViewModel(
                     today_epoch_day = today, profile = profile,
                     hold_reason = if (youth) HoldReason.Youth else HoldReason.Pain, next_session = ns?.let(::blank), week_plan = week.map(::blank),
+                    today_surface = TodaySurfaceView(state = TodayState.Paused),
                 )
             }
-            if (noPlan) return ViewModel(today_epoch_day = today, profile = profile, plan_withheld = withheld)
-            return ViewModel(today_epoch_day = today, profile = profile, next_session = ns, week_plan = week)
+            if (noPlan) {
+                return ViewModel(
+                    today_epoch_day = today, profile = profile, plan_withheld = withheld,
+                    today_surface = TodaySurfaceView(state = TodayState.NoPlan),
+                )
+            }
+            val restToday = session(today).kind == K.Rest
+            val state = when {
+                nsDay == today -> TodayState.Session
+                !restToday -> TodayState.Done
+                else -> TodayState.Rest
+            }
+            return ViewModel(
+                today_epoch_day = today, profile = profile, next_session = ns, week_plan = week,
+                today_surface = TodaySurfaceView(state = state, rest_today = restToday),
+            )
         }
 
         fun describe(day: Long) =

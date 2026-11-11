@@ -6,16 +6,12 @@ package app.milestone
  * log file never existed, a log that exists but compacted to zero surviving lines
  * (the user cleared all their data) is a RETURNING user, and the caller must not
  * re-seed the onboarding profile over their deliberate empty state. [maxEntryId]
- * is the largest `entry_id` any intact line carries (0 when none). [planRemoved]
- * is true when the surviving log's last plan line is a `ClearPlan` (the user
- * removed their plan): compaction keeps that line, so boot can honour the
- * removal even when the setup prefs' marker was lost.
+ * is the largest `entry_id` any intact line carries (0 when none).
  */
 data class RestoredLog(
     val lines: List<String>,
     val freshInstall: Boolean,
     val maxEntryId: Long = 0L,
-    val planRemoved: Boolean = false,
 )
 
 /**
@@ -114,7 +110,6 @@ object EventLog {
                 lines.filterIndexed { i, _ -> !skip[i] },
                 freshInstall = false,
                 maxEntryId = verdict.max_entry_id,
-                planRemoved = verdict.plan_removed,
             ),
             total = lines.size,
             unparseable = verdict.torn.isNotEmpty(),

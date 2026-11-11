@@ -111,9 +111,11 @@ jobs:
 
   widgets:
     name: Widget extension tests (simulator)
-    # The extension's model and views without the Kotlin framework: the day rule,
-    # the line fitting, the App Group lookup, the activity content, and renders of
-    # every widget family, state and activity (artifact `widget-renders`).
+    # The extension's model and views without the Kotlin framework, on the fixture
+    # android/lollop's GeneratedSourcesTest writes from the Kotlin payload code: the
+    # day rule, the line cuts and layouts, the bundled fallback and strings, the App
+    # Group lookup, the activity frames, and renders of every widget family, state
+    # and activity (artifact `widget-renders`).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -223,7 +225,7 @@ jobs:
           container=$(xcrun simctl get_app_container "$SIMULATOR_UDID" "$bundle" "$group")
           test -s "$container/widget-today.json" || { echo "::error::no widget payload in $container"; ls -la "$container"; exit 1; }
           cp "$container/widget-today.json" "$out/"
-          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["snapshot"]["kind"], "|", d["face"]["title"], "|", d["control"]["label"])' "$out/widget-today.json"
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["current"], "|", d["face"]["title"], "|", d["control"]["label"])' "$out/widget-today.json"
           mkdir -p "$out/widget-renders"
           TEST_RUNNER_LOLLOP_WIDGET_PAYLOAD="$out/widget-today.json" TEST_RUNNER_LOLLOP_RENDER_DIR="$out/widget-renders" \
             xcodebuild test -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \

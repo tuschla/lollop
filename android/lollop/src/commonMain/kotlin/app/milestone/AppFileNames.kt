@@ -31,8 +31,8 @@ internal object AppFileNames {
     /** Android's widget snapshot (WidgetSnapshotStore). */
     const val WIDGET_SNAPSHOT = "widget-today.json"
 
-    /** The setup store ([setupStore]): the onboarding flag, [KEY_PLAN_CLEARED],
-     *  [KEY_RESTORED_ENTRIES] and the tracker's start gates. */
+    /** The setup store ([setupStore]): the onboarding flag, [KEY_RESTORED_ENTRIES]
+     *  and the tracker's start gates. */
     const val SETUP_STORE = "milestone_setup"
 
     /** The settings store ([AppSettings]), named for its first setting. */

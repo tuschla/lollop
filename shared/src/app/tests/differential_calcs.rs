@@ -504,7 +504,7 @@ fn race_prediction_matches_riegel_and_daniels_oracles_over_5k_grid() {
                     let Some((lo, hi, agreed)) = oracle_race(d1, t1, d2, weekly) else {
                         continue;
                     };
-                    let v = to_race_view(&race_q(d1, t1, d2, weekly), None);
+                    let v = race(&race_q(d1, t1, d2, weekly), None, DistanceUnit::Km);
                     let ctx = || format!("{d1} m in {t1} s → {d2} m @ {weekly} km/wk");
                     // Near the 2% knife edge the two float paths may legitimately
                     // fall on different sides; the bounds then still bracket.
@@ -557,7 +557,7 @@ fn race_prediction_identity_and_monotonicity() {
     // Same distance in → same time out (both methods), agreed.
     for t in (720..=7200).step_by(37) {
         let t = f64::from(t);
-        let v = to_race_view(&race_q(5000.0, t, 5000.0, 40.0), None);
+        let v = race(&race_q(5000.0, t, 5000.0, 40.0), None, DistanceUnit::Km);
         assert!(v.agreed, "identity must agree: {t}");
         assert!((v.low_sec - t).abs() < 1e-6, "{t} → {}", v.low_sec);
         assert_eq!(v.predicted, oracle::clock(t));
@@ -572,7 +572,11 @@ fn race_prediction_identity_and_monotonicity() {
         for weekly in WEEKLY_KM {
             let mut prev: Option<(f64, f64, bool)> = None;
             for t in (720..=4800).step_by(10) {
-                let v = to_race_view(&race_q(5000.0, f64::from(t), d2, weekly), None);
+                let v = race(
+                    &race_q(5000.0, f64::from(t), d2, weekly),
+                    None,
+                    DistanceUnit::Km,
+                );
                 if let Some((lo, hi, agreed)) = prev {
                     let ctx = format!("{d2} m {weekly} km/wk at {t} s");
                     assert!(v.low_sec + v.high_sec >= lo + hi, "{ctx}");
@@ -587,7 +591,7 @@ fn race_prediction_identity_and_monotonicity() {
     for t in [900.0, 1200.0, 1500.0, 2100.0] {
         let mut prev = (0.0, 0.0);
         for d2 in GOALS_M {
-            let v = to_race_view(&race_q(5000.0, t, d2, 40.0), None);
+            let v = race(&race_q(5000.0, t, d2, 40.0), None, DistanceUnit::Km);
             assert!(v.low_sec > prev.0 && v.high_sec > prev.1, "{t} s → {d2} m");
             prev = (v.low_sec, v.high_sec);
         }
@@ -595,7 +599,7 @@ fn race_prediction_identity_and_monotonicity() {
         // and so the band centre never slower (Daniels ignores volume).
         let mut prev_mid = f64::INFINITY;
         for weekly in WEEKLY_KM {
-            let v = to_race_view(&race_q(5000.0, t, 42_195.0, weekly), None);
+            let v = race(&race_q(5000.0, t, 42_195.0, weekly), None, DistanceUnit::Km);
             let mid = v.low_sec + v.high_sec;
             assert!(mid <= prev_mid + 1e-9, "{t} s marathon at {weekly} km/wk");
             prev_mid = mid;
@@ -620,10 +624,11 @@ fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
             },
             model,
         );
-        app.view(model).race_prediction.expect("prediction")
+        assert!(app.view(model).race_prediction.is_some(), "prediction");
+        race_of(model)
     };
     for t in [1080.0, 1320.0, 1500.0, 1800.0, 2400.0] {
-        let base = to_race_view(&race_q(5000.0, t, 42_195.0, 40.0), None);
+        let base = race(&race_q(5000.0, t, 42_195.0, 40.0), None, DistanceUnit::Km);
         let mut bare = Model::default();
         let p = predict(&mut bare, t);
         assert_eq!(
@@ -685,7 +690,7 @@ fn slow_recent_race_long_goal_band_still_brackets_the_daniels_time() {
         for d2 in [21_097.5, 42_195.0] {
             let daniels = oracle::daniels_time(oracle::vdot(5000.0, t), d2);
             let riegel = oracle::riegel(t, 5000.0, d2, oracle::riegel_exponent(10.0));
-            let v = to_race_view(&race_q(5000.0, t, d2, 10.0), None);
+            let v = race(&race_q(5000.0, t, d2, 10.0), None, DistanceUnit::Km);
             let lo = daniels.min(riegel);
             if v.low_sec < lo * (1.0 - 1e-6) {
                 bad.push(format!(
@@ -747,6 +752,7 @@ fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
             },
             Some(vdot),
             Default::default(),
+            DistanceUnit::Km,
         );
         assert!(
             f64::from(rec.pace_slow_sec_per_km) >= (mp * 1.20).floor(),
@@ -821,28 +827,36 @@ fn run_target_labels_match_the_clock_oracle_in_km_and_miles() {
             VdotBand::Interval,
         ] {
             let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
-            let t = resolve_target(
+            let km = resolve_target(
                 tb,
                 &RunIntensity::Vdot(band),
                 Some(vdot),
                 Default::default(),
+                DistanceUnit::Km,
+            );
+            let mi = resolve_target(
+                tb,
+                &RunIntensity::Vdot(band),
+                Some(vdot),
+                Default::default(),
+                DistanceUnit::Mi,
             );
             let (fast, slow) = running::vdot_band_pace_sec_per_km(vdot, band).unwrap();
             assert_eq!(
-                f64::from(t.pace_fast_sec_per_km),
+                f64::from(km.pace_fast_sec_per_km),
                 oracle::round_half_away(fast)
             );
             assert_eq!(
-                f64::from(t.pace_slow_sec_per_km),
+                f64::from(km.pace_slow_sec_per_km),
                 oracle::round_half_away(slow)
             );
             assert_eq!(
-                t.pace_label_km,
+                km.pace_label,
                 format!("{}–{} /km", oracle::mss(fast), oracle::mss(slow))
             );
             let k = oracle::MILE_M / 1000.0;
             assert_eq!(
-                t.pace_label_mi,
+                mi.pace_label,
                 format!("{}–{} /mi", oracle::mss(fast * k), oracle::mss(slow * k))
             );
         }
@@ -861,7 +875,7 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
         };
         for band in [VdotBand::Easy, VdotBand::Marathon, VdotBand::Threshold] {
             let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
-            let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
+            let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr, DistanceUnit::Km);
             let (lo, hi) = oracle::band_row(band).2.unwrap();
             let (lo_bpm, hi_bpm) = t
                 .hr_label
@@ -880,7 +894,7 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
         }
         for band in [VdotBand::Interval, VdotBand::Repetition] {
             let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
-            let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
+            let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr, DistanceUnit::Km);
             assert!(t.hr_label.is_empty(), "{band:?} is pace-governed");
         }
     }
@@ -1233,7 +1247,7 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
         },
         ..Default::default()
     };
-    let item = flatten_prescription(&rx, &anchors, None, true);
+    let item = flatten_prescription(&rx, &anchors, None, true, DistanceUnit::Km);
     let shown = item.load_kg.expect("anchored load") * LB_PER_KG;
     if (shown - 240.0).abs() > 1e-6 {
         bad.push(format!(
@@ -1277,15 +1291,15 @@ fn kg_display_rounds_once_to_a_tenth() {
 }
 
 #[test]
-fn distance_line_miles_twin_converts_the_km_actually_shown() {
+fn distance_line_in_miles_converts_the_km_actually_shown() {
     // `fmt_mi_of_km` is documented as "the km distance a line shows at one
-    // decimal, restated in miles". The km line is `fmt_km_or_mi(km, false)`.
+    // decimal, restated in miles". The km line is `fmt_km_or_mi(km, Km)`.
     // On an exact .x5 binary tie (quarter kilometres) the two round the km
     // differently, so the pair can describe two different distances.
     let mut bad = Vec::new();
     for q in 1..=4000 {
         let km = 0.25 * f64::from(q);
-        let km_line = fmt_km_or_mi(km, false);
+        let km_line = fmt_km_or_mi(km, DistanceUnit::Km);
         let shown: f64 = km_line.trim_end_matches(" km").parse().unwrap();
         let mi = shown * 1000.0 / oracle::MILE_M;
         let tenths = mi * 10.0;
@@ -1294,7 +1308,7 @@ fn distance_line_miles_twin_converts_the_km_actually_shown() {
         if want.ends_with(".0") {
             want.truncate(want.len() - 2);
         }
-        let mi_line = fmt_km_or_mi(km, true);
+        let mi_line = fmt_km_or_mi(km, DistanceUnit::Mi);
         if mi_line != format!("{want} mi") {
             bad.push(format!(
                 "{km} km: km line {km_line:?}, mi line {mi_line:?}, miles of the shown km {want}"
@@ -1629,7 +1643,7 @@ fn training_load_matches_lucia_trimp_and_ewma_oracle() {
         let last = 20_000 + seed as i64;
         let runs = seeded_runs(0x10ad + seed, last, 20 + 15 * seed as i64);
         let (app, m) = load_model(&runs, last);
-        let tl = app.view(&m).training_load.expect("HR-carrying runs");
+        let tl = load_figures_of(&m).expect("HR-carrying runs");
         let (ctl, atl) = oracle_load(&runs, last);
         assert!(
             (tl.ctl - ctl).abs() <= 0.05 + 1e-9,
@@ -1647,12 +1661,13 @@ fn training_load_matches_lucia_trimp_and_ewma_oracle() {
             tl.tsb,
             ctl - atl
         );
-        assert_eq!(tl.sessions_counted as usize, runs.len());
+        let view = app.view(&m).training_load.expect("HR-carrying runs");
+        assert_eq!(view.sessions_counted as usize, runs.len());
         let want = format!(
             "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1}",
             tl.ctl, tl.atl, tl.tsb
         );
-        assert!(tl.summary.starts_with(&want), "{}", tl.summary);
+        assert!(view.summary.starts_with(&want), "{}", view.summary);
     }
 }
 
@@ -1664,8 +1679,8 @@ fn training_load_decays_through_rest_days_up_to_today() {
     let last = 20_100;
     let runs = seeded_runs(0x10ad_0bad, last, 42);
     let today = last + 21;
-    let (app, m) = load_model(&runs, today);
-    let tl = app.view(&m).training_load.expect("HR-carrying runs");
+    let (_, m) = load_model(&runs, today);
+    let tl = load_figures_of(&m).expect("HR-carrying runs");
     let (ctl, atl) = oracle_load(&runs, today);
     assert!(
         (tl.atl - atl).abs() <= 0.05

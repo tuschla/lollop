@@ -130,7 +130,7 @@ internal class RouteRenderer(private val s: RouteStyle) : RoutePainter {
     }
 
     /** Strokes the runs of consecutive legs of segment [si] that are kept ([keptLegs]) or cut. */
-    private fun strokeLegs(c: Canvas, si: Int, seg: List<GpxFix>, o: RouteDrawOptions, keptLegs: Boolean, paint: Paint) {
+    private fun strokeLegs(c: Canvas, si: Int, seg: List<GpsPoint>, o: RouteDrawOptions, keptLegs: Boolean, paint: Paint) {
         val xs = layout.xs[si]
         val ys = layout.ys[si]
         val n = seg.size

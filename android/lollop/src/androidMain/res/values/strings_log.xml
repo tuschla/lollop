@@ -153,7 +153,8 @@
     <string name="log_field_severity">Severity</string>
     <string name="log_field_value">Value</string>
     <string name="log_field_run_duration">Run duration</string>
-    <string name="log_decoupling_hint">Heart-rate drift only counts on a steady run longer than 20 minutes.</string>
+    <!-- %1$s = DECOUPLING_MIN_EFFORT_MIN (CoreConstants), filled in ReadinessEditors.kt. -->
+    <string name="log_decoupling_hint">Heart-rate drift only counts on a steady run longer than %1$s minutes.</string>
 
     <!-- Pain triage -->
     <string name="log_report_pain">Report pain</string>
@@ -193,8 +194,10 @@
     <string name="log_weekly_sign_sleep">Sleeping worse</string>
     <string name="log_weekly_signs_how_long">For how long?</string>
     <string name="log_weekly_signs_lt1">Less than a week</string>
-    <string name="log_weekly_signs_1to2">1–2 weeks</string>
-    <string name="log_weekly_signs_gt2">More than 2 weeks</string>
+    <!-- %1$s = OVERTRAINING_MIN_WEEKS, %2$s = NFOR_DECLINE_WEEKS (CoreConstants), filled in ReviewSheets.kt. -->
+    <string name="log_weekly_signs_1to2">%1$s–%2$s weeks</string>
+    <!-- %1$s = NFOR_DECLINE_WEEKS (CoreConstants). -->
+    <string name="log_weekly_signs_gt2">More than %1$s weeks</string>
     <string name="log_weekly_clinical_header">Health questions</string>
     <string name="log_clinical_compulsive_q">Over the last few weeks, have you felt you must exercise even when ill or injured, or anxious when you can\'t?</string>
     <string name="log_clinical_compulsive_ctx">If yes, training pauses. Talk to a doctor or therapist.</string>
@@ -238,10 +241,11 @@
     <!-- Protein form -->
     <string name="log_field_bodyweight">Bodyweight</string>
     <string name="log_prefill_profile">From your profile.</string>
-    <string name="log_switch_masters">Age 65+</string>
+    <!-- %1$s = MASTERS_AGE_YEARS (CoreConstants), here and in log_protein_deficit_only. -->
+    <string name="log_switch_masters">Age %1$s+</string>
     <string name="log_switch_deficit">Eating less than you burn</string>
     <string name="log_protein_no_context">Pick one above. There\'s no proven protein target for everyone.</string>
-    <string name="log_protein_deficit_only">Under 65, the evidence supports a protein target only while you eat less than you burn.</string>
+    <string name="log_protein_deficit_only">Under %1$s, the evidence supports a protein target only while you eat less than you burn.</string>
     <string name="log_btn_compute_protein">Get protein target</string>
 
     <!-- HR zones form -->
@@ -251,7 +255,6 @@
 
     <!-- Backdate / observed-at chip + date/time pickers -->
     <string name="log_logged">Logged</string>
-    <string name="log_backdate_locked">This older entry\'s date can\'t be changed. To move it, delete it and log it again.</string>
     <string name="log_future_clamped">Can\'t log in the future. Set to now.</string>
     <string name="log_logged_at">Logged at</string>
     <string name="log_ok">OK</string>
@@ -278,16 +281,17 @@
     <string name="log_illness_level_none">None</string>
     <string name="log_illness_level_above">Head cold only (no fever)</string>
     <string name="log_illness_level_below">Flu, fever or body aches</string>
-    <string name="log_spec_rpe">Effort vs plan: +1 means 1 rep fewer left than planned · 1 off adjusts the weight, 2 off adjusts it more</string>
-    <string name="log_spec_e1rm">Today\'s estimated max ÷ your normal · under 0.95 holds the weight, over 1.05 adds to it</string>
+    <!-- Value hints: every %N$s is a core threshold (CoreConstants), filled in ReadinessEditors.kt. -->
+    <string name="log_spec_rpe">Effort vs plan: +1 means 1 rep fewer left than planned · %1$s off adjusts the weight, %2$s off adjusts it more</string>
+    <string name="log_spec_e1rm">Today\'s estimated max ÷ your normal · under %1$s holds the weight, over %2$s adds to it</string>
     <string name="log_spec_bar_velocity">Average bar speed while lifting (m/s)</string>
-    <string name="log_spec_velocity_loss" formatted="false">Bar-speed drop within a set (%) · stop at 10–40% depending on goal</string>
-    <string name="log_spec_wellness">Wellness vs your normal (z-score) · −1.5 or lower eases today\'s session</string>
-    <string name="log_spec_hrv">HRV vs your normal (z-score) · below −0.5 eases today\'s session</string>
+    <string name="log_spec_velocity_loss">Bar-speed drop within a set (%%) · stop at %1$s–%2$s%% depending on goal</string>
+    <string name="log_spec_wellness">Wellness vs your normal (z-score) · %1$s or lower eases today\'s session</string>
+    <string name="log_spec_hrv">HRV vs your normal (z-score) · below %1$s eases today\'s session</string>
     <string name="log_spec_hrv_cv" formatted="false">HRV coefficient of variation (%)</string>
-    <string name="log_spec_decoupling" formatted="false">Heart-rate drift (%) · over 10 keeps the run easy</string>
-    <string name="log_spec_rhr">Resting heart rate above your normal (bpm) · +5 for 2+ days eases training, +10 stops it</string>
-    <string name="log_spec_soreness">Soreness, 1–7 · 6 or more eases intensity</string>
+    <string name="log_spec_decoupling">Heart-rate drift (%%) · over %1$s keeps the run easy</string>
+    <string name="log_spec_rhr">Resting heart rate above your normal (bpm) · %1$s for %2$s+ days eases training, %3$s stops it</string>
+    <string name="log_spec_soreness">Soreness, 1–7 · %1$s or more eases intensity</string>
     <string name="log_value_min">%1$d\u00A0min</string>
     <string name="log_value_pct">%1$s\u00A0%%</string>
     <string name="log_value_bpm">%1$d\u00A0bpm</string>

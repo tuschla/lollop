@@ -356,14 +356,14 @@ class SessionReminderTest {
     fun snapshotCarriesPlannedDaysAheadAndItsZone() {
         val day = today
         val lift = PrescriptionView(exercise = "Back squat", face_lead = "3 × 5 @ 100 kg")
-        val run = PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"))
+        val run = PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"))
         val week = listOf(
             SessionPlanView(day, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift)),
             SessionPlanView(day + 1, "", SessionType.Rest, SessionStatus.Rest),
             SessionPlanView(day + 2, "Easy run 8 km", SessionType.RunEasy, SessionStatus.Planned, listOf(run)),
             SessionPlanView(day + 3, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Planned, listOf(lift)),
         )
-        val model = ViewModel(today_epoch_day = day, profile = Profile(), next_session = week[0], week_plan = week)
+        val model = ViewModel(today_epoch_day = day, profile = Profile(), next_session = week[0], week_plan = week, today_surface = TodaySurfaceView(state = TodayState.Session))
         val s = widgetSnapshotOf(model, DistanceUnit.Km, zone = "Europe/Berlin")
         assertEquals("Europe/Berlin", s.zone)
         assertEquals(listOf(day + 2, day + 3), s.ahead.map { it.epochDay })
@@ -371,7 +371,7 @@ class SessionReminderTest {
         assertEquals(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km"), s.ahead[0].items.single())
         assertEquals(WidgetDayKind.Lift, s.ahead[1].kind)
         // Paused: nothing ahead.
-        val held = widgetSnapshotOf(model.copy(hold_reason = HoldReason.Pain), DistanceUnit.Km, zone = "Europe/Berlin")
+        val held = widgetSnapshotOf(model.copy(hold_reason = HoldReason.Pain, today_surface = TodaySurfaceView(state = TodayState.Paused)), DistanceUnit.Km, zone = "Europe/Berlin")
         assertTrue(held.ahead.isEmpty())
     }
 

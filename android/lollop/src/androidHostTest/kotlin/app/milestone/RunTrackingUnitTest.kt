@@ -18,12 +18,19 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
  * JVM unit tests (no device) for the run-tracking shell: the incremental
  * live-distance accumulator must match a full haversine, and the recorded track,
  * moving time, pace slices and notification state stay consistent.
+ *
+ * Robolectric, not plain JUnit: the save's and recovery's thinning is the core's
+ * (`ThinTrack`), and the JVM loads `libshared.so` into one classloader only (see
+ * [EventLogTest]).
  */
+@RunWith(RobolectricTestRunner::class)
 class RunTrackingUnitTest {
 
     @Before fun isolate() = AppRuntime.resetForTest(clock = PlainJvmClock)
@@ -448,7 +455,7 @@ class RunTrackingUnitTest {
         val segs = trackSegments(pts, listOf(3))
         assertEquals(listOf(3, 2), segs.map { it.size })
         assertEquals(pts[3].lat, segs[1].first().lat, 0.0)
-        assertEquals(30L, segs[1].first().timeSec)
+        assertEquals(30L, segs[1].first().observedAt)
         assertEquals(listOf(5), trackSegments(pts, emptyList()).map { it.size })
         assertTrue(trackSegments(emptyList(), listOf(0)).isEmpty())
 
@@ -712,8 +719,8 @@ class RunTrackingUnitTest {
         lon += 5.0 * degPerM
         RunSession.add(GpsPoint(0.0, lon, 400, 5.0), 400_000_000_000L)
         val captured = RunSession.points.value
-        assertTrue("wall span passes the bar", captured.last().observedAt - captured.first().observedAt >= MIN_RUN_SEC)
-        assertTrue("distance passes the bar", RunSession.distanceKm.value >= MIN_RUN_KM)
+        assertTrue("wall span passes the bar", captured.last().observedAt - captured.first().observedAt >= CoreConstants.MIN_RUN_SEC)
+        assertTrue("distance passes the bar", RunSession.distanceKm.value >= CoreConstants.MIN_RUN_KM)
         assertTrue("moving time does not", isShortRun(RunSession.distanceKm.value, RunSession.elapsedSec.value))
         RunSession.reset()
     }
@@ -959,9 +966,9 @@ class RunTrackingUnitTest {
         // 60 s of running (30 m every 10 s), 20 s standing still, a pause, then
         // another 60 s of running: 4:20 on the wall clock, 2:00 moving.
         val degPerM = 1.0 / 111_195.0
-        val seg1 = (0..6).map { GpxFix(47.0 + it * 30.0 * degPerM, 8.0, it * 10L, null) } +
-            GpxFix(47.0 + 180.0 * degPerM, 8.0, 80L, null)
-        val seg2 = (0..6).map { GpxFix(47.01 + it * 30.0 * degPerM, 8.0, 200L + it * 10L, null) }
+        val seg1 = (0..6).map { GpsPoint(47.0 + it * 30.0 * degPerM, 8.0, it * 10L, 5.0) } +
+            GpsPoint(47.0 + 180.0 * degPerM, 8.0, 80L, 5.0)
+        val seg2 = (0..6).map { GpsPoint(47.01 + it * 30.0 * degPerM, 8.0, 200L + it * 10L, 5.0) }
         val points = timedTrackFromSegments(listOf(seg1, seg2))
         val last = points.lastIndex
         assertEquals(260L, points[last].timeSec - points[0].timeSec)
@@ -1024,8 +1031,8 @@ private fun RunSession.paceBuckets(bucketMinutes: Int): List<PaceBucket> {
         var legSec = (pts[i].observedAt - pts[i - 1].observedAt).toDouble()
         if (legSec <= 0.0) continue
         var legKm = segmentKm(pts[i - 1], pts[i])
-        if (legKm * 1000.0 / legSec < MIN_MOVING_SPEED_MPS) continue
-        val maxKm = MAX_PLAUSIBLE_SPEED_MPS * legSec / 1000.0
+        if (legKm * 1000.0 / legSec < CoreConstants.MIN_MOVING_SPEED_MPS) continue
+        val maxKm = CoreConstants.MAX_PLAUSIBLE_SPEED_MPS * legSec / 1000.0
         if (legKm > maxKm) legKm = maxKm
         while (curSec + legSec >= bucketSec) {
             val take = bucketSec - curSec

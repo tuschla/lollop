@@ -7,7 +7,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -51,24 +50,18 @@ import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.DarkMode
-import app.milestone.DarkStatusColors
+import app.milestone.DayMark
 import app.milestone.OpenDest
-import app.milestone.Palette
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.Space
-import app.milestone.StatusColors
 import app.milestone.Type
-import app.milestone.WeekdayWidth
-import app.milestone.accentTint
-import app.milestone.icon
-import app.milestone.appLocale
-import app.milestone.latinDigitResources
+import app.milestone.appResources
 import app.milestone.openIntent
 import app.milestone.planDateLabel
 import app.milestone.resolveSurfaceAccent
 import app.milestone.todayEpochDay
-import app.milestone.weekdayName
+import app.milestone.weekdayStripLabel
 import kotlin.math.ceil
 import kotlinx.datetime.LocalDate
 import androidx.compose.ui.text.TextStyle as ComposeTextStyle
@@ -110,22 +103,6 @@ private const val LineEm = 1.171f
 /** The height of a text in this style on [lines] lines at [fontScale]. */
 private fun ComposeTextStyle.height(lines: Int, fontScale: Float): Dp =
     (fontSize.value * fontScale * (FontPaddingEm + LineEm * lines)).dp
-
-/**
- * A character's advance in em, for estimating where a line wraps: about the
- * system font's (Roboto) widths by class, a little wide, so a line estimated to
- * fit does.
- */
-private fun charEm(c: Char): Float = when {
-    c == ' ' || c == '\u00A0' -> 0.27f
-    c in "iljtfrI.,:;·'!|()" -> 0.32f
-    c in "mwMW@" -> 0.82f
-    c.isUpperCase() -> 0.64f
-    c.isDigit() -> 0.57f
-    else -> 0.54f
-}
-
-private fun textEm(text: String): Float = text.sumOf { charEm(it).toDouble() }.toFloat()
 
 /** A labelled button's icon (dp) and label size (sp): Glance's FilledButton. */
 private const val LabelledIcon = 18
@@ -179,7 +156,7 @@ internal class TodayWidget : GlanceAppWidget() {
             val ctx = LocalContext.current
             // The face's counts in Latin digits like the app's (AppLocale.kt),
             // rebuilt when the language changes.
-            val res = ctx.latinDigitResources()
+            val res = ctx.appResources()
             // A write or a stale mark ticks the revision, so a session that is still
             // running re-reads the file and today's date.
             val revision by WidgetSnapshotStore.revision.collectAsState()
@@ -199,7 +176,7 @@ internal class TodayWidget : GlanceAppWidget() {
      *  sample lift day in the app's current theme. */
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
         AppRuntime.start(context)
-        val res = context.latinDigitResources()
+        val res = context.appResources()
         val face = widgetFace(previewSnapshot(res, todayEpochDay()), todayEpochDay(), res)
         val colors = widgetColors(context, AppSettings.theme.value, AppSettings.darkMode.value, AppSettings.dynamicAccent.value)
         provideContent { TodayWidgetContent(face, colors) }
@@ -215,10 +192,10 @@ internal fun previewSnapshot(res: Resources, today: Long): WidgetSnapshot {
     val week = (0 until 7).map { i ->
         val day = monday + i
         val mark = when {
-            day == today -> WidgetWeekMark.Next
-            i !in PreviewSessionDays -> WidgetWeekMark.Rest
-            day < today -> WidgetWeekMark.Done
-            else -> WidgetWeekMark.Planned
+            day == today -> DayMark.Next
+            i !in PreviewSessionDays -> DayMark.Rest
+            day < today -> DayMark.Done
+            else -> DayMark.Planned
         }
         WidgetWeekDay(day, mark)
     }
@@ -232,8 +209,8 @@ internal fun previewSnapshot(res: Resources, today: Long): WidgetSnapshot {
             lift(R.string.widget_preview_lift_2, R.string.widget_preview_lift_2_detail),
             lift(R.string.widget_preview_lift_3, R.string.widget_preview_lift_3_detail),
         ),
-        weekDone = week.count { it.mark == WidgetWeekMark.Done },
-        weekPlanned = week.count { it.mark != WidgetWeekMark.Rest && it.mark != WidgetWeekMark.None },
+        weekDone = week.count { it.mark == DayMark.Done },
+        weekPlanned = week.count { it.mark != DayMark.Rest && it.mark != DayMark.None },
         week = week,
     )
 }
@@ -296,7 +273,7 @@ private fun labelledWidth(label: String, fontScale: Float): Dp =
 
 /** Whether each weekday label of [days] fits a strip column of [column], with a [Space.Sm] margin each side. */
 private fun dayLabelsFit(days: List<WidgetWeekDay>, column: Dp, fontScale: Float): Boolean =
-    days.all { (textEm(weekdayShort(it.epochDay)) * Type.Overline.fontSize.value * fontScale).dp + (Space.Sm * 2).dp <= column }
+    days.all { (textEm(weekdayStripLabel(LocalDate.fromEpochDays(it.epochDay).dayOfWeek)) * Type.Overline.fontSize.value * fontScale).dp + (Space.Sm * 2).dp <= column }
 
 /**
  * The layout for [face] at [size] and the system [fontScale]. The richest one
@@ -469,39 +446,39 @@ internal fun bodyLines(face: WidgetFace, layout: WidgetLayout, res: Resources): 
     val fs = layout.fontScale
     // A lone lead line too long for two lines ("Next: Heavy volume day, Thu, Oct 30"
     // at a large font) gives way to the short one ("Next: Thu").
-    val lead = face.lead.singleOrNull()?.takeIf { wrappedLines(it, Type.Caption, layout.textWidth, fs) > 2 }
-        ?.let { face.brief }?.let { listOf(it) } ?: face.lead
+    val lead = face.shortLead?.takeIf { wrappedLines(face.lead.single(), Type.Caption, layout.textWidth, fs) > 2 }
+        ?.let { listOf(it) } ?: face.lead
     val src = if (layout.hero) face.copy(lead = face.heroLead, items = face.heroItems) else face.copy(lead = lead)
     fun List<BodyLine>.height() = fold(0.dp) { acc, l -> acc + (if (l.large) Type.Body else Type.Caption).height(l.maxLines, fs) }
     val all = src.lead.size + src.items.size
     if (all in 1..MaxBodyLines) {
-        val large = visibleLines(src, all, res).map { BodyLine(it, wrappedLines(it, Type.Body, layout.textWidth, fs), large = true) }
+        val large = visibleLines(src.lead, src.items, all, res).map { BodyLine(it, wrappedLines(it, Type.Body, layout.textWidth, fs), large = true) }
         if (large.all { it.maxLines <= 2 } && large.height() <= layout.bodyHeight) return large
     }
     for (n in minOf(all, MaxBodyLines) downTo 1) {
-        val lines = visibleLines(src, n, res).map { BodyLine(it, linesOf(it, Type.Caption, layout.textWidth, fs)) }
+        val lines = visibleLines(src.lead, src.items, n, res).map { BodyLine(it, linesOf(it, Type.Caption, layout.textWidth, fs)) }
         if (lines.height() <= layout.bodyHeight) return lines
     }
     // A hero's lines show whole or not at all; a list keeps its first line, cut to one.
     return if (!layout.hero && all > 0 && Type.Caption.height(1, fs) <= layout.bodyHeight) {
-        listOf(BodyLine(visibleLines(src, 1, res).first(), 1))
+        listOf(BodyLine(visibleLines(src.lead, src.items, 1, res).first(), 1))
     } else {
         emptyList()
     }
 }
 
-/** The app palette as Glance colours. */
-internal data class WidgetColors(
-    val ground: ColorProvider,
-    val body: ColorProvider,
-    val muted: ColorProvider,
-    val faint: ColorProvider,
-    val accent: ColorProvider,
-    val onAccent: ColorProvider,
-    val accentTint: ColorProvider,
-    val danger: ColorProvider,
-    val done: ColorProvider,
-)
+/** The app palette as Glance colours, one per [WidgetInk]. */
+internal class WidgetColors(private val inks: Map<WidgetInk, ColorProvider>) {
+    operator fun get(ink: WidgetInk): ColorProvider = inks.getValue(ink)
+
+    val ground: ColorProvider get() = this[WidgetInk.Ground]
+    val body: ColorProvider get() = this[WidgetInk.Body]
+    val muted: ColorProvider get() = this[WidgetInk.Muted]
+    val faint: ColorProvider get() = this[WidgetInk.Faint]
+    val accent: ColorProvider get() = this[WidgetInk.Accent]
+    val onAccent: ColorProvider get() = this[WidgetInk.OnAccent]
+    val accentTint: ColorProvider get() = this[WidgetInk.AccentTint]
+}
 
 /**
  * [theme]'s palette, light and dark like the app: following the system mode
@@ -512,27 +489,12 @@ internal data class WidgetColors(
 internal fun widgetColors(ctx: Context, theme: AppTheme, darkMode: DarkMode, dynamic: Boolean): WidgetColors {
     val light = resolveSurfaceAccent(ctx, theme.light, night = false, dynamic = dynamic)
     val dark = resolveSurfaceAccent(ctx, theme.dark, night = true, dynamic = dynamic)
-    fun pick(role: (Palette) -> Color): ColorProvider = when (darkMode) {
-        DarkMode.System -> DayNightColorProvider(role(light), role(dark))
-        DarkMode.Light -> ColorProvider(role(light))
-        DarkMode.Dark -> ColorProvider(role(dark))
+    fun pick(ink: WidgetInk): ColorProvider = when (darkMode) {
+        DarkMode.System -> DayNightColorProvider(light.ink(ink, dark = false), dark.ink(ink, dark = true))
+        DarkMode.Light -> ColorProvider(light.ink(ink, dark = false))
+        DarkMode.Dark -> ColorProvider(dark.ink(ink, dark = true))
     }
-    val done = when (darkMode) {
-        DarkMode.System -> DayNightColorProvider(StatusColors().done, DarkStatusColors.done)
-        DarkMode.Light -> ColorProvider(StatusColors().done)
-        DarkMode.Dark -> ColorProvider(DarkStatusColors.done)
-    }
-    return WidgetColors(
-        ground = pick { it.bgTop },
-        body = pick { it.onBgBody },
-        muted = pick { it.onBgMuted },
-        faint = pick { it.onBgFaint },
-        accent = pick { it.accent },
-        onAccent = pick { it.bgTop },
-        accentTint = pick { it.accentTint() },
-        danger = pick { it.dangerText },
-        done = done,
-    )
+    return WidgetColors(WidgetInk.entries.associateWith(::pick))
 }
 
 /** A [Type] token as a Glance text style in [color]. */
@@ -547,17 +509,13 @@ private fun ComposeTextStyle.glance(color: ColorProvider, align: TextAlign? = nu
     textAlign = align,
 )
 
-private fun WidgetFace.titleColor(colors: WidgetColors) = when (tone) {
-    WidgetTone.Paused -> colors.danger
-    WidgetTone.Muted -> colors.muted
-    WidgetTone.Normal -> colors.body
-}
+private fun WidgetFace.titleColor(colors: WidgetColors) = colors[tone.ink]
 
 @Composable
 internal fun TodayWidgetContent(face: WidgetFace, colors: WidgetColors) {
     val ctx = LocalContext.current
     val layout = widgetLayout(LocalSize.current, ctx.resources.configuration.fontScale, face)
-    val openToday = ctx.getString(R.string.widget_open_today_cd)
+    val openToday = ctx.appResources().getString(R.string.widget_open_today_cd)
     val root = GlanceModifier
         .fillMaxSize()
         .appWidgetBackground()
@@ -609,7 +567,7 @@ private fun LineLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLay
 @Composable
 private fun StackLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLayout, modifier: GlanceModifier) {
     val ctx = LocalContext.current
-    val res = ctx.latinDigitResources()
+    val res = ctx.appResources()
     val lines = bodyLines(face, layout, res)
     // The lead lines (session done, the next session, the pause pointer) read muted;
     // items are what to do and read in body colour.
@@ -681,8 +639,20 @@ private fun StackLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLa
     }
 }
 
+/** The icon's drawable (24 dp), also the source of the iOS extension's image set. */
+internal val SurfaceIcon.drawable: Int
+    get() = when (this) {
+        SurfaceIcon.TrackRun -> R.drawable.ic_content_track_run
+        SurfaceIcon.LogSet -> R.drawable.ic_content_set_dumbbell
+        SurfaceIcon.Log -> R.drawable.ic_action_log_plus
+        SurfaceIcon.Mark -> R.drawable.ic_stat_mark
+        SurfaceIcon.Pause -> R.drawable.ic_track_pause
+        SurfaceIcon.Play -> R.drawable.ic_track_play
+        SurfaceIcon.Stop -> R.drawable.ic_track_stop
+    }
+
 /** The button's icon: its tile face's. */
-private val WidgetAction.icon: Int get() = face.icon
+private val WidgetAction.icon: Int get() = face.icon.drawable
 
 /**
  * The action(s): the secondary one (Log) as a tinted round icon button, the
@@ -730,10 +700,6 @@ private fun RowScope.Actions(face: WidgetFace, colors: WidgetColors, layout: Wid
     }
 }
 
-/** Two-letter weekday ("Mo", "Tu"), as the app's week strip. */
-private fun weekdayShort(epochDay: Long): String =
-    weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.ShortStandalone, appLocale()).take(2)
-
 /**
  * The week block: the week count ("1 of 4 sessions done"), then, where the layout
  * has room ([WidgetLayout.weekDays]), the plan week Monday to Sunday, each day's
@@ -752,14 +718,7 @@ private fun ColumnScope.WeekStrip(face: WidgetFace, colors: WidgetColors, layout
     ) {
         face.days.forEach { d ->
             val isToday = d.epochDay == today
-            val (glyph, color) = when (d.mark) {
-                WidgetWeekMark.Done -> "\u2713" to colors.done
-                WidgetWeekMark.Next -> "\u25CF" to colors.accent
-                WidgetWeekMark.Planned -> "\u25CB" to colors.faint
-                WidgetWeekMark.Missed -> "\u25CB" to colors.muted
-                WidgetWeekMark.Rest -> "\u00A0" to colors.faint
-                WidgetWeekMark.None -> "\u2013" to colors.faint
-            }
+            val (glyph, color) = d.mark.glyph.let { it.text to colors[it.ink] }
             Column(
                 modifier = GlanceModifier
                     .defaultWeight()
@@ -774,7 +733,7 @@ private fun ColumnScope.WeekStrip(face: WidgetFace, colors: WidgetColors, layout
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    weekdayShort(d.epochDay),
+                    weekdayStripLabel(LocalDate.fromEpochDays(d.epochDay).dayOfWeek),
                     style = (if (isToday) Type.Overline else Type.Overline.copy(fontWeight = ComposeFontWeight.Normal))
                         .glance(if (isToday) colors.accent else colors.muted, TextAlign.Center),
                     maxLines = 1,

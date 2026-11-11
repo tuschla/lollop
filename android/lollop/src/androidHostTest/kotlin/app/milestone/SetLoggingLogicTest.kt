@@ -5,10 +5,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /** The pure rules behind the set/run editors: the loop's double-tap guard, quick
  *  picks, timer-style run duration, the rest countdown, and which sets count as
  *  "today's" for the loop. */
+@RunWith(RobolectricTestRunner::class)
 class SetLoggingLogicTest {
 
     @Test
@@ -133,35 +136,17 @@ class SetLoggingLogicTest {
         assertEquals(stop, inSessionCue("Back Squat", listOf(nextTime), listOf(stop)))
     }
 
+    /** The warm-up chips are the core's ramp (`strength::warm_up_ramp`, whose
+     *  steps, floor start and plate grids `strength::tests` pins), decoded with
+     *  the bar flag; none off the straight barbell. */
     @Test
-    fun warmUpsRampFortySixtyEightyWithATaperAfterTheFirstStep() {
+    fun theWarmUpChipsAreTheCoresRamp() {
         assertEquals(
             listOf(WarmUpStep(20.0, 5, bar = true), WarmUpStep(40.0, 5), WarmUpStep(60.0, 3), WarmUpStep(80.0, 2)),
             warmUpSteps(100.0, WeightUnit.Kg, "Back squat"),
         )
-        // lb: 45 lb bar, then 115, 175 and 230 lb on the 5 lb grid for a 290 lb work set.
-        assertEquals(
-            listOf(lbToKgWire(45.0), lbToKgWire(115.0), lbToKgWire(175.0), lbToKgWire(230.0)),
-            warmUpSteps(lbToKgWire(290.0), WeightUnit.Lb, "Back squat").map { it.kg },
-        )
-        // A light work set keeps only the ramp steps above the bar.
-        assertEquals(listOf(20.0, 25.0, 32.5), warmUpSteps(40.0, WeightUnit.Kg, "Bench press").map { it.kg })
-        assertEquals(emptyList<WarmUpStep>(), warmUpSteps(20.0, WeightUnit.Kg, "Bench press"))
-    }
-
-    @Test
-    fun aFloorPullStartsPlateLoadedNotOnTheEmptyBar() {
-        assertEquals(
-            listOf(WarmUpStep(60.0, 5), WarmUpStep(85.0, 3), WarmUpStep(112.5, 2)),
-            warmUpSteps(140.0, WeightUnit.Kg, "Deadlift"),
-        )
         assertEquals(lbToKgWire(135.0), warmUpSteps(lbToKgWire(390.0), WeightUnit.Lb, "Sumo deadlift").first().kg, 1e-9)
-        assertEquals(emptyList<WarmUpStep>(), warmUpSteps(60.0, WeightUnit.Kg, "Deadlift"))
-        assertTrue(isFloorLift("Power clean"))
-        assertFalse(isFloorLift("Romanian deadlift"))
-        assertFalse(isFloorLift("Hang clean"))
-        // The Turkish-keyboard caps spelling is folded like nameKey's.
-        assertTrue(isFloorLift("DEADL\u0130FT"))
+        assertEquals(emptyList<WarmUpStep>(), warmUpSteps(40.0, WeightUnit.Kg, "Dumbbell bench press"))
     }
 
     @Test
@@ -184,7 +169,7 @@ class SetLoggingLogicTest {
         assertEquals("101.25", loadFigure(101.25, WeightUnit.Kg))
         assertEquals("100", loadFigure(100.0, WeightUnit.Kg))
         // A core-derived lb load (225 lb = 102.05828… kg) reads at the field's precision.
-        assertEquals("102.06", loadFigure(225.0 / LB_PER_KG, WeightUnit.Kg))
+        assertEquals("102.06", loadFigure(225.0 / CoreConstants.LB_PER_KG, WeightUnit.Kg))
         assertEquals("295", trimWeightText("295.0"))
         assertEquals("292.5", trimWeightText("292.5"))
     }

@@ -119,7 +119,7 @@ class FormattingTest {
         assertEquals("0.00001", fmtLosslessPrefill(1e-5))
         assertEquals("10000000", fmtLosslessPrefill(1.0E7))
         assertEquals("100000000000000000000", fmtLosslessPrefill(1e20))
-        assertEquals("104.32624510230815", fmtLosslessPrefill(230.0 / LB_PER_KG))
+        assertEquals("104.32624510230815", fmtLosslessPrefill(230.0 / CoreConstants.LB_PER_KG))
         assertFailsWith<NumberFormatException> { fmtLosslessPrefill(Double.NaN) }
         assertFailsWith<NumberFormatException> { fmtLosslessPrefill(Double.POSITIVE_INFINITY) }
     }

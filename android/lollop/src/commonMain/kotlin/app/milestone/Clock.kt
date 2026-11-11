@@ -61,6 +61,19 @@ internal fun ViewModel.resumableLiftDay(): SessionPlanView? = week_plan.firstOrN
         it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
 }
 
+/** The lift item a set logs against today, with its session: today's plan lift
+ *  session's first open item (else its first), or once something is logged and
+ *  the core moved next_session on, today's started lift session's first open item
+ *  (else its last, for an extra set). */
+internal fun ViewModel.openLiftTarget(): Pair<SessionPlanView, PrescriptionView>? {
+    val plan = todaysPlan()
+    if (plan != null && plan.session_type.discipline == SessionDiscipline.Lift) {
+        return plan to (firstOpenItem(plan.items) ?: plan.items.first())
+    }
+    val started = resumableLiftDay() ?: return null
+    return started to (firstOpenItem(started.items) ?: started.items.last())
+}
+
 /** The device's current UTC offset in SECONDS east of UTC, so the core can
  *  bucket a logged session's UTC `observed_at` into the correct local day. Uses
  *  the offset at "now" (DST-correct for the current instant). */

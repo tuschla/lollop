@@ -3,22 +3,25 @@
 use crate::app::plan_views::calis_views::flatten_calisthenics_prescription;
 use crate::app::plan_views::flatten_lift::flatten_lift_prescription;
 use crate::app::plan_views::flatten_run::flatten_run_prescription;
-use crate::app::view_types::PrescriptionView;
+use crate::app::plan_views::plan_item::PlanItem;
+use crate::profile::DistanceUnit;
 use crate::schema::{
     DupDay, LiftSessionType, Prescription, RunSessionType, Rx, RxBasis, Session, SessionType,
 };
 
-/// Flatten one graded `Prescription` into a shell-facing `PrescriptionView`,
-/// resolving the load from the anchor when the intensity is %1RM.
+/// Flatten one graded `Prescription` into a plan item,
+/// resolving the load from the anchor when the intensity is %1RM. A run's
+/// safety reason reads in `unit`.
 pub(in crate::app) fn flatten_prescription(
     rx: &Rx,
     anchors: &crate::plan::Anchors,
     bodyweight_kg: Option<f64>,
     weight_lb: bool,
-) -> PrescriptionView {
+    unit: DistanceUnit,
+) -> PlanItem {
     match &rx.value {
         Prescription::Lift(l) => flatten_lift_prescription(l, &anchors.lift, rx, weight_lb),
-        Prescription::Run(r) => flatten_run_prescription(r, rx),
+        Prescription::Run(r) => flatten_run_prescription(r, rx, unit),
         Prescription::Calisthenics(c) => {
             flatten_calisthenics_prescription(c, rx, anchors, bodyweight_kg, weight_lb)
         }

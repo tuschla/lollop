@@ -11,6 +11,41 @@ import WidgetKit
 // two lines still fit, then the lines. SwiftUI measures the candidates
 // (`ViewThatFits`), so a larger text size drops parts instead of clipping them.
 
+extension WidgetType {
+    /// A small card's hero figure: one size down from `display`, so the title, the
+    /// figure, its pace and the button fit a small widget's height.
+    static let displaySmall = Font.system(.title).weight(.bold).monospacedDigit()
+    /// A button label (Glance's FilledButton, 14 sp medium).
+    static let button = Font.system(.subheadline).weight(.semibold)
+}
+
+extension WidgetSpace {
+    /// A card's padding: `Space.Screen`, a little less on a small widget, which is
+    /// shorter than Android's two rows.
+    static func edge(wide: Bool) -> CGFloat { wide ? screen : 14 }
+
+    /// A round button's and a labelled button's height (Android: 48 dp
+    /// `ActionMinHeight`): the 44 pt touch target, 36 pt on a small widget, which is
+    /// one tap target (iOS 16) or one button.
+    static func action(wide: Bool) -> CGFloat { wide ? 44 : 36 }
+}
+
+/// The extension's own bundle: its asset catalog and fallback.json (also compiled
+/// into the tests).
+private final class WidgetBundleToken {}
+
+extension Bundle {
+    static let lollopWidgets = Bundle(for: WidgetBundleToken.self)
+}
+
+extension SurfaceIcon {
+    /// The image set iosApp/make-assets.py renders from the icon's Android drawable,
+    /// as a template image.
+    var image: Image {
+        Image("Icon" + rawValue, bundle: .lollopWidgets).renderingMode(.template)
+    }
+}
+
 /// How a card's buttons respond to a tap.
 enum CardButtons {
     /// A link each (medium and large widgets: each part of the widget is its own target).
@@ -33,7 +68,7 @@ struct CardLayout: Hashable {
     var overline: Bool
     var hero: Hero
     var week: Week
-    /// Body line slots ([visibleLines]).
+    /// Body line slots ([WidgetLines.lines]).
     var lines: Int
     /// Body lines in `Type.Body` rather than `Type.Caption`.
     var large: Bool
@@ -61,20 +96,20 @@ struct CardLayout: Hashable {
     /// The candidates for [face], richest first. [wide]: a medium or large widget,
     /// where the week strip fits (never on a small one, like Android's two cells)
     /// and the hero can stand beside the buttons.
-    static func candidates(for face: Face, wide: Bool) -> [CardLayout] {
-        let weeks: [Week] = face.week == nil ? [.hidden] : (wide && face.days.count == 7 ? [.strip, .count, .hidden] : [.count, .hidden])
+    static func candidates(for face: WidgetFace, wide: Bool) -> [CardLayout] {
+        let weeks: [Week] = face.week.map { wide && !$0.days.isEmpty ? [.strip, .count, .hidden] : [.count, .hidden] } ?? [.hidden]
         let heroes: [Hero] = face.hero == nil ? [.hidden] : (wide ? [.stacked, .beside, .hidden] : [.stacked, .hidden])
-        let plain = face.lead.count + face.items.count
-        let heroLines = face.heroLead.count + face.heroItems.count
+        let plain = face.body.total
         var out: [CardLayout] = []
         for overline in [true, false] {
             for hero in heroes {
                 for week in weeks {
                     // A hero keeps its lead lines ("Session done"); the week block
                     // keeps the hero or two lines.
-                    let total = hero != .hidden ? heroLines : plain
-                    let least = hero != .hidden ? face.heroLead.count : (week == .hidden ? 0 : min(2, plain))
-                    let statement = hero == .hidden && week == .hidden && face.items.isEmpty
+                    let heroBody = hero != .hidden ? face.hero?.body : nil
+                    let total = heroBody?.total ?? plain
+                    let least = heroBody?.lead ?? (week == .hidden ? 0 : min(2, plain))
+                    let statement = hero == .hidden && week == .hidden && face.body.leadOnly
                     for (lines, large) in lineOptions(total: total, least: least) {
                         for bigTitle in statement ? [true, false] : [false] {
                             out.append(CardLayout(overline: overline, hero: hero, week: week, lines: lines, large: large, bigTitle: bigTitle))
@@ -102,34 +137,16 @@ struct CardLayout: Hashable {
     }
 }
 
-/// Android's estimate of where a line wraps (TodayWidget.kt `charEm`): a
-/// character's advance in em by class, a little wide.
-func estimatedLines(_ text: String, fontSize: CGFloat, width: CGFloat) -> Int {
-    let em = text.reduce(CGFloat(0)) { sum, c in
-        let w: CGFloat
-        if c == " " || c == "\u{00A0}" {
-            w = 0.27
-        } else if "iljtfrI.,:;·'!|()".contains(c) {
-            w = 0.32
-        } else if "mwMW@".contains(c) {
-            w = 0.82
-        } else if c.isUppercase {
-            w = 0.64
-        } else if c.isNumber {
-            w = 0.57
-        } else {
-            w = 0.54
-        }
-        return sum + w
-    }
-    return max(1, Int((em * fontSize / max(width, 1)).rounded(.up)))
+/// How many lines a text [em] wide (in em of its font size, Kotlin's estimate)
+/// wraps to in [fontSize] at [width].
+func estimatedLines(em: Double, fontSize: CGFloat, width: CGFloat) -> Int {
+    max(1, Int((CGFloat(em) * fontSize / max(width, 1)).rounded(.up)))
 }
 
 /// The home screen card: the fitting candidate of [CardLayout.candidates].
 struct TodayCard: View {
-    let face: Face
+    let face: WidgetFace
     let colors: WidgetColors
-    let moreItems: [String]
     /// A medium or large widget: the overline with "Today ·", the week strip, Log beside the primary.
     let wide: Bool
     let buttons: CardButtons
@@ -139,7 +156,7 @@ struct TodayCard: View {
             let shown = Self.shortLead(face, textWidth: geo.size.width - 2 * WidgetSpace.edge(wide: wide))
             ViewThatFits(in: .vertical) {
                 ForEach(CardLayout.candidates(for: shown, wide: wide), id: \.self) { layout in
-                    CardContent(face: shown, layout: layout, colors: colors, moreItems: moreItems, wide: wide, buttons: buttons)
+                    CardContent(face: shown, layout: layout, colors: colors, wide: wide, buttons: buttons)
                 }
             }
             .padding(WidgetSpace.edge(wide: wide))
@@ -149,12 +166,12 @@ struct TodayCard: View {
 
     /// A lone lead line too long for two lines ("Next: Heavy volume day, Thu, Oct 30"
     /// on a small card) gives way to the short one ("Next: Thu"), as on Android.
-    static func shortLead(_ face: Face, textWidth: CGFloat) -> Face {
-        guard face.lead.count == 1, let lead = face.lead.first, let brief = face.brief,
-              estimatedLines(lead, fontSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, width: textWidth) > 2
+    static func shortLead(_ face: WidgetFace, textWidth: CGFloat) -> WidgetFace {
+        guard let short = face.shortBody,
+              estimatedLines(em: short.leadEm, fontSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, width: textWidth) > 2
         else { return face }
         var shown = face
-        shown.lead = [brief]
+        shown.body = short.body
         return shown
     }
 }
@@ -165,27 +182,23 @@ struct TodayCard: View {
 /// (a title and its line) set on the actions. Every text shows whole: a part that
 /// would be cut makes the candidate too tall, and a sparser one is drawn.
 struct CardContent: View {
-    let face: Face
+    let face: WidgetFace
     let layout: CardLayout
     let colors: WidgetColors
-    let moreItems: [String]
     let wide: Bool
     let buttons: CardButtons
 
-    private var hasHero: Bool { layout.hero != .hidden && face.hero != nil }
+    private var hero: WidgetHero? { layout.hero != .hidden ? face.hero : nil }
 
-    private var statement: Bool { !hasHero && layout.week == .hidden && face.items.isEmpty }
+    private var statement: Bool { hero == nil && layout.week == .hidden && face.body.leadOnly }
 
-    private var lines: [String] {
-        hasHero
-            ? visibleLines(lead: face.heroLead, items: face.heroItems, maxLines: layout.lines, moreItems: moreItems)
-            : visibleLines(lead: face.lead, items: face.items, maxLines: layout.lines, moreItems: moreItems)
-    }
+    /// The hero's own lines where it shows, else the face's.
+    private var source: WidgetLines { hero?.body ?? face.body }
+
+    private var lines: [String] { source.lines(layout.lines) }
 
     /// The first lines are lead lines (muted), the rest items.
-    private var leadCount: Int {
-        min(hasHero ? face.heroLead.count : face.lead.count, lines.count)
-    }
+    private var leadCount: Int { min(source.lead, lines.count) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -196,14 +209,14 @@ struct CardContent: View {
             if statement {
                 Spacer(minLength: 0)
                 if layout.bigTitle {
-                    StatementTitle(text: face.title, color: colors.title(tone: face.tone))
+                    StatementTitle(text: face.title, color: colors[face.titleInk])
                 } else {
                     title
                 }
                 Spacer().frame(height: WidgetSpace.sm)
                 bodyLines(lines, leadCount: lines.count)
                 actions(top: WidgetSpace.md)
-            } else if hasHero, let hero = face.hero {
+            } else if let hero {
                 title
                 Spacer().frame(height: WidgetSpace.sm)
                 if layout.hero == .stacked {
@@ -241,14 +254,14 @@ struct CardContent: View {
     private var title: some View {
         Text(face.title)
             .font(WidgetType.title)
-            .foregroundColor(colors.title(tone: face.tone))
+            .foregroundColor(colors[face.titleInk])
             .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
     private var week: some View {
         if layout.week != .hidden, let week = face.week {
-            WeekBlock(week: week, days: layout.week == .strip ? face.days : [], colors: colors)
+            WeekBlock(week: week, strip: layout.week == .strip, colors: colors)
         }
     }
 
@@ -261,7 +274,7 @@ struct CardContent: View {
     }
 
     /// The hero's lead lines ("Session done"), the hero, then its items.
-    private func heroColumn(_ hero: Face.Hero) -> some View {
+    private func heroColumn(_ hero: WidgetHero) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             bodyLines(Array(lines.prefix(leadCount)), leadCount: leadCount)
             HeroBlock(hero: hero, colors: colors, compact: !wide)
@@ -282,7 +295,7 @@ struct CardContent: View {
 
 /// "TODAY · WED, OCT 28" where it fits on its line (wide), else the date alone.
 struct OverlineText: View {
-    let face: Face
+    let face: WidgetFace
     let wide: Bool
     let color: Color
 
@@ -299,7 +312,7 @@ struct OverlineText: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(WidgetType.overline).tracking(1.2).foregroundColor(color).lineLimit(1)
+        Text(text).font(WidgetType.overline).tracking(WidgetType.overlineTracking).foregroundColor(color).lineLimit(1)
     }
 }
 
@@ -320,7 +333,7 @@ struct StatementTitle: View {
 /// [compact]: a small card's figure, one size down, so it fits with the title and
 /// the button.
 struct HeroBlock: View {
-    let hero: Face.Hero
+    let hero: WidgetHero
     let colors: WidgetColors
     var compact = false
 
@@ -345,44 +358,32 @@ struct HeroBlock: View {
     }
 }
 
-/// The week count, then Mo–Su with each day's mark (TodayWidget.kt `WeekStrip`):
-/// ✓ trained, ● the next session, ○ planned, a muted ○ missed, nothing on a rest
-/// day, – before the plan; today's label in the accent on an accent tint.
+/// The week count, then (with [strip]) Mo–Su with each day's mark (TodayWidget.kt
+/// `WeekStrip`); today's label in the accent on an accent tint.
 struct WeekBlock: View {
-    let week: String
-    let days: [Face.Day]
+    let week: WidgetWeek
+    let strip: Bool
     let colors: WidgetColors
 
     var body: some View {
         VStack(alignment: .leading, spacing: WidgetSpace.sm) {
-            Text(week).font(WidgetType.caption).foregroundColor(colors.muted).lineLimit(2)
-            if days.count == 7 {
+            Text(week.text).font(WidgetType.caption).foregroundColor(colors.muted).lineLimit(2)
+            if strip && !week.days.isEmpty {
                 HStack(spacing: 0) {
-                    ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                    ForEach(Array(week.days.enumerated()), id: \.offset) { _, day in
                         DayMark(day: day, colors: colors)
                     }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(week)
+                .accessibilityLabel(week.text)
             }
         }
     }
 }
 
 struct DayMark: View {
-    let day: Face.Day
+    let day: WidgetDay
     let colors: WidgetColors
-
-    private var glyph: (String, Color) {
-        switch day.mark {
-        case "done": return ("\u{2713}", colors.done)
-        case "next": return ("\u{25CF}", colors.accent)
-        case "missed": return ("\u{25CB}", colors.muted)
-        case "rest": return ("\u{00A0}", colors.faint)
-        case "none": return ("\u{2013}", colors.faint)
-        default: return ("\u{25CB}", colors.faint)
-        }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -390,7 +391,7 @@ struct DayMark: View {
                 .font(day.today ? WidgetType.overline : WidgetType.overlineRegular)
                 .foregroundColor(day.today ? colors.accent : colors.muted)
                 .lineLimit(1)
-            Text(glyph.0).font(WidgetType.chip).foregroundColor(glyph.1).lineLimit(1)
+            Text(day.glyph).font(WidgetType.chip).foregroundColor(colors[day.ink]).lineLimit(1)
         }
         .padding(.vertical, WidgetSpace.sm)
         .frame(maxWidth: .infinity)
@@ -405,7 +406,7 @@ struct DayMark: View {
 /// it as a round tinted button where both fit (wide), else the primary alone,
 /// full width on a small card. A label never gives way: the icon does.
 struct ActionRow: View {
-    let actions: [Face.Action]
+    let actions: [WidgetAction]
     let colors: WidgetColors
     let wide: Bool
     let buttons: CardButtons
@@ -443,11 +444,11 @@ struct ActionRow: View {
     /// The primary: its natural width on a wide card, the card's width on a small
     /// one. [fixed]: measured whole, so a label that doesn't fit beside its icon
     /// makes this candidate too wide.
-    private func labelled(_ action: Face.Action, icon: Bool, fixed: Bool) -> some View {
+    private func labelled(_ action: WidgetAction, icon: Bool, fixed: Bool) -> some View {
         tappable(action) {
             HStack(spacing: WidgetSpace.md) {
                 if icon {
-                    WidgetIcon(face: action.face).image
+                    action.icon.image
                         .resizable()
                         .scaledToFit()
                         .frame(width: 18, height: 18)
@@ -463,9 +464,9 @@ struct ActionRow: View {
         }
     }
 
-    private func round(_ action: Face.Action) -> some View {
+    private func round(_ action: WidgetAction) -> some View {
         tappable(action) {
-            WidgetIcon(face: action.face).image
+            action.icon.image
                 .resizable()
                 .scaledToFit()
                 .frame(width: 20, height: 20)
@@ -477,7 +478,7 @@ struct ActionRow: View {
     }
 
     @ViewBuilder
-    private func tappable<Content: View>(_ action: Face.Action, @ViewBuilder _ content: () -> Content) -> some View {
+    private func tappable<Content: View>(_ action: WidgetAction, @ViewBuilder _ content: () -> Content) -> some View {
         switch buttons {
         case .links:
             Link(destination: action.screen.url) { content() }
@@ -499,7 +500,7 @@ struct ActionRow: View {
 /// The rectangular lock screen widget: Android's one-row widget without its
 /// buttons: the title over the status line where it fits, else the short one.
 struct RectangularView: View {
-    let face: Face
+    let face: WidgetFace
 
     var body: some View {
         ViewThatFits(in: .vertical) {
@@ -526,23 +527,21 @@ struct RectangularView: View {
 /// The circular lock screen widget: the week's sessions done of planned, else
 /// the primary action's icon.
 struct CircularView: View {
-    let face: Face
-    /// This week's done and planned sessions, for today's snapshot.
-    let week: (done: Int, planned: Int)?
+    let face: WidgetFace
 
     var body: some View {
-        if let week, week.planned > 0 {
+        if let week = face.week, week.planned > 0 {
             Gauge(value: Double(min(week.done, week.planned)), in: 0...Double(week.planned)) {
-                Text(face.week ?? "")
+                Text(week.text)
             } currentValueLabel: {
                 Text(verbatim: "\(week.done)/\(week.planned)").monospacedDigit()
             }
             .gaugeStyle(.accessoryCircularCapacity)
-            .accessibilityLabel(face.week ?? "")
+            .accessibilityLabel(week.text)
         } else {
             ZStack {
                 AccessoryWidgetBackground()
-                WidgetIcon(face: face.actions.first?.face ?? "log").image
+                (face.actions.first?.icon ?? .log).image
                     .resizable()
                     .scaledToFit()
                     .padding(16)
@@ -555,7 +554,7 @@ struct CircularView: View {
 
 /// The inline lock screen widget: the title and the short line where both fit.
 struct InlineView: View {
-    let face: Face
+    let face: WidgetFace
 
     var body: some View {
         ViewThatFits {

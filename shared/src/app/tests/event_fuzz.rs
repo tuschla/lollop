@@ -1000,10 +1000,10 @@ impl Gen {
         }
     }
 
-    /// An amend's (new date, old date). A legacy (`entry_id` 0) row keeps its
-    /// date: the shell pins `observed_at == observed_at_fallback` for those
-    /// (`SetEditorState.kt` / `RunEditor.kt`), and compaction relies on it
-    /// (`log::tests::rule3_walk_assumes_legacy_rows_are_never_redated`).
+    /// An amend's (new date, old date). An amend with `entry_id` 0 keeps its
+    /// date: only old shells sent one, and they pinned
+    /// `observed_at == observed_at_fallback` for a row without an id (a shell
+    /// now amends by the id the core gave the row).
     fn amend_stamps(&mut self, entry_id: u64, old_at: i64) -> (i64, i64) {
         if entry_id == 0 {
             return (old_at, old_at);
@@ -1326,7 +1326,7 @@ impl Gen {
             None
         };
         let km = if running { self.f(5.0, 80.0, 0.1) } else { 0.0 };
-        let p = Profile {
+        let mut p = Profile {
             resistance_modality: modality,
             progression_cadence: self.rng.pick(&[
                 ProgressionCadence::EverySession,
@@ -1377,6 +1377,7 @@ impl Gen {
             resting_hr_bpm: self.opt_f(0.4, 40.0, 80.0),
             measured_hr_max: self.opt_f(0.3, 160.0, 210.0),
             weight_lb: self.rng.chance(0.2),
+            distance_unit: DistanceUnit::Km,
             // The Android shell always dates an edit with the core's today
             // (`ProfileDraft.toEvent(model.today())`); an undated edit is a
             // legacy or hand-edited log.
@@ -1423,6 +1424,11 @@ impl Gen {
             }),
             runner_strength: self.rng.chance(0.2),
         };
+        // Imperial with the pounds draw, so the RNG stream (and every pinned
+        // seed) stays as it was.
+        if p.weight_lb {
+            p.distance_unit = DistanceUnit::Mi;
+        }
         Event::SetProfile(p)
     }
 
@@ -2766,10 +2772,9 @@ fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
     let r = &app.view(&model).runs[0];
     assert!(
         !r.distance_km.is_sign_negative() && !r.summary.contains("-0"),
-        "distance {:?}, summary {:?}, split_pct {:?}",
+        "distance {:?}, summary {:?}",
         r.distance_km,
-        r.summary,
-        r.split_pct
+        r.summary
     );
 }
 
@@ -2867,10 +2872,7 @@ fn compaction_keeps_in_window_checkins_when_one_is_dated_after_today() {
 #[test]
 fn an_extreme_set_today_never_panics_the_view() {
     let youth = Profile {
-        health: HealthScreen {
-            youth: true,
-            ..HealthScreen::default()
-        },
+        age_years: Some(15.0),
         ..base_profile()
     };
     let adult = Profile {
@@ -3033,10 +3035,7 @@ fn a_huge_run_duration_never_panics_the_youth_card() {
     for e in [
         set_today_ev(BASE_DAY),
         Event::SetProfile(Profile {
-            health: HealthScreen {
-                youth: true,
-                ..HealthScreen::default()
-            },
+            age_years: Some(15.0),
             ..base_profile()
         }),
         // Started today at 08:00 (the day the card buckets it), so its

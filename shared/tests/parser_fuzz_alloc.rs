@@ -1,11 +1,12 @@
-//! Peak heap of the FIT import (`shared::fit::parse_fit` + `import_gate`, what
-//! `Core.parseFit` runs) relative to the input size, measured with a counting
-//! global allocator (its own test binary, so no other test shares the count).
+//! Peak heap of the run import (`shared::import::import_run_file`, what the
+//! `ParseRunFile` op runs) relative to the input size, for FIT and GPX, measured
+//! with a counting global allocator (its own test binary, so no other test
+//! shares the count).
 //!
-//! The shell caps an import at 32 MB (`RunImport.kt` `MAX_RUN_IMPORT_BYTES`,
-//! "keeps a pathological or wrong-type file from OOMing the process"); a Rust
-//! allocation failure aborts the process (no unwind, no firewall), so the
-//! parser's peak per input byte times that cap is the import's worst case.
+//! An import reads at most `shared::import::MAX_RUN_IMPORT_BYTES` (the shells
+//! stop reading there too); a Rust allocation failure aborts the process (no
+//! unwind, no firewall), so the import's peak per input byte times that cap is
+//! its worst case.
 //!
 //! `PARSER_FUZZ_ALLOC_MB=<n>` additionally measures an n-MB file (slow in debug).
 
@@ -130,16 +131,41 @@ fn array_fit(messages: u32) -> Vec<u8> {
 }
 
 fn import(bytes: &[u8]) -> bool {
-    shared::fit::parse_fit(bytes)
-        .and_then(|t| shared::fit::import_gate(&t).map(|()| t))
-        .is_ok()
+    shared::import::import_run_file(bytes).refusal.is_none()
 }
 
-/// Heap per input byte the import may use: at the 32 MB shell cap this is a
-/// 512 MB native peak, beyond which a mid-range phone's process is at risk.
-/// A file of messages the importer never reads (no fixes come out) needs no
-/// more than its own bytes; a positioned run needs its fixes.
+/// The import cap in MB.
+const CAP_MB: usize = shared::import::MAX_RUN_IMPORT_BYTES as usize / (1024 * 1024);
+
+/// Heap per input byte the import may use: at the 32 MB cap this is a 512 MB
+/// native peak, beyond which a mid-range phone's process is at risk. A file of
+/// messages the importer never reads (no fixes come out) needs no more than its
+/// own bytes; a positioned run needs its fixes.
 const MAX_BYTES_PER_INPUT_BYTE: usize = 16;
+
+#[test]
+fn a_gpx_run_imports_within_a_bounded_heap_per_input_byte() {
+    let held = exclusive();
+    let mut doc = String::from("<?xml version=\"1.0\"?><gpx version=\"1.1\"><trk><trkseg>\n");
+    for i in 0..20_000u32 {
+        let lat = 47.0 + f64::from(i) * 3.0 / 111_195.0;
+        let (h, m, s) = (i / 3600, i / 60 % 60, i % 60);
+        doc += &format!(
+            "<trkpt lat=\"{lat}\" lon=\"8.0\"><time>2026-03-04T{h:02}:{m:02}:{s:02}Z</time><hdop>0.9</hdop></trkpt>\n"
+        );
+    }
+    doc += "</trkseg></trk></gpx>\n";
+    let bytes = doc.into_bytes();
+    let (ok, peak) = peak_during(&held, || import(&bytes));
+    assert!(ok);
+    let per = peak / bytes.len();
+    eprintln!("GPX: {} bytes, peak {peak} B ({per} B/B)", bytes.len());
+    assert!(
+        per <= MAX_BYTES_PER_INPUT_BYTE,
+        "{per} B of heap per input byte, {} MB at the {CAP_MB} MB cap",
+        per * CAP_MB
+    );
+}
 
 #[test]
 fn a_plain_run_fit_parses_within_a_bounded_heap_per_input_byte() {
@@ -179,9 +205,9 @@ fn an_array_heavy_fit_parses_within_a_bounded_heap_per_input_byte() {
         );
         assert!(
             per <= MAX_BYTES_PER_INPUT_BYTE,
-            "{} B input peaked at {peak} B: {per} B per input byte, {} MB at the 32 MB cap",
+            "{} B input peaked at {peak} B: {per} B per input byte, {} MB at the {CAP_MB} MB cap",
             bytes.len(),
-            per * 32
+            per * CAP_MB
         );
     }
 }

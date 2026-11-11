@@ -75,11 +75,21 @@ internal data class LiftSession(val epochDay: Long?, val sets: List<LiftResultVi
     /** Stable, saveable selection + list key. */
     val key: String = epochDay?.toString() ?: "undated"
 
-    /** Exercises in first-logged order, keyed by [nameKey] (the core's
-     *  `names::exercise_key`, the key its e1RM chains and PRs use) and named by
-     *  their first-logged spelling, each with its own sets in logged order. */
-    val exercises: List<Pair<String, List<LiftResultView>>> =
-        sets.groupBy { nameKey(it.exercise) }.values.map { it.first().exercise to it }
+    /** Exercises in first-logged order, grouped by match key ([nameKeys], the
+     *  core's `names::exercise_key`, the key its e1RM chains and PRs use) and named
+     *  by their first-logged spelling, each with its own sets in logged order. */
+    val exercises: List<Pair<String, List<LiftResultView>>>
+
+    /** The match key of each of [exercises], in order. */
+    val exerciseKeys: List<String>
+
+    init {
+        val keys = nameKeys(sets.map { it.exercise })
+        val groups = LinkedHashMap<String, MutableList<LiftResultView>>()
+        sets.forEachIndexed { i, s -> groups.getOrPut(keys[i]) { ArrayList() } += s }
+        exerciseKeys = groups.keys.toList()
+        exercises = groups.values.map { it.first().exercise to it }
+    }
 
     /** Stamp of the session's first set (0 when undated): dates the card and its month header. */
     val firstObservedAt: Long get() = sets.firstOrNull()?.observed_at ?: 0L
@@ -131,18 +141,19 @@ internal fun historyActivityDays(
 }
 
 /**
- * Per [nameKey], its best e1RM of each dated session in ascending day order: the
- * factual series behind the session sheet's e1RM change line (one point per
- * session, so warm-up sets don't count as a change within a day). Holds and sets
- * without an estimate (e1RM 0) contribute nothing.
+ * Per exercise key ([LiftSession.exerciseKeys]), its best e1RM of each dated
+ * session in ascending day order: the factual series behind the session sheet's
+ * e1RM change line (one point per session, so warm-up sets don't count as a
+ * change within a day). Holds and sets without an estimate (e1RM 0) contribute
+ * nothing.
  */
 internal fun bestE1rmByExerciseDay(sessions: List<LiftSession>): Map<String, List<Pair<Long, Double>>> {
     val out = HashMap<String, MutableList<Pair<Long, Double>>>()
     for (s in sessions.asReversed()) {
         val day = s.epochDay ?: continue
-        for ((name, sets) in s.exercises) {
-            val best = bestE1rmKg(sets) ?: continue
-            out.getOrPut(nameKey(name)) { ArrayList() } += day to best
+        s.exercises.forEachIndexed { i, (_, sets) ->
+            val best = bestE1rmKg(sets) ?: return@forEachIndexed
+            out.getOrPut(s.exerciseKeys[i]) { ArrayList() } += day to best
         }
     }
     return out
@@ -388,7 +399,7 @@ internal fun LiftSessionSheet(
             val glossaryAt = session.firstE1rmIndex()
             session.exercises.forEachIndexed { i, (name, sets) ->
                 val series = session.epochDay?.let { day ->
-                    e1rmSeries[nameKey(name)].orEmpty().filter { it.first <= day }.map { it.second }
+                    e1rmSeries[session.exerciseKeys[i]].orEmpty().filter { it.first <= day }.map { it.second }
                 }.orEmpty()
                 ExerciseSetsCard(
                     name = name,
@@ -409,17 +420,19 @@ internal fun LiftSessionSheet(
                 TileOverline(stringResource(Res.string.main_lift_session_audit))
                 model.trend?.let { t ->
                     EvidenceCard(
-                        t.summary, t.grade, t.citation, t.confidence, t.safety_critical, t.contested,
+                        t.summary, t.evidence,
                         border = if (t.safety_critical) null else SheetCardBorder,
                         why = t.why,
+                        glossary = t.glossary, spokenSubject = t.subject, proseSummary = t.prose,
                     )
                 }
                 model.lift_audit.byGuidancePriority().forEach { g ->
                     EvidenceCard(
-                        g.summary, g.grade, g.citation, g.confidence, g.safety_critical, g.contested,
+                        g.summary, g.evidence,
                         g.section.takeIf { it.isNotBlank() },
                         border = if (g.safety_critical) null else SheetCardBorder,
                         why = g.why,
+                        glossary = g.glossary, spokenSubject = g.subject, proseSummary = g.prose,
                     )
                 }
             }

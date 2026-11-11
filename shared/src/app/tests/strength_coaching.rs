@@ -315,7 +315,13 @@ fn a_plate_floored_load_is_asked_at_the_effort_it_takes() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
+    let it = flatten_prescription(
+        &pct_rx(85.0, 3, None),
+        &anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!((it.load_kg, it.target_rpe), (Some(45.0), Some(6.0)));
     let base = set("Back Squat", 45.0, 5, 8.0, 0);
     let asked = [base.clone(), set("Back Squat", 45.0, 3, 6.0, 3)];
@@ -348,7 +354,13 @@ fn e1rm_drop_cut_also_leaves_one_more_rep_in_reserve() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
+    let it = flatten_prescription(
+        &pct_rx(85.0, 3, None),
+        &anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     // 100 kg × 85 % × 95 % = 80.75 kg, floored to 80 kg: 84 % of the cut
     // 95 kg estimate is ~3 reps left on its own, ~4 with the cut's extra rep.
     assert_eq!(it.load_kg, Some(80.0));
@@ -449,7 +461,13 @@ fn percent_item_carries_expected_target_rpe_and_plates() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
+    let it = flatten_prescription(
+        &pct_rx(85.0, 3, None),
+        &anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!(it.load_kg, Some(85.0));
     assert_eq!(it.target_rpe, Some(8.0));
     assert!(it.summary.contains("~2 reps left"), "{}", it.summary);
@@ -471,7 +489,13 @@ fn power_item_face_shows_move_fast_without_a_device_number() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&pct_rx(50.0, 3, Some(10)), &anchors, None, false);
+    let it = flatten_prescription(
+        &pct_rx(50.0, 3, Some(10)),
+        &anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!(it.effort_cue, "move fast");
     assert!(it.summary.contains("move fast"), "{}", it.summary);
     assert!(it.why.basis.contains("visibly slows"), "{}", it.why.basis);
@@ -492,7 +516,13 @@ fn derated_card_names_the_reason_and_cites_detraining() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&pct_rx(80.0, 5, None), &anchors, None, false);
+    let it = flatten_prescription(
+        &pct_rx(80.0, 5, None),
+        &anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!(
         it.load_kg,
         Some(55.0),
@@ -559,7 +589,7 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
 
 /// An effort-prescribed (3×`reps` at 3 RIR) row item after applying the last
 /// set: one 60 kg × 8 @ RPE 7 row logged `age_days` before day 100.
-fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> PrescriptionView {
+fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> PlanItem {
     let today = 100;
     let rx = RxBasis::Workout.rx(
         Prescription::Lift(LiftPrescription {
@@ -574,7 +604,13 @@ fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> Pres
         }),
         claims::STR_INTENT_001,
     );
-    let mut items = vec![flatten_prescription(&rx, anchors, None, false)];
+    let mut items = vec![flatten_prescription(
+        &rx,
+        anchors,
+        None,
+        false,
+        DistanceUnit::Km,
+    )];
     let mut model = Model::default();
     model.sets.push(set("Row", 60.0, 8, 7.0, today - age_days));
     apply_last_sets(
@@ -920,8 +956,8 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         },
         ..Default::default()
     };
-    let full = flatten_prescription(&rx, &anchors_full, None, false);
-    let re = flatten_prescription(&rx, &anchors_re, None, false);
+    let full = flatten_prescription(&rx, &anchors_full, None, false, DistanceUnit::Km);
+    let re = flatten_prescription(&rx, &anchors_re, None, false, DistanceUnit::Km);
     assert_eq!(full.load_kg, Some(round_load_grid(100.0 * 0.80, false)));
     assert_eq!(
         re.load_kg,
@@ -1095,7 +1131,7 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
         lift: anchors,
         ..Default::default()
     };
-    let item = flatten_prescription(&rx, &anchors, None, false);
+    let item = flatten_prescription(&rx, &anchors, None, false, DistanceUnit::Km);
     // No anchor-derived %e1RM load: a novice re-entry trains by RIR (HARD RULE 1).
     assert_eq!(item.load_kg, None, "no %e1RM load on a novice re-entry");
     assert!(

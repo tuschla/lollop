@@ -183,21 +183,19 @@ internal object ActiveRunStore : AppFeature {
     }
 
     /**
-     * Thin a recovered track to ~[maxPoints] fixes with the save's rule
-     * ([decimationKeep]): a uniform stride plus the last fix and every fix that opened
-     * a segment ([segmentStarts], remapped into the result). Dropping fixes only widens
+     * Thin a recovered track to ~[maxPoints] fixes with the save's rule ([thinTrack],
+     * the core's): a uniform stride plus the last fix and every fix that opened a
+     * segment ([segmentStarts], remapped into the result). Dropping fixes only widens
      * gaps; a widened gap opens a new segment only once stride × fix cadence exceeds
-     * [MAX_FIX_GAP_SEC] (at the 4 s screen-off cadence, past ~37,800 fixes, ≈42 h).
+     * [CoreConstants.MAX_FIX_GAP_SEC] (at the 4 s screen-off cadence, past ~37,800 fixes, ≈42 h).
      * No-op at or below the cap.
      */
     internal fun thinForRecovery(
         pts: List<GpsPoint>,
-        maxPoints: Int = TRACK_DECIMATION_CAP,
+        maxPoints: Int = CoreConstants.TRACK_DECIMATION_CAP,
         segmentStarts: Collection<Int> = emptyList(),
     ): RecoveredTrack {
-        val starts = segmentStarts.filterTo(HashSet()) { it in 1 until pts.size }
-        val kept = decimationKeep(pts.size, maxPoints, starts)
-        val thinned = if (kept.size == pts.size) pts else kept.map(pts::get)
-        return RecoveredTrack(thinned, remapStarts(kept, starts))
+        val (thinned, starts) = thinTrack(pts, maxPoints, segmentStarts)
+        return RecoveredTrack(thinned, starts)
     }
 }

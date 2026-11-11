@@ -142,43 +142,6 @@ class LocaleNumberTest {
         assertTrue("$l: $data", Regex("""lollop-\d{4}-\d{2}-\d{2}\.ndjson""").matches(data) && foreignDigits(data).isEmpty())
     }
 
-    // ── Import ────────────────────────────────────────────────────────────────
-
-    private val gpx = """<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
-<trk><type>RUNNING</type><trkseg>
-<trkpt lat="52.5200" lon="13.4050"><ele>34.5</ele><time>2026-03-04T05:06:00Z</time><hdop>1.5</hdop><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>142.0</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>
-<trkpt lat="52.5209" lon="13.4061"><ele>35.0</ele><time>2026-03-04T05:06:30+00:00</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>145</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>
-<trkpt lat="52.5218" lon="1.34072E1"><time>2026-03-04T07:07:00+0200</time></trkpt>
-</trkseg></trk></gpx>"""
-
-    private val tcx = """<?xml version="1.0" encoding="UTF-8"?>
-<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"><Activities><Activity Sport="Running"><Lap><Track>
-<Trackpoint><Time>2026-03-04T05:06:00.000Z</Time><Position><LatitudeDegrees>52.52</LatitudeDegrees><LongitudeDegrees>13.405</LongitudeDegrees></Position><HeartRateBpm><Value>142</Value></HeartRateBpm></Trackpoint>
-<Trackpoint><Time>2026-03-04T05:06:30.000Z</Time><Position><LatitudeDegrees>52.5209</LatitudeDegrees><LongitudeDegrees>13.4061</LongitudeDegrees></Position><HeartRateBpm><Value>145</Value></HeartRateBpm></Trackpoint>
-</Track></Lap></Activity></Activities></TrainingCenterDatabase>"""
-
-    @Test
-    fun gpxAndTcxImport_readTheSameNumbersInEveryLocale() {
-        Locale.setDefault(Locale.US)
-        val gpxRuns = parseGpxRuns(gpx)
-        val tcxRuns = parseTcxActivities(tcx)
-        val fixes = gpxRuns.single().segments.single()
-        assertEquals(listOf(52.52, 52.5209, 52.5218), fixes.map { it.lat })
-        assertEquals(listOf(13.405, 13.4061, 13.4072), fixes.map { it.lon })
-        assertEquals(listOf(1_772_600_760L, 1_772_600_790L, 1_772_600_820L), fixes.map { it.timeSec })
-        assertEquals(listOf(142, 145, null), fixes.map { it.hrBpm })
-        assertEquals(listOf(52.52, 52.5209), tcxRuns.single().segments.single().map { it.lat })
-        assertEquals("1.5 hdop is metres, not a parse miss", true, fixes[0].accuracyM != null)
-        eachLocale { l ->
-            assertEquals("$l", gpxRuns, parseGpxRuns(gpx))
-            assertEquals("$l", tcxRuns, parseTcxActivities(tcx))
-            assertNull("$l: RUNNING is a run", nonRunSport("RUNNING"))
-            assertEquals("$l", "cycling", nonRunSport("CYCLING"))
-            assertEquals("$l", fixes.map { it.accuracyM }, parseGpxRuns(gpx).single().segments.single().map { it.accuracyM })
-        }
-    }
-
     // ── Case folding (tr-TR dotless i) ───────────────────────────────────────
 
     @Test
@@ -186,11 +149,10 @@ class LocaleNumberTest {
         Locale.setDefault(Locale.forLanguageTag("tr-TR"))
         assertEquals("title", nameKey(" TITLE "))
         assertTrue(sameExercise("INCLINE BENCH PRESS", "Incline bench press"))
-        assertTrue(isFloorLift("DEADLIFT"))
+        assertEquals(60.0, warmUpSteps(140.0, WeightUnit.Kg, "DEADLIFT").first().kg, 0.0)
         assertEquals(listOf("Incline bench press"), quickPickCandidates("", listOf("Incline bench press"), listOf("INCLINE BENCH PRESS"), emptyList()))
         assertEquals("Incline bench press", resolveExerciseName("incline bench press", listOf("Incline bench press")))
         assertEquals("Incline press", exerciseDisplayName("incline press"))
-        assertEquals("cycling", nonRunSport("BIKING"))
         assertEquals(DistanceUnit.Km, localeDistanceUnit(Locale.forLanguageTag("tr-TR")))
         assertEquals(WeightUnit.Kg, localeWeightUnit(Locale.forLanguageTag("tr-TR")))
     }

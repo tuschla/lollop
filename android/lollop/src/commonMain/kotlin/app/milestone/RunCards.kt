@@ -78,10 +78,9 @@ internal fun runPaceLabel(distanceKm: Double, durationMin: Double, unit: Distanc
     return formatPaceMinutes(paceInUnit(durationMin / distanceKm, unit)) + " " + unit.paceSuffix
 }
 
-/** The resolved distance unit (locale + user override), collected reactively. */
+/** The distance unit of the published model ([distanceUnit]), collected reactively. */
 @Composable
-internal fun rememberDistanceUnit(): DistanceUnit =
-    resolveDistanceUnit(AppSettings.distanceUnitOverride.collectAsState().value)
+internal fun rememberDistanceUnit(): DistanceUnit = EventDispatcher.model.collectAsState().value.distanceUnit()
 
 /**
  * Run entry card (03-history §4): title (the user's run-type tag, else the weekday)
@@ -232,7 +231,8 @@ internal fun RunFindings(r: RunResultView, face: Boolean, showSplit: Boolean = t
                             }
                         }
                         if (shownSplit != null) {
-                            if (splitChip) Chip(shownSplit.label, if (shownSplit.verdict == SplitVerdict.Fade) status.warn else ChipNeutral)
+                            // An even or negative split has no valence: the neutral slate; only a fade gets the warn.
+                            if (splitChip) Chip(shownSplit.label, if (shownSplit.verdict == SplitVerdict.Fade) status.warn else status.evidenceUnknown)
                             if (splitSafety) Chip(stringResource(Res.string.main_chip_safety), status.danger)
                         }
                         if (shownInterval != null) {
@@ -525,6 +525,6 @@ private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
     }
 }
 
-/** Chip ground for an even / negative split verdict: a neutral slate with no
- *  valence (only a fade gets the semantic warn). Not a `StatusColors` token. */
-private val ChipNeutral = Color(0xFF334155)
+/** Floor of a split bar's domain, as a fraction of the slowest split's pace. */
+const val SplitBarBaseline = 0.85f
+

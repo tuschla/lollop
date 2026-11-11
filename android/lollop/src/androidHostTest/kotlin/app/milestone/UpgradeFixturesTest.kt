@@ -81,7 +81,9 @@ class UpgradeFixturesTest {
     }
 
     /** Every History entry [v]'s build listed is in [view], unchanged and in order.
-     *  A field the old build's view did not have is not compared. */
+     *  A field the old build's view did not have is not compared. A row the old
+     *  build listed without an id (entry_id 0) now carries the id its logged time
+     *  gives it (the core's `row_id`), 0 when undated. */
     private fun assertSameHistory(what: String, v: String, view: ViewModel) {
         val e = expected(v)
         val lifts = e["lifts"]!!.jsonArray
@@ -89,7 +91,7 @@ class UpgradeFixturesTest {
         lifts.zip(view.lifts).forEachIndexed { i, (x, l) ->
             val o = x.jsonObject
             val at = "$what: set #$i"
-            assertEquals(at, o["entry_id"]!!.jsonPrimitive.long, l.entry_id)
+            assertEquals(at, loadedId(o), l.entry_id)
             assertEquals(at, o["exercise"]!!.jsonPrimitive.content, l.exercise)
             assertEquals(at, o["weight_kg"]!!.jsonPrimitive.double, l.weight_kg, 1e-9)
             assertEquals(at, o["reps"]!!.jsonPrimitive.int, l.reps)
@@ -102,7 +104,7 @@ class UpgradeFixturesTest {
         runs.zip(view.runs).forEachIndexed { i, (x, r) ->
             val o = x.jsonObject
             val at = "$what: run #$i"
-            assertEquals(at, o["entry_id"]!!.jsonPrimitive.long, r.entry_id)
+            assertEquals(at, loadedId(o), r.entry_id)
             assertEquals(at, o["observed_at"]!!.jsonPrimitive.long, r.observed_at)
             val km = o["distance_km"]!!.jsonPrimitive.double
             assertTrue("$at distance $km vs ${r.distance_km}", abs(km - r.distance_km) <= 1e-9 * km.coerceAtLeast(1.0))
@@ -116,6 +118,9 @@ class UpgradeFixturesTest {
         assertEquals("$what: training paused", e["train_blocked"]!!.jsonPrimitive.boolean, view.train_blocked)
         assertNotNull("$what: profile", view.profile)
     }
+
+    private fun loadedId(o: JsonObject): Long =
+        o["entry_id"]!!.jsonPrimitive.long.takeIf { it != 0L } ?: o["observed_at"]!!.jsonPrimitive.long.coerceAtLeast(0L)
 
     @Test
     fun anOldLogBootsWithEveryEntryAndKeepsThemAcrossTheNextBoot() {
@@ -161,7 +166,8 @@ class UpgradeFixturesTest {
 
     /** 203ab56's compaction dropped a removed plan's GeneratePlan together with its
      *  ClearPlan, so after the update only that build's `plan_cleared` pref says the
-     *  user removed the plan: boot must not generate a new one. */
+     *  user removed the plan: boot must not generate a new one, and writes the
+     *  removal into the log so the pref can go. */
     @Test
     fun aPlanRemovedInTheOldBuildStaysRemoved() {
         logFile.parentFile!!.mkdirs()
@@ -173,6 +179,15 @@ class UpgradeFixturesTest {
         assertEquals("the set", 1, model.lifts.size)
         assertNotNull("the profile", model.profile)
         assertNull("no plan", model.program)
+        assertTrue(model.plan_removed)
+        assertTrue("boot generated a plan", QaHarness.logLines(ctx).none { EventLog.variantOf(it) == "GeneratePlan" })
+        assertTrue("the log records the removal", QaHarness.logLines(ctx).any { EventLog.variantOf(it) == "ClearPlan" })
+        assertFalse("the legacy pref is gone", ctx.setupPrefs().contains(KEY_PLAN_CLEARED))
+
+        // The next launch has only the log.
+        ProcessDeath.kill(ctx)
+        rule.launchApp()
+        assertNull("no plan after a relaunch", checkNotNull(EventDispatcher.model.value).program)
         assertTrue("boot generated a plan", QaHarness.logLines(ctx).none { EventLog.variantOf(it) == "GeneratePlan" })
     }
 
@@ -195,10 +210,10 @@ class UpgradeFixturesTest {
         assertEquals("oldest entry day (the legacy set)", 20666L, summary.firstDay)
         assertEquals("newest entry day", 20724L, summary.lastDay)
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
-        assertFalse("the backup's plan is not removed", ctx.setupPrefs().getBoolean(KEY_PLAN_CLEARED, true))
         ProcessDeath.kill(ctx)
         val restored = bootCore()
         assertFalse(restored.stale)
+        assertFalse("the backup's plan is not removed", restored.view.plan_removed)
         assertSameHistory("imported 4728546 backup", "4728546", restored.view)
     }
 

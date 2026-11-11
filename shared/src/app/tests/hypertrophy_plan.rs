@@ -220,12 +220,24 @@ fn last_raise(kg: f64, reps: u32) -> crate::plan::Anchors {
 fn a_held_dumbbell_load_is_carried_exactly_as_logged() {
     // 6 kg × 13 → hold 6 kg for 14; never floored onto the 2.5 kg grid
     // (5 kg) while the card says "same weight as last time".
-    let it = flatten_prescription(&range_rx(14, 6.0), &last_raise(6.0, 13), None, false);
+    let it = flatten_prescription(
+        &range_rx(14, 6.0),
+        &last_raise(6.0, 13),
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!(it.load_kg, Some(6.0));
     assert!(it.why.basis.contains("same weight"), "{}", it.why.basis);
     // A 15 lb dumbbell stays 15 lb for a lb profile.
     let w = 15.0 / LB_PER_KG;
-    let it = flatten_prescription(&range_rx(14, w as f32), &last_raise(w, 13), None, true);
+    let it = flatten_prescription(
+        &range_rx(14, w as f32),
+        &last_raise(w, 13),
+        None,
+        true,
+        DistanceUnit::Km,
+    );
     assert_eq!(it.load_kg, Some(w));
 }
 
@@ -235,7 +247,13 @@ fn a_light_load_steps_up_by_at_most_ten_percent() {
     // STR-LOADPROG-001's +10 %, so a 6 kg raise goes to 6.6 kg, not 8.5 kg.
     assert!((crate::hypertrophy::load_step_kg(6.0) - 0.6).abs() < 1e-9);
     assert_eq!(crate::hypertrophy::load_step_kg(40.0), 2.5);
-    let it = flatten_prescription(&range_rx(12, 6.6), &last_raise(6.0, 20), None, false);
+    let it = flatten_prescription(
+        &range_rx(12, 6.6),
+        &last_raise(6.0, 20),
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     let kg = it.load_kg.expect("a stepped load");
     assert!(kg > 6.0 && kg <= 6.6 + 1e-6, "{kg}");
     assert!(it.why.basis.contains("goes up"), "{}", it.why.basis);
@@ -278,7 +296,7 @@ fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
         }),
         claims::HYP_DOUBLEPROG_001,
     );
-    let it = flatten_prescription(&rx, &anchors, None, false);
+    let it = flatten_prescription(&rx, &anchors, None, false, DistanceUnit::Km);
     assert_eq!((it.load_kg, it.target_rpe), (Some(55.0), Some(7.0)));
     assert!(
         it.evidence.citation.contains("Helms"),

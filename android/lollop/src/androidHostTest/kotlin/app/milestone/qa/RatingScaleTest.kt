@@ -42,10 +42,10 @@ import app.milestone.R
 import app.milestone.RunTargetView
 import app.milestone.RunTypeChips
 import app.milestone.SessionPlanView
+import app.milestone.SetEditorInputs
 import app.milestone.ViewModel
 import app.milestone.WeightUnit
 import app.milestone.WorkoutType
-import app.milestone.label
 import app.milestone.localizedDayFormatter
 import app.milestone.planDayObservedAt
 import org.junit.After
@@ -164,7 +164,7 @@ class RatingScaleTest {
         val labels = listOf(WorkoutType.Easy, WorkoutType.Recovery, WorkoutType.Steady, WorkoutType.LongRun, WorkoutType.Tempo, WorkoutType.Interval)
         val lefts = labels.map { rule.onNodeWithTag("run-type-${it.name}").fetchSemanticsNode().boundsInRoot.left }
         assertTrue("chips flow left to right in runner order: $lefts", lefts.first() < lefts[1])
-        rule.onNodeWithText(WorkoutType.Tempo.label).performClick()
+        rule.onNodeWithText(str(R.string.run_type_tempo)).performClick()
         assertEquals(WorkoutType.Tempo, type)
     }
 
@@ -184,7 +184,7 @@ class RatingScaleTest {
                 Column(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {
                         LogSetEditor(
-                            recentExercises = listOf("Back Squat"),
+                            inputs = SetEditorInputs(recentExercises = listOf("Back Squat")),
                             planSession = SessionPlanView(items = listOf(run)),
                             weightUnit = WeightUnit.Lb,
                             onSave = {},

@@ -4,15 +4,24 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +44,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -59,7 +72,6 @@ import app.milestone.resources.main_dark_mode_dark
 import app.milestone.resources.main_dark_mode_light
 import app.milestone.resources.main_dark_mode_pinned
 import app.milestone.resources.main_dark_mode_system
-import app.milestone.resources.main_distance_auto
 import app.milestone.resources.main_evidence_references_title
 import app.milestone.resources.main_evidence_row_sub
 import app.milestone.resources.main_export_first
@@ -235,8 +247,7 @@ private fun LazyListScope.PlanAnswersSection(
     val profileGuidance = if (model.profile == null) {
         emptyList()
     } else {
-        model.guidance
-            .filter { it.section == PROFILE_GUIDANCE_SECTION }
+        model.profile_guidance
             .filterNot { !hasHistory && it.training_age.isNotEmpty() }
             .byGuidancePriority()
     }
@@ -279,7 +290,11 @@ private fun LazyListScope.PlanAnswersSection(
                                 ) {
                                     SectionOverline(stringResource(Res.string.main_section_how_coach_reads))
                                     profileGuidance.forEach {
-                                        EvidenceCard(guidanceTitle(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
+                                        EvidenceCard(
+                                            guidanceTitle(it), it.evidence, why = it.why, glossary = it.glossary, spokenSubject = it.subject,
+                                            // A training-age row's face is its short title, not the summary.
+                                            proseSummary = it.prose && it.training_age.isEmpty(),
+                                        )
                                     }
                                 }
                             }
@@ -355,9 +370,9 @@ private fun LazyListScope.UnitsSection(ctx: PlatformContext, model: ViewModel, o
             SectionOverline(stringResource(Res.string.main_overline_units))
             PlainCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                    // Weight units live on the PROFILE (kg | lb): the toggle reads
-                    // the profile flag and commits the full profile with the flag
-                    // flipped (mirrors ProfileEditor's SetProfile funnel), so a
+                    // Weight and distance units live on the PROFILE: each toggle
+                    // reads the profile and commits the full profile with the unit
+                    // changed (ProfileEditor's SetProfile funnel), so a
                     // training-field edit never last-write-wins the choice away.
                     // Hidden until a profile exists (nothing to write to yet).
                     val profile = model.profile
@@ -375,27 +390,23 @@ private fun LazyListScope.UnitsSection(ctx: PlatformContext, model: ViewModel, o
                                 }
                             },
                         )
+                        SegmentedEnumRow(
+                            label = stringResource(Res.string.main_label_distance_units),
+                            values = listOf(DistanceUnit.Km, DistanceUnit.Mi),
+                            current = draft.distanceUnit,
+                            display = {
+                                when (it) {
+                                    DistanceUnit.Km -> res.getString(Res.string.main_unit_km)
+                                    DistanceUnit.Mi -> res.getString(Res.string.main_unit_mi)
+                                }
+                            },
+                            onSelect = { sel ->
+                                if (sel != draft.distanceUnit) {
+                                    onEvent(draft.effectiveFrom(model.today()).copy(distanceUnit = sel))
+                                }
+                            },
+                        )
                     }
-                    // Distance units: Auto follows the phone locale (mi for
-                    // US/UK/Liberia/Myanmar, else km); Km/Mi pin it.
-                    val unitOverride by AppSettings.distanceUnitOverride.collectAsState()
-                    SegmentedEnumRow(
-                        label = stringResource(Res.string.main_label_distance_units),
-                        values = listOf(
-                            DistanceUnitOverride.System,
-                            DistanceUnitOverride.Km,
-                            DistanceUnitOverride.Mi,
-                        ),
-                        current = unitOverride,
-                        display = {
-                            when (it) {
-                                DistanceUnitOverride.System -> res.getString(Res.string.main_distance_auto)
-                                DistanceUnitOverride.Km -> res.getString(Res.string.main_unit_km)
-                                DistanceUnitOverride.Mi -> res.getString(Res.string.main_unit_mi)
-                            }
-                        },
-                        onSelect = { AppSettings.setDistanceUnitOverride(ctx, it) },
-                    )
                     // Live pace-bucket size (minutes): the run screen groups
                     // pace into buckets of this many minutes of moving time. Digit
                     // segments with the unit on the label; a list when they don't fit.
@@ -640,7 +651,7 @@ private val dataRestoreRunning = MutableStateFlow(false)
 /** Replace the log with [lines] and boot into it, or say why not. [entries] is
  *  what that boot confirms ("Restored N entries"). */
 private fun restoreData(ctx: PlatformContext, res: PlatformResources, lines: List<String>, entries: Int) {
-    if (RunSession.tracking.value || RunSession.armed.value) {
+    if (RunSession.runActive) {
         showNotice(ctx, res.getString(Res.string.main_import_refused_run), long = true)
         return
     }
@@ -755,3 +766,97 @@ private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean
         contentPadding = PaddingValues(Space.Card.dp),
     )
 
+/** Gap between theme swatch cards, across a row and between grid rows. */
+private val ThemeSwatchGap = Space.Md.dp
+
+/** Side padding inside a theme swatch card (also the label's measured room). */
+private val ThemeSwatchInset = Space.Md.dp
+
+/**
+ * The theme picker: one [ThemeSwatchCard] per [AppTheme], in enum order. Four
+ * across while every name fits on one line in its card at the current font
+ * scale (measured in the exact style the card renders, like [SegmentedEnumRow]);
+ * otherwise a 2×2 grid, so a name never breaks mid-word at 130 % / 200 % type.
+ * A radio group to TalkBack.
+ */
+@Composable
+fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        val themes = AppTheme.entries
+        val labelRoomPx = with(density) {
+            ((maxWidth - ThemeSwatchGap * (themes.size - 1)) / themes.size - ThemeSwatchInset * 2).toPx()
+        }
+        val fits = themes.all {
+            measurer.measure(it.name, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            verticalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
+        ) {
+            themes.chunked(if (fits) themes.size else 2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
+                ) {
+                    row.forEach { t -> ThemeSwatchCard(t, selected = t == current) { onSelect(t) } }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A theme choice as a swatch card: a mini preview of the theme's LIGHT face (its
+ * ground with an elevated-card bar and its accent dot) over its name, drawn as a
+ * [choiceCard] (selected = solid Accent, no outline, like every other selection).
+ * The light face is each theme's most recognisable one (rose blush, mint, butter
+ * cream, white paper) and it reads the theme's own [AppTheme.light] palette, so
+ * every card previews itself regardless of the active theme or dark mode. The
+ * preview plate keeps a 1dp hairline so a white ground (Paper) never melts into a
+ * light card, and an OnAccent hairline on the selected accent fill.
+ */
+@Composable
+private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
+    val pal = theme.light
+    val plateShape = RoundedCornerShape(Space.Md.dp)
+    val barShape = RoundedCornerShape(Space.Sm.dp)
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .choiceCard(selected)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = Space.Card.dp, horizontal = ThemeSwatchInset),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(plateShape)
+                .background(pal.bgTop)
+                .border(1.dp, if (selected) OnAccent.copy(alpha = 0.4f) else ChoiceCellBorder, plateShape)
+                .padding(Space.Sm.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(16.dp).clip(CircleShape).background(pal.accent))
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(16.dp)
+                    .clip(barShape)
+                    .background(pal.bgElevated)
+                    .border(1.dp, pal.onBgFaint.copy(alpha = HairlineAlpha.Strong), barShape),
+            )
+        }
+        // Wraps rather than clipping if a name still outgrows its card.
+        Text(
+            theme.name,
+            color = choiceCellContent(selected),
+            style = Type.Chip,
+            textAlign = TextAlign.Center,
+        )
+    }
+}

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Dark (system night) overrides. Only the SYSTEM-default themes need a
-         night variant: black ground + WHITE logo. The Forced.Light / Forced.Dark
+         night variant: dark ground + WHITE logo. The Forced.Light / Forced.Dark
          themes (values/themes.xml) reference explicit colors + logos, so they are
          intentionally NOT overridden here and hold under any night setting. -->
     <style name="Theme.Milestone.App" parent="android:Theme.Material.NoActionBar">

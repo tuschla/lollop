@@ -5,13 +5,19 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
-/** Pure Today decisions: the banner's way back per hold reason, one coaching
+/** Today decisions: the banner's way back per hold reason, one coaching
  *  card per exercise, the win that carries its next-time advice, the newcomer
  *  guide's reps-in-reserve and face line, when the session review asks runs,
  *  and the plan face's plate figure, run head and display-unit distances. */
 class TodayLogicTest {
+
+    // Exercise matching and draft facts ask the real core: start from a fresh
+    // process, not an engine another test class left installed.
+    @Before
+    fun setUp() = AppRuntime.resetForTest()
 
     @Test
     fun holdAction_followsTheHoldReasonBeforeTheTier() {
@@ -33,25 +39,6 @@ class TodayLogicTest {
         assertEquals(HoldAction.RemoveIllness, holdAction(null, SafetyTier.Illness))
         assertEquals(HoldAction.ReviewHealth, holdAction(null, SafetyTier.MedicalReferral))
         assertEquals(HoldAction.ClearReadiness, holdAction(null, SafetyTier.HrvTrend))
-    }
-
-    @Test
-    fun painSubline_fallbackUsesTheTriageWordsAndMatchesTheCore() {
-        val noCore = ViewModel()
-        // The triage choices' words, not "sharp/joint" / "tendon-like".
-        assertEquals(
-            "Left knee · sharp or joint pain · 6/10",
-            painSubline(noCore, PainDetail(PainKind.SharpJoint, severity = 6, trend = PainTrend.Stable, location = "Left knee")),
-        )
-        assertEquals("dull ache · 3/10", painSubline(noCore, PainDetail(PainKind.TendonLoadRelated, severity = 3, trend = PainTrend.Stable)))
-        // "Not sure" adds nothing to the line (never a stray "not sure" fragment).
-        assertEquals("Left knee · 4/10", painSubline(noCore, PainDetail(PainKind.Other, severity = 4, trend = PainTrend.Stable, location = "Left knee")))
-        assertNull(painSubline(noCore, PainDetail(PainKind.Other, trend = PainTrend.Stable)))
-        // Worse the morning after reads "worsening" too, as the core's pain_context does.
-        assertEquals(
-            "muscle soreness · worsening",
-            painSubline(noCore, PainDetail(PainKind.Doms, trend = PainTrend.WorseningAfter24h)),
-        )
     }
 
     @Test
@@ -104,10 +91,10 @@ class TodayLogicTest {
         assertNull(ProfileRowId.Pregnant.pickerRow)
         assertNull(ProfileRowId.Reds.pickerRow)
         assertEquals(ProfileRowId.Age, ProfileRowId.Age.pickerRow)
-        val chestPain = HealthScreen().withParqAnswer(ParqItem.ChestPain, true)
-        assertEquals(ParqItem.ChestPain, parqRevealItem(ProfileRowId.ParqSymptom, chestPain))
+        val chestPain = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.ChestPain, true))).health
+        assertEquals(ParqQuestion.ChestPain, parqRevealItem(ProfileRowId.ParqSymptom, chestPain))
         assertNull("a legacy flag has no question to land on", parqRevealItem(ProfileRowId.ParqSymptom, HealthScreen(symptomatic = true)))
-        assertEquals(ParqItem.BoneOrJoint, parqRevealItem(ProfileRowId.ParqInjury, HealthScreen(injury_or_rehab = true)))
+        assertEquals(ParqQuestion.BoneOrJoint, parqRevealItem(ProfileRowId.ParqInjury, HealthScreen(injury_or_rehab = true)))
     }
 
     @Test
@@ -128,16 +115,18 @@ class TodayLogicTest {
     }
 
     @Test
-    fun returnCheckAdjustmentKey_onlyForTheReturnCheckSession() {
+    fun aReturnCheckSessionOwnsItsAdjustment() {
         val adj = AdjustmentView(summary = "Return check after illness: …", citation = "Schwellnus 2022", safety_critical = true)
         val check = SessionPlanView(
             status = SessionStatus.Adjusted,
             items = listOf(PrescriptionView(summary = "Return check: 10–20 min easy", return_check = true)),
             adjustment = adj,
+            adjustment_on_item = true,
         )
-        assertEquals(adj.summary to adj.citation, returnCheckAdjustmentKey(check))
-        assertNull(returnCheckAdjustmentKey(check.copy(items = listOf(PrescriptionView(summary = "Run: 20 min easy")))))
-        assertNull(returnCheckAdjustmentKey(null))
+        val m = ViewModel(today_epoch_day = 100, next_session = check, adjustments = listOf(adj.copy(repeats_session = true)))
+        val c = todayCards(m, hasSignal = true)
+        assertNull("the item states it: no card above", c.hostAdjustment)
+        assertTrue(c.sessionAdjustmentAbove)
     }
 
     @Test
@@ -164,27 +153,6 @@ class TodayLogicTest {
         // Half points and the open-ended "4+" are not stated as a plain number.
         assertNull(prescribedRir(7.5))
         assertNull(prescribedRir(6.0))
-    }
-
-    @Test
-    fun winAdviceFor_pairsTheWinWithItsLiftsNextTimeNote() {
-        val win = "New best on Back squat: 295 lb × 5."
-        val cue = AdjustmentView(summary = "Deadlift: remaining sets drop 5%", exercise = "Deadlift", suggested_load_kg = 140.0)
-        val nextTime = AdjustmentView(summary = "Back squat: add about 4% next time", exercise = "Back squat")
-        assertSame(nextTime, winAdviceFor(win, listOf(cue, nextTime)))
-        // An in-session cue for the same lift is not next-time advice.
-        val squatCue = AdjustmentView(summary = "Squat: drop 5%", exercise = "Back squat", suggested_load_kg = 120.0)
-        assertNull(winAdviceFor(win, listOf(squatCue)))
-        // Advice for another lift stays its own card.
-        assertNull(winAdviceFor(win, listOf(AdjustmentView(summary = "Add 2%", exercise = "Bench press"))))
-    }
-
-    @Test
-    fun withoutEffortClause_dropsOnlyTheRepsLeftClause() {
-        assertEquals("3×5 @ 60 kg", withoutEffortClause("3×5 @ 60 kg · ~3 reps left"))
-        assertEquals("3×5 @ 60 kg · move fast", withoutEffortClause("3×5 @ 60 kg · 1–2 reps left · move fast"))
-        assertEquals("3×5", withoutEffortClause("3×5 · to your last good rep"))
-        assertEquals("3×5 @ 60 kg", withoutEffortClause("3×5 @ 60 kg"))
     }
 
     @Test
@@ -228,14 +196,16 @@ class TodayLogicTest {
         val cue = AdjustmentView(summary = "Stop a rep earlier", grade = EvidenceGrade.Moderate, citation = "c1", exercise = "Back squat")
         val safety = AdjustmentView(summary = "Head cold: fewer sets", grade = EvidenceGrade.Moderate, citation = "c2", safety_critical = true)
         val underWay = ViewModel(today_epoch_day = 100, adjustments = listOf(cue, safety))
-        val open = todayCards(underWay, hasSignal = true, DistanceUnit.Km)
+        val open = todayCards(underWay, hasSignal = true)
         assertSame(safety, open.hostAdjustment)
         assertEquals(listOf(cue), open.coachingCards)
-        assertTrue("both are cards above the session", ("Stop a rep earlier" to "c1") in open.renderedKeys)
+        assertFalse("nothing above repeats the session's adjustment", open.sessionAdjustmentAbove)
+        val repeated = underWay.copy(adjustments = listOf(cue.copy(repeats_session = true), safety))
+        assertTrue("a card above states it", todayCards(repeated, hasSignal = true).sessionAdjustmentAbove)
         val done = underWay.copy(
             session_done = SessionDoneView(epoch_day = 100, items = listOf(SessionDoneItemView(exercise = "Back squat"))),
         )
-        val after = todayCards(done, hasSignal = true, DistanceUnit.Km)
+        val after = todayCards(done, hasSignal = true)
         assertSame("a safety call is never spent", safety, after.hostAdjustment)
         assertTrue("the session's coaching is spent once it is done", after.coachingCards.isEmpty())
     }
@@ -267,26 +237,20 @@ class TodayLogicTest {
         assertEquals(null, runFaceHead(item.copy(run_head = ""), DistanceUnit.Km))
     }
 
-    /** A distance head and distance prose read in the display unit from the core's
-     *  structured km figure and its miles twins, never by rewriting the km text. */
+    /** A distance head reads in the display unit from the core's structured km
+     *  figure, never by rewriting the km text. The safety reason and feedback are
+     *  rendered in the profile's unit by the core (Rust tests
+     *  `a_logged_shakeout_keeps_the_stated_long_run`,
+     *  `session_done_carries_run_numbers_and_says_of_plan_when_short`). */
     @Test
     fun distancesFollowTheDisplayUnit() {
         val item = PrescriptionView(
             run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(band = "easy"),
             safety_reason = "Capped at 8 km: at most 10% over your longest recent run",
-            safety_reason_mi = "Capped at 5 mi: at most 10% over your longest recent run",
         )
         assertEquals("8 km", runFaceHead(item, DistanceUnit.Km))
-        assertEquals("5 mi", runFaceHead(item, DistanceUnit.Mi))
-        assertEquals(item.safety_reason, safetyReasonText(item, DistanceUnit.Km))
-        assertEquals(item.safety_reason_mi, safetyReasonText(item, DistanceUnit.Mi))
-        // A reason stating no distance has no twin: the km text stands.
-        val kept = item.copy(safety_reason = "Kept short and easy", safety_reason_mi = "")
-        assertEquals("Kept short and easy", safetyReasonText(kept, DistanceUnit.Mi))
-        assertEquals(null, safetyReasonText(PrescriptionView(), DistanceUnit.Mi))
-        val fb = FeedbackView(message = "Run done: 10.2 km in 47 min, as planned.", message_mi = "Run done: 6.3 mi in 47 min, as planned.")
-        assertEquals(fb.message, feedbackMessage(fb, DistanceUnit.Km))
-        assertEquals(fb.message_mi, feedbackMessage(fb, DistanceUnit.Mi))
-        assertEquals("Even split.", feedbackMessage(FeedbackView(message = "Even split."), DistanceUnit.Mi))
+        assertEquals("5\u00A0mi", runFaceHead(item, DistanceUnit.Mi))
+        assertEquals(item.safety_reason, safetyReasonText(item))
+        assertEquals(null, safetyReasonText(PrescriptionView()))
     }
 }

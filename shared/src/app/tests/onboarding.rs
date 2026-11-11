@@ -56,31 +56,29 @@ fn gated_profiles_get_no_prescriptive_guidance_or_calculator_numbers() {
     // onboard-050 / safety-011 / safety-045 / safety-049: gates run BEFORE any
     // prescription, so no %1RM, 1RM-testing, volume-ramp or running-cap row,
     // and the plan calculators show the hold instead of numbers.
-    for health in [
-        HealthScreen {
-            youth: true,
-            ..HealthScreen::default()
+    for profile in [
+        Profile {
+            age_years: Some(15.0),
+            ..sample_profile()
         },
-        HealthScreen {
+        profile_with_health(HealthScreen {
             pregnant: true,
             ..HealthScreen::default()
-        },
-        HealthScreen {
+        }),
+        profile_with_health(HealthScreen {
             reds_signal: true,
             ..HealthScreen::default()
-        },
-        HealthScreen {
+        }),
+        profile_with_health(HealthScreen {
             parq_positive: true,
             ..HealthScreen::default()
-        },
+        }),
     ] {
         let app = Engine;
         let mut model = Model::default();
-        app.update(
-            Event::SetProfile(profile_with_health(health.clone())),
-            &mut model,
-        )
-        .expect_only_render();
+        let health = profile.health.clone();
+        app.update(Event::SetProfile(profile), &mut model)
+            .expect_only_render();
         app.update(
             Event::PlanHypertrophyMeso {
                 muscle: "chest".into(),
@@ -151,11 +149,13 @@ fn youth_and_injury_screens_defer_visibly() {
     let app = Engine;
     let mut model = Model::default();
     app.update(
-        Event::SetProfile(profile_with_health(HealthScreen {
-            youth: true,
-            injury_or_rehab: true,
-            ..HealthScreen::default()
-        })),
+        Event::SetProfile(Profile {
+            age_years: Some(15.0),
+            ..profile_with_health(HealthScreen {
+                injury_or_rehab: true,
+                ..HealthScreen::default()
+            })
+        }),
         &mut model,
     )
     .expect_only_render();

@@ -176,18 +176,10 @@ private const val UndoRowMaxLinesBeside = 2
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LogSetEditor(
-    recentExercises: List<String> = emptyList(),
-    // Names of today's + this week's prescribed exercises: the tail of the quick
-    // picks (fed by LogSheet.kt), after today's open items and the user's recents.
-    plannedExercises: List<String> = emptyList(),
-    // Canonical names of today's prescribed TIMED-HOLD rungs. When the picked
-    // exercise matches one (by [sameExercise]), the editor logs a hold (seconds)
-    // instead of reps and relabels the weight field "added load".
-    holdExercises: Set<String> = emptySet(),
-    // Canonical names of prescribed PURE-BODYWEIGHT rungs (added load 0): the
-    // weight/added-load field + keypad are hidden for these (a Wall push-up has no
-    // load to enter). Weighted rungs and barbell lifts keep the field.
-    bodyweightExercises: Set<String> = emptySet(),
+    // The model's exercise lists every host builds the same way: quick picks,
+    // hold rungs (logged in seconds, the weight field relabelled "added load") and
+    // pure-bodyweight rungs (no weight field).
+    inputs: SetEditorInputs = SetEditorInputs(),
     // Non-null → EDIT mode: prefill from this logged set and emit
     // an AmendSet targeting its entry_id instead of a fresh LogSet.
     initial: LiftResultView? = null,
@@ -215,11 +207,6 @@ fun LogSetEditor(
     adjustments: List<AdjustmentView> = emptyList(),
     reviewAdjustments: List<AdjustmentView> = emptyList(),
     onClose: () -> Unit = {},
-    // Report unsaved-edits state so a host sheet's swipe-down can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
-    // Whether the host sheet must refuse a swipe or scrim tap: today's planned
-    // loop, or any loop once a set is logged in it (close via X or "Done for now" only).
-    onSheetLockChange: (Boolean) -> Unit = {},
     // Close the whole sheet: the after-Save close for an EDIT (amend) or a
     // past-day set, and the planned loop's X. A NEW today set loops instead.
     onDone: () -> Unit = {},
@@ -247,21 +234,22 @@ fun LogSetEditor(
     // only a hint on the scale), an untouched Save logs it unrated (0.0, which the
     // core reads as "not recorded"), and it is never carried into the next set.
     var fields by rememberSaveable(stateSaver = SetEditorState.Saver) { mutableStateOf(SetEditorState.from(seed)) }
-    // Canonical names of today's prescribed hold rungs.
-    val holdSet = remember(holdExercises) { holdExercises.mapTo(HashSet(), ::nameKey) }
+    // The current exercise's match key, and those of the prescribed hold rungs.
+    val exerciseKey = remember(fields.exercise) { nameKey(fields.exercise) }
+    val holdSet = remember(inputs.holdExercises) { nameKeys(inputs.holdExercises.toList()).toHashSet() }
     // Hold mode follows the CURRENT exercise: a prescribed hold rung, OR editing an
     // existing hold set while its exercise is unchanged ([sameExercise], the match
     // Save resolves the name with). Renaming an edited hold set to a barbell lift
     // drops hold mode (so it can't emit a "Bench — 30 s hold" row or pollute the
     // Bench e1RM with a phantom 1-rep set).
-    val holdMode = nameKey(fields.exercise) in holdSet ||
+    val holdMode = exerciseKey in holdSet ||
         (initial?.hold_sec != null && sameExercise(fields.exercise, initial.exercise))
     // A pure-bodyweight rung (prescribed added load 0) has no weight to enter, so
     // the field + keypad below are hidden. Follows the CURRENT exercise like
     // holdMode; in EDIT mode only when the logged weight is already 0, so editing a
     // weighted set can never silently drop its load.
-    val bodyweightSet = remember(bodyweightExercises) { bodyweightExercises.mapTo(HashSet(), ::nameKey) }
-    val bodyweightMode = nameKey(fields.exercise) in bodyweightSet &&
+    val bodyweightSet = remember(inputs.bodyweightExercises) { nameKeys(inputs.bodyweightExercises.toList()).toHashSet() }
+    val bodyweightMode = exerciseKey in bodyweightSet &&
         (initial?.weight_kg ?: 0.0) == 0.0
     // Auto-manage the (added-)load buffer only for a blank, no-load editor as the
     // user types a hold-rung name: reset to "0" (hold) / "" (reps). A reseeded or
@@ -285,10 +273,6 @@ fun LogSetEditor(
     // last re-seeded.
     var observedAtTouched by rememberSaveable { mutableStateOf(false) }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
-    // A legacy row (entry_id == 0) is amended by matching its original stamp,
-    // so its date can't be changed without orphaning it; lock the date chip.
-    val dateEditable = initial == null || initial.entry_id != 0L
     // The gym-floor loop: every NEW set logged for today (from the plan, the
     // "Today's plan" tile, or a one-off "Log set") keeps the sheet open and
     // re-seeds for the next set. A past-day log (initialObservedAt set) and an EDIT
@@ -306,12 +290,11 @@ fun LogSetEditor(
     var undoRestScheduled by rememberSaveable { mutableStateOf(false) }
     // A just-logged set whose warm-up verdict (`qualifies`) is pending from the core.
     var pendingQualifyId by rememberSaveable { mutableStateOf<Long?>(null) }
-    // A set of today's opened for editing from the loop, by entry id (a legacy
-    // id-0 row by its stamp), re-resolved against the live list so it survives
-    // rotation; and whether that nested edit has unsaved changes.
+    // A set of today's opened for editing from the loop, by entry id,
+    // re-resolved against the live list so it survives
+    // rotation; the nested edit's own guard (an outside tap closes it only clean).
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var editingAt by rememberSaveable { mutableStateOf(0L) }
-    var editDirty by rememberSaveable { mutableStateOf(false) }
+    val editGuard = remember { EditorGuard() }
     // Sets logged in this loop (work sets and warm-ups).
     var loggedHere by rememberSaveable { mutableStateOf(0) }
     // Clock time of the last one-tap warm-up, for the double-tap guard.
@@ -357,27 +340,30 @@ fun LogSetEditor(
     val todayOpen = remember(planSession) {
         planSession?.items.orEmpty().filter { !it.done }.map { it.exercise }
     }
-    val quickPicks = remember(fields.exercise, todayOpen, recentExercises, plannedExercises) {
-        quickPickCandidates(fields.exercise, todayOpen, recentExercises, plannedExercises)
+    val quickPicks = remember(fields.exercise, todayOpen, inputs) {
+        quickPickCandidates(fields.exercise, todayOpen, inputs.recentExercises, inputs.plannedExercises)
     }
     // Every spelling the app already knows, so a name typed in another case is
     // saved under its known form.
-    val knownNames = remember(planSession, recentExercises, plannedExercises) {
-        planSession?.items.orEmpty().map { it.exercise } + recentExercises + plannedExercises
+    val knownNames = remember(planSession, inputs) {
+        planSession?.items.orEmpty().map { it.exercise } + inputs.recentExercises + inputs.plannedExercises
     }
     // Weight, reps and effort show once the exercise is settled, never for a
     // half-typed search term.
-    val chosen = exerciseChosen(
-        fields.exercise,
-        knownNames,
-        added = addedName,
-        preset = initialExercise ?: prescription?.exercise,
-        editing = initial != null,
-    )
-    // Today's planned loop (opened from a plan item): X returns to Today.
+    val presetExercise = initialExercise ?: prescription?.exercise
+    val chosen = remember(fields.exercise, knownNames, addedName, presetExercise, initial) {
+        exerciseChosen(
+            fields.exercise,
+            knownNames,
+            added = addedName,
+            preset = presetExercise,
+            editing = initial != null,
+        )
+    }
+    // Today's planned loop (opened from a plan item): X returns to Today. It, and
+    // any loop once a set is logged in it, closes via X or "Done for now" only.
     val plannedLoop = loop && prescription != null
     val sheetLocked = plannedLoop || (loop && loggedHere > 0)
-    LaunchedEffect(sheetLocked) { onSheetLockChange(sheetLocked) }
 
     // Keep the screen on while the loop is open: a rest is longer than a typical
     // screen timeout, and the countdown should stay readable between sets.
@@ -550,15 +536,14 @@ fun LogSetEditor(
             liveItem?.let { AppliedCueLoads.record(it, kg) }
         }
     }
-    // Barbell warm-ups before the first work set of a plate-loaded item.
+    // Barbell warm-ups before the first work set (the core's ramp, empty off the
+    // straight barbell).
     val workKg = liveItem?.let { it.load_kg ?: it.suggested_load_kg }
-    val warmUps = if (
-        loop && liveItem != null && !liveItem.done && liveItem.sets_done == 0 &&
-        liveItem.plates_per_side.isNotEmpty() && !holdMode && !bodyweightMode && workKg != null
-    ) {
-        warmUpSteps(workKg, weightUnit, liveItem.exercise)
-    } else {
-        emptyList()
+    val warmUpExercise = liveItem?.exercise?.takeIf {
+        loop && !liveItem.done && liveItem.sets_done == 0 && !holdMode && !bodyweightMode
+    }
+    val warmUps = remember(warmUpExercise, workKg, weightUnit) {
+        if (warmUpExercise != null && workKg != null) warmUpSteps(workKg, weightUnit, warmUpExercise) else emptyList()
     }
     // Warm-up loads already logged today (the core marks them not qualifying).
     val warmUpsDoneKg = liveItem?.logged_sets.orEmpty().filter { !it.qualifies }.map { it.weight_kg }
@@ -571,6 +556,7 @@ fun LogSetEditor(
         keepOpenAfterSave = loop,
         actionLabel = primaryLabel,
         controlsBeside = true,
+        locksSheet = sheetLocked,
         onSave = {
             when (primary) {
                 LoopPrimary.Next -> nextItem?.let { reseedTo(it.exercise, markDirty = false) }
@@ -647,8 +633,6 @@ fun LogSetEditor(
                     onEditLast = lastSet?.takeIf { undoEntryId == null }?.let { s ->
                         {
                             editingId = s.entry_id
-                            editingAt = s.observed_at
-                            editDirty = false
                         }
                     },
                     onLogExtra = if (movesOn && saveEnabled) {
@@ -759,8 +743,9 @@ fun LogSetEditor(
                     horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
                     verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
                 ) {
-                    quickPicks.forEach { name ->
-                        ChoiceChip(name, selected = sameExercise(name, fields.exercise), onClick = { reseedTo(name) })
+                    val pickKeys = remember(quickPicks) { nameKeys(quickPicks) }
+                    quickPicks.forEachIndexed { i, name ->
+                        ChoiceChip(name, selected = pickKeys[i] == exerciseKey, onClick = { reseedTo(name) })
                     }
                 }
                 // A name the app doesn't know yet is offered as a new exercise, in
@@ -872,7 +857,7 @@ fun LogSetEditor(
                     }
                 }
             }
-            ObservedAtRow(observedAt, withTime = true, enabled = dateEditable) {
+            ObservedAtRow(observedAt, withTime = true) {
                 observedAt = it
                 observedAtTouched = true
                 dirty = true
@@ -884,13 +869,11 @@ fun LogSetEditor(
     // put underneath). Saves an AmendSet through the same event path. Neither an
     // outside tap nor Back drops an edited set silently: Back is the editor's own
     // close (with its discard confirm), and an outside tap only closes it clean.
-    val editing = editingId?.let { id ->
-        recentLifts.firstOrNull { if (id != 0L) it.entry_id == id else it.observed_at == editingAt }
-    }
+    val editing = editingId?.let { id -> recentLifts.firstOrNull { it.entry_id == id } }
     editing?.let { set ->
-        val closeEdit = { editingId = null; editDirty = false }
+        val closeEdit = { editingId = null }
         Dialog(
-            onDismissRequest = { if (!editDirty) closeEdit() },
+            onDismissRequest = { if (!editGuard.dirty) closeEdit() },
             properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
         ) {
             Surface(
@@ -899,15 +882,12 @@ fun LogSetEditor(
                 modifier = Modifier.fillMaxWidth().padding(Space.Md.dp).traversalGroup(),
             ) {
                 Column(Modifier.sheetPadding()) {
-                    CompositionLocalProvider(LocalEditorPinnedActions provides true) {
+                    CompositionLocalProvider(LocalEditorPinnedActions provides true, LocalEditorGuard provides editGuard) {
                         LogSetEditor(
-                            recentExercises = recentExercises,
-                            holdExercises = holdExercises,
-                            bodyweightExercises = bodyweightExercises,
+                            inputs = inputs,
                             initial = set,
                             weightUnit = weightUnit,
                             onClose = closeEdit,
-                            onDirtyChange = { editDirty = it },
                             onDone = closeEdit,
                             onSave = onSave,
                         )

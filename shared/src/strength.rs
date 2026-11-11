@@ -563,6 +563,16 @@ pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
 // 10. Velocity-loss set termination by goal (File 02 strength-018; AUTOREG-VL-001)
 // ---------------------------------------------------------------------------
 
+/// Velocity-loss fraction ending a power set (autoreg-010; AUTOREG-VL-001): the
+/// lowest goal threshold.
+pub const VL_STOP_POWER_FRAC: f64 = 0.10;
+/// Velocity-loss fraction ending a max-strength set (File 02 strength-018;
+/// AUTOREG-VL-001).
+pub const VL_STOP_MAX_STRENGTH_FRAC: f64 = 0.20;
+/// Velocity-loss fraction ending a hypertrophy set (File 02 strength-018;
+/// AUTOREG-VL-001): the highest goal threshold.
+pub const VL_STOP_HYPERTROPHY_FRAC: f64 = 0.40;
+
 /// Velocity-loss fraction at which to terminate the set for a given goal (File
 /// 02 strength-018; AUTOREG-VL-001): 10 % power, 20 % max strength, 40 %
 /// hypertrophy. strength-018 groups power with max strength at 20 %; autoreg-010
@@ -570,9 +580,9 @@ pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
 /// goal→VL map.
 pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
     let vl = match goal {
-        LiftGoal::Power => 0.10,
-        LiftGoal::MaxStrength => 0.20,
-        LiftGoal::Hypertrophy => 0.40,
+        LiftGoal::Power => VL_STOP_POWER_FRAC,
+        LiftGoal::MaxStrength => VL_STOP_MAX_STRENGTH_FRAC,
+        LiftGoal::Hypertrophy => VL_STOP_HYPERTROPHY_FRAC,
     };
     Recommended::new(vl, claims::AUTOREG_VL_001)
 }
@@ -918,6 +928,58 @@ pub fn novice_load_jump_cap_frac(upper_body: bool) -> Recommended<(f64, f64)> {
         (0.05, 0.10)
     };
     Recommended::new(cap, claims::STR_1RMTEST_001)
+}
+
+// ---------------------------------------------------------------------------
+// 16. Warm-up ramp (STR-WARMUP-001)
+// ---------------------------------------------------------------------------
+
+/// The specific warm-up ramp after its first step (STR-WARMUP-001; the exact
+/// steps are expert opinion): 40 % × 5, 60 % × 3 and 80 % × 2 of the working
+/// load, ending on a high-load set.
+const WARM_UP_RAMP: [(f64, u32); 3] = [(0.4, 5), (0.6, 3), (0.8, 2)];
+
+/// One step of a warm-up ramp: its load (wire kg) and reps.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, crate::wire::Wire)]
+pub struct WarmUpStep {
+    pub kg: f64,
+    pub reps: u32,
+    /// The empty bar: the set screen labels it "Bar" rather than its figure.
+    pub bar: bool,
+}
+
+/// The warm-up steps before the first work set at `work_kg` of `exercise`
+/// (STR-WARMUP-001): a first step × 5 (the empty bar, or for a pull from the
+/// floor, [`crate::exercise::starts_from_floor`], the bar with one full plate
+/// a side), then [`WARM_UP_RAMP`] on the display unit's plate grid. A ramp
+/// step that rounds onto the first step or up to the work load is dropped.
+/// Empty for a lift not loaded on a straight barbell
+/// ([`crate::exercise::is_barbell_lift`]), for a non-finite load and at or
+/// below the first step.
+pub fn warm_up_ramp(exercise: &str, work_kg: f64, weight_lb: bool) -> Recommended<Vec<WarmUpStep>> {
+    let mut steps = Vec::new();
+    if work_kg.is_finite() && crate::exercise::is_barbell_lift(exercise) {
+        let from_floor = crate::exercise::starts_from_floor(exercise);
+        let first = crate::plates::warm_up_start_kg(from_floor, weight_lb);
+        if work_kg > first + 1e-6 {
+            steps.push(WarmUpStep {
+                kg: first,
+                reps: 5,
+                bar: !from_floor,
+            });
+            for (share, reps) in WARM_UP_RAMP {
+                let kg = crate::plates::round_warm_up_kg(work_kg * share, weight_lb);
+                if kg > first + 1e-6 && kg < work_kg - 1e-6 && steps.iter().all(|s| s.kg != kg) {
+                    steps.push(WarmUpStep {
+                        kg,
+                        reps,
+                        bar: false,
+                    });
+                }
+            }
+        }
+    }
+    Recommended::new(steps, claims::STR_WARMUP_001)
 }
 
 #[cfg(test)]

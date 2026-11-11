@@ -13,19 +13,10 @@ import androidx.glance.appwidget.GlanceRemoteViews
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppTheme
 import app.milestone.DarkMode
-import app.milestone.HoldReason
 import app.milestone.widget.TodayWidgetContent
-import app.milestone.widget.WidgetAheadDay
-import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetFace
-import app.milestone.widget.WidgetItem
-import app.milestone.widget.WidgetItemKind
-import app.milestone.widget.WidgetNext
+import app.milestone.widget.WidgetFixtures
 import app.milestone.widget.WidgetSizes
-import app.milestone.widget.WidgetSnapshot
-import app.milestone.widget.WidgetWeekDay
-import app.milestone.widget.WidgetWeekMark
-import app.milestone.widget.previewSnapshot
 import app.milestone.widget.widgetColors
 import app.milestone.widget.widgetFace
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -52,7 +43,6 @@ import kotlin.math.pow
 @RunWith(RobolectricTestRunner::class)
 class ScreenshotWidgetTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val day = 20_389L // Tue 2025-10-28
 
     @After
     fun resetFont() = RuntimeEnvironment.setFontScale(1f)
@@ -79,33 +69,9 @@ class ScreenshotWidgetTest {
             .minByOrNull { (size.width - it.width).value.pow(2) + (size.height - it.height).value.pow(2) }
             ?: WidgetSizes.minBy { it.width.value * it.height.value }
 
-    private val week = listOf(
-        WidgetWeekMark.Done, WidgetWeekMark.Next, WidgetWeekMark.Rest, WidgetWeekMark.Planned,
-        WidgetWeekMark.Planned, WidgetWeekMark.Rest, WidgetWeekMark.Rest,
-    ).mapIndexed { i, m -> WidgetWeekDay(day - 1 + i, m) }
-
-    private fun lift(name: String, detail: String, done: Boolean = false) = WidgetItem(WidgetItemKind.Lift, name, detail, done)
-
     private fun states(): Map<String, WidgetFace> {
         val res = ctx.resources
-        val base = WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Lift, weekDone = 1, weekPlanned = 4, week = week)
-        val liftItems = listOf(lift("Back Squat", "5×3 @ 117.5 kg"), lift("Deadlift", "3×5"), lift("Bench press", "3×5"), lift("Cable row", "3×5"))
-        val runItems = listOf(WidgetItem(WidgetItemKind.Run, detail = "3.4 mi", pace = "9:00–9:40 /mi"))
-        val next = WidgetNext(day + 2, "Heavy volume day")
-        val ahead = listOf(WidgetAheadDay(day + 2, WidgetDayKind.Lift, "Heavy volume day", listOf(lift("Back Squat", "4×5 @ 112.5 kg"), lift("Deadlift", "4×5 @ 57.5 kg"), lift("Bench press", "4×5 @ 57.5 kg"))))
-        fun f(s: WidgetSnapshot, recording: Boolean = false) = widgetFace(s, day, res, recording)
-        return linkedMapOf(
-            "lift" to f(base.copy(title = "Heavy day", items = liftItems)),
-            "liftstarted" to f(base.copy(title = "Heavy day", items = listOf(lift("Back Squat", "5×3 @ 117.5 kg", true)) + liftItems.drop(1))),
-            "run" to f(base.copy(kind = WidgetDayKind.Run, title = "Easy run", items = runItems, trackable = true)),
-            "recording" to f(base.copy(kind = WidgetDayKind.Run, title = "Easy run", items = runItems, trackable = true), recording = true),
-            "rest" to f(base.copy(kind = WidgetDayKind.Rest, restDay = true, next = next, ahead = ahead, week = week.map { if (it.epochDay == day) it.copy(mark = WidgetWeekMark.Rest) else it })),
-            "done" to f(base.copy(kind = WidgetDayKind.Run, title = "Easy run", items = runItems.map { it.copy(done = true) }, sessionDone = true, next = next, ahead = ahead, weekDone = 2, week = week.map { if (it.epochDay == day) it.copy(mark = WidgetWeekMark.Done) else it })),
-            "hold" to f(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Paused, holdReason = HoldReason.Pain)),
-            "noplan" to f(WidgetSnapshot(epochDay = day, kind = WidgetDayKind.NoPlan)),
-            "stale" to f(base.copy(stale = true)),
-            "preview" to f(previewSnapshot(res, day)),
-        )
+        return WidgetFixtures.states(res).mapValues { (_, s) -> widgetFace(s.snapshot, WidgetFixtures.DAY, res, s.recording) }
     }
 
     private fun render(name: String, face: WidgetFace, theme: AppTheme, dark: Boolean, size: DpSize) {

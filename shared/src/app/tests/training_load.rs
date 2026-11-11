@@ -27,10 +27,14 @@ fn training_load_chains_lucia_trimp_into_ctl_atl_tsb() {
     assert_eq!(tl.sessions_counted, 3);
     assert_eq!(tl.sessions_skipped, 2);
     assert_eq!(tl.days, 5, "day span 0..=4");
-    assert!(tl.ctl > 0.0 && tl.atl > 0.0);
+    let fig = load_figures_of(&model).expect("load figures present");
+    assert!(fig.ctl > 0.0 && fig.atl > 0.0);
     // Fresh loading: acute fatigue outruns chronic fitness → negative form.
-    assert!(tl.atl > tl.ctl, "ATL {} vs CTL {}", tl.atl, tl.ctl);
-    assert!((tl.tsb - (tl.ctl - tl.atl)).abs() < 0.11, "TSB = CTL − ATL");
+    assert!(fig.atl > fig.ctl, "ATL {} vs CTL {}", fig.atl, fig.ctl);
+    assert!(
+        (fig.tsb - (fig.ctl - fig.atl)).abs() < 0.11,
+        "TSB = CTL − ATL"
+    );
     // Plain-language method, TRIMP + CTL/ATL kept, but the raw τ/EWMA
     // formula-speak is gone (the shell glossary defines the abbreviations).
     assert!(
@@ -133,16 +137,24 @@ fn weekly_report_runs_the_volume_system_over_the_latest_week() {
         has("time in each heart-rate zone"),
         "counting-method note present"
     );
-    assert!(
-        report
-            .iter()
-            .any(|r| r.summary_mi.contains("Long run 12.4 mi")),
-        "the long-run row carries a miles twin: {report:#?}"
-    );
     // Z1 share: 120 of 210 min = 57%, below the 80% easy floor.
     assert!(has("below the ~80% easy floor"), "rows: {report:#?}");
     // One hard (Z3-by-heart-rate) session, within quality caps.
     assert!(has("1 hard session"), "rows: {report:#?}");
+    // A miles profile reads the long-run row in miles.
+    let miles = Profile {
+        distance_unit: DistanceUnit::Mi,
+        ..base_profile()
+    };
+    app.update(Event::SetProfile(miles), &mut model)
+        .expect_only_render();
+    let report = app.view(&model).weekly_report;
+    assert!(
+        report
+            .iter()
+            .any(|r| r.summary.starts_with("Long run 12.4 mi")),
+        "the long-run row reads in miles: {report:#?}"
+    );
 }
 
 #[test]

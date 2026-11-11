@@ -24,11 +24,11 @@ interface CoreBridge {
     fun view(): ByteArray?
 
     /**
-     * A `.fit` file's bytes in; the tracker-import JSON out, or the error of
-     * a file that is no run (kinds `not_fit`, `damaged`, `no_track`,
-     * `too_short`, `not_a_run`). Reads no core state.
+     * A run file's bytes in (FIT, GPX or TCX, sniffed from the content); its
+     * `ImportVerdict` out: the runs to log, or the one reason the file gave
+     * none. Reads no core state.
      */
-    fun parseFit(fit: ByteArray): ByteArray?
+    fun parseRunFile(file: ByteArray): ByteArray?
 
     /**
      * A `LogRunTrack` event's wire JSON in; the figures it will be saved with
@@ -53,6 +53,49 @@ interface CoreBridge {
      * Replace the core with an empty one, as a fresh process starts it.
      */
     fun reset(): ByteArray?
+
+    /**
+     * Exercise names in, one per line; their match keys out, a JSON array of
+     * strings in line order (two spellings of one exercise share a key).
+     * Reads no core state.
+     */
+    fun exerciseKeys(names: Array<String>): ByteArray?
+
+    /**
+     * A `WarmUpQuery`'s JSON in; the `WarmUpStep`s before the first work
+     * set at its load out, a JSON array (empty for a lift off the straight
+     * barbell or a load at or below the first step). Reads no core state.
+     */
+    fun warmUpRamp(query: ByteArray): ByteArray?
+
+    /**
+     * A `ProfileDraft`'s JSON in (a profile still being edited, with the
+     * health answer just given); its `DraftFacts` out: the age, the gates it
+     * would raise and the PAR-Q+ answers as the form shows them. Reads no
+     * core state.
+     */
+    fun draftFacts(draft: ByteArray): ByteArray?
+
+    /**
+     * A run's `{"entry_id":I,"observed_at":T}` in; its `RunTrack` out: the
+     * fixes the GPX export writes, one list per recording segment (none for
+     * a run with no track or an unknown run).
+     */
+    fun runTrack(run: ByteArray): ByteArray?
+
+    /**
+     * A `TrackThinning`'s JSON in (a recorded track's fix count, cap and
+     * segment starts); its `ThinnedTrack` out: the fixes a save or a crash
+     * recovery keeps and the segment starts among them. Reads no core state.
+     */
+    fun thinTrack(track: ByteArray): ByteArray?
+
+    /**
+     * An `ImportedHr`'s JSON in; the imported run's `hr_pct_max` out, a
+     * JSON number (0.0 without samples or a measured HRmax). Reads no core
+     * state.
+     */
+    fun importedHrPct(hr: ByteArray): ByteArray?
 }
 
 /**
@@ -68,11 +111,17 @@ abstract class CoreCalls : CoreBridge {
 
     final override fun update(event: ByteArray): ByteArray? = call(0, event)
     final override fun view(): ByteArray? = call(1, NO_INPUT)
-    final override fun parseFit(fit: ByteArray): ByteArray? = call(2, fit)
+    final override fun parseRunFile(file: ByteArray): ByteArray? = call(2, file)
     final override fun trackFigures(event: ByteArray): ByteArray? = call(3, event)
     final override fun exportGpx(run: ByteArray): ByteArray? = call(4, run)
     final override fun compactLog(lines: Array<String>): ByteArray? = callLines(5, lines)
     final override fun reset(): ByteArray? = call(6, NO_INPUT)
+    final override fun exerciseKeys(names: Array<String>): ByteArray? = callLines(7, names)
+    final override fun warmUpRamp(query: ByteArray): ByteArray? = call(8, query)
+    final override fun draftFacts(draft: ByteArray): ByteArray? = call(9, draft)
+    final override fun runTrack(run: ByteArray): ByteArray? = call(10, run)
+    final override fun thinTrack(track: ByteArray): ByteArray? = call(11, track)
+    final override fun importedHrPct(hr: ByteArray): ByteArray? = call(12, hr)
 
     private companion object {
         val NO_INPUT = ByteArray(0)

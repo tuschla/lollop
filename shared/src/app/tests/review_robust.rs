@@ -680,12 +680,13 @@ fn review_last_set_full_tie_survives_delete_undo() {
     );
 }
 
-/// The content leg of `LoggedSet::chrono_cmp`: two legacy (`entry_id == 0`)
-/// sets of one lift on the same second, same load and reps, differing in
-/// spelling and rated effort, render the identical PLAN card whichever was
-/// stored first (the item's name, its "Last:" set, its `logged_sets` order).
-/// History (`lifts`) keeps a legacy pair in its logged (insertion) order by
-/// design, so only the plan surfaces are compared.
+/// The content leg of `LoggedSet::chrono_cmp`: two legacy (logged without an
+/// `entry_id`, so both get the id of their second) sets of one lift on the
+/// same second, same load and reps, differing in spelling and rated effort,
+/// render the identical PLAN card whichever was stored first (the item's
+/// name, its "Last:" set, its `logged_sets` order). History (`lifts`) keeps a
+/// legacy pair in its logged (insertion) order by design, so only the plan
+/// surfaces are compared.
 #[test]
 fn legacy_same_second_sets_render_alike_in_either_storage_order() {
     // Today, the plan's first (squat) session: the sets are its logged sets
@@ -702,7 +703,7 @@ fn legacy_same_second_sets_render_alike_in_either_storage_order() {
     };
     let (ab, ba) = (render(&a, &b), render(&b, &a));
     assert!(
-        ab.contains("\"entry_id\":0"),
+        ab.contains(&format!("\"entry_id\":{at}")),
         "fixture: the tied sets are on the plan card"
     );
     assert_eq!(

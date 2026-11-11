@@ -11,7 +11,10 @@ import kotlin.test.assertTrue
  * The crash-safe active-run file ([ActiveRunStore]) over the platform file seam
  * ([AppFiles]): java.io on the JVM, POSIX on iOS. Recovery skips the marker and a
  * torn last line, keeps the segment marks, an append after a torn tail starts its
- * own line, and the post-save clear runs after every queued append.
+ * own line, and the post-save clear runs after every queued append. The engine is a
+ * scripted one (the JVM runs these without Robolectric, where the native core must
+ * not load), so recovery keeps every fix (the core's thinning is
+ * `RunTrackingUnitTest`'s and `RunFixGuardsTest`'s).
  */
 class ActiveRunStoreTest {
     private val dir = newTempDir()
@@ -19,6 +22,7 @@ class ActiveRunStoreTest {
 
     @BeforeTest
     fun setUp() {
+        AppRuntime.resetForTest(engine = DurableCore(ScriptedCore()))
         RunSession.reset()
         ActiveRunStore.open(file)
     }

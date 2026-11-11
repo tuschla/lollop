@@ -139,9 +139,9 @@
     <!-- Spoken form of the review figures: %1$s distance ("3.21 kilometers"), %2$s moving time ("23 minutes 41 seconds"), %3$s average pace ("5 minutes 15 seconds per kilometer"). -->
     <string name="track_finish_summary">%1$s · %2$s moving · %3$s average</string>
     <!-- Inline note at the top of the review for a run under the keep threshold:
-         %1$s = the run's distance ("0.13 mi"), %2$s = the threshold, rounded ("0.3 mi").
-         "3 minutes" mirrors MIN_RUN_SEC (RunTracking.kt). -->
-    <string name="track_short_run_note">Short run (%1$s). Runs under %2$s or 3 minutes are often started by accident.</string>
+         %1$s = the run's distance ("0.13 mi"), %2$s = the threshold, rounded ("0.3 mi"),
+         %3$s = MIN_RUN_SEC in minutes (CoreConstants). -->
+    <string name="track_short_run_note">Short run (%1$s). Runs under %2$s or %3$s minutes are often started by accident.</string>
 
     <!-- Today's plan on the tracker -->
     <string name="track_plan_follow">Follow today\'s plan</string>

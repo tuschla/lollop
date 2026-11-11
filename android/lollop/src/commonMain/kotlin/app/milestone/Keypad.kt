@@ -399,7 +399,7 @@ private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit,
             Text(
                 "$key",
                 color = if (key == '.') OnBgMuted else OnBgBody,
-                style = Type.KeypadKey,
+                style = KeypadKeyStyle,
                 modifier = if (key == '.') {
                     Modifier.semantics { contentDescription = decimalDesc }
                 } else {
@@ -409,6 +409,12 @@ private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit,
         }
     }
 }
+
+/** A keypad key face: 22sp Bold, tabular. */
+internal val KeypadKeyStyle = androidx.compose.ui.text.TextStyle(
+    fontSize = 22.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+    fontFeatureSettings = "tnum", textDirection = AppTextDirection,
+)
 
 /** A raised keypad key's chrome: ≥48dp tall, rounded, on the elevated ground
  *  (a theme colour, so it reads the composition). */

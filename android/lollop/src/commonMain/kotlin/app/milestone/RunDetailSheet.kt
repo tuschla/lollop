@@ -72,25 +72,24 @@ internal fun runStartCaption(startedAt: Long): String {
     return stringResource(Res.string.run_start_caption, localizedDayFormatter("EEEdMMM").format(at), localizedDayFormatter(clock).format(at))
 }
 
-/** A run's route, shared by its detail and trim sheets: the core's GPX document (for
- *  Export), its parsed segments (map, Undo, the trim map), whether the track can be
- *  trimmed (≥2 fixes over a nonzero span) and, when it can, the timed track the trim
- *  slider and readout work on. */
+/** A run's route, shared by its detail and trim sheets: its segments of fixes (map,
+ *  Undo, the trim map), whether the track can be trimmed (≥2 fixes over a nonzero
+ *  span) and, when it can, the timed track the trim slider and readout work on. */
 internal data class RunRoute(
-    val gpx: String?,
-    val segments: List<List<GpxFix>>,
+    val segments: List<List<GpsPoint>>,
     val trimmable: Boolean,
     val track: List<TimedTrackPoint>,
 )
 
-/** Fetches a run's GPX document for [rememberRunRoute] (off the main thread). A var
+/** Fetches a run's route fixes for [rememberRunRoute] (off the main thread). A var
  *  only so a JVM test can hold the fetch and see what the sheets do while it loads. */
-internal var runGpxFetch: (entryId: Long, observedAt: Long) -> String? = { id, at -> AppRuntime.engine.runGpx(id, at) }
+internal var runTrackFetch: (entryId: Long, observedAt: Long) -> List<List<GpsPoint>> =
+    { id, at -> AppRuntime.engine.runTrack(id, at) }
 
 /**
- * The run's GPX, fetched ON DEMAND (off the main thread) for the one run being
- * inspected and parsed ONCE in the same block, keyed on the fields that change the
- * route, so rating or tagging never re-runs the export. Null while loading. A GPS run
+ * The run's route fixes ([DurableCore.runTrack]), fetched ON DEMAND (off the main
+ * thread) for the one run being inspected, keyed on the fields that change the
+ * route, so rating or tagging never re-runs the fetch. Null while loading. A GPS run
  * QC left unmeasurable has no route, but its recorded fixes are fetched too, for Undo
  * only (never mapped, shared or trimmed). Hoisted above the detail and trim sheets:
  * neither opens before it has loaded, so their height never changes while they slide
@@ -105,14 +104,13 @@ internal fun rememberRunRoute(run: RunResultView): RunRoute? {
     ) {
         value = if (run.has_gpx || run.gps_unmeasurable) {
             withContext(Dispatchers.IO) {
-                val gpx = runGpxFetch(run.entry_id, run.observed_at)
-                val segs = if (gpx.isNullOrBlank()) emptyList() else parseGpx(gpx)
+                val segs = runTrackFetch(run.entry_id, run.observed_at)
                 val flat = segs.flatten()
-                val trimmable = run.has_gpx && flat.size >= 2 && flat.last().timeSec > flat.first().timeSec
-                RunRoute(gpx.takeIf { run.has_gpx }, segs, trimmable, if (trimmable) timedTrackFromSegments(segs) else emptyList())
+                val trimmable = run.has_gpx && flat.size >= 2 && flat.last().observedAt > flat.first().observedAt
+                RunRoute(segs, trimmable, if (trimmable) timedTrackFromSegments(segs) else emptyList())
             }
         } else {
-            RunRoute(null, emptyList(), false, emptyList())
+            RunRoute(emptyList(), false, emptyList())
         }
     }
     return route
@@ -142,7 +140,7 @@ internal fun RunDetailContent(
     val title = runTitle(run)
     val caption = runStartCaption(run.started_at)
     val stats = runStats(run, unit)
-    val splits = if (unit == DistanceUnit.Mi) run.splits_mi else run.splits_km
+    val splits = run.splits
     var rating by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(false) }
 
     Column(
@@ -264,7 +262,7 @@ private fun RunLogSection(
             HorizontalDivider(color = Hairline)
             LogRow(
                 label = stringResource(Res.string.history_workout_type),
-                value = type?.label ?: stringResource(Res.string.run_type_unset),
+                value = stringResource(type?.text?.label ?: Res.string.run_type_unset),
                 prompt = type == null,
                 tag = "run-log-type",
                 onClick = onRate,
@@ -338,7 +336,7 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                     testTag = "run-export",
                     onClick = {
                         scope.launch {
-                            val g = route?.gpx ?: withContext(Dispatchers.IO) { AppRuntime.engine.runGpx(run.entry_id, run.observed_at) }
+                            val g = withContext(Dispatchers.IO) { AppRuntime.engine.runGpx(run.entry_id, run.observed_at) }
                             if (!g.isNullOrBlank()) {
                                 shareGpx(ctx, g, run.started_at)
                             } else {

@@ -83,7 +83,7 @@ class TodayEditorA11yTest {
                 Column(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {
                         LogSetEditor(
-                            recentExercises = listOf("Plank"),
+                            inputs = SetEditorInputs(recentExercises = listOf("Plank")),
                             initial = LiftResultView(
                                 exercise = "Plank", weight_kg = 0.0, reps = 1, hold_sec = 30,
                                 observed_at = AppClock.nowSec() - 3_600, entry_id = 42L,

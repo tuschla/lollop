@@ -49,7 +49,12 @@ class MutationGuardsTest {
     private fun logLines(): List<String> =
         File(ctx.filesDir, AppFileNames.EVENT_LOG).readLines().filter { it.isNotBlank() }
 
-    private fun planCleared() = ctx.setupPrefs().getBoolean(KEY_PLAN_CLEARED, false)
+    /** The legacy `plan_cleared` pref is still stored. */
+    private fun legacyMarker() = ctx.setupPrefs().contains(KEY_PLAN_CLEARED)
+
+    /** The variant of the last `GeneratePlan` / `ClearPlan` line, or null when none. */
+    private fun lastPlanEvent(lines: List<String>): String? =
+        lines.map(EventLog::variantOf).lastOrNull { it == "GeneratePlan" || it == "ClearPlan" }
 
     private fun restoreAndRestart(lines: List<String>) {
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
@@ -59,20 +64,21 @@ class MutationGuardsTest {
 
     /**
      * Kotlin M06a. A log rewritten by an older build lost the final `ClearPlan`
-     * with the plan it cleared, so only the device's "plan removed" marker
-     * remembers the removal. The backup must still end with a `ClearPlan`
-     * (Export.kt readDataExport doc), else restoring it generates a plan the
-     * user had removed (BUGS.md 2026-10-23: "a backup of a removed plan
-     * restored a generated plan"). The standing ImportExportRoundtripTest case
-     * seeds a log that still holds its `ClearPlan`, where the append is moot.
+     * with the plan it cleared, so only that build's `plan_cleared` pref
+     * ([KEY_PLAN_CLEARED]) remembers the removal. Boot's one-time upgrade writes
+     * the `ClearPlan` into the log, so the backup records the removal and
+     * restoring it does not generate a plan the user had removed (BUGS.md
+     * 2026-10-23: "a backup of a removed plan restored a generated plan").
      */
     @Test
     fun aLegacyLogThatLostItsClearPlanStillBacksUpTheRemovedPlan() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2))))
+        assertNull("the legacy log holds no plan line", lastPlanEvent(logLines()))
         ctx.setupPrefs().edit().putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         assertNull("the removed plan stays removed", EventDispatcher.model.value!!.program)
-        assertNull("the legacy log holds no plan line", lastPlanEvent(logLines()))
+        assertEquals("the log records the removal", "ClearPlan", lastPlanEvent(logLines()))
+        assertFalse("the legacy pref is read once", legacyMarker())
 
         val backup = File(ctx.cacheDir, "backup/legacy.ndjson").apply { parentFile!!.mkdirs() }
         assertTrue(onAppScope { exportDataTo(ctx, Uri.fromFile(backup)) })
@@ -86,33 +92,33 @@ class MutationGuardsTest {
         restoreAndRestart(lines)
         assertEquals(1, EventDispatcher.model.value!!.lifts.size)
         assertNull("restoring a removed plan must not invent one", EventDispatcher.model.value!!.program)
+        assertTrue(EventDispatcher.model.value!!.plan_removed)
     }
 
     /**
-     * Kotlin M06b. The "plan removed" marker describes the log, so restoring a
-     * backup whose log never removed a plan clears this device's marker
-     * (Export.kt replaceEventLog doc: "this device's own marker never outlives
-     * its replaced log"), and the next boot plans for the set-up profile as a
-     * fresh install with that log would. Boot's own reconcile only re-ARMS the
-     * marker from a log ending in `ClearPlan`; nothing else clears a stale one.
+     * Kotlin M06b. Boot removes the legacy `plan_cleared` pref once it has read it:
+     * the pref described this device's old log and must not outlive it. Restoring
+     * a backup whose log never removed a plan then plans for the set-up profile,
+     * as a fresh install with that log would. A pref left in place would remove
+     * the restored log's plan on the next boot.
      */
     @Test
-    fun restoringALogThatNeverRemovedAPlanClearsThisDevicesMarker() {
+    fun restoringALogThatNeverRemovedAPlanPlansDespiteALegacyMarker() {
         // The backup: a set-up profile and a set, never a plan line.
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2))))
         val backup = logLines()
         assertNull(lastPlanEvent(backup))
 
-        // This device: the user removed their plan.
+        // This device: an older build recorded the removal in the log and the pref.
         QaHarness.reset(ctx)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7), Event.ClearPlan))
         ctx.setupPrefs().edit().putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         assertNull(EventDispatcher.model.value!!.program)
-        assertTrue(planCleared())
+        assertFalse("the legacy pref is read once", legacyMarker())
 
         restoreAndRestart(backup)
-        assertFalse("the replaced log's marker is gone", planCleared())
         assertNotNull("a set-up profile without a removed plan is planned", EventDispatcher.model.value!!.program)
+        assertFalse(EventDispatcher.model.value!!.plan_removed)
     }
 }

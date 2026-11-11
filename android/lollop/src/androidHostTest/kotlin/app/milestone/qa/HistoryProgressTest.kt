@@ -19,7 +19,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppFileNames
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.R
 import app.milestone.AppSettings
@@ -166,7 +165,7 @@ class HistoryProgressTest {
 
     @Test
     fun progressChart_rendersSixteenWeeksSpokenInMiles() {
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
         QaHarness.seedLog(
             ctx,
             listOf(

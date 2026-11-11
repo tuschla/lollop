@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.milestone.resources.Res
 import app.milestone.resources.coach_export_action
 import app.milestone.resources.ic_safety_warning_triangle
@@ -206,7 +207,7 @@ internal fun SafetyBannerHost(
     SafetyBanner(
         model = model,
         modifier = modifier,
-        holdDetail = painSubline(model, lastPain),
+        holdDetail = model.active_pain?.context,
         action = action,
         onAction = onAction,
         onAddDetails = onAddDetails,
@@ -315,7 +316,7 @@ private fun SafetyBanner(
     val strokePx = with(LocalDensity.current) { 2.dp.toPx() }
     val pulseModifier = Modifier.drawBehind {
         drawRoundRect(
-            color = Color.White.copy(alpha = PulseAlphaMin + pulse.value * PulseAlphaSpan),
+            color = OnStatusFill.copy(alpha = PulseAlphaMin + pulse.value * PulseAlphaSpan),
             cornerRadius = CornerRadius(cornerPx, cornerPx),
             style = Stroke(width = strokePx),
         )
@@ -364,13 +365,13 @@ private fun SafetyBanner(
                     Icon(
                         painterResource(Res.drawable.ic_safety_warning_triangle),
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = OnStatusFill,
                         modifier = Modifier.size(26.dp),
                     )
                     Text(
                         stringResource(Res.string.main_do_not_train),
-                        color = Color.White,
-                        style = Type.BannerTitle,
+                        color = OnStatusFill,
+                        style = BannerTitleStyle,
                     )
                 }
                 Text(subLine, color = DangerOn, style = Type.Body)
@@ -407,7 +408,7 @@ private fun SafetyBanner(
             .map { r -> r.action_label to { onResolveHold(r) } }
         val disclosureSubject = stringResource(Res.string.main_do_not_train_subject)
         val disclosure: @Composable () -> Unit = {
-            DisclosureButton(whyOpen, tint = Color.White, onTint = bg, subject = disclosureSubject) { whyOpen = !whyOpen }
+            DisclosureButton(whyOpen, tint = OnStatusFill, onTint = bg, subject = disclosureSubject) { whyOpen = !whyOpen }
         }
         val actions: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -434,10 +435,10 @@ private fun SafetyBanner(
                         // Each text action on its own line (never joined by a stray "·").
                         Column(Modifier.weight(1f).offset(x = -TextActionInset)) {
                             if (reportHold) {
-                                TextAction(stringResource(Res.string.main_add_details), onClick = onAddDetails, tint = Color.White)
+                                TextAction(stringResource(Res.string.main_add_details), onClick = onAddDetails, tint = OnStatusFill)
                             }
                             if (undoLabel != null && onAction != null) {
-                                TextAction(undoLabel, onClick = onAction, tint = Color.White, chevron = opensProfile)
+                                TextAction(undoLabel, onClick = onAction, tint = OnStatusFill, chevron = opensProfile)
                             } else if (opensProfile) {
                                 // No Profile flow on this screen (the tracker): the way back as text.
                                 Text(
@@ -456,7 +457,7 @@ private fun SafetyBanner(
         val why: @Composable () -> Unit = {
             if (whyOpen) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    HoldEvidencePanel(model, profileHold, strong = Color.White, muted = DangerOn)
+                    HoldEvidencePanel(model, profileHold, strong = OnStatusFill, muted = DangerOn)
                 }
             }
         }
@@ -500,16 +501,16 @@ private fun HoldEvidencePanel(model: ViewModel, profileHold: Boolean, strong: Co
     if (hold != null) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
             Text(hold.summary, color = strong, style = Type.Caption)
-            gradeLabel(hold.grade)?.let { gradeText ->
+            gradeLabel(hold.evidence.grade)?.let { gradeText ->
                 Text(
                     stringResource(Res.string.main_evidence_prefix, gradeText),
                     color = muted,
                     style = Type.Caption,
                 )
             }
-            if (hold.citation.isNotBlank()) {
+            if (hold.evidence.citation.isNotBlank()) {
                 Text(
-                    citationLabel(hold.citation),
+                    citationLabel(hold.evidence.citation),
                     color = muted,
                     style = Type.Caption,
                 )
@@ -576,6 +577,11 @@ private const val PulseAlphaSpan = 0.4f
  *  more than its hold statement (its extra text scrolls inside it instead). */
 private const val BannerMaxScreenFraction = 0.5f
 
+/** The banner headline: 23sp Black. */
+internal val BannerTitleStyle = androidx.compose.ui.text.TextStyle(
+    fontSize = 23.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Black, textDirection = AppTextDirection,
+)
+
 /** A solid white full-width action on the danger banner (its primary actions). */
 @Composable
 private fun BannerSolidAction(label: String, onFill: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -584,7 +590,7 @@ private fun BannerSolidAction(label: String, onFill: Color, onClick: () -> Unit,
             .fillMaxWidth()
             .heightIn(min = ActionMinHeight)
             .clip(ActionShape)
-            .background(Color.White)
+            .background(OnStatusFill)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
         contentAlignment = Alignment.Center,
@@ -618,13 +624,23 @@ internal fun HoldResolveDialog(
     )
 }
 
-/** The evidence behind the active hold: the headline's safety-hold rung (it
- *  also covers a gates-only medical referral, which emits no adjustment row),
- *  else the top safety-critical adjustment. */
-internal fun holdEvidence(model: ViewModel): AdjustmentView? =
+/** The evidence behind the active hold. */
+internal class HoldEvidence(
+    val summary: String,
+    val evidence: EvidenceTagView,
+    val why: WhyView,
+    val glossary: List<GlossarySpan>,
+    val subject: String,
+    val prose: Boolean,
+)
+
+/** [HoldEvidence] of the headline's safety-hold rung (it also covers a gates-only
+ *  medical referral, which emits no adjustment row), else of the top
+ *  safety-critical adjustment. */
+internal fun holdEvidence(model: ViewModel): HoldEvidence? =
     model.today_headline.takeIf { it.kind == HeadlineKind.SafetyHold && it.summary.isNotBlank() }
-        ?.let { AdjustmentView(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.why) }
-        ?: dominantSafetyAdjustment(model)
+        ?.let { HoldEvidence(it.summary, it.evidence, it.why, it.glossary, it.subject, it.prose) }
+        ?: dominantSafetyAdjustment(model)?.let { HoldEvidence(it.summary, it.evidence, it.why, it.glossary, it.subject, it.prose) }
 
 /**
  * What confirming [resolution] sends: [Event.ResolveHold] dated [nowSec] (every
@@ -645,34 +661,3 @@ internal fun holdResolutionEvents(
     }
 }
 
-/**
- * Sub-line for a pain hold's banner: prefer the core's own `detail` on the Pain
- * readiness row (populated when the core surfaces the characterized report),
- * else fall back to the shell echo of what the user just entered in triage.
- * Returns null when there's no characterized pain (bare/legacy report): the
- * banner then shows the generic tier line.
- */
-// l10n: needs context plumbing (pure display helper, no Context; builds a joined phrase)
-internal fun painSubline(model: ViewModel, echo: PainDetail?): String? {
-    val coreDetail = model.readiness_summary.firstOrNull { it.signal == ReadinessSignal.Pain }?.detail
-    if (!coreDetail.isNullOrBlank()) return coreDetail
-    if (echo == null) return null
-    val parts = buildList {
-        echo.location?.let { add(it) }
-        painKindLabel(echo.kind)?.let { add(it) }
-        echo.severity?.let { add("$it/10") }
-        // Both trends read "worsening", as in the core's pain_context.
-        if (echo.trend != PainTrend.Stable) add("worsening")
-    }
-    return parts.joinToString(" · ").ifEmpty { null }
-}
-
-/** Plain-language label for a [PainKind], in the triage choices' words; none for
- *  "Not sure" (nothing to add to the line). Display-only. */
-// l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
-private fun painKindLabel(kind: PainKind): String? = when (kind) {
-    PainKind.SharpJoint -> "sharp or joint pain"
-    PainKind.TendonLoadRelated -> "dull ache"
-    PainKind.Doms -> "muscle soreness"
-    PainKind.Other -> null
-}

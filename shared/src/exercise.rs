@@ -356,8 +356,8 @@ fn barbell_tokens(tokens: &[&str]) -> bool {
 
 /// Whether a lift starts each rep from the floor (a deadlift, a clean or
 /// snatch from the floor, a Pendlay row; not a Romanian, stiff-leg or hang
-/// variant), as `isFloorLift` in `SetEditorState.kt` reads it: its first
-/// warm-up is the bar with one full plate a side.
+/// variant): its first warm-up is the bar with one full plate a side
+/// ([`crate::strength::warm_up_ramp`]).
 pub(crate) fn starts_from_floor(name: &str) -> bool {
     let e = crate::names::fold(name);
     let has = |k: &str| e.contains(k);

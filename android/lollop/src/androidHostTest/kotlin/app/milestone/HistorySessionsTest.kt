@@ -138,8 +138,8 @@ class HistorySessionsTest {
         val run = RunResultView(distance_km = 5.0, observed_at = 2_000L, entry_id = 7L, has_gpx = true)
         assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
         val route = listOf(
-            listOf(GpxFix(0.0, 0.0, 1_000L, null), GpxFix(0.0, 0.001, 1_500L, null)),
-            listOf(GpxFix(0.0, 0.002, 1_800L, null), GpxFix(0.0, 0.003, 2_000L, null)),
+            listOf(GpsPoint(0.0, 0.0, 1_000L, 5.0), GpsPoint(0.0, 0.001, 1_500L, 5.0)),
+            listOf(GpsPoint(0.0, 0.002, 1_800L, 5.0), GpsPoint(0.0, 0.003, 2_000L, 5.0)),
         )
         val ev = restoreEventFor(HistoryEntry.Run(run), route) as Event.LogRunTrack
         assertEquals(7L, ev.entryId)
@@ -159,7 +159,7 @@ class HistorySessionsTest {
         )
         assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
         val recorded = listOf(
-            listOf(GpxFix(48.1, 11.5, 1_940L, null, accuracyM = 5.0), GpxFix(48.1, 11.5, 1_970L, null, accuracyM = 5.0)),
+            listOf(GpsPoint(48.1, 11.5, 1_940L, 5.0), GpsPoint(48.1, 11.5, 1_970L, 5.0)),
         )
         val ev = restoreEventFor(HistoryEntry.Run(run), recorded) as Event.LogRunTrack
         assertEquals(8L, ev.entryId)
@@ -200,7 +200,7 @@ class HistorySessionsTest {
             manual.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"]!!.jsonPrimitive.int,
         )
         val gps = run.copy(has_gpx = true)
-        val route = listOf(listOf(GpxFix(52.0, 13.0, 2_900L, null), GpxFix(52.001, 13.0, 3_000L, null)))
+        val route = listOf(listOf(GpsPoint(52.0, 13.0, 2_900L, 5.0), GpsPoint(52.001, 13.0, 3_000L, 5.0)))
         val track = restoreEventFor(HistoryEntry.Run(gps), route) as Event.LogRunTrack
         assertEquals(7200L, track.utcOffsetSec)
         // A legacy row (no logged offset) stays unstamped.

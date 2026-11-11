@@ -8,7 +8,9 @@ import Lollop
 // into the app and the widget extension: the extension needs the types for its
 // buttons, and the system runs both intents in the app's process (an OpenIntent
 // brings the app to the front; a LiveActivityIntent runs in the app). The calls
-// into the Kotlin app are compiled into the app only.
+// into the Kotlin app are compiled into the app only. Their text is named by the
+// app's string resource keys, whose English Localizable.strings is generated
+// (en.lproj, GeneratedSourcesTest).
 
 /// A screen a system surface opens: Android's `OpenDest` (`lollop://open/<dest>`);
 /// android/lollop's AppIdentifiersTest checks the cases and the URL against it.
@@ -18,12 +20,12 @@ enum LollopScreen: String, AppEnum {
     case track
     case logSet = "log_set"
 
-    static let typeDisplayRepresentation: TypeDisplayRepresentation = "lollop screen"
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "ios_intent_screen_type"
     static let caseDisplayRepresentations: [LollopScreen: DisplayRepresentation] = [
-        .today: "Today",
-        .log: "Log",
-        .track: "Track run",
-        .logSet: "Log set",
+        .today: "main_dest_today",
+        .log: "main_log",
+        .track: "main_plan_item_track",
+        .logSet: "tile_log_set",
     ]
 
     /// The destination's wire name ([OpenDest.wire]); an unknown one opens Today.
@@ -37,9 +39,9 @@ enum LollopScreen: String, AppEnum {
 /// Open the app at a screen: the control's tap and the small widget's button,
 /// as Android's tile and widget buttons open their destination.
 struct OpenLollopIntent: OpenIntent {
-    static let title: LocalizedStringResource = "Open lollop"
+    static let title: LocalizedStringResource = "ios_intent_open_title"
 
-    @Parameter(title: "Screen")
+    @Parameter(title: "ios_intent_open_screen")
     var target: LollopScreen
 
     init() {
@@ -62,9 +64,9 @@ struct OpenLollopIntent: OpenIntent {
 /// The run activity's Pause and Resume: Android's notification actions.
 @available(iOS 17.0, *)
 struct SetRunPausedIntent: LiveActivityIntent {
-    static let title: LocalizedStringResource = "Pause or resume the run"
+    static let title: LocalizedStringResource = "ios_intent_pause_title"
 
-    @Parameter(title: "Paused")
+    @Parameter(title: "ios_intent_paused")
     var paused: Bool
 
     init() {

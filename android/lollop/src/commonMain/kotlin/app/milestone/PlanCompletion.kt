@@ -410,12 +410,12 @@ internal fun SetSlotsRow(item: PrescriptionView) {
                     mark.isEmpty() -> Icon(
                         painterResource(Res.drawable.ic_ui_check),
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = OnStatusFill,
                         modifier = Modifier.size(SlotCheckSize),
                     )
                     else -> Text(
                         mark,
-                        color = Color.White,
+                        color = OnStatusFill,
                         style = Type.Caption.merge(TabularFigures).copy(fontWeight = FontWeight.Bold),
                         modifier = Modifier.padding(horizontal = Space.Xs.dp),
                     )
@@ -503,26 +503,13 @@ internal fun runHeadText(item: PrescriptionView, unit: DistanceUnit): String {
     return if (km == null || unit == DistanceUnit.Km) {
         item.run_head
     } else {
-        "${trimDecimal(metersToDisplay(km * 1000.0, unit))} ${unit.distanceLabel}"
+        // A figure and its unit never wrap apart, as in the core's own head.
+        "${trimDecimal(metersToDisplay(km * 1000.0, unit))}\u00A0${unit.distanceLabel}"
     }
 }
 
-/** Why a safety cap shaped [item], in the display [unit]; null when none did. */
-internal fun safetyReasonText(item: PrescriptionView, unit: DistanceUnit): String? =
-    item.safety_reason.takeIf { it.isNotBlank() }
-        ?.let { if (unit == DistanceUnit.Mi) item.safety_reason_mi.ifBlank { it } else it }
-
-/** The feedback message in the display [unit]. */
-internal fun feedbackMessage(fb: FeedbackView, unit: DistanceUnit): String =
-    if (unit == DistanceUnit.Mi) fb.message_mi.ifBlank { fb.message } else fb.message
-
-/** A lift face line without its reps-left clause ("6×5 @ 275 lb · ~1 rep left"
- *  → "6×5 @ 275 lb"; also "1–2 reps left" and "to your last good rep"), for an
- *  item whose newcomer guide already states the effort. Pure. */
-internal fun withoutEffortClause(detail: String): String =
-    detail.split(" \u00b7 ")
-        .filterNot { c -> c.startsWith("~") || c.endsWith(" left") || c == "to your last good rep" }
-        .joinToString(" \u00b7 ")
+/** Why a safety cap shaped [item]; null when none did. */
+internal fun safetyReasonText(item: PrescriptionView): String? = item.safety_reason.takeIf { it.isNotBlank() }
 
 /** A whole-seconds duration as plain copy: "3 min", "45 s", "1:30 min". */
 @Composable
@@ -616,7 +603,7 @@ private fun PlanItemFace(
         if (isRun) {
             val t = item.run_target
             if (t != null && runHead != null) {
-                val pace = t.paceLabel(distanceUnit)
+                val pace = t.pace_label
                 // The band key ("threshold") is engine vocabulary; the Effort line
                 // below already says how hard in plain words.
                 if (pace.isNotBlank()) add(stringResource(Res.string.plan_face_pace_only, pace))
@@ -839,7 +826,7 @@ internal fun OpenPlanItemCard(
         null
     } else {
         item.face_name.takeIf { it.isNotBlank() }?.let {
-            it to if (guide.isEmpty()) item.face_detail else withoutEffortClause(item.face_detail)
+            it to if (guide.isEmpty()) item.face_detail else item.face_detail_without_effort
         }
     }
     val lastOnFace = if (isRun || isCheck) null else lastLine(item)
@@ -850,7 +837,7 @@ internal fun OpenPlanItemCard(
     // restating what its Track / Log run action already says.
     val runUnlogged = isRun && runProgressText(currentResources(), item, distanceUnit).isBlank()
     // A safety cap states its reason in place of a bare SAFETY badge.
-    val safetyReason = safetyReasonText(item, distanceUnit)
+    val safetyReason = safetyReasonText(item)
     val shape = RoundedCornerShape(Space.Card.dp)
     Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
         Column(
@@ -877,7 +864,7 @@ internal fun OpenPlanItemCard(
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                 if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, distanceUnit, lastOnFace)
                 safetyReason?.let { FaceLine(it, color = OnBgBody) }
-                note?.let { FaceLine(stripClaimIds(it)) }
+                note?.let { FaceLine(it) }
                 guide.forEach { FaceLine(it) }
                 item.calis?.let { CalisControls(it, unplaced, onSetRung) }
             }
@@ -914,9 +901,9 @@ internal fun PlanItemRow(
         isRun -> runFaceHead(item, distanceUnit) ?: item.face_lead
         else -> item.face_lead
     }?.takeIf { it.isNotBlank() && it != name }
-    val note = noteOnFace(item, isRun, isCheck)?.let(::stripClaimIds)
+    val note = noteOnFace(item, isRun, isCheck)
     val runLogged = if (isRun) runProgressText(currentResources(), item, distanceUnit) else ""
-    val safetyReason = safetyReasonText(item, distanceUnit)
+    val safetyReason = safetyReasonText(item)
     val cd = actionLabel?.let { stringResource(Res.string.main_action_subject, it, name) }
     val shape = RoundedCornerShape(Space.Card.dp)
     Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
@@ -991,10 +978,10 @@ internal fun SessionItemsEvidence(
             Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                 group.forEach { item ->
                     val name = planItemName(item, isRun(item), isCheck(item))
-                    val own = basisSentences(item.why.basis).filterNot { it in shared }.joinToString(" ")
+                    val own = item.why.basis.filterNot { it in shared }.joinToString(" ")
                     val line = listOfNotNull(
                         own.ifBlank { null },
-                        itemEvidenceDetail(item, isRun(item), isCheck(item))?.let(::stripClaimIds),
+                        itemEvidenceDetail(item, isRun(item), isCheck(item)),
                     ).joinToString(" \u00b7 ")
                     Text(
                         if (line.isBlank()) name else stringResource(Res.string.ui_label_value, name, line),
@@ -1003,33 +990,22 @@ internal fun SessionItemsEvidence(
                     )
                 }
                 WhyDetail(
-                    why = WhyView(basis = shared.joinToString(" "), grade_note = first.why.grade_note, improves = first.why.improves),
-                    grade = first.grade,
-                    citation = first.citation,
-                    confidence = group.minOf { it.confidence },
+                    why = WhyView(basis = shared, grade_note = first.why.grade_note, improves = first.why.improves),
+                    evidence = first.evidence.copy(confidence = group.minOf { it.confidence }),
                     confidenceHigh = group.maxOf { it.confidence },
-                    contested = first.contested,
                     showConfidence = !first.safety_critical,
-                    glossaryKeys = remember(group) { group.flatMap { glossaryKeysIn(it.summary) }.distinct() },
+                    glossaryKeys = remember(group) { group.flatMap { it.glossary }.terms() },
                 )
             }
         }
     }
 }
 
-/** A why-basis split into its sentences ("6×5 at 83% … 275 lb.", "Aim to …").
- *  A decimal point ("264.5") never splits. Pure. */
-internal fun basisSentences(basis: String): List<String> =
-    basis.trim().split(SentenceBreak).map { it.trim() }.filter { it.isNotEmpty() }
-
-private val SentenceBreak = Regex("""(?<=[.!?])\s+""")
-
 /** The basis sentences every one of [bases] states, in the first one's order:
  *  what a shared evidence block says once. For a single item, all of them. Pure. */
-internal fun sharedBasisSentences(bases: List<String>): List<String> {
-    val split = bases.map(::basisSentences)
-    val head = split.firstOrNull() ?: return emptyList()
-    return head.filter { s -> split.all { s in it } }
+internal fun sharedBasisSentences(bases: List<List<String>>): List<String> {
+    val head = bases.firstOrNull() ?: return emptyList()
+    return head.filter { s -> bases.all { s in it } }
 }
 
 /** A settled plan item collapsed to one row: "k/N" with a ✓, "Ended early k/N",

@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** Active decorative palette, provided at the theme root by [MilestoneTheme]. */
-val LocalPalette = staticCompositionLocalOf { RosePalette }
+val LocalPalette = staticCompositionLocalOf { AppTheme.Default.light }
 
 // Bare token accessors for the many call sites that read them directly. Each
 // resolves against the active [LocalPalette], so switching themes recolors the
@@ -40,12 +40,8 @@ val WarnText: Color @Composable get() = LocalPalette.current.warnText
  *  [StatusColors.danger] stays the fill of the danger surfaces. */
 val DangerText: Color @Composable get() = LocalPalette.current.dangerText
 
-/** Tone for text/icons sitting on the [Accent] fill (spec
- *  "Accent fill + BgTop text"): the active theme's `bgTop`, the deep tinted
- *  ground on the dark palettes (white fails AA on their light, bright accents,
- *  2.2:1 on Rose-dark's #FF8AB5 vs 8.1:1 for its plum #24111F) and the soft
- *  tinted ground on the light palettes, whose accents are deepened for contrast. */
-internal val OnAccent: Color @Composable get() = LocalPalette.current.bgTop
+/** The active theme's [Palette.onAccent]: text and icons on the [Accent] fill. */
+internal val OnAccent: Color @Composable get() = LocalPalette.current.onAccent
 
 /** The active theme's [accentTint]: the one soft accent tint (selected nav pill,
  *  leading icon tiles, [SecondaryButton] fill, selected [OptionList] row). */
@@ -148,15 +144,6 @@ object Type {
     val Display = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     val Title = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
 
-    // Off-scale display figures, each owned by one surface.
-    /** Do-not-train banner headline: 23sp Black. */
-    val BannerTitle = TextStyle(fontSize = 23.sp, fontWeight = FontWeight.Black, textDirection = AppTextDirection)
-    /** Guided-run step countdown on the tracker: 28sp/32sp ExtraBold, tabular. */
-    val Countdown = TextStyle(fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
-    /** Numeric keypad key face: 22sp Bold, tabular. */
-    val KeypadKey = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
-    /** History week-strip stat value: 19sp ExtraBold, tabular. */
-    val StatValue = TextStyle(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     /** Title of a history card or detail sheet (a run, a lift session): 17sp ExtraBold. */
     val CardTitle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, textDirection = AppTextDirection)
 
@@ -246,12 +233,6 @@ val LargeControlHeight = 56.dp
  *  padding) lines up with the content edge above it. */
 val TextActionInset = Space.Sm.dp
 
-/** Height of an embedded route map (run detail, trim sheet). */
-val RouteMapHeight = 220.dp
-
-/** Top-corner radius of the tracker's floating stat sheet. */
-val SheetCornerRadius = 26.dp
-
 /** Widest a single column of cards or a form grows on a wide window (a tablet,
  *  a landscape phone): centred beyond it, so lines stay readable. The same width
  *  as Material's bottom-sheet cap, so a sheet lines up with the page under it. */
@@ -259,14 +240,6 @@ val ContentMaxWidth = 640.dp
 
 /** Widest one pane of a two-pane layout grows; the pair centres beyond it. */
 val PaneMaxWidth = 560.dp
-
-/** Width of the tracker's side panel (stats and controls) beside the map on a
- *  landscape window: a portrait phone's stat sheet; at most half the window. */
-val TrackerPanelWidth = 400.dp
-
-/** Width of the typed date picker in a short window's date dialog, Cancel/OK
- *  beside it: Material's date picker dialog width. */
-val DateFieldDialogWidth = 360.dp
 
 /** Fully rounded ends: pills, discs, round touch targets. */
 internal val PillShape = RoundedCornerShape(100)
@@ -277,43 +250,6 @@ val StatusRingWidth = 1.5.dp
 /** Accent bar along the start edge of a list card whose entry is open in the
  *  detail pane beside the list ([PlainCard] `selected`). */
 val SelectedBarWidth = Space.Sm.dp
-
-/** Opacity of the `BgTop` ground behind the full-screen map's top bar and stat sheet. */
-const val MapChromeAlpha = 0.94f
-
-/** Floor of a split bar's domain, as a fraction of the slowest split's pace. */
-const val SplitBarBaseline = 0.85f
-
-/** Medium motion, in ms: a content fade-in (the route map). */
-const val MotionMedium = 200
-
-/**
- * Route markers (map, trim, finish review). Start: an [StartSize] disc with an
- * [StartRing] `Accent` ring and a `BgElevated` centre. Finish: a solid `Accent`
- * [FinishSize] disc holding a [FinishGlyph] OnAccent flag
- * (`R.drawable.ic_route_finish_flag`). Distance: a [DistanceSize] `BgElevated`
- * disc with a [DistanceRing] `Accent` ring and a `Type.Chip` tnum `OnBgBody`
- * numeral at every whole km/mi. Every marker sits on a [Halo] casing in the
- * polyline's ground-casing colour so it reads on any tile.
- */
-object RouteMarker {
-    val StartSize = 18.dp
-    val StartRing = 4.dp
-    val FinishSize = 26.dp
-    val FinishGlyph = 16.dp
-    val DistanceSize = 22.dp
-    val DistanceRing = 1.5.dp
-    val Halo = 3.dp
-}
-
-/** Grade badge color from the theme-fixed status palette. See design spec §2. */
-fun StatusColors.gradeColor(grade: EvidenceGrade?): Color = when (grade) {
-    EvidenceGrade.Strong -> evidenceStrong
-    EvidenceGrade.Moderate -> evidenceModerate
-    EvidenceGrade.Weak -> evidenceWeak
-    EvidenceGrade.ExpertOpinion -> evidenceExpert
-    EvidenceGrade.MarketingMyth, null -> evidenceUnknown
-}
 
 /**
  * App theme. The selected [AppTheme] supplies the whole decorative palette (ground,

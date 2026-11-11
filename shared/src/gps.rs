@@ -1,8 +1,9 @@
 //! GPS track processing: the File 07 ingest QC limits ("Sanity / QC"), fix
 //! acceptance, recording segments, the QC pass, moving legs, the track
 //! metrics derived from them (distance, splits, positive split, variability
-//! index), trimming and the GPX writer. The one definition of every GPS limit
-//! and of the geometry; FIT import and the run views call it.
+//! index), trimming, decimation and the GPX writer. The one definition of
+//! every GPS limit and of the geometry; the run import, the run views and the
+//! shells' live recorder (through the generated `CoreConstants`) use it.
 //!
 //! Pure geodesy, not a coached claim, so nothing here carries an evidence tag
 //! (the graded interval verdict on the variability index is
@@ -18,7 +19,7 @@ use crate::sanitize::{positive_zero, sum0};
 // ---------------------------------------------------------------------------
 
 /// Mean Earth radius (metres) for the haversine great-circle distance.
-const EARTH_RADIUS_M: f64 = 6_371_000.0;
+pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
 /// Fixes with worse horizontal accuracy than this (metres) are noise; they are
 /// dropped before deriving distance *and* duration so both are computed from the
@@ -39,7 +40,25 @@ const MAX_VERTICAL_RATE_MPS: f64 = 5.0;
 
 /// Ground speed (m/s) below which a leg counts as stopped (File 07 auto-pause
 /// rule): it adds no moving time or distance.
-const STOP_SPEED_MPS: f64 = 0.5;
+pub const MIN_MOVING_SPEED_MPS: f64 = 0.5;
+
+/// A gap longer than this (seconds) between consecutive accepted fixes opens a
+/// new recording segment: the straight-line bridge across it (a pause and
+/// relocation, a tunnel, a signal dropout) is no run distance. A normal 1–4 s
+/// fix cadence never trips it.
+pub const MAX_FIX_GAP_SEC: i64 = 30;
+
+/// The most GPS fixes a saved run keeps in one `LogRunTrack` (the heaviest line
+/// of the append-only log): about 90 min at 1 Hz, so ordinary runs keep full
+/// detail and only very long ones are thinned ([`decimation_keep`]).
+pub const TRACK_DECIMATION_CAP: u32 = 5400;
+
+/// The keep threshold of a run: a track under this distance (km) or under
+/// [`MIN_RUN_SEC`] is as likely an accidental recording as a run.
+pub const MIN_RUN_KM: f64 = 0.5;
+
+/// The keep threshold's time (seconds); see [`MIN_RUN_KM`].
+pub const MIN_RUN_SEC: i64 = 180;
 
 /// GPS speed sanity gate (File 07): true when the speed is plausible for a
 /// runner (≤ [`MAX_PLAUSIBLE_SPEED_MPS`]).
@@ -54,10 +73,10 @@ fn gps_point_accept(distance_moved_m: f64, vertical_rate_m_s: f64) -> bool {
     distance_moved_m >= GPS_MIN_MOVE_M && vertical_rate_m_s.abs() <= MAX_VERTICAL_RATE_MPS
 }
 
-/// Stop detection for pace/load exclusion: below [`STOP_SPEED_MPS`] counts as
-/// stopped (File 07 auto-pause rule).
+/// Stop detection for pace/load exclusion: below [`MIN_MOVING_SPEED_MPS`]
+/// counts as stopped (File 07 auto-pause rule).
 fn is_stopped(speed_m_s: f64) -> bool {
-    speed_m_s < STOP_SPEED_MPS
+    speed_m_s < MIN_MOVING_SPEED_MPS
 }
 
 /// Whether a fix is accurate enough to use (within [`MAX_GPS_ACCURACY_M`]).
@@ -131,7 +150,7 @@ fn usable_track(points: &[GpsPoint]) -> Vec<GpsPoint> {
 /// a hand-logged run) yields the whole track as a single segment. Out-of-range,
 /// zero, and duplicate indices are ignored, so a malformed boundary list can
 /// only under-split, never panic.
-fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Vec<&'a [GpsPoint]> {
+pub(crate) fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Vec<&'a [GpsPoint]> {
     let bounds = segment_bounds(segment_starts, points.len());
     if bounds.is_empty() {
         return vec![points];
@@ -773,25 +792,82 @@ pub(crate) fn trim_track(
     (new_track.len() >= 2 && new_track.len() < points.len()).then_some((new_track, new_starts))
 }
 
+/// The indices (ascending) kept when thinning an `n`-fix track to about
+/// `max_points`: a uniform stride (ceiling division, so the strided count stays
+/// within the cap) plus the last fix and every segment start in `starts`. At or
+/// below the cap, every index. The save rule of a live run (the shell's
+/// recorder) and of an imported one ([`crate::import`]).
+pub(crate) fn decimation_keep(n: usize, max_points: usize, starts: &[usize]) -> Vec<usize> {
+    if n <= max_points || max_points < 2 {
+        return (0..n).collect();
+    }
+    let mut keep = vec![false; n];
+    let stride = n.div_ceil(max_points);
+    for k in (0..n).step_by(stride) {
+        keep[k] = true;
+    }
+    keep[n - 1] = true;
+    for &s in starts {
+        if (1..n).contains(&s) {
+            keep[s] = true;
+        }
+    }
+    (0..n).filter(|&k| keep[k]).collect()
+}
+
+/// The positions in `kept` (original indices, ascending) of the segment
+/// `starts` (sorted): the starts of the thinned track.
+pub(crate) fn remap_starts(kept: &[usize], starts: &[usize]) -> Vec<u32> {
+    kept.iter()
+        .enumerate()
+        .filter(|(_, k)| starts.binary_search(k).is_ok())
+        .map(|(pos, _)| pos as u32)
+        .collect()
+}
+
+/// A track of `n` fixes thinned to about `max_points` for a save or a crash
+/// recovery (the shell's recorder): the indices [`decimation_keep`] keeps and
+/// the segment `starts` (any order; one outside `1..n` opens nothing) as
+/// positions among them ([`remap_starts`]).
+pub fn thin_track(n: usize, max_points: usize, starts: &[u32]) -> (Vec<usize>, Vec<u32>) {
+    let mut starts: Vec<usize> = starts
+        .iter()
+        .map(|&s| s as usize)
+        .filter(|s| (1..n).contains(s))
+        .collect();
+    starts.sort_unstable();
+    starts.dedup();
+    let kept = decimation_keep(n, max_points, &starts);
+    let remapped = remap_starts(&kept, &starts);
+    (kept, remapped)
+}
+
 // ---------------------------------------------------------------------------
 // GPX export
 // ---------------------------------------------------------------------------
 
 /// Nominal GNSS range error (m) a GPX `<hdop>` multiplies into a horizontal
-/// accuracy: the export writes `accuracy_m / 5` and the shell's importer reads
-/// `hdop × 5` (Gpx.kt `GPS_UERE_NOMINAL_M`), so a fix's accuracy round-trips.
+/// accuracy: the export writes `accuracy_m / 5` and the importer reads
+/// `hdop × 5` ([`hdop_accuracy_m`]), so a fix's accuracy round-trips.
 const GPX_HDOP_UERE_M: f64 = 5.0;
 
 /// The `<hdop>` a fix's accuracy is exported as. Divided in f64 and written as
-/// the shortest f64 decimal: the importer's Double `hdop × 5` then lands within
-/// one f64 ulp of the f32 accuracy, which rounds back to it exactly, so a route
-/// rebuilt from the file (Undo, re-import) keeps every `accuracy_m` bit for bit.
+/// the shortest f64 decimal: the importer's `hdop × 5` then lands within one
+/// f64 ulp of the f32 accuracy, which rounds back to it exactly, so a route
+/// rebuilt from the file (a re-import) keeps every `accuracy_m` bit for bit.
 pub(crate) fn gpx_hdop(accuracy_m: f32) -> f64 {
     f64::from(accuracy_m) / GPX_HDOP_UERE_M
 }
 
-/// XML namespace of lollop's own GPX extension elements. The shell's importer
-/// (Gpx.kt `parseGpxRuns`) matches the elements by local name.
+/// A GPX `<hdop>` as an estimated accuracy in metres ([`GPX_HDOP_UERE_M`]): a
+/// coarse estimate that only feeds the QC gate. `None` when the dilution is
+/// not a finite positive number.
+pub(crate) fn hdop_accuracy_m(hdop: f64) -> Option<f64> {
+    (hdop.is_finite() && hdop > 0.0).then_some(hdop * GPX_HDOP_UERE_M)
+}
+
+/// XML namespace of lollop's own GPX extension elements. The importer
+/// (`import::gpx`) matches the elements by local name.
 const GPX_LOLLOP_NS: &str = "urn:lollop:gpx:1";
 
 /// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin

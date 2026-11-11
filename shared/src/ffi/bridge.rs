@@ -27,9 +27,11 @@ use crux_core::{App, Command, Core};
 
 use super::ops::Op;
 use crate::app::{Effect, Engine, Model, ViewModel};
-use crate::envelope::{CoreError, ErrorEnvelope, ErrorKind, RunRef, TrackFigures};
+use crate::envelope::{
+    CoreError, ErrorEnvelope, ErrorKind, ImportedHr, ProfileDraft, RunRef, RunTrack, ThinnedTrack,
+    TrackFigures, TrackThinning, WarmUpQuery,
+};
 use crate::event::Event;
-use crate::fit::FitError;
 use crate::log::LineFacts;
 
 impl CoreError {
@@ -54,26 +56,8 @@ impl CoreError {
     }
 }
 
-impl From<&FitError> for ErrorKind {
-    fn from(err: &FitError) -> Self {
-        match err {
-            FitError::NotFit => ErrorKind::NotFit,
-            FitError::Damaged => ErrorKind::Damaged,
-            FitError::NoTrack => ErrorKind::NoTrack,
-            FitError::TooShort => ErrorKind::TooShort,
-            FitError::NotARun(_) => ErrorKind::NotARun,
-        }
-    }
-}
-
-impl From<FitError> for CoreError {
-    fn from(err: FitError) -> Self {
-        Self::new(ErrorKind::from(&err), err.context().to_owned(), "")
-    }
-}
-
 impl Op {
-    /// The op's name as an error's `context`: `parse_fit` for `ParseFit`.
+    /// The op's name as an error's `context`: `export_gpx` for `ExportGpx`.
     pub(super) fn context(self) -> String {
         let mut out = String::new();
         for (i, c) in self.name().chars().enumerate() {
@@ -219,11 +203,26 @@ impl Session {
         Ok(out)
     }
 
+    fn run_ref(op: Op, run: &[u8]) -> Result<RunRef, CoreError> {
+        serde_json::from_slice(run).map_err(|err| CoreError::bad_input(op, err.to_string()))
+    }
+
     fn export_gpx(&self, run: &[u8]) -> Result<Vec<u8>, CoreError> {
-        let run: RunRef = serde_json::from_slice(run)
-            .map_err(|err| CoreError::bad_input(Op::ExportGpx, err.to_string()))?;
+        let run = Self::run_ref(Op::ExportGpx, run)?;
         let gpx = crate::app::export_run_gpx(&self.model.borrow(), run.entry_id, run.observed_at);
         Ok(gpx.into_bytes())
+    }
+
+    fn run_track(&self, run: &[u8]) -> Result<Vec<u8>, CoreError> {
+        let run = Self::run_ref(Op::RunTrack, run)?;
+        let track = RunTrack {
+            segments: crate::app::run_track_segments(
+                &self.model.borrow(),
+                run.entry_id,
+                run.observed_at,
+            ),
+        };
+        serde_json::to_vec(&track).map_err(|err| CoreError::unserializable(Op::RunTrack, &err))
     }
 }
 
@@ -267,9 +266,9 @@ impl CoreBridge {
                 self.on_core(op, move |session| session.update(&event))
             }
             Op::View => self.on_core(op, |session| session.view()),
-            Op::ParseFit => {
-                let fit = input.bytes(op)?;
-                guarded(op, || parse_fit(&fit))
+            Op::ParseRunFile => {
+                let file = input.bytes(op)?;
+                guarded(op, || parse_run_file(&file))
             }
             Op::TrackFigures => {
                 let event = input.bytes(op)?;
@@ -279,6 +278,10 @@ impl CoreBridge {
                 let run = input.bytes(op)?.into_owned();
                 self.on_core(op, move |session| session.export_gpx(&run))
             }
+            Op::RunTrack => {
+                let run = input.bytes(op)?.into_owned();
+                self.on_core(op, move |session| session.run_track(&run))
+            }
             Op::CompactLog => {
                 let lines = input.lines(op)?;
                 guarded(op, || compact_log(lines))
@@ -287,6 +290,26 @@ impl CoreBridge {
                 *session = Session::new();
                 Ok(Vec::new())
             }),
+            Op::ExerciseKeys => {
+                let names = input.lines(op)?;
+                guarded(op, || exercise_keys(names))
+            }
+            Op::WarmUpRamp => {
+                let query = input.bytes(op)?;
+                guarded(op, || warm_up_ramp(&query))
+            }
+            Op::DraftFacts => {
+                let draft = input.bytes(op)?;
+                guarded(op, || draft_facts(&draft))
+            }
+            Op::ThinTrack => {
+                let track = input.bytes(op)?;
+                guarded(op, || thin_track(&track))
+            }
+            Op::ImportedHrPct => {
+                let hr = input.bytes(op)?;
+                guarded(op, || imported_hr_pct(&hr))
+            }
         }
     }
 
@@ -336,12 +359,10 @@ pub(crate) fn call(code: u32, input: Input<'_>) -> Vec<u8> {
     BRIDGE.call(code, input)
 }
 
-/// Parse `.fit` bytes ([`crate::fit::parse_fit`], then
-/// [`crate::fit::import_gate`]) into the [`crate::fit::FitTrack`] JSON.
-fn parse_fit(bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let track = crate::fit::parse_fit(bytes)?;
-    crate::fit::import_gate(&track)?;
-    serde_json::to_vec(&track).map_err(|err| CoreError::unserializable(Op::ParseFit, &err))
+/// The [`crate::import::ImportVerdict`] JSON on a run file's bytes.
+fn parse_run_file(bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
+    serde_json::to_vec(&crate::import::import_run_file(bytes))
+        .map_err(|err| CoreError::unserializable(Op::ParseRunFile, &err))
 }
 
 /// The figures from [`crate::app::preview_track_figures`] (the same QC and
@@ -378,6 +399,65 @@ fn compact_log(
         .map_err(|message| CoreError::bad_input(Op::CompactLog, message))?;
     serde_json::to_vec(&crate::log::compact_lines(&facts))
         .map_err(|err| CoreError::unserializable(Op::CompactLog, &err))
+}
+
+/// [`crate::names::exercise_key`] of each name, in order.
+fn exercise_keys(
+    names: &mut dyn Iterator<Item = Result<Cow<'_, str>, String>>,
+) -> Result<Vec<u8>, CoreError> {
+    const OP: Op = Op::ExerciseKeys;
+    let keys = names
+        .map(|name| name.map(|name| crate::names::exercise_key(&name)))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|message| CoreError::bad_input(OP, message))?;
+    serde_json::to_vec(&keys).map_err(|err| CoreError::unserializable(OP, &err))
+}
+
+/// [`crate::strength::warm_up_ramp`] for a [`WarmUpQuery`].
+fn warm_up_ramp(query: &[u8]) -> Result<Vec<u8>, CoreError> {
+    const OP: Op = Op::WarmUpRamp;
+    let q = serde_json::from_slice::<WarmUpQuery>(query)
+        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+    let steps = crate::strength::warm_up_ramp(&q.exercise, q.work_kg, q.weight_lb).value;
+    serde_json::to_vec(&steps).map_err(|err| CoreError::unserializable(OP, &err))
+}
+
+/// [`crate::app::draft_facts`] for a [`ProfileDraft`].
+fn draft_facts(draft: &[u8]) -> Result<Vec<u8>, CoreError> {
+    const OP: Op = Op::DraftFacts;
+    let draft = serde_json::from_slice::<ProfileDraft>(draft)
+        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+    serde_json::to_vec(&crate::app::draft_facts(draft))
+        .map_err(|err| CoreError::unserializable(OP, &err))
+}
+
+/// [`crate::gps::thin_track`] for a [`TrackThinning`].
+fn thin_track(track: &[u8]) -> Result<Vec<u8>, CoreError> {
+    const OP: Op = Op::ThinTrack;
+    let track = serde_json::from_slice::<TrackThinning>(track)
+        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+    let (kept, segment_starts) = crate::gps::thin_track(
+        track.fixes as usize,
+        track.max_points as usize,
+        &track.segment_starts,
+    );
+    serde_json::to_vec(&ThinnedTrack {
+        kept: kept.into_iter().map(|k| k as u32).collect(),
+        segment_starts,
+    })
+    .map_err(|err| CoreError::unserializable(OP, &err))
+}
+
+/// [`crate::import::imported_hr_pct_max`] for an [`ImportedHr`].
+fn imported_hr_pct(hr: &[u8]) -> Result<Vec<u8>, CoreError> {
+    const OP: Op = Op::ImportedHrPct;
+    let hr = serde_json::from_slice::<ImportedHr>(hr)
+        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+    serde_json::to_vec(&crate::import::imported_hr_pct_max(
+        hr.avg_hr_bpm,
+        hr.measured_hr_max,
+    ))
+    .map_err(|err| CoreError::unserializable(OP, &err))
 }
 
 /// Panic while holding the core, exactly the case the firewall guards, for a

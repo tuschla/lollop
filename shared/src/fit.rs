@@ -1,15 +1,16 @@
 //! Garmin/ANT `.fit` activity-file parsing: pure data ingestion, no
-//! model/event-log involvement. Extracts GPS+HR fixes from a byte blob; the
-//! Android shell turns the result into its `LogRunTrack` event. Nothing here
+//! model/event-log involvement. Extracts GPS+HR fixes from a byte blob for the
+//! run import ([`crate::import`]). Nothing here
 //! is recommendation-bearing, so no `Recommended`/`ClaimId` is attached.
 //!
 //! Pure function: no clocks, no IO beyond the given byte slice.
 
 use fitparser::{FitDataRecord, Value, profile::MesgNum};
 
-/// One GPS+HR fix extracted from a FIT `record` message. Its serialization is
-/// the per-fix wire shape of the `ParseFit` bridge op's payload.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, crate::wire::Wire)]
+use crate::gps;
+
+/// One GPS+HR fix extracted from a FIT `record` message.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct FitFix {
     pub lat: f64,
     pub lon: f64,
@@ -18,15 +19,14 @@ pub struct FitFix {
     pub hr_bpm: Option<u16>,
     /// Horizontal position accuracy in metres from the FIT `record.gps_accuracy`
     /// field (field 31, `UInt8`, scale 1). `None` when the file has no such
-    /// field; the shell picks the accuracy it hands the core's QC gate for a
-    /// `None` fix (`Gpx.kt`'s `importedRunEvent`).
+    /// field; the import then gives the fix the unknown-accuracy sentinel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accuracy_m: Option<f32>,
 }
 
 /// A parsed FIT activity: fixes grouped into segments by the recorder's
 /// timer stop_all/start events (see [`parse_fit`] for the exact split rule).
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, crate::wire::Wire)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct FitTrack {
     pub segments: Vec<Vec<FitFix>>,
 }
@@ -41,21 +41,14 @@ pub enum FitError {
     Damaged,
     /// A cleanly decoded file with fewer than two positioned records.
     NoTrack,
-    /// A track too short to keep as a run: under [`MIN_IMPORT_M`] of GPS
-    /// distance or [`MIN_IMPORT_SEC`] of recorded time, the shell tracker's
+    /// A track too short to keep as a run: under [`gps::MIN_RUN_KM`] of GPS
+    /// distance or [`gps::MIN_RUN_SEC`] of recorded time, the tracker's
     /// accidental-recording thresholds.
     TooShort,
     /// The file records a non-running activity. Carries the FIT sport name in
     /// plain lowercase words (e.g. `"cycling"`, `"cross country skiing"`).
     NotARun(String),
 }
-
-/// The shortest GPS distance (metres, summed within segments) an imported
-/// track must cover to count as a run: the tracker's short-run threshold.
-pub const MIN_IMPORT_M: f64 = 500.0;
-/// The shortest recorded time (seconds, summed within segments) an imported
-/// track must span to count as a run: the tracker's short-run threshold.
-pub const MIN_IMPORT_SEC: i64 = 180;
 
 impl FitError {
     /// Detail for the kind: the sport for [`FitError::NotARun`], else empty.
@@ -158,10 +151,10 @@ impl TrackScan {
 }
 
 /// The import gate on a parsed track: [`FitError::TooShort`] when its fixes
-/// cover under [`MIN_IMPORT_M`] or span under [`MIN_IMPORT_SEC`], each summed
-/// within segments (a pause between segments counts as neither).
+/// cover under [`gps::MIN_RUN_KM`] or span under [`gps::MIN_RUN_SEC`], each
+/// summed within segments (a pause between segments counts as neither).
 pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
-    let point = |f: &FitFix| crate::gps::GpsPoint {
+    let point = |f: &FitFix| gps::GpsPoint {
         lat: f.lat,
         lon: f.lon,
         observed_at: f.time_sec,
@@ -172,14 +165,14 @@ pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
     for seg in &track.segments {
         metres += seg
             .windows(2)
-            .map(|w| crate::gps::haversine_m(point(&w[0]), point(&w[1])))
+            .map(|w| gps::haversine_m(point(&w[0]), point(&w[1])))
             .filter(|d| d.is_finite())
             .sum::<f64>();
         if let (Some(first), Some(last)) = (seg.first(), seg.last()) {
             seconds = seconds.saturating_add(last.time_sec.saturating_sub(first.time_sec).max(0));
         }
     }
-    if metres < MIN_IMPORT_M || seconds < MIN_IMPORT_SEC {
+    if metres < gps::MIN_RUN_KM * 1000.0 || seconds < gps::MIN_RUN_SEC {
         return Err(FitError::TooShort);
     }
     Ok(())

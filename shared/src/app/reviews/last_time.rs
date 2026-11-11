@@ -5,11 +5,10 @@ use std::fmt::Write as _;
 
 use crate::app::format::fmt_weight;
 use crate::app::model::Model;
-use crate::app::plan_views::last_top_set;
+use crate::app::plan_views::{PlanRow, last_top_set};
 use crate::app::reviews::mastery::pr_e1rm;
 use crate::app::reviews::session_feedback::with_reserve_from_rpe;
 use crate::app::set_index::SetIndex;
-use crate::app::view_types::SessionPlanView;
 use crate::autoreg;
 use crate::day::{is_undated, local_day};
 
@@ -17,13 +16,14 @@ use crate::day::{is_undated, local_day};
 /// that movement and what changed today, with the reason when the engine
 /// knows it (ADH-RATIONALE-001; feedback-019).
 pub(in crate::app) fn annotate_last_time(
-    ns: &mut SessionPlanView,
+    ns: &mut PlanRow,
     model: &Model,
     set_index: &SetIndex,
     anchors: &crate::plan::LiftAnchors,
     weight_lb: bool,
 ) {
     let offset = model.today_utc_offset_sec;
+    let day = ns.epoch_day;
     for it in ns.items.iter_mut() {
         // Effort-prescribed items already show their last top set as the
         // `anchored_on` line ("Last: 60 kg × 8"); never repeat it in the basis.
@@ -35,7 +35,7 @@ pub(in crate::app) fn annotate_last_time(
         let Some((_, top_i)) = last_top_set(
             &model.sets,
             set_index.same_movement_sets(&it.exercise),
-            ns.epoch_day,
+            day,
             |i| {
                 let at = model.sets[i].observed_at;
                 (!is_undated(at)).then(|| local_day(at, offset))

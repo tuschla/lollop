@@ -1,11 +1,26 @@
 use crate::app::format::round_tenths;
 use crate::app::model::Model;
 use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
-use crate::app::view_types::{EvidenceTagView, RunProgressView, SrpeLoadView, TrainingLoadView};
+use crate::app::run_views::RunProgress;
+use crate::app::view_types::{EvidenceTagView, SrpeLoadView, TrainingLoadView};
 use crate::day::local_day;
 use crate::evidence::claims;
 use crate::schema::Recommended;
 use crate::{load, running};
+
+/// The fitness–fatigue figures a [`TrainingLoadView`] states, rounded as
+/// shown, and what the chain counted.
+pub(in crate::app) struct LoadFigures {
+    /// Chronic Training Load (fitness): EWMA τ=42 d of daily load.
+    pub(in crate::app) ctl: f64,
+    /// Acute Training Load (fatigue): EWMA τ=7 d of daily load.
+    pub(in crate::app) atl: f64,
+    /// Training Stress Balance (form) entering the next day: CTL − ATL.
+    pub(in crate::app) tsb: f64,
+    days: u32,
+    counted: u32,
+    skipped: u32,
+}
 
 /// CTL/ATL/TSB bookkeeping over the logged run history (File 07
 /// impulse-response; LOAD-PMC-001). Daily load is a Lucia 3-zone TRIMP: each
@@ -17,10 +32,7 @@ use crate::{load, running};
 /// summed into this chain. Time enters only via each event's `observed_at`
 /// and the shell-supplied local today the chain runs through (no clock in the
 /// core).
-pub(in crate::app) fn build_training_load(
-    model: &Model,
-    facts: &RunFacts,
-) -> Option<TrainingLoadView> {
+pub(in crate::app) fn load_figures(model: &Model, facts: &RunFacts) -> Option<LoadFigures> {
     use std::collections::BTreeMap;
 
     let mut daily: BTreeMap<i64, f64> = BTreeMap::new();
@@ -78,24 +90,42 @@ pub(in crate::app) fn build_training_load(
         ctl = load::ctl(ctl, l);
         atl = load::atl(atl, l);
     }
-    let span_days = end - start + 1;
-    let tsb = round_tenths(load::tsb(ctl, atl));
-    let (ctl, atl) = (round_tenths(ctl), round_tenths(atl));
-    let g = Recommended::new((), claims::LOAD_PMC_001);
-    Some(TrainingLoadView {
+    Some(LoadFigures {
+        ctl: round_tenths(ctl),
+        atl: round_tenths(atl),
+        tsb: round_tenths(load::tsb(ctl, atl)),
+        days: (end - start + 1) as u32,
+        counted,
+        skipped,
+    })
+}
+
+/// The training-load card of [`load_figures`].
+pub(in crate::app) fn build_training_load(
+    model: &Model,
+    facts: &RunFacts,
+) -> Option<TrainingLoadView> {
+    let LoadFigures {
         ctl,
         atl,
         tsb,
-        days: span_days as u32,
+        days,
+        counted,
+        skipped,
+    } = load_figures(model, facts)?;
+    let g = Recommended::new((), claims::LOAD_PMC_001);
+    Some(TrainingLoadView {
+        days,
         sessions_counted: counted,
         sessions_skipped: skipped,
         method: "Heart-rate training load (Lucía 3-zone TRIMP, run-average %HRmax), smoothed into a 42-day fitness average (CTL) and a 7-day fatigue average (ATL)".to_string(),
         summary: format!(
             "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1} over {} days. A running tally of training, not a prediction of performance",
             ctl, atl, tsb,
-            span_days
+            days
         ),
         evidence: EvidenceTagView::of(&g),
+        ..Default::default()
     })
 }
 
@@ -103,10 +133,12 @@ pub(in crate::app) fn build_training_load(
 /// LOAD-SRPE-001) for this week vs last, from the run-progress weekly series.
 /// Its own series, never mixed into the heart-rate TRIMP. `None` until a run
 /// in the 16-week window is rated.
-pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadView> {
-    if !p.weekly.iter().any(|w| w.rated_runs > 0) {
+pub(in crate::app) fn build_srpe_load(progress: &RunProgress) -> Option<SrpeLoadView> {
+    if !progress.any_rated {
         return None;
     }
+    let p = &progress.view;
+    let rated = progress.rated_this_week;
     let cur = p.weekly.last()?;
     let prev_au = p
         .weekly
@@ -114,11 +146,11 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
         .checked_sub(2)
         .and_then(|i| p.weekly.get(i))
         .map_or(0.0, |w| w.srpe_load_au);
-    let unrated = cur.runs.saturating_sub(cur.rated_runs);
+    let unrated = cur.runs.saturating_sub(rated);
     let g = Recommended::new((), claims::LOAD_SRPE_001);
     Some(SrpeLoadView {
         method: "Effort load: minutes of running × your 0–10 rating of the whole run, given about 30 minutes afterwards. Kept separate from heart-rate load.".to_string(),
-        summary: if cur.rated_runs == 0 {
+        summary: if rated == 0 {
             format!(
                 "No rated runs this week{} · last week {prev_au:.0}",
                 if unrated > 0 {
@@ -131,8 +163,8 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
             format!(
                 "Effort load {:.0} this week ({} rated run{}{}) · last week {prev_au:.0}",
                 cur.srpe_load_au,
-                cur.rated_runs,
-                if cur.rated_runs == 1 { "" } else { "s" },
+                rated,
+                if rated == 1 { "" } else { "s" },
                 if unrated > 0 {
                     format!(", {unrated} not rated yet")
                 } else {
@@ -141,5 +173,6 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
             )
         },
         evidence: EvidenceTagView::of(&g),
+        ..Default::default()
     })
 }

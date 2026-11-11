@@ -721,89 +721,6 @@ fun ChoiceChip(
     }
 }
 
-/** Run types in the order a runner thinks of them, easiest first. */
-private val RunTypeOrder = listOf(
-    WorkoutType.Easy,
-    WorkoutType.Recovery,
-    WorkoutType.Steady,
-    WorkoutType.LongRun,
-    WorkoutType.Tempo,
-    WorkoutType.Interval,
-)
-
-/**
- * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]:
- * Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only; [onSelect]
- * gets the tapped type, and the caller toggles a re-tapped type off.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-        FieldLabel(stringResource(Res.string.history_workout_type))
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
-            verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
-        ) {
-            RunTypeOrder.forEach { wt ->
-                ChoiceChip(
-                    label = wt.label,
-                    selected = wt == selected,
-                    description = stringResource(Res.string.history_workout_type_cd, wt.label),
-                    onClick = { onSelect(wt) },
-                    modifier = Modifier.testTag("run-type-${wt.name}"),
-                )
-            }
-        }
-    }
-}
-
-/**
- * One compact stat cell for a horizontal summary strip (History week header),
- * using the app-wide tile anatomy: big tabular value (with optional small unit)
- * over its label. A [RowScope] extension so callers place several across a row
- * with `weight`. A [value] of [EmptyValuePlaceholder] ("nothing logged") renders
- * as the faint dash with no unit, never a "0.0 t" that reads as a measurement.
- */
-@Composable
-fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: String? = null) {
-    // History week-strip anatomy (spec 03-history §1): value ABOVE (19sp
-    // ExtraBold, tabular) with the unit inline muted, label below-left.
-    // fillMaxHeight: in a `height(IntrinsicSize.Min)` row every tile takes the
-    // tallest tile's height, so a glossary ⓘ never leaves a ragged bottom edge.
-    // A traversal group: TalkBack reads each tile's value and label together, tile
-    // by tile, even when a large font wraps one label to more lines than another.
-    Column(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .traversalGroup()
-            .clip(RoundedCornerShape(12.dp))
-            .background(BgElevated)
-            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-    ) {
-        val empty = value == EmptyValuePlaceholder
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                value,
-                color = if (empty) OnBgFaint else OnBgBody,
-                style = Type.StatValue,
-                maxLines = 1,
-            )
-            if (unit != null && !empty) {
-                Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
-            }
-        }
-        // Label, with an optional glossary affordance for jargon tiles.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            Text(label, color = OnBgFaint, style = Type.Caption)
-            glossaryKey?.let { GlossaryInfo(it) }
-        }
-    }
-}
-
 /** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`), pointing to the
  *  end edge; turned to point down when the row is expanded. One shared affordance
  *  for every tappable row; a [TextAction] that opens something tints it with its
@@ -939,7 +856,7 @@ fun PrimaryButton(
     minHeight: Dp = ActionMinHeight,
     danger: Boolean = false,
 ) {
-    val (fill, labelColor) = if (danger) LocalStatusColors.current.danger to DangerLabel else Accent to OnAccent
+    val (fill, labelColor) = if (danger) LocalStatusColors.current.danger to OnStatusFill else Accent to OnAccent
     ActionButton(label, onClick, modifier, enabled, description, minHeight, fill, labelColor, FontWeight.ExtraBold)
 }
 
@@ -1216,101 +1133,6 @@ fun DateBadge(text: String) {
             .background(BgTop)
             .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp),
     )
-}
-
-/** Gap between theme swatch cards, across a row and between grid rows. */
-private val ThemeSwatchGap = Space.Md.dp
-
-/** Side padding inside a theme swatch card (also the label's measured room). */
-private val ThemeSwatchInset = Space.Md.dp
-
-/**
- * The theme picker: one [ThemeSwatchCard] per [AppTheme], in enum order. Four
- * across while every name fits on one line in its card at the current font
- * scale (measured in the exact style the card renders, like [SegmentedEnumRow]);
- * otherwise a 2×2 grid, so a name never breaks mid-word at 130 % / 200 % type.
- * A radio group to TalkBack.
- */
-@Composable
-fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val measurer = rememberTextMeasurer()
-        val density = LocalDensity.current
-        val themes = AppTheme.entries
-        val labelRoomPx = with(density) {
-            ((maxWidth - ThemeSwatchGap * (themes.size - 1)) / themes.size - ThemeSwatchInset * 2).toPx()
-        }
-        val fits = themes.all {
-            measurer.measure(it.name, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
-        }
-        Column(
-            modifier = Modifier.fillMaxWidth().selectableGroup(),
-            verticalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
-        ) {
-            themes.chunked(if (fits) themes.size else 2).forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
-                ) {
-                    row.forEach { t -> ThemeSwatchCard(t, selected = t == current) { onSelect(t) } }
-                }
-            }
-        }
-    }
-}
-
-/**
- * A theme choice as a swatch card: a mini preview of the theme's LIGHT face (its
- * ground with an elevated-card bar and its accent dot) over its name, drawn as a
- * [choiceCard] (selected = solid Accent, no outline, like every other selection).
- * The light face is each theme's most recognisable one (rose blush, mint, butter
- * cream, white paper) and it reads the theme's own [AppTheme.light] palette, so
- * every card previews itself regardless of the active theme or dark mode. The
- * preview plate keeps a 1dp hairline so a white ground (Paper) never melts into a
- * light card, and an OnAccent hairline on the selected accent fill.
- */
-@Composable
-private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
-    val pal = theme.light
-    val plateShape = RoundedCornerShape(Space.Md.dp)
-    val barShape = RoundedCornerShape(Space.Sm.dp)
-    Column(
-        modifier = Modifier
-            .weight(1f)
-            .choiceCard(selected)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .padding(vertical = Space.Card.dp, horizontal = ThemeSwatchInset),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(plateShape)
-                .background(pal.bgTop)
-                .border(1.dp, if (selected) OnAccent.copy(alpha = 0.4f) else ChoiceCellBorder, plateShape)
-                .padding(Space.Sm.dp),
-            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(16.dp).clip(CircleShape).background(pal.accent))
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(16.dp)
-                    .clip(barShape)
-                    .background(pal.bgElevated)
-                    .border(1.dp, pal.onBgFaint.copy(alpha = HairlineAlpha.Strong), barShape),
-            )
-        }
-        // Wraps rather than clipping if a name still outgrows its card.
-        Text(
-            theme.name,
-            color = choiceCellContent(selected),
-            style = Type.Chip,
-            textAlign = TextAlign.Center,
-        )
-    }
 }
 
 /**

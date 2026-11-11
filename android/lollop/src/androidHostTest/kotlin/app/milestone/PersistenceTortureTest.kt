@@ -486,22 +486,25 @@ class PersistenceTortureTest {
 
     /**
      * The user removed their plan (a committed ClearPlan in the log), then the setup
-     * prefs were lost (cleared / corrupted to empty, or the async `apply()` of
-     * KEY_PLAN_CLEARED not yet on disk when the process died) while the log is intact.
-     * The removal is part of the committed log, so the next boot must keep the plan
-     * removed: compaction keeps a final ClearPlan ([RestoredLog.planRemoved]) and the
-     * boot re-arms the marker from it before the auto-GeneratePlan gate.
+     * prefs were lost (cleared / corrupted to empty) while the log is intact. The
+     * removal is part of the committed log, which compaction keeps, so the next boot
+     * reads it from the core's view (`plan_removed`) and generates no plan.
      */
     @Test
     fun aRemovedPlanStaysRemovedWhenOnlyTheLogSurvives() {
         writeLog(listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7), Event.ClearPlan))
         ctx.setupPrefs().edit().clear().commit()
         rule.launchApp()
-        assertNull("the removed plan came back", EventDispatcher.model.value!!.program)
+        val vm = EventDispatcher.model.value!!
+        assertNull("the removed plan came back", vm.program)
+        assertTrue(vm.plan_removed)
+        assertEquals("no plan generated at boot", "ClearPlan",
+            QaHarness.logLines(ctx).map(EventLog::variantOf).last { it == "GeneratePlan" || it == "ClearPlan" })
     }
 
-    /** The log gone while the prefs still say onboarding is done (vice versa): the
-     *  app boots to a usable, empty main screen instead of crashing or hanging. */
+    /** The log gone while the prefs still say onboarding is done and an older
+     *  build's plan was removed (vice versa): the app boots to a usable, empty main
+     *  screen instead of crashing or hanging, and the legacy pref is dropped. */
     @Test
     fun aMissingLogWithStalePrefsStillBootsUsable() {
         ctx.setupPrefs().edit().putBoolean("onboarding_done", true).putBoolean(KEY_PLAN_CLEARED, true).commit()
@@ -509,6 +512,7 @@ class PersistenceTortureTest {
         val vm = EventDispatcher.model.value
         assertNotNull(vm)
         assertNull(vm!!.profile)
+        assertFalse(ctx.setupPrefs().contains(KEY_PLAN_CLEARED))
     }
 
     // ── 7. Backup import interrupted ────────────────────────────────────────────

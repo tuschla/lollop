@@ -64,26 +64,24 @@ internal suspend fun runSaveCriticalSection(
     }
 }
 
-/** Below this measured distance (km) the Finish review notes a short run, so a
- *  drift/accidental "run" is a conscious keep rather than silent weekly-km / spike
- *  pollution. */
-internal const val MIN_RUN_KM = 0.5
-
-/** Below this measured MOVING duration (seconds) the review notes a short run too:
- *  a ≥0.5 km blip logged over ~90 s is as likely to be noise as a sub-0.5 km one. */
-internal const val MIN_RUN_SEC = 180L
-
-/** True when a captured run is under the keep threshold on distance OR moving time
- *  ([RunSession.elapsedSec], which excludes pauses and standing still, so a short
- *  run padded by a long pause still counts as short). */
+/** True when a captured run is under the core's keep threshold
+ *  ([CoreConstants.MIN_RUN_KM] or [CoreConstants.MIN_RUN_SEC]) on distance OR moving
+ *  time ([RunSession.elapsedSec], which excludes pauses and standing still, so a
+ *  short run padded by a long pause still counts as short): the Finish review notes
+ *  it, so a drift/accidental "run" is a conscious keep rather than silent weekly-km /
+ *  spike pollution. */
 internal fun isShortRun(km: Double, movingSec: Long): Boolean =
-    km < MIN_RUN_KM || movingSec < MIN_RUN_SEC
+    km < CoreConstants.MIN_RUN_KM || movingSec < CoreConstants.MIN_RUN_SEC
 
 /** The keep threshold as the short-run note states it: a round figure in the user's
  *  unit ("0.3 mi", "0.5 km"), not a converted 500 m ("0.31 mi"); the check itself
- *  stays at [MIN_RUN_KM]. */
+ *  stays at [CoreConstants.MIN_RUN_KM]. */
 internal fun shortRunThresholdLabel(unit: DistanceUnit): String =
-    "${trimDecimal(metersToDisplay(MIN_RUN_KM * 1000.0, unit))} ${unit.distanceLabel}"
+    "${trimDecimal(metersToDisplay(CoreConstants.MIN_RUN_KM * 1000.0, unit))} ${unit.distanceLabel}"
+
+/** The keep threshold's time half as the short-run note states it, in minutes
+ *  ("3"): [CoreConstants.MIN_RUN_SEC], [trimDecimal]-trimmed. */
+internal fun shortRunMinutesLabel(): String = trimDecimal(CoreConstants.MIN_RUN_SEC / 60.0)
 
 /** Where the Finish review is: not shown, reviewing the paused run, or confirming a
  *  discard. An enum so `rememberSaveable` keeps it across rotation. */
@@ -128,17 +126,13 @@ internal fun finishTransition(step: FinishStep, action: FinishAction): FinishTra
 
 /**
  * Today's open planned run, or null: the next session is dated today, still
- * trainable (next/adjusted), a run session, and has an item not yet done. Prefers
- * the item carrying run targets/structure. Pure so the tracker's plan hand-off is
- * testable.
+ * trainable (next/adjusted), and its run item ([runItem]) is set. Pure so the
+ * tracker's plan hand-off is testable.
  */
 internal fun plannedRunToday(model: ViewModel): PrescriptionView? {
     val ns = model.next_session ?: return null
-    if (ns.epoch_day != model.today()) return null
-    if (!ns.actionable) return null
-    if (ns.session_type.discipline != SessionDiscipline.Run) return null
-    val open = ns.items.filter { !it.done }
-    return open.firstOrNull { it.run_target != null || it.run_structure != null } ?: open.firstOrNull()
+    if (ns.epoch_day != model.today() || !ns.actionable) return null
+    return ns.runItem
 }
 
 /** The run-type chip preselected on the Finish review for a followed plan's
@@ -164,13 +158,13 @@ internal fun workoutTypeForPlan(sessionType: SessionType?, band: String?): Worko
     else -> workoutTypeForBand(band)
 }
 
-/** The plan's targets as short lines: pace in the user's unit, heart rate, and the
- *  effort, each labelled like the Today run item ("Effort: 3–4 of 10"). Empty when
- *  the item carries no targets. */
-internal fun runTargetLines(res: PlatformResources, t: RunTargetView?, unit: DistanceUnit): List<String> {
+/** The plan's targets as short lines: pace (in the profile's unit), heart rate,
+ *  and the effort, each labelled like the Today run item ("Effort: 3–4 of 10").
+ *  Empty when the item carries no targets. */
+internal fun runTargetLines(res: PlatformResources, t: RunTargetView?): List<String> {
     if (t == null) return emptyList()
     val out = ArrayList<String>(3)
-    val pace = t.paceLabel(unit)
+    val pace = t.pace_label
     if (pace.isNotBlank()) out += res.getString(Res.string.track_target_pace, pace)
     if (t.hr_label.isNotBlank()) out += res.getString(Res.string.track_target_hr, t.hr_label)
     if (t.effort_detail.isNotBlank()) out += res.getString(Res.string.plan_face_effort, t.effort_detail)
@@ -179,9 +173,9 @@ internal fun runTargetLines(res: PlatformResources, t: RunTargetView?, unit: Dis
 
 /** The plan's targets folded into the one line shown while recording ("Plan
  *  9:00–9:50 /mi · ≤ 140 bpm · effort 3–5 of 10"), or null without targets. */
-internal fun runTargetSummary(res: PlatformResources, t: RunTargetView?, unit: DistanceUnit): String? {
+internal fun runTargetSummary(res: PlatformResources, t: RunTargetView?): String? {
     if (t == null) return null
-    val parts = listOf(t.paceLabel(unit), t.hr_label, t.effort_cue).filter { it.isNotBlank() }
+    val parts = listOf(t.pace_label, t.hr_label, t.effort_cue).filter { it.isNotBlank() }
     if (parts.isEmpty()) return null
     return res.getString(Res.string.track_plan_targets_line, parts.joinToString(" · "))
 }
@@ -273,16 +267,16 @@ internal fun averagePaceMinPerKm(elapsedSec: Long, km: Double): Double =
 /** The recorded fixes as route segments (each [segmentStarts] index opens a new
  *  one, so a pause never draws a bridging line), for the Finish review's route
  *  thumbnail. Pure. */
-internal fun trackSegments(points: List<GpsPoint>, segmentStarts: Collection<Int>): List<List<GpxFix>> {
+internal fun trackSegments(points: List<GpsPoint>, segmentStarts: Collection<Int>): List<List<GpsPoint>> {
     val starts = segmentStarts as? Set<Int> ?: segmentStarts.toHashSet()
-    val out = ArrayList<List<GpxFix>>()
-    var seg = ArrayList<GpxFix>()
+    val out = ArrayList<List<GpsPoint>>()
+    var seg = ArrayList<GpsPoint>()
     points.forEachIndexed { i, p ->
         if (i in starts && seg.isNotEmpty()) {
             out += seg
             seg = ArrayList()
         }
-        seg += GpxFix(p.lat, p.lon, p.observedAt, hrBpm = null, accuracyM = p.accuracyM)
+        seg += p
     }
     if (seg.isNotEmpty()) out += seg
     return out

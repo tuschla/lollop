@@ -15,6 +15,7 @@ import androidx.glance.unit.ColorProvider
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppTheme
 import app.milestone.DarkMode
+import app.milestone.DayMark
 import app.milestone.HoldReason
 import app.milestone.OpenDest
 import app.milestone.Palette
@@ -51,8 +52,8 @@ class TodayWidgetContentTest {
 
     // Mon trained, today (Tue) next, Wed rest, Thu and Fri planned, a rest weekend.
     private val week = listOf(
-        WidgetWeekMark.Done, WidgetWeekMark.Next, WidgetWeekMark.Rest, WidgetWeekMark.Planned,
-        WidgetWeekMark.Planned, WidgetWeekMark.Rest, WidgetWeekMark.Rest,
+        DayMark.Done, DayMark.Next, DayMark.Rest, DayMark.Planned,
+        DayMark.Planned, DayMark.Rest, DayMark.Rest,
     ).mapIndexed { i, m -> WidgetWeekDay(day - 1 + i, m) }
 
     private fun liftDay() = widgetFace(
@@ -61,7 +62,7 @@ class TodayWidgetContentTest {
             kind = WidgetDayKind.Lift,
             title = "Heavy day",
             items = listOf(
-                WidgetItem(WidgetItemKind.Lift, "Back squat", "5×3 @ 117.5 kg"),
+                WidgetItem(WidgetItemKind.Lift, "Back squat", "5×3 @\u00A0117.5\u00A0kg"),
                 WidgetItem(WidgetItemKind.Lift, "Deadlift", "3×5"),
                 WidgetItem(WidgetItemKind.Lift, "Bench press", "3×5"),
                 WidgetItem(WidgetItemKind.Lift, "Cable row", "3×5"),
@@ -212,10 +213,10 @@ class TodayWidgetContentTest {
             day + 2,
             WidgetDayKind.Lift,
             "Heavy volume day",
-            listOf(WidgetItem(WidgetItemKind.Lift, "Back squat", "4×5 @ 112.5 kg"), WidgetItem(WidgetItemKind.Lift, "Deadlift", "4×5 @ 57.5 kg")),
+            listOf(WidgetItem(WidgetItemKind.Lift, "Back squat", "4×5 @\u00A0112.5\u00A0kg"), WidgetItem(WidgetItemKind.Lift, "Deadlift", "4×5 @\u00A057.5\u00A0kg")),
         ),
     )
-    private val runItem = WidgetItem(WidgetItemKind.Run, detail = "3.4 mi", pace = "9:00–9:40 /mi")
+    private val runItem = WidgetItem(WidgetItemKind.Run, detail = "3.4\u00A0mi", pace = "9:00–9:40\u00A0/mi")
 
     private fun runDay() = widgetFace(
         WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Run, title = "Easy run", items = listOf(runItem), trackable = true, weekDone = 1, weekPlanned = 4, week = week),
@@ -271,7 +272,7 @@ class TodayWidgetContentTest {
         layoutAt(cells2x1, face = doneDay()).let { assertEquals(res.getString(R.string.widget_session_done), it.status) }
         // A rest day: the next session, its date and its items, from three cells wide.
         assertEquals("Heavy volume day", restDay().hero?.text)
-        assertEquals(listOf("Back squat · 4×5\u00A0@\u00A0112.5\u00A0kg", "Deadlift · 4×5\u00A0@\u00A057.5\u00A0kg"), restDay().heroItems)
+        assertEquals(listOf("Back squat · 4×5 @\u00A0112.5\u00A0kg", "Deadlift · 4×5 @\u00A057.5\u00A0kg"), restDay().heroItems)
         for (c in listOf(cells3x2, cells4x2, cells2x3, cells4x3, five3x2, five4x2, five2x3, five4x3)) {
             val l = layoutAt(c, face = restDay())
             assertTrue("rest $c", l.hero)
@@ -295,7 +296,7 @@ class TodayWidgetContentTest {
         for (c in listOf(cells2x2, cells2x3, five2x2, five3x2, five2x3)) assertFalse("hold $c", layoutAt(c, face = hold()).bigTitle)
         // A wrapped item line keeps its prescription whole: never a line ending on "@"
         // nor one starting with it ("Back squat · 5×3" / "@ 117.5 kg" on a 2×2, e37).
-        assertEquals("Back squat · 5×3\u00A0@\u00A0117.5\u00A0kg", liftDay().items.first())
+        assertEquals("Back squat · 5×3 @\u00A0117.5\u00A0kg", liftDay().items.first())
         // A list never gets the large title.
         assertFalse(layoutAt(cells4x3).bigTitle)
     }
@@ -373,7 +374,7 @@ class TodayWidgetContentTest {
         setAppWidgetSize(hostStep(cells4x3))
         provideComposable { TodayWidgetContent(liftDay(), colors) }
         onNode(hasTextEqualTo("Heavy day")).assertExists()
-        onNode(hasTextEqualTo("Back squat · 5×3\u00A0@\u00A0117.5\u00A0kg")).assertExists()
+        onNode(hasTextEqualTo("Back squat · 5×3 @\u00A0117.5\u00A0kg")).assertExists()
         onNode(hasTextEqualTo("Cable row · 3×5")).assertExists()
         onNode(hasTextEqualTo(res.getString(R.string.tile_log_set))).assertExists()
         onNode(hasContentDescriptionEqualTo(res.getString(R.string.tile_log))).assertExists()
@@ -411,7 +412,7 @@ class TodayWidgetContentTest {
         assertEquals("$what accent", p.accent, c.accent.at(night))
         assertEquals("$what on accent", p.bgTop, c.onAccent.at(night))
         assertEquals("$what accent tint", p.accentTint(), c.accentTint.at(night))
-        assertEquals("$what danger", p.dangerText, c.danger.at(night))
+        assertEquals("$what danger", p.dangerText, c[WidgetInk.Danger].at(night))
     }
 
     @Test

@@ -16,7 +16,6 @@ import app.milestone.openIntent
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.AppSettings
-import app.milestone.DistanceUnitOverride
 import app.milestone.PrescriptionView
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
@@ -116,8 +115,7 @@ class RunFinishEffortTest {
     fun finishReview_effort7_saveSendsLogRunTrackWithSessionRpe7() {
         openTracker()
         rule.pickRating("effort-scale", 7)
-        // The run-type chip shows WorkoutType's own label (no string resource).
-        rule.onNodeWithText("Interval").performScrollTo().performClick()
+        rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().performClick()
         val line = saveAndAwaitLoggedRun()
         assertTrue(line, line.contains("\"session_rpe\":7"))
         assertTrue(line, line.contains("\"workout_type\":\"Interval\""))
@@ -141,7 +139,7 @@ class RunFinishEffortTest {
      */
     @Test
     fun followedPlan_showsTargetsAndCurrentStep_andSkipAdvances() {
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Km)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         RunSession.followPlan(PrescriptionView(
             exercise = "Intervals",
@@ -152,8 +150,7 @@ class RunFinishEffortTest {
                 band = "interval",
                 pace_fast_sec_per_km = 250,
                 pace_slow_sec_per_km = 260,
-                pace_label_km = "4:10–4:20 /km",
-                pace_label_mi = "6:43–6:59 /mi",
+                pace_label = "4:10–4:20 /km",
                 effort_cue = "effort 8–9 of 10",
                 effort_detail = "8–9 of 10",
             ),
@@ -187,7 +184,7 @@ class RunFinishEffortTest {
         // Stopping a guided run preselects its type from the plan (interval band).
         rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
         rule.waitUntil(10_000) { rule.onAllNodesWithText(str(R.string.track_finish_title)).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Interval").performScrollTo().assertIsSelected()
+        rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().assertIsSelected()
     }
 
     /**

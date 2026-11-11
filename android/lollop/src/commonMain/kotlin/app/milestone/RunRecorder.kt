@@ -17,12 +17,12 @@ internal class LiveFix(
     val accuracyM: Double?,
 )
 
-/** Whether a fix may reach the live display: accuracy within [MAX_GPS_ACCURACY_M]
+/** Whether a fix may reach the live display: accuracy within [CoreConstants.MAX_GPS_ACCURACY_M]
  *  (the core's of-record bound) and, unless [recording], fresh enough per
  *  [armedFixPassesAgeGate] ([ageMs] on the monotonic clock). */
 internal fun isPlausibleLiveFix(accuracyM: Double?, ageMs: Long, recording: Boolean, batchSize: Int): Boolean {
     if (!recording && !armedFixPassesAgeGate(ageMs, batchSize)) return false
-    return accuracyM != null && accuracyM <= MAX_GPS_ACCURACY_M
+    return accuracyM != null && accuracyM <= CoreConstants.MAX_GPS_ACCURACY_M
 }
 
 /** A one-shot deadline on the main thread. */
@@ -221,7 +221,7 @@ internal class RunRecorder(private val host: RecorderHost) {
             return
         }
         // Gate implausible fixes for the live display + map ([armedFixPassesAgeGate],
-        // [MAX_GPS_ACCURACY_M]); the core's QC still gates the of-record figures.
+        // [CoreConstants.MAX_GPS_ACCURACY_M]); the core's QC still gates the of-record figures.
         val accuracyM = fix.accuracyM
         val ageMs = (host.nowNanos() - fix.monoNanos) / 1_000_000
         if (accuracyM == null || !isPlausibleLiveFix(accuracyM, ageMs, recording = recording, batchSize = batchSize)) return

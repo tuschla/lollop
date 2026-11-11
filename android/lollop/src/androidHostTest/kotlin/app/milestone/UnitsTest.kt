@@ -17,12 +17,11 @@ class UnitsTest {
     }
 
     @Test
-    fun overridePrecedenceWinsOverLocale() {
-        // Explicit override beats the locale; System falls back to the locale.
-        assertEquals(DistanceUnit.Km, resolveDistanceUnit(DistanceUnitOverride.Km, Locale("en", "US")))
-        assertEquals(DistanceUnit.Mi, resolveDistanceUnit(DistanceUnitOverride.Mi, Locale("de", "DE")))
-        assertEquals(DistanceUnit.Mi, resolveDistanceUnit(DistanceUnitOverride.System, Locale("en", "US")))
-        assertEquals(DistanceUnit.Km, resolveDistanceUnit(DistanceUnitOverride.System, Locale("de", "DE")))
+    fun theProfileUnitWinsAndTheLocaleCoversThePreSetupApp() {
+        assertEquals(DistanceUnit.Km, ViewModel(profile = Profile(distance_unit = DistanceUnit.Km)).distanceUnit())
+        assertEquals(DistanceUnit.Mi, ViewModel(profile = Profile(distance_unit = DistanceUnit.Mi)).distanceUnit())
+        assertEquals(localeDistanceUnit(), ViewModel().distanceUnit())
+        assertEquals(localeDistanceUnit(), (null as ViewModel?).distanceUnit())
     }
 
     @Test
@@ -39,8 +38,8 @@ class UnitsTest {
     @Test
     fun metersToDisplayConvertsPerUnit() {
         assertEquals(1.0, metersToDisplay(1000.0, DistanceUnit.Km), 1e-9)
-        assertEquals(1.0, metersToDisplay(METERS_PER_MILE, DistanceUnit.Mi), 1e-9)
-        assertEquals(1609.344, METERS_PER_MILE, 1e-9)
+        assertEquals(1.0, metersToDisplay(CoreConstants.MILE_M, DistanceUnit.Mi), 1e-9)
+        assertEquals(1609.344, CoreConstants.MILE_M, 1e-9)
     }
 
     @Test
@@ -48,7 +47,7 @@ class UnitsTest {
         // A mile is longer, so min/mi > min/km for the same speed.
         val minPerKm = 5.0
         val minPerMi = paceInUnit(minPerKm, DistanceUnit.Mi)
-        assertEquals(minPerKm * (METERS_PER_MILE / 1000.0), minPerMi, 1e-9)
+        assertEquals(minPerKm * (CoreConstants.MILE_M / 1000.0), minPerMi, 1e-9)
         assertTrue("min/mi must exceed min/km", minPerMi > minPerKm)
         assertEquals(minPerKm, paceInUnit(minPerKm, DistanceUnit.Km), 1e-9)
     }
@@ -84,8 +83,8 @@ class UnitsTest {
     @Test
     fun kmMiRoundTripAndKnownValues() {
         // One mile is exactly 1.609344 km (NIST), so the pair is each other's inverse.
-        assertEquals(1.0, kmToMi(METERS_PER_MILE / 1000.0), 1e-9)
-        assertEquals(METERS_PER_MILE / 1000.0, miToKm(1.0), 1e-9)
+        assertEquals(1.0, kmToMi(CoreConstants.MILE_M / 1000.0), 1e-9)
+        assertEquals(CoreConstants.MILE_M / 1000.0, miToKm(1.0), 1e-9)
         assertEquals(10.0, miToKm(kmToMi(10.0)), 1e-9)
         // 10 km ≈ 6.21 mi.
         assertEquals(6.21371, kmToMi(10.0), 1e-5)

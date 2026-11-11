@@ -39,12 +39,8 @@ internal object WidgetSnapshotStore {
             ?.takeIf { it.version == WIDGET_SNAPSHOT_VERSION }
     }
 
-    /**
-     * The stored snapshot when it describes [today] and is not marked stale; null
-     * otherwise, so a snapshot from another day never shows as today.
-     */
-    fun today(ctx: Context, today: Long = todayEpochDay()): WidgetSnapshot? =
-        read(ctx)?.takeIf { !it.stale && it.epochDay == today }
+    /** The stored snapshot when it is current on [today] ([WidgetSnapshot.currentOn]). */
+    fun today(ctx: Context, today: Long = todayEpochDay()): WidgetSnapshot? = read(ctx)?.currentOn(today)
 
     /** Store [snapshot]; false (and no write) when the file already holds it. */
     fun write(ctx: Context, snapshot: WidgetSnapshot): Boolean = synchronized(lock) {

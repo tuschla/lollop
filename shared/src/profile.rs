@@ -26,6 +26,28 @@ pub enum ResistanceModality {
     Calisthenics,
 }
 
+/// The distance unit every core-rendered distance and pace reads in: `Km`
+/// (default, so a profile line from before the choice replays metric) or
+/// `Mi`. Display-only, like `Profile::weight_lb`: numeric fields stay km.
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Sanitize,
+)]
+pub enum DistanceUnit {
+    #[default]
+    Km,
+    Mi,
+}
+
 /// The athlete's programming profile: drives the evidence-cited guidance
 /// section. Shell-supplied; no logged data required.
 ///
@@ -51,6 +73,7 @@ pub enum ResistanceModality {
         resting_hr_bpm,
         measured_hr_max,
         weight_lb,
+        distance_unit,
         resistance_modality,
         high_load_block,
         environment,
@@ -160,6 +183,11 @@ pub struct Profile {
     /// `weight_suffix` / `fmt_weight` helpers).
     #[serde(default)]
     pub weight_lb: bool,
+    /// The unit distances and paces are rendered in (`DistanceUnit`). Like
+    /// `weight_lb` it changes text only: plan, history and every numeric
+    /// field stay km.
+    #[serde(default)]
+    pub distance_unit: DistanceUnit,
     /// Resistance-training modality: `Weights` (default) or `Calisthenics`.
     /// A calisthenics profile routes lift days through the leverage-ladder
     /// synthesizer (`plan::calisthenics_session`).
@@ -456,7 +484,11 @@ impl<'a> PlanProfile<'a> {
 
     /// The lift-day count when the athlete chose none: 3 pure, 2 hybrid.
     pub fn default_lift_days(&self) -> usize {
-        if self.runs { 2 } else { 3 }
+        usize::from(if self.runs {
+            HYBRID_DEFAULT_LIFT_DAYS
+        } else {
+            LIFT_ONLY_DEFAULT_LIFT_DAYS
+        })
     }
 
     /// Why no plan can be built, `None` when one can: any onboarding gate
@@ -500,7 +532,7 @@ impl<'a> PlanProfile<'a> {
             let chosen = self
                 .profile
                 .lift_days_per_week
-                .map(|d| (d as usize).clamp(2, 5))
+                .map(|d| (d as usize).clamp(LIFT_DAYS_MIN.into(), LIFT_DAYS_MAX.into()))
                 .unwrap_or(self.default_lift_days());
             if lead == Some(HybridLead::Running) {
                 chosen.min(hybrid::maintenance_lift_sessions().value.1 as usize)
@@ -547,6 +579,15 @@ impl<'a> PlanProfile<'a> {
     }
 }
 
+/// Fewest lift days a week a chosen count is held to (LIFT-DAYS-001).
+pub const LIFT_DAYS_MIN: u8 = 2;
+/// Most lift days a week a chosen count is held to (LIFT-DAYS-001).
+pub const LIFT_DAYS_MAX: u8 = 5;
+/// Lift days a lifting-only profile that chose none trains.
+pub const LIFT_ONLY_DEFAULT_LIFT_DAYS: u8 = 3;
+/// Lift days a lifting-and-running profile that chose none trains.
+pub const HYBRID_DEFAULT_LIFT_DAYS: u8 = 2;
+
 fn goal_table_run_days(profile: &Profile) -> usize {
     let gwp = running::goal_week_plan(profile.goal_distance, profile.advanced).value;
     (profile.running_days_per_week as usize)
@@ -572,7 +613,7 @@ fn run_slot_count(profile: &Profile, goal_table: usize, lead: Option<HybridLead>
 pub(crate) mod test_support {
     use crate::hybrid::ConcurrentGoal;
     use crate::individualization::ProgressionCadence;
-    use crate::profile::{Profile, ResistanceModality};
+    use crate::profile::{DistanceUnit, Profile, ResistanceModality};
     use crate::running::GoalDistance;
     use crate::schema::HealthScreen;
     use crate::strength::LiftGoal;
@@ -605,6 +646,7 @@ pub(crate) mod test_support {
             resting_hr_bpm: None,
             measured_hr_max: None,
             weight_lb: false,
+            distance_unit: DistanceUnit::Km,
             effective_from_epoch_day: None,
             edited_at: None,
             lift_days_per_week: None,

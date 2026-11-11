@@ -6,14 +6,17 @@
 use super::*;
 use crate::schema::{PainDetail, PainKind, PainTrend};
 
-fn interval_item() -> PrescriptionView {
-    PrescriptionView {
-        summary: "6 × 4 min · Interval pace".into(),
-        intensity_label: "Interval pace".into(),
+fn interval_item() -> PlanItem {
+    PlanItem {
+        view: PrescriptionView {
+            summary: "6 × 4 min · Interval pace".into(),
+            intensity_label: "Interval pace".into(),
+            rep_volume: "4 min".into(),
+            ..PrescriptionView::default()
+        },
         rep_count: 6,
-        rep_volume: "4 min".into(),
         rep_amount: Some(RunAmount::Minutes(4.0)),
-        ..PrescriptionView::default()
+        ..PlanItem::default()
     }
 }
 

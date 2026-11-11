@@ -195,7 +195,7 @@ class PlanCompletionTest {
         // A core-derived lb load (225 lb = 102.05828… kg) is off the 0.01 kg wire
         // grid: the kg field shows "102.06" and an untouched Save stores 102.06; in
         // lb it shows "225" and stores lbToKgWire(225), never every digit.
-        val raw = 225.0 / LB_PER_KG
+        val raw = 225.0 / CoreConstants.LB_PER_KG
         assertEquals(102.06, resolveSaveWeightKg(false, true, raw, loadFigure(raw, WeightUnit.Kg), WeightUnit.Kg)!!, 0.0)
         assertEquals(lbToKgWire(225.0), resolveSaveWeightKg(false, true, raw, loadFigure(raw, WeightUnit.Lb), WeightUnit.Lb)!!, 0.0)
         // An on-grid stored kg stays lossless in lb: 100 kg shown as "220.5" lb saves 100.

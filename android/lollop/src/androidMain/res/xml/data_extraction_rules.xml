@@ -7,8 +7,8 @@
      have left osmdroid tiles on external storage; exclude that legacy directory too
      (new tiles live in cache/). The GPX export temp dir lives in cache/, which is
      never transferred, so it needs no rule here. The milestone_setup prefs
-     (onboarding_done, plan_cleared) describe the excluded log, so restoring them
-     without it would skip guided setup and plan generation on an empty install.
+     (onboarding_done) describe the excluded log, so restoring them without it
+     would skip guided setup on an empty install.
      The names are AppFileNames' (Kotlin); AppIdentifiersTest checks both sections. -->
 <data-extraction-rules>
     <cloud-backup>

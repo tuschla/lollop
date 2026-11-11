@@ -41,6 +41,7 @@ pub mod fit;
 pub mod gps;
 pub mod hybrid;
 pub mod hypertrophy;
+pub mod import;
 pub mod individualization;
 pub mod load;
 pub mod log;

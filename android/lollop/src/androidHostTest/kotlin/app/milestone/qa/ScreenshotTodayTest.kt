@@ -34,6 +34,7 @@ import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SessionPlanView
 import app.milestone.TestClock
+import app.milestone.overtrainingWeekEdgeLabels
 import java.io.File
 import java.time.Duration
 import java.util.Locale
@@ -483,8 +484,9 @@ class ScreenshotTodayTest {
         rule.shot("log-weekly-top-${mode.suffix}")
         rule.onNodeWithText(str(R.string.log_weekly_sign_sleep)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
-        rule.onNodeWithText(str(R.string.log_weekly_signs_1to2)).performScrollTo().performClick()
-        rule.onNodeWithText(str(R.string.log_weekly_signs_gt2)).performScrollTo()
+        val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
+        rule.onNodeWithText(str(R.string.log_weekly_signs_1to2, minWeeks, nforWeeks)).performScrollTo().performClick()
+        rule.onNodeWithText(str(R.string.log_weekly_signs_gt2, nforWeeks)).performScrollTo()
         rule.shot("log-weekly-mid-${mode.suffix}")
         rule.onNode(hasText(str(R.string.log_clinical_reds_ctx), substring = true)).performScrollTo()
         rule.shot("log-weekly-bottom-${mode.suffix}")

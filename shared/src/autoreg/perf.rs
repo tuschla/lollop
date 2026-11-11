@@ -20,7 +20,7 @@ pub(crate) const E1RM_NOISE_FRAC: f64 = 0.05;
 pub(super) const E1RM_DELOAD_RATIO: f64 = 0.90;
 pub(super) const E1RM_DELOAD_STREAK: u8 = 2;
 pub(crate) const E1RM_REDUCE_RATIO: f64 = 1.0 - E1RM_NOISE_FRAC;
-pub(super) const E1RM_INCREASE_RATIO: f64 = 1.0 + E1RM_NOISE_FRAC;
+pub(crate) const E1RM_INCREASE_RATIO: f64 = 1.0 + E1RM_NOISE_FRAC;
 /// Top-set load cut below baseline − 5 % (autoreg-006 "reduce top-set load ~5%").
 pub(super) const E1RM_REDUCE_LOAD_PCT: f32 = 5.0;
 /// Load add above baseline + 5 % (autoreg-007 "+2.5–5%"; 3.5 % used).

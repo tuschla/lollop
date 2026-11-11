@@ -1,6 +1,7 @@
 package app.milestone
 
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.Serializable
 
 /** Modality derivation from the echoed profile: a side is "shown" when it carries
  *  volume. Callers OR in `profile == null` wherever a not-yet-set-up user should
@@ -13,6 +14,40 @@ internal val SessionPlanView.actionable: Boolean get() = status == SessionStatus
 
 /** A finished session: every item done, or done lighter. */
 internal val SessionPlanView.isDone: Boolean get() = status.isDone
+
+/** A run session's run item ([SessionPlanView.run_item]), else null. */
+internal val SessionPlanView.runItem: PrescriptionView? get() = run_item?.let(items::getOrNull)
+
+/** How one plan day reads at a glance: the app's week strip and the widget's. */
+@Serializable
+internal enum class DayMark {
+    /** Trained (done, or done lighter). */
+    Done,
+
+    /** The plan's next session (adjusted or not). */
+    Next,
+
+    /** A session still to come. */
+    Planned,
+
+    /** A past session not logged, or only partly done. */
+    Missed,
+
+    /** A plan rest day. */
+    Rest,
+
+    /** Before the plan started. */
+    None,
+}
+
+internal val SessionStatus.mark: DayMark get() = when (this) {
+    SessionStatus.Done, SessionStatus.DoneLighter -> DayMark.Done
+    SessionStatus.Next, SessionStatus.Adjusted -> DayMark.Next
+    SessionStatus.Missed, SessionStatus.Partial -> DayMark.Missed
+    SessionStatus.Rest -> DayMark.Rest
+    SessionStatus.BeforePlan -> DayMark.None
+    SessionStatus.Planned, SessionStatus.Blocked -> DayMark.Planned
+}
 
 /**
  * Priority sort for adjustments: safety-critical first, then strongest grade,
@@ -34,9 +69,6 @@ internal fun List<GuidanceView>.byGuidancePriority(): List<GuidanceView> =
 
 private fun <T> evidencePriority(safety: (T) -> Boolean, grade: (T) -> EvidenceGrade?, confidence: (T) -> Float): Comparator<T> =
     compareByDescending(safety).thenByDescending { grade(it)?.ordinal ?: -1 }.thenByDescending(confidence)
-
-/** The core's guidance section of profile-context rows (shared/src/app/guidance.rs). */
-internal const val PROFILE_GUIDANCE_SECTION = "Profile"
 
 /** A plan day's short date in the app's language ([appLocale]: "Thu, Oct 15"). */
 internal fun planDateLabel(epochDay: Long): String =

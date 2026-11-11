@@ -72,12 +72,8 @@ fn compact_log_reports_a_torn_tail_by_line_index() {
 
 #[test]
 fn ops_answer_errors_and_empties() {
-    let fit = call(Op::ParseFit, b"not a fit file");
-    assert!(
-        fit.starts_with(b"{\"error\""),
-        "{}",
-        String::from_utf8_lossy(&fit)
-    );
+    let verdict = json(&call(Op::ParseRunFile, b"not a run file"));
+    assert_eq!(verdict["refusal"], "wrong_type", "{verdict}");
     let figures = call(Op::TrackFigures, b"\"ClearSets\"");
     assert!(figures.starts_with(b"{\"error\""));
     assert!(

@@ -157,6 +157,16 @@ pub(crate) fn zone_label(zone: Option<ThreeZone>) -> &'static str {
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct AdjustmentView {
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
+    #[serde(default)]
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// The three-part "why?" disclosure (basis → why this grade → what would
@@ -172,6 +182,18 @@ pub struct AdjustmentView {
     /// The cue says to stop this exercise now (tap End exercise).
     #[serde(default)]
     pub suggests_end_exercise: bool,
+    /// Next-time advice for the lift today's win names (a coaching row, not an
+    /// in-session cue), so the win and this advice share one card.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub win_advice: bool,
+    /// `summary` and `citation` are an adjustment headline's
+    /// ([`ViewModel::today_headline`]): the headline already states this row.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats_headline: bool,
+    /// `summary` and `citation` are the next session's `adjustment`'s: a
+    /// card for this row already states the session's adjustment.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats_session: bool,
 }
 
 /// One logged set with its derived strength metrics, flattened for shells.
@@ -206,8 +228,8 @@ pub struct LiftResultView {
     /// history card from this; the core does no formatting (it holds no clock).
     pub observed_at: i64,
     /// Stable per-entry id echoed for the shell's edit/delete affordance: the
-    /// shell sends it back in `AmendSet`/`DeleteEntry`. 0 for a legacy row (the
-    /// shell then falls back to `observed_at`).
+    /// shell sends it back in `AmendSet`/`DeleteEntry`. A row an old build
+    /// logged without an id carries the one its date gives it.
     #[serde(default)]
     pub entry_id: u64,
     /// Timed-hold duration, seconds, for a static/hold set (`None` for a
@@ -246,17 +268,6 @@ pub struct E1rmRangeView {
 /// statement carries that caveat).
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct TrainingLoadView {
-    /// Chronic Training Load (fitness): EWMA τ=42 d of daily load. This and
-    /// `atl`/`tsb` are the figures behind `summary`, kept as test oracles; not
-    /// on the wire.
-    #[serde(skip)]
-    pub ctl: f64,
-    /// Acute Training Load (fatigue): EWMA τ=7 d of daily load.
-    #[serde(skip)]
-    pub atl: f64,
-    /// Training Stress Balance (form) entering the next day: CTL − ATL.
-    #[serde(skip)]
-    pub tsb: f64,
     /// Days the daily chain spans: from the first counted session through local
     /// today (the last counted session when the shell set no today), at most
     /// `MAX_LOAD_DAYS`.
@@ -270,6 +281,16 @@ pub struct TrainingLoadView {
     /// How daily load was quantified, e.g. `"Lucia TRIMP (3-zone HR)"`.
     pub method: String,
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
+    #[serde(default)]
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
 }
@@ -282,6 +303,16 @@ pub struct TrainingLoadView {
 pub struct SrpeLoadView {
     pub method: String,
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
+    #[serde(default)]
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
 }
@@ -316,6 +347,10 @@ pub struct ViewModel {
     pub runs: Vec<RunResultView>,
     /// Evidence-cited programming guidance derived from the profile.
     pub guidance: Vec<GuidanceView>,
+    /// The profile-context rows (the training age), shown with the profile
+    /// rather than in the reference library; not part of `guidance`.
+    #[serde(default)]
+    pub profile_guidance: Vec<GuidanceView>,
     /// The single resolved coaching message: a weekly-check-in safety concern,
     /// a run-spike warning, or one takeaway on the latest session (from the
     /// session review, or derived from the logged sets/runs of a completed
@@ -367,6 +402,12 @@ pub struct ViewModel {
     pub hr_zone_input: Option<HrZoneInputView>,
     pub protein_input: Option<ProteinInputView>,
     pub hypertrophy_input: Option<HypertrophyInputView>,
+    /// Whether the Protein calculator offers its masters context
+    /// (`ComputeProtein.masters`, MASTERS-001, 65+): false only for a stated
+    /// age under 65 (then the deficit context alone applies); an unknown age
+    /// leaves it open.
+    #[serde(default)]
+    pub protein_masters_offered: bool,
     /// The weekly direct-set counts of the hypertrophy plan's ramp row (e.g.
     /// `[12, 16, 20, 22]`), for a compact summary of the last plan. Empty when no
     /// plan exists, a calculator hold applies, the muscle is unknown or the
@@ -433,10 +474,18 @@ pub struct ViewModel {
     pub next_week_plan: Vec<SessionPlanView>,
     /// The active program summary card (name/goal/phase/week), when a plan is set.
     pub program: Option<ProgramSummaryView>,
+    /// The user removed the plan (`ClearPlan` is the last plan event): a shell
+    /// does not generate one on its own until the user asks again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plan_removed: bool,
     /// Structured HRmax figure (bpm + measured/estimate + Tanaka split) for
     /// the last HR-zone query, so no shell regex-scrapes `hr_zones`.
     /// `None` until an HR-zone query is made (or the age is out of range).
     pub hr_max: Option<HrMaxView>,
+    /// True when the current profile anchors %HRmax (a plausible measured HRmax,
+    /// or an age the Tanaka estimate covers), so a run's average bpm converts.
+    #[serde(default)]
+    pub hr_max_known: bool,
     /// Structured protein g/day figures paralleling `protein_targets`, so no
     /// shell regex-scrapes those rows. Empty until a protein query is made.
     #[serde(default)]
@@ -495,6 +544,44 @@ pub struct ViewModel {
     /// today's profile is under 18 and the shell has sent today
     /// (`SetToday`). Tracking and information only; the plan hold stays.
     pub youth_activity: Option<YouthActivityView>,
+    /// The pain report in force (the one the pain gate holds on), `None` when
+    /// none is: its area and context line for the shell's pain surfaces, and
+    /// the report itself to restore after a "Remove report" undo.
+    pub active_pain: Option<ActivePainView>,
+    /// Today as every surface (Today, widget, tile, Log sheet) reads it.
+    #[serde(default)]
+    pub today_surface: TodaySurfaceView,
+}
+
+/// What today is ([`TodaySurfaceView::state`], wire: snake_case).
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TodayState {
+    /// Training is paused (`hold_reason`), the under-18 pause included.
+    Paused,
+    /// No profile yet: guided setup has not run.
+    #[default]
+    Setup,
+    /// A profile but no plan (`plan_withheld` says why when withheld).
+    NoPlan,
+    /// `next_session` is today's, still to train.
+    Session,
+    /// Today's session is finished: `next_session` moved on, today's
+    /// `week_plan` row says what was done.
+    Done,
+    /// A plan with no session today (`rest_today` says if it is a rest day).
+    Rest,
+}
+
+/// Today's facts every surface reads ([`ViewModel::today_surface`]).
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
+pub struct TodaySurfaceView {
+    pub state: TodayState,
+    /// Today is a plan rest day.
+    pub rest_today: bool,
+    /// Fewer than three days with a logged lift: the session card spells out
+    /// each lift's prescription and how to pick a first weight.
+    pub show_guide: bool,
 }
 
 /// One logged other activity ([`ViewModel::activities`]).
@@ -708,8 +795,6 @@ pub struct SessionDoneItemView {
 pub struct BaselineStatusView {
     /// The signal this baseline feeds, e.g. `"WellnessZ"`.
     pub signal: ReadinessSignal,
-    /// Friendly channel label, e.g. `"Sleep, soreness, fatigue, stress & mood"`.
-    pub label: String,
     /// Check-in days collected so far.
     pub have: u32,
     /// Days needed before a baseline is emitted.
@@ -735,11 +820,6 @@ pub struct ReadinessSignalView {
     pub streak: u8,
     /// Qualitative state, e.g. `"below normal"`, `"high 2+ days"`.
     pub state: String,
-    /// Display-only sub-line context, e.g. a pain report's
-    /// `"Left knee · sharp/joint · 6/10"`. Empty for signals without such
-    /// detail.
-    #[serde(default)]
-    pub detail: String,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// False when the shown value comes from an earlier check-in, not today's.
@@ -803,12 +883,25 @@ pub enum HeadlineKind {
 pub struct TodayHeadlineView {
     pub kind: HeadlineKind,
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
+    #[serde(default)]
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// The three-part "why?" disclosure (basis → why this grade → what would
     /// improve it).
     #[serde(default)]
     pub why: WhyView,
+    /// `summary` and `citation` are the next session's `adjustment`'s.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats_session: bool,
 }
 
 /// The three-part "why?" disclosure carried by every action-bearing card:
@@ -819,9 +912,118 @@ pub struct TodayHeadlineView {
 /// never new training advice, so they invent no claim (HARD RULE 1).
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct WhyView {
+    /// What the call is based on, one sentence per entry (a decimal point
+    /// never ends one), so a block that speaks for several items states what
+    /// they share once. Rendered joined by a space.
+    #[serde(with = "basis_sentences")]
     pub basis: String,
     pub grade_note: String,
     pub improves: String,
+}
+
+/// Wire form of [`WhyView::basis`]: its sentences as a list. The core builds
+/// the basis as text; a sentence ends at `.`, `!` or `?` followed by a space.
+pub(crate) mod basis_sentences {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    /// The sentences of `basis`, trimmed, empty ones dropped.
+    pub(crate) fn split(basis: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut start = 0;
+        let mut prev = None;
+        for (i, c) in basis.char_indices() {
+            if c.is_whitespace() && matches!(prev, Some('.' | '!' | '?')) {
+                out.push(basis[start..i].trim());
+                start = i;
+            }
+            prev = Some(c);
+        }
+        out.push(basis[start..].trim());
+        out.retain(|s| !s.is_empty());
+        out
+    }
+
+    #[allow(clippy::ptr_arg)] // serde's `with` passes the field as `&String`
+    pub fn serialize<S: Serializer>(basis: &String, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(split(basis))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+        Ok(Vec::<String>::deserialize(d)?.join(" "))
+    }
+
+    pub fn wire_shape(_: &mut crate::wire::Registry) -> crate::wire::Shape {
+        crate::wire::Shape::List(Box::new(crate::wire::Shape::Str))
+    }
+}
+
+/// A jargon term the glossary explains; the wire name is the key the shell
+/// opens the glossary at.
+#[derive(
+    Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum GlossaryTerm {
+    #[serde(rename = "e1rm")]
+    E1rm,
+    #[serde(rename = "1rm")]
+    OneRm,
+    #[serde(rename = "rpe")]
+    Rpe,
+    #[serde(rename = "rir")]
+    Rir,
+    #[serde(rename = "zscore")]
+    ZScore,
+    #[serde(rename = "vdot")]
+    Vdot,
+    #[serde(rename = "decoupling")]
+    Decoupling,
+    #[serde(rename = "vi")]
+    VariabilityIndex,
+    #[serde(rename = "tonnage")]
+    Tonnage,
+    #[serde(rename = "spike")]
+    Spike,
+    #[serde(rename = "hrmax")]
+    HrMax,
+    #[serde(rename = "deload")]
+    Deload,
+    #[serde(rename = "mesocycle")]
+    Mesocycle,
+    #[serde(rename = "ctl")]
+    Ctl,
+    #[serde(rename = "trimp")]
+    Trimp,
+    #[serde(rename = "hrzones")]
+    HrZones,
+    #[serde(rename = "volume")]
+    Volume,
+    #[serde(rename = "maf")]
+    Maf,
+    #[serde(rename = "pap")]
+    Pap,
+    #[serde(rename = "reds")]
+    RedS,
+}
+
+/// Where a glossary term sits in a text: `[start, end)` in UTF-16 code units
+/// (the indices of a Kotlin or Swift string).
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlossarySpan {
+    pub term: GlossaryTerm,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// The pain report in force ([`ViewModel::active_pain`]).
+#[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
+pub struct ActivePainView {
+    /// The report as logged.
+    pub report: crate::schema::PainDetail,
+    /// The preset body area its location names; `None` for free text or none.
+    pub area: Option<crate::schema::PainArea>,
+    /// The report as one line, e.g. `"Left knee · sharp or joint pain ·
+    /// 6/10"`; `None` when it names nothing (no area, kind, rating or trend).
+    pub context: Option<String>,
 }
 
 /// One logged set attributed to a plan item's session day, flattened for
@@ -861,6 +1063,9 @@ pub struct ItemSetView {
 pub struct PrescriptionView {
     /// The full human line, e.g. `"Back squat: 5×3 @ 85 kg · ~2 reps left"`.
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
     pub exercise: String,
     pub sets: u8,
     pub reps_low: u8,
@@ -871,20 +1076,9 @@ pub struct PrescriptionView {
     pub load_kg: Option<f64>,
     /// Intensity target, e.g. `"85% e1RM"` | `"RIR 3"` | `"90% HRmax"`.
     pub intensity_label: String,
-    /// Structured form of `intensity_label` — the machine-readable target that
-    /// readiness adjustments (CapRpe, load reductions) mutate directly; the
-    /// label is re-rendered FROM it, so no adjustment path parses the display
-    /// string. `Prose` (the default) is the free-text label.
-    #[serde(skip)]
-    pub(crate) intensity: PlanIntensity,
     /// Rest between sets, seconds (0 for runs).
     #[serde(default)]
     pub rest_sec: u16,
-    /// For an interval/repetition run, the rep count. `0` for a continuous
-    /// run or a lift: the `summary` then carries the whole-session volume. When
-    /// nonzero the `summary` already reads as "`N × <rep_volume> · <pace>`".
-    #[serde(skip)]
-    pub(crate) rep_count: u8,
     /// For an interval/repetition run, the per-rep volume label, e.g. `"4 min"`
     /// or `"800 m"`. Empty for a continuous run or a lift.
     #[serde(default)]
@@ -953,14 +1147,10 @@ pub struct PrescriptionView {
     /// For a run held by the single-run spike ceiling (RUN-SPIKE-001 /
     /// RUN-START-001): the plain reason the safety badge stands for, e.g.
     /// `"Capped at 12.5 km: at most 10% over your longest recent run"`
-    /// (distances in km like `summary`). The shell shows it inline instead
+    /// (its distance in the profile's unit). The shell shows it inline instead
     /// of a bare badge. Empty otherwise.
     #[serde(default)]
     pub safety_reason: String,
-    /// `safety_reason` with its distance in miles (`"Capped at 4 mi: …"`), for a
-    /// shell showing miles. Empty when the reason states no distance.
-    #[serde(default)]
-    pub safety_reason_mi: String,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     #[serde(default)]
@@ -1017,68 +1207,27 @@ pub struct PrescriptionView {
     /// left"`): the `summary` after the name. Empty when `face_name` is.
     #[serde(default)]
     pub face_detail: String,
-    /// A compact row's one line: the first ` · ` clause of `face_detail`, else
-    /// of `summary` (`"5×3 @ 85 kg"`, a run's `"8 km"`).
+    /// `face_detail` without its reps-left wording ("~2 reps left", "1–2 reps
+    /// left", "to your last good rep", "pick a weight for ~3 reps left"), for
+    /// a face whose newcomer guide states the effort itself.
     #[serde(default)]
+    pub face_detail_without_effort: String,
+    /// A compact row's one line: the first ` · ` clause of `face_detail`, else
+    /// of `summary` (`"5×3 @ 85 kg"`, a run's `"8 km"`). On the wire a figure
+    /// and its unit, and "@" and its neighbours, are joined by non-breaking
+    /// spaces (`text_parts::keep_units`).
+    #[serde(default, with = "crate::app::text_parts::units_kept")]
     pub face_lead: String,
     /// For a run item: the session volume its `summary` leads with, before the
     /// target (`"6 × 800 m"`, `"8 km"`, run/walk bouts), distances in km like
     /// `summary`. Empty when the summary leads with no volume (a pain stop, an
-    /// easy cap of run/walk bouts) and for lifts.
-    #[serde(default)]
+    /// easy cap of run/walk bouts) and for lifts. Glued on the wire like
+    /// `face_lead`.
+    #[serde(default, with = "crate::app::text_parts::units_kept")]
     pub run_head: String,
     /// `run_head`'s distance in km as shown (`8.0` for `"8 km"`) when the head
     /// is a plain distance; `None` for reps, minutes and run/walk bouts.
     pub run_head_km: Option<f64>,
-    /// For a run item: the shown whole-session volume as a number, so a
-    /// readiness cut or an easy downgrade rebuilds `summary` without parsing
-    /// it. Core-internal.
-    #[serde(skip)]
-    pub(crate) run_volume: Option<RunAmount>,
-    /// For an interval/repetition run: the per-rep volume behind `rep_volume`.
-    /// Core-internal.
-    #[serde(skip)]
-    pub(crate) rep_amount: Option<RunAmount>,
-    /// For a run item: the judged day's runs cover at least half its planned
-    /// volume, so a run under the done threshold still reads done lighter.
-    /// Core-internal.
-    #[serde(skip)]
-    pub(crate) run_lighter: bool,
-    /// The target is an RPE (`intensity_label` "RPE 8", `target_rpe` its
-    /// value), so the face phrases it as reps left. Core-internal.
-    #[serde(skip)]
-    pub(crate) rpe_target: bool,
-    /// The heaviest weight already lifted on this movement for at least
-    /// `reps_low` reps in the recent anchor window, before this day: the load a
-    /// held day (ready-upd-001, no load added) may not exceed. Core-internal.
-    #[serde(skip)]
-    pub(crate) hold_load_cap_kg: Option<f64>,
-    /// `anchored_on` is a last-time line naming one set: the face already
-    /// shows the last top set. Core-internal.
-    #[serde(skip)]
-    pub(crate) anchored_on_single_set: bool,
-    /// The day took this lift's load away (an easy / pain-free day): the face
-    /// says to pick a weight for the reps-left target. Core-internal.
-    #[serde(skip)]
-    pub(crate) pick_load: bool,
-    /// The prescription `why.basis` states as the plan derived it, before any
-    /// fold, hold or in-session cue moved the face. Core-internal.
-    #[serde(skip)]
-    pub(crate) basis_rx: Option<BasisRx>,
-    /// A held day (ready-upd-001) clamped `load_kg` to `hold_load_cap_kg`.
-    /// Core-internal.
-    #[serde(skip)]
-    pub(crate) load_held: bool,
-}
-
-/// What a lift's `why.basis` states, so the basis can be restated once the
-/// face moves (`plan_views::restate_basis`): the load, the `"3×5"` sets×reps
-/// lead and the reps left, each as planned. Core-internal.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct BasisRx {
-    pub(crate) load_kg: Option<f64>,
-    pub(crate) lead: String,
-    pub(crate) rir: Option<i64>,
 }
 
 impl PrescriptionView {
@@ -1086,22 +1235,6 @@ impl PrescriptionView {
     pub fn is_run(&self) -> bool {
         self.exercise.is_empty()
     }
-}
-
-/// A run item's volume as a number (core-internal; the label lives in
-/// `summary` / `rep_volume`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum RunAmount {
-    Minutes(f64),
-    /// Kilometres as the plan quantised them, shown by `fmt_run_km` ("8 km",
-    /// "6.5 km").
-    PlanKm(f32),
-    /// A minutes band ("10–20 min"), never scaled.
-    MinutesRange(u16, u16),
-    /// Kilometres after a readiness change, shown to one decimal ("4.0 km").
-    Km(f64),
-    /// Run/walk bouts: no single number to scale.
-    RunWalk,
 }
 
 /// Numeric structure of a prescribed run, every field 0/empty when it
@@ -1233,6 +1366,15 @@ pub struct SessionPlanView {
     /// a same-discipline session done on a nearby day of the week (a swap or a
     /// shift) is credited to it.
     pub credited_from_epoch_day: Option<i64>,
+    /// The index in `items` of a run session's run item: the first open item
+    /// with a target or a structure, else the first open item. `None` for a
+    /// lift or rest day, or once every item is done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_item: Option<usize>,
+    /// A return-check item states `adjustment` (its dose and stop list), so
+    /// no card repeats it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjustment_on_item: bool,
 }
 
 /// How one plan item stands on its session day (wire: snake_case).
@@ -1326,8 +1468,6 @@ pub struct MuscleVolumeView {
 pub struct GradeDefView {
     /// Wire name matching the grade strings on every card, e.g. `"Strong"`.
     pub grade: EvidenceGrade,
-    /// Friendly label, e.g. `"Expert opinion"`.
-    pub label: String,
     /// One-sentence KB definition of the grade (File 09 scale).
     pub definition: String,
     /// Default confidence this grade maps to (File 09), e.g. `0.90`.
@@ -1352,17 +1492,10 @@ pub struct RacePredictionView {
     pub goal_label: String,
     /// Formatted finish time (`"41:30"`) or range (`"41:30–43:00"`).
     pub predicted: String,
-    /// True when the two methods agreed (single time); false = range. This and
-    /// the bounds are the figures behind `predicted`, kept as test oracles; not
-    /// on the wire.
-    #[serde(skip)]
-    pub agreed: bool,
-    /// Range bounds in seconds (equal when `agreed`); 0.0 on degenerate input.
-    #[serde(skip)]
-    pub low_sec: f64,
-    #[serde(skip)]
-    pub high_sec: f64,
     pub summary: String,
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// Graded caveat rows riding on the prediction: input-race staleness
@@ -1501,21 +1634,28 @@ pub struct FeedbackView {
     pub category: crate::feedback::FeedbackCategory,
     /// Human overline for the card face; render verbatim.
     pub category_label: String,
-    /// Human-readable coaching copy for the category.
+    /// Human-readable coaching copy for the category, distances in the
+    /// profile's unit.
     pub message: String,
-    /// `message` with its distances in miles, for a shell showing miles.
-    /// Empty when the message states no distance.
+    /// The glossary terms `message` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
     #[serde(default)]
-    pub message_mi: String,
-    /// True when this message suppresses all competing praise this cycle.
-    #[serde(skip)]
-    pub(crate) suppresses_praise: bool,
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// The three-part "why?" disclosure (basis → why this grade → what would
     /// improve it).
     #[serde(default)]
     pub why: WhyView,
+    /// `message` and `citation` are the next session's `adjustment`'s.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats_session: bool,
 }
 
 /// One evidence-cited programming recommendation, flattened for shells.
@@ -1524,11 +1664,18 @@ pub struct FeedbackView {
 pub struct GuidanceView {
     /// Grouping label, e.g. `"Strength"`, `"Running"`, `"Hybrid"`.
     pub section: String,
+    /// The row's text, distances in the profile's unit.
     pub summary: String,
-    /// `summary` with its distances in miles, for a shell showing miles.
-    /// Empty when the summary states no distance.
+    /// The glossary terms `summary` uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<GlossarySpan>,
+    /// What the card is about, for its spoken "?" ("Details: <subject>").
     #[serde(default)]
-    pub summary_mi: String,
+    pub subject: String,
+    /// The summary reads as a paragraph: shells set it in the body weight,
+    /// not bold (`text_parts::is_prose`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prose: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
     /// The three-part "why?" disclosure (basis → why this grade → what would
@@ -1663,15 +1810,10 @@ pub struct RunResultView {
     /// Why the spike gate fired, phrased honestly (empty when it did not). A
     /// first run with no baseline says so rather than claiming a ">10%" jump.
     pub spike_note: String,
-    /// Second-half pace slowdown percent for a GPS-tracked run (a positive split;
-    /// positive = slowed in the back half). `None` for a hand-entered run or a
-    /// track too short/degenerate to split. Feeds `split` and the pacing
-    /// feedback; not on the wire.
-    #[serde(skip)]
-    pub split_pct: Option<f64>,
-    /// Core-owned pacing verdict + chip data for `split_pct` (feedback-016/017).
-    /// `None` when `split_pct` is `None` and when the track has fewer than two
-    /// full km splits (too short to judge pacing).
+    /// Core-owned pacing verdict + chip data for a GPS track's second-half
+    /// slowdown (feedback-016/017). `None` for a hand-entered run, a track too
+    /// short/degenerate to split, and a track with fewer than two full km splits
+    /// (too short to judge pacing).
     pub split: Option<SplitVerdictView>,
     /// Core-owned interval-vs-steady verdict from the track's variability index
     /// (RUN-INTERVAL-VI-001). `None` for a hand-entered run or a track too short
@@ -1703,19 +1845,15 @@ pub struct RunResultView {
     /// history card from this; the core does no formatting (it holds no clock).
     pub observed_at: i64,
     /// Stable per-entry id echoed for the shell's edit/delete affordance; see
-    /// [`LiftResultView::entry_id`]. 0 for a legacy row.
+    /// [`LiftResultView::entry_id`].
     #[serde(default)]
     pub entry_id: u64,
-    /// Per-kilometre splits for a GPS run (one entry per completed km + a final
-    /// partial), derived core-side from the same QC-gated track as
-    /// distance/pace. Empty for a hand-entered run or a track too short to split.
+    /// Splits for a GPS run in the profile's distance unit (one entry per
+    /// completed km or mile + a final partial), derived core-side from the same
+    /// QC-gated track as distance/pace. Empty for a hand-entered run or a track
+    /// too short to split.
     #[serde(default)]
-    pub splits_km: Vec<RunSplitView>,
-    /// Per-mile splits for a GPS run (same shape and track as
-    /// [`splits_km`](Self::splits_km),
-    /// unit = one international mile). Empty for a hand-entered run.
-    #[serde(default)]
-    pub splits_mi: Vec<RunSplitView>,
+    pub splits: Vec<RunSplitView>,
     /// Structured form of the spike-baseline provenance, so no shell scrapes it
     /// from `spike_note` (`contains("no prior run")`). `true` when a
     /// prior 30-day baseline distance exists to gauge this run against; `false`
@@ -1778,9 +1916,6 @@ pub struct RunWeekView {
     /// LOAD-SRPE-001), its own series. 0 when nothing was rated.
     #[serde(default)]
     pub srpe_load_au: f64,
-    /// Rated runs counted in `srpe_load_au`.
-    #[serde(skip)]
-    pub(crate) rated_runs: u32,
 }
 
 /// The fastest known effort over one standard distance.
@@ -1811,10 +1946,11 @@ pub struct RunTargetView {
     /// a repetition run only `pace_fast_sec_per_km` ("this fast or faster").
     pub pace_fast_sec_per_km: u32,
     pub pace_slow_sec_per_km: u32,
-    /// Rendered pace in km and miles, e.g. `"4:50–5:05 /km"` / `"7:47–8:11 /mi"`.
-    /// Empty without a pace anchor.
-    pub pace_label_km: String,
-    pub pace_label_mi: String,
+    /// Rendered pace in the profile's unit, e.g. `"4:50–5:05 /km"` /
+    /// `"7:47–8:11 /mi"`. Empty without a pace anchor. Glued on the wire like
+    /// `PrescriptionView::face_lead`.
+    #[serde(with = "crate::app::text_parts::units_kept")]
+    pub pace_label: String,
     /// e.g. `"150–162 bpm"` / `"≤ 143 bpm"`; empty when not given (interval /
     /// repetition work, where pace governs and heart rate lags).
     pub hr_label: String,
@@ -1825,16 +1961,6 @@ pub struct RunTargetView {
     /// labels it itself (`"3–4 of 10, easy enough to talk in full sentences"`).
     #[serde(default)]
     pub effort_detail: String,
-    /// The fitness score behind the paces (0 = none) and the heart-rate figures
-    /// used (0 = unknown), so a downgrade can re-derive the easy band.
-    #[serde(skip)]
-    pub(crate) vdot: f64,
-    #[serde(skip)]
-    pub(crate) hr_max_bpm: f64,
-    #[serde(skip)]
-    pub(crate) hr_max_measured: bool,
-    #[serde(skip)]
-    pub(crate) hr_rest_bpm: f64,
     /// Evidence for the numeric anchor (pace: RUN-VDOT-001; heart rate:
     /// RUN-HRMAX-001; talk test: RUN-TALKTEST-001).
     #[serde(flatten)]

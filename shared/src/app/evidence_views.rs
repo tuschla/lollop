@@ -1,9 +1,8 @@
 //! Evidence presentation: `Recommended<T>` → `AdjustmentView`, the grade
 //! definitions, claim statements, the "why" sheet, and grade notes.
 
-use crate::app::view_types::{
-    AdjustmentView, EvidenceTagView, GradeDefView, PrescriptionView, WhyView,
-};
+use crate::app::plan_views::PlanItem;
+use crate::app::view_types::{AdjustmentView, EvidenceTagView, GradeDefView, WhyView};
 use crate::autoreg;
 use crate::evidence::{ClaimId, EvidenceGrade, claims};
 use crate::schema::{
@@ -24,11 +23,11 @@ pub(in crate::app) struct CallCtx<'a> {
     pub(in crate::app) first_set_logged: bool,
     /// The session the call applies to (a tendon modify call names the lifts
     /// it eases in it).
-    pub(in crate::app) items: &'a [PrescriptionView],
+    pub(in crate::app) items: &'a [PlanItem],
 }
 
 /// Whether any lift in `items` has work logged.
-pub(in crate::app) fn lift_work_logged(items: &[PrescriptionView]) -> bool {
+pub(in crate::app) fn lift_work_logged(items: &[PlanItem]) -> bool {
     items.iter().any(|it| !it.is_run() && it.has_work())
 }
 
@@ -329,10 +328,7 @@ fn describe_rec(r: &AdjustmentCall, ctx: &CallCtx) -> String {
 
 /// The lifts in `items` a tendon modify call eases ("Back squat and
 /// Deadlift"): those that load `region`, every lift when it maps to none.
-fn eased_lifts(
-    items: &[PrescriptionView],
-    region: Option<crate::schema::PainRegion>,
-) -> Option<String> {
+fn eased_lifts(items: &[PlanItem], region: Option<crate::schema::PainRegion>) -> Option<String> {
     let names: Vec<&str> = items
         .iter()
         .filter(|it| !it.is_run())
@@ -382,10 +378,9 @@ fn grade_definitions_impl() -> Vec<GradeDefView> {
     ]
     .into_iter()
     .map(|g| {
-        let (label, definition) = grade_words(g);
+        let (_, definition) = grade_words(g);
         GradeDefView {
             grade: g,
-            label: label.to_string(),
             definition: definition.to_string(),
             confidence: g.default_confidence(),
         }
@@ -394,7 +389,8 @@ fn grade_definitions_impl() -> Vec<GradeDefView> {
 }
 
 /// Plain-word label and definition of each grade (the File 09 meanings without
-/// the research vocabulary), shared by the legend and the why-sheet grade note.
+/// the research vocabulary): the legend shows the definition, the why-sheet
+/// grade note both. The shells label the grade chip from their own strings.
 fn grade_words(g: EvidenceGrade) -> (&'static str, &'static str) {
     match g {
         EvidenceGrade::Strong => ("Strong", "Many good studies agree."),

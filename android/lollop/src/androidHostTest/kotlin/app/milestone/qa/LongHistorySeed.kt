@@ -1,11 +1,10 @@
 package app.milestone.qa
 
 import app.milestone.ConcurrentGoal
+import app.milestone.Core
 import app.milestone.Event
 import app.milestone.GoalDistance
 import app.milestone.GpsPoint
-import app.milestone.GpxFix
-import app.milestone.ImportedRun
 import app.milestone.LiftGoal
 import app.milestone.PainDetail
 import app.milestone.PainKind
@@ -15,6 +14,7 @@ import app.milestone.ReadinessSignal
 import app.milestone.WorkoutType
 import app.milestone.importedRunEvent
 import app.milestone.lbToKgWire
+import app.milestone.parseRunFile
 import kotlin.math.cos
 import kotlin.math.roundToLong
 import kotlin.math.sin
@@ -303,12 +303,21 @@ internal object LongHistorySeed {
         )
     }
 
-    /** One GPX import as [importedRunEvent] builds it (no recorded accuracy, HR from a strap). */
+    /** One GPX import through the core ([parseRunFile] → [importedRunEvent]): no
+     *  recorded accuracy, HR from a strap. */
     private fun importedRun(rng: Lcg, day: Long, km: Double, paceSecPerKm: Double, fixEverySec: Long): Pair<Event, SeededRun> {
         val start = day * 86_400L + 18 * 3_600L
         val (points, _, routeKm) = route(rng, start, km, paceSecPerKm, fixEverySec, null)
-        val fixes = points.map { GpxFix(it.lat, it.lon, it.observedAt, hrBpm = 140 + rng.int(0, 15)) }
-        val ev = importedRunEvent(ImportedRun(listOf(fixes)), measuredHrMax = 190.0).copy(entryId = start * 1000 + 9)
+        val gpx = buildString {
+            append("<gpx><trk><trkseg>")
+            for (p in points) {
+                append("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\"><time>${java.time.Instant.ofEpochSecond(p.observedAt)}</time>")
+                append("<extensions><hr>${140 + rng.int(0, 15)}</hr></extensions></trkpt>")
+            }
+            append("</trkseg></trk></gpx>")
+        }
+        val run = parseRunFile(gpx.toByteArray(), Core::parseRunFile).single()
+        val ev = importedRunEvent(run, measuredHrMax = 190.0).copy(entryId = start * 1000 + 9)
         return ev to SeededRun(ev.observedAt, ev.entryId, RunSource.Imported, routeKm, points.last().observedAt - start, null, null)
     }
 

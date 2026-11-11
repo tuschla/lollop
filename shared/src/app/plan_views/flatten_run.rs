@@ -2,9 +2,11 @@
 
 use crate::app::evidence_views::why_from;
 use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths};
+use crate::app::plan_views::plan_item::{PlanItem, RunAmount};
 use crate::app::view_types::{
-    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, RunStructureView, RunWalkStepView,
+    EvidenceTagView, PlanIntensity, PrescriptionView, RunStructureView, RunWalkStepView,
 };
+use crate::profile::DistanceUnit;
 use crate::schema::{RunIntensity, RunVolume, Rx, RxBasis, ThreeZone, VdotBand};
 
 /// Render a prescribed run distance: whole km as "8 km", a sub-km step as one
@@ -97,18 +99,20 @@ fn volume_label(v: RunVolume, metres: bool) -> String {
     }
 }
 
-/// Flatten a `Prescription::Run` arm into its `PrescriptionView`.
+/// Flatten a `Prescription::Run` arm into its [`PlanItem`], the safety
+/// reason in `unit`.
 pub(super) fn flatten_run_prescription(
     r: &crate::schema::RunPrescription,
     rx: &Rx,
-) -> PrescriptionView {
+    unit: DistanceUnit,
+) -> PlanItem {
     let vol = volume_label(r.volume, false);
     // An interval/repetition run carries per-rep structure; surface
     // it so the card reads "4 × 4 min · Interval pace", not a misleading
     // "16 min · Interval pace" that looks like one continuous VO2max run.
     let rep_volume = r.repeats.map(|(_, rv)| volume_label(rv, true));
     let rep_count = r.repeats.map_or(0, |(n, _)| n);
-    let (safety_reason, safety_reason_mi) = run_safety_reasons(r, rx);
+    let safety_reason = run_safety_reason(r, rx, unit);
     let label = match r.intensity {
         RunIntensity::HrPercentMax { lo, hi, hrr_hi } => {
             let band = match (lo, hi) {
@@ -135,24 +139,26 @@ pub(super) fn flatten_run_prescription(
         None => vol,
     };
     let summary = format!("{head} · {label}");
-    PrescriptionView {
-        summary,
-        intensity_label: label,
+    PlanItem {
+        view: PrescriptionView {
+            summary,
+            intensity_label: label,
+            rep_volume: rep_volume.unwrap_or_default(),
+            safety_reason,
+            evidence: EvidenceTagView::of(rx),
+            why: why_from(run_basis(rx), rx),
+            run_structure: run_structure_view(r),
+            face_lead: head.clone(),
+            run_head: head,
+            run_head_km: run_volume.and_then(RunAmount::shown_km),
+            ..PrescriptionView::default()
+        },
         // A run target (pace/zone/HRmax) is never RIR/load-adjustable.
         intensity: PlanIntensity::Prose,
         rep_count,
-        rep_volume: rep_volume.unwrap_or_default(),
-        safety_reason,
-        safety_reason_mi,
-        evidence: EvidenceTagView::of(rx),
-        why: why_from(run_basis(rx), rx),
-        run_structure: run_structure_view(r),
-        face_lead: head.clone(),
-        run_head: head,
-        run_head_km: run_volume.and_then(RunAmount::shown_km),
         run_volume,
         rep_amount: r.repeats.map(|(_, rv)| RunAmount::of(rv)),
-        ..PrescriptionView::default()
+        ..PlanItem::default()
     }
 }
 
@@ -205,10 +211,10 @@ fn run_basis(rx: &Rx) -> Option<String> {
     }
 }
 
-/// A spike-capped run's safety line, in km and in miles: "Capped at 8 km: at
-/// most N% over your longest recent run" for a continuous distance, else
-/// "Kept short and easy: …". Both empty for any other basis.
-fn run_safety_reasons(r: &crate::schema::RunPrescription, rx: &Rx) -> (String, String) {
+/// A spike-capped run's safety line, its distance in `unit`: "Capped at 8 km:
+/// at most N% over your longest recent run" for a continuous distance, else
+/// "Kept short and easy: …". Empty for any other basis.
+fn run_safety_reason(r: &crate::schema::RunPrescription, rx: &Rx, unit: DistanceUnit) -> String {
     let spike_pct = crate::running::SPIKE_FRAC * 100.0;
     let longest = match rx.kind() {
         RxBasis::SpikeCeiling => Some("your longest recent run"),
@@ -216,15 +222,15 @@ fn run_safety_reasons(r: &crate::schema::RunPrescription, rx: &Rx) -> (String, S
         _ => None,
     };
     match (longest, r.volume) {
-        (None, _) => (String::new(), String::new()),
+        (None, _) => String::new(),
         (Some(l), RunVolume::DistanceKm(k)) if r.repeats.is_none() => {
-            let capped = |d: String| format!("Capped at {d}: at most {spike_pct:.0}% over {l}");
-            (capped(fmt_run_km(k)), capped(fmt_mi_of_km(f64::from(k))))
+            let d = match unit {
+                DistanceUnit::Km => fmt_run_km(k),
+                DistanceUnit::Mi => fmt_mi_of_km(f64::from(k)),
+            };
+            format!("Capped at {d}: at most {spike_pct:.0}% over {l}")
         }
-        (Some(l), _) => {
-            let kept = format!("Kept short and easy: at most {spike_pct:.0}% over {l}");
-            (kept.clone(), kept)
-        }
+        (Some(l), _) => format!("Kept short and easy: at most {spike_pct:.0}% over {l}"),
     }
 }
 

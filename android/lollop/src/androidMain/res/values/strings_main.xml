@@ -123,7 +123,8 @@
     <string name="main_calc_protein_caption">grams per day</string>
     <string name="main_calc_protein_basis">%1$s–%2$s g/kg × %3$s kg · %4$s</string>
     <string name="main_calc_protein_deficit">for weight loss</string>
-    <string name="main_calc_protein_masters">age 65+</string>
+    <!-- %1$s = MASTERS_AGE_YEARS (CoreConstants). -->
+    <string name="main_calc_protein_masters">age %1$s+</string>
     <string name="main_calc_hr_overline">Heart-rate zones</string>
     <string name="main_calc_hr_caption_estimated">bpm HRmax (estimated)</string>
     <string name="main_calc_hr_caption_measured">bpm HRmax (measured)</string>
@@ -192,6 +193,27 @@
 
     <!-- Week strip (accessibility) -->
     <string name="main_a11y_today_prefix">"Today, "</string>
+    <!-- A day's status, spoken mid-phrase after its weekday and type ("Tuesday, Run, planned"). -->
+    <string name="main_week_a11y_next">next session</string>
+    <string name="main_week_a11y_adjusted">adjusted</string>
+    <string name="main_week_a11y_paused">paused</string>
+    <string name="main_week_a11y_done">done</string>
+    <string name="main_week_a11y_done_lighter">done, lighter than planned</string>
+    <string name="main_week_a11y_before_plan">before your plan started</string>
+    <string name="main_week_a11y_missed">not logged</string>
+    <string name="main_week_a11y_partial">partly done</string>
+    <string name="main_week_a11y_rest">rest day</string>
+    <string name="main_week_a11y_planned">planned</string>
+    <!-- A done day credited by a session on another day: %1$s = the status above, %2$s = that day ("Monday"). -->
+    <string name="main_week_a11y_on">%1$s, on %2$s</string>
+
+    <!-- Plan footer: %1$s = the plan's name, %2$s = its phase below, %3$d of %4$d = the week ("Strength · building up · week 5 of 6"). -->
+    <string name="main_plan_footer_line">%1$s · %2$s · week %3$d of %4$d</string>
+    <string name="main_plan_phase_base">building a base</string>
+    <string name="main_plan_phase_build">building up</string>
+    <string name="main_plan_phase_peak">hardest weeks</string>
+    <string name="main_plan_phase_taper">easing off</string>
+    <string name="main_plan_phase_deload">lighter week</string>
 
     <!-- History destination -->
     <string name="main_overline_last_7_days">Last 7 days</string>
@@ -228,7 +250,6 @@
     <string name="main_overline_units">Units</string>
     <string name="main_label_weight">Weight</string>
     <string name="main_label_distance_units">Distance units</string>
-    <string name="main_distance_auto">Auto</string>
     <string name="main_unit_mi">mi</string>
     <string name="main_live_pace_split">Recent pace window</string>
     <string name="main_live_pace_split_sub">The run screen\'s recent pace covers this many minutes.</string>

@@ -23,17 +23,17 @@ fn flatten_with_targets(
     anchors: &crate::plan::Anchors,
     model: &Model,
     day: i64,
-) -> PrescriptionView {
+) -> PlanItem {
     let session = Session {
         session_type: SessionType::Run(kind),
         day: 0,
         prescriptions: vec![rx],
         dup_day: None,
     };
-    let mut items: Vec<PrescriptionView> = session
+    let mut items: Vec<PlanItem> = session
         .prescriptions
         .iter()
-        .map(|rx| flatten_prescription(rx, anchors, None, false))
+        .map(|rx| flatten_prescription(rx, anchors, None, false, DistanceUnit::Km))
         .collect();
     super::super::run_targets::apply_run_targets(&mut items, &session, anchors, model, day);
     items.remove(0)
@@ -84,8 +84,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         t.pace_slow_sec_per_km / 60,
         t.pace_slow_sec_per_km % 60
     );
-    assert_eq!(t.pace_label_km, expect);
-    assert!(t.pace_label_mi.ends_with("/mi"), "{t:?}");
+    assert_eq!(t.pace_label, expect);
     assert!(
         it.summary.starts_with("5 km · ") && it.summary.contains(&expect),
         "the card reads the pace: {}",
@@ -113,7 +112,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
 fn easy_run_without_anchors_shows_the_talk_test_cue() {
     // No race, no age, no measured HRmax: the long run has no pace or bpm, but
     // it still tells the runner how it should feel.
-    let (app, model) = {
+    let model = {
         let app = Engine;
         let mut model = Model::default();
         app.update(Event::SetProfile(running_profile()), &mut model)
@@ -126,11 +125,11 @@ fn easy_run_without_anchors_shows_the_talk_test_cue() {
         )
         .expect_only_render();
         set_today(&app, &mut model, MON);
-        (app, model)
+        model
     };
-    let it = planned_long_run_item(&app, &model);
+    let it = planned_long_run_item(&model);
     let t = it.run_target.clone().expect("run items carry a target");
-    assert!(t.pace_label_km.is_empty() && t.hr_label.is_empty(), "{t:?}");
+    assert!(t.pace_label.is_empty() && t.hr_label.is_empty(), "{t:?}");
     assert!(
         t.effort_cue.contains("talk in full sentences"),
         "talk-test cue without anchors: {t:?}"
@@ -164,12 +163,9 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
     )
     .expect_only_render();
     set_today(&app, &mut model, MON);
-    let it = planned_long_run_item(&app, &model);
+    let it = planned_long_run_item(&model);
     let t = it.run_target.clone().expect("run items carry a target");
-    assert!(
-        !t.pace_label_km.is_empty(),
-        "race anchor → easy pace: {t:?}"
-    );
+    assert!(!t.pace_label.is_empty(), "race anchor → easy pace: {t:?}");
     let high: u32 = t
         .hr_label
         .strip_suffix(" bpm")
@@ -177,13 +173,13 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
         .and_then(|h| h.parse().ok())
         .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
     assert!(high > 0 && high <= 190, "{t:?}");
-    assert!(t.hr_max_measured);
+    assert!(it.target_anchor.expect("a resolved target").hr.measured);
     assert!(
         !t.effort_cue.contains("talk"),
         "measured anchors replace the talk test: {t:?}"
     );
     assert!(
-        it.intensity_label.starts_with(&t.pace_label_km),
+        it.intensity_label.starts_with(&t.pace_label),
         "{}",
         it.intensity_label
     );
@@ -202,14 +198,20 @@ fn downgrade_re_resolves_the_easy_band() {
         &tempo,
         Some(50.0),
         hr,
+        DistanceUnit::Km,
     );
-    let mut it = PrescriptionView {
-        intensity_label: "Easy: zone 1–2".into(),
-        run_target: Some(t.clone()),
+    let anchor = super::super::run_targets::TargetAnchor::new(Some(50.0), hr, DistanceUnit::Km);
+    let mut it = PlanItem {
+        view: PrescriptionView {
+            intensity_label: "Easy: zone 1–2".into(),
+            run_target: Some(t.clone()),
+            ..Default::default()
+        },
+        target_anchor: Some(anchor),
         ..Default::default()
     };
     super::super::run_targets::downgrade_run_target_to_easy(&mut it);
-    let e = it.run_target.expect("still targeted");
+    let e = it.run_target.clone().expect("still targeted");
     assert_eq!(e.band, "easy");
     assert!(
         e.pace_fast_sec_per_km > t.pace_slow_sec_per_km,
@@ -220,6 +222,36 @@ fn downgrade_re_resolves_the_easy_band() {
         "{}",
         it.intensity_label
     );
+
+    // A miles target stays in miles through the downgrade; the item's own
+    // line keeps km.
+    let mut it = PlanItem {
+        view: PrescriptionView {
+            intensity_label: "Easy: zone 1–2".into(),
+            run_target: Some(super::super::run_targets::resolve_target(
+                super::super::run_targets::TargetBand::Threshold,
+                &tempo,
+                Some(50.0),
+                hr,
+                DistanceUnit::Mi,
+            )),
+            ..Default::default()
+        },
+        target_anchor: Some(super::super::run_targets::TargetAnchor::new(
+            Some(50.0),
+            hr,
+            DistanceUnit::Mi,
+        )),
+        ..Default::default()
+    };
+    super::super::run_targets::downgrade_run_target_to_easy(&mut it);
+    let e = it.run_target.clone().expect("still targeted");
+    assert!(e.pace_label.ends_with(" /mi"), "{e:?}");
+    assert!(
+        it.intensity_label.contains(" /km"),
+        "{}",
+        it.intensity_label
+    );
 }
 
 #[test]
@@ -227,7 +259,7 @@ fn downgrade_keeps_anchors_from_interval_and_hills() {
     // An interval shows no bpm and a hill session neither pace nor bpm; both
     // still carry the anchors, so their downgrade reads like a direct easy run.
     use super::super::run_targets::{
-        HrAnchor, TargetBand, downgrade_run_target_to_easy, resolve_target,
+        HrAnchor, TargetAnchor, TargetBand, downgrade_run_target_to_easy, resolve_target,
     };
     use crate::schema::RunIntensity;
     let hr = HrAnchor {
@@ -240,22 +272,27 @@ fn downgrade_keeps_anchors_from_interval_and_hills() {
         &RunIntensity::Vdot(VdotBand::Easy),
         Some(50.0),
         hr,
+        DistanceUnit::Km,
     );
-    assert!(!easy.hr_label.is_empty() && !easy.pace_label_km.is_empty());
+    assert!(!easy.hr_label.is_empty() && !easy.pace_label.is_empty());
     for (band, iv) in [
         (TargetBand::Interval, RunIntensity::Vdot(VdotBand::Interval)),
         (TargetBand::Hills, RunIntensity::ThreeZone(ThreeZone::Z3)),
     ] {
-        let mut it = PrescriptionView {
-            intensity_label: "Easy".into(),
-            run_target: Some(resolve_target(band, &iv, Some(50.0), hr)),
+        let mut it = PlanItem {
+            view: PrescriptionView {
+                intensity_label: "Easy".into(),
+                run_target: Some(resolve_target(band, &iv, Some(50.0), hr, DistanceUnit::Km)),
+                ..Default::default()
+            },
+            target_anchor: Some(TargetAnchor::new(Some(50.0), hr, DistanceUnit::Km)),
             ..Default::default()
         };
         downgrade_run_target_to_easy(&mut it);
-        let e = it.run_target.expect("target");
+        let e = it.run_target.clone().expect("target");
         assert_eq!(
-            (e.hr_label.as_str(), e.pace_label_km.as_str()),
-            (easy.hr_label.as_str(), easy.pace_label_km.as_str()),
+            (e.hr_label.as_str(), e.pace_label.as_str()),
+            (easy.hr_label.as_str(), easy.pace_label.as_str()),
             "{band:?} downgraded to easy"
         );
     }
@@ -923,11 +960,7 @@ fn trivial_gps_run_gets_no_pacing_verdict() {
     app.update(track_event(pts, end, 9_101, None), &mut model)
         .expect_only_render();
     let run = &app.view(&model).runs[0];
-    assert!(
-        run.splits_km.iter().all(|s| s.partial),
-        "{:?}",
-        run.splits_km
-    );
+    assert!(run.splits.iter().all(|s| s.partial), "{:?}", run.splits);
     assert!(run.split.is_none(), "no pacing verdict: {:?}", run.split);
 
     // A 3 km evenly paced run (3 full km) does get one.

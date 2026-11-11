@@ -137,8 +137,6 @@ fun ReadinessEditor(
     // the red-flag fence come from it, not from a shell-side predicate.
     signalGroups: Map<ReadinessSignal, SignalGroup>,
     onClose: () -> Unit,
-    // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
     onSubmit: (Event.SubmitReadiness) -> Unit,
 ) {
     var signal by rememberSaveable { mutableStateOf(ReadinessSignal.WellnessZ) }
@@ -149,7 +147,6 @@ fun ReadinessEditor(
     // signal so the core can validate the reading instead of silently discarding it.
     var effortMin by rememberSaveable { mutableStateOf(DecouplingDefaultMin) }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
     // First red-flag signal in wire order, so the fence lands before the first
     // medical flag as displayed.
     val firstRedFlag = remember(signalGroups) {
@@ -218,7 +215,7 @@ fun ReadinessEditor(
                         dirty = true
                     }
                     // The unit and the point where the value starts to matter.
-                    Text(stringResource(spec.hint), color = OnBgMuted, style = Type.Caption)
+                    Text(stringResource(spec.hint, *spec.hintArgs.toTypedArray()), color = OnBgMuted, style = Type.Caption)
                 }
                 signal == ReadinessSignal.Illness -> {
                     val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
@@ -252,7 +249,7 @@ fun ReadinessEditor(
                     dirty = true
                 }
                 Text(
-                    stringResource(Res.string.log_decoupling_hint),
+                    stringResource(Res.string.log_decoupling_hint, decouplingMinEffortLabel()),
                     color = OnBgMuted,
                     style = Type.Caption,
                 )
@@ -288,8 +285,6 @@ fun MorningCheckinSheet(
     // The core's most recent check-in echo, if any.
     echo: CheckinInput? = null,
     onClose: () -> Unit = {},
-    // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
     // The core asks for the illness check (an active illness report, or a high
     // resting-HR morning): the Illness item moves to the top.
     illnessPrompt: Boolean = false,
@@ -316,7 +311,6 @@ fun MorningCheckinSheet(
     // Optional illness answer (AUTOREG-4): null = not answered, nothing sent.
     var illness by rememberSaveable { mutableStateOf<IllnessLevel?>(null) }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
 
     // Optional watch numbers behind toggles: a check-in without a watch sends
     // neither, and the core simply won't derive that channel, honest, never
@@ -606,8 +600,8 @@ private fun defaultReadinessValue(signal: ReadinessSignal): Double =
  * autoreg.rs input thresholds so the scale lands near where the signal triggers:
  * the core reads [ReadinessSignal.EstimatedOneRm] as a ~0.9–1.05 ratio,
  * [ReadinessSignal.Rpe] as a signed delta, RestingHr as a bpm delta, others as
- * z-scores or percents. Hint thresholds cite autoreg.rs inputs the bridge does
- * not export.
+ * z-scores or percents. [hintArgs] fill the hint's figures from the core's
+ * thresholds ([CoreConstants]), so the caption never restates a rule's number.
  */
 private data class ValueSpec(
     val min: Double,
@@ -617,7 +611,15 @@ private data class ValueSpec(
     // Unit + threshold caption.
     val hint: StringResource,
     val decimals: Int = 1,
+    val hintArgs: List<String> = emptyList(),
 )
+
+/** A signed threshold figure, [trimDecimal]-trimmed: "+5", "−1.5" (a real minus sign). */
+private fun signedFigure(v: Double): String = when {
+    v > 0 -> "+" + trimDecimal(v)
+    v < 0 -> "−" + trimDecimal(-v)
+    else -> trimDecimal(v)
+}
 
 /**
  * The spec's `min + n·step` grid as a picklist for [ScrollableScaleRow]. Each
@@ -646,57 +648,88 @@ private class SignalUi(val label: StringResource, val explainer: StringResource,
  *  is still `signal.name` (see [Event.SubmitReadiness]). */
 private val SignalUis: Map<ReadinessSignal, SignalUi> = ReadinessSignal.entries.associateWith { signal ->
     when (signal) {
-        // Signed RPE delta (actual − target); ±1/±2 gate load adjustments.
+        // Signed RPE delta (actual − target); RPE_DELTA_ABOVE / _WELL_ABOVE gate load adjustments.
         ReadinessSignal.Rpe -> SignalUi(
             Res.string.log_signal_rpe, Res.string.log_signal_rpe_explainer,
-            ValueSpec(-4.0, 4.0, 0.5, 0.0, Res.string.log_spec_rpe),
+            ValueSpec(
+                -4.0, 4.0, 0.5, 0.0, Res.string.log_spec_rpe,
+                hintArgs = listOf(trimDecimal(CoreConstants.RPE_DELTA_ABOVE), trimDecimal(CoreConstants.RPE_DELTA_WELL_ABOVE)),
+            ),
         )
-        // e1RM today ÷ baseline; <0.90/<0.95/>1.05 gate deload/cap/add-load.
+        // e1RM today ÷ baseline; E1RM_REDUCE_RATIO / E1RM_INCREASE_RATIO gate cap/add-load.
         ReadinessSignal.EstimatedOneRm -> SignalUi(
             Res.string.log_signal_e1rm, Res.string.log_signal_e1rm_explainer,
-            ValueSpec(0.70, 1.15, 0.01, 1.0, Res.string.log_spec_e1rm, 2),
+            ValueSpec(
+                0.70, 1.15, 0.01, 1.0, Res.string.log_spec_e1rm, 2,
+                hintArgs = listOf(formatFixed(CoreConstants.E1RM_REDUCE_RATIO, 2), formatFixed(CoreConstants.E1RM_INCREASE_RATIO, 2)),
+            ),
         )
         // Mean concentric velocity, m/s (dormant, no autoreg gate yet).
         ReadinessSignal.BarVelocity -> SignalUi(
             Res.string.log_signal_bar_velocity, Res.string.log_signal_bar_velocity_explainer,
             ValueSpec(0.0, 2.0, 0.05, 0.5, Res.string.log_spec_bar_velocity, 2),
         )
-        // Within-set velocity-loss %; ≥20 terminates the set.
+        // Within-set velocity-loss %; the goal's VL_STOP_*_FRAC terminates the set.
         ReadinessSignal.VelocityLoss -> SignalUi(
             Res.string.log_signal_velocity_loss, Res.string.log_signal_velocity_loss_explainer,
-            ValueSpec(0.0, 50.0, 5.0, 0.0, Res.string.log_spec_velocity_loss, 0),
+            ValueSpec(
+                0.0, 50.0, 5.0, 0.0, Res.string.log_spec_velocity_loss, 0,
+                hintArgs = listOf(
+                    trimDecimal(CoreConstants.VL_STOP_POWER_FRAC * 100.0),
+                    trimDecimal(CoreConstants.VL_STOP_HYPERTROPHY_FRAC * 100.0),
+                ),
+            ),
         )
-        // Composite wellness z-score; ≤ −1.5 downgrades.
+        // Composite wellness z-score; ≤ WELLNESS_SINGLE_DAY_Z downgrades.
         ReadinessSignal.WellnessZ -> SignalUi(
             Res.string.log_signal_wellness, Res.string.log_signal_wellness_explainer,
-            ValueSpec(-3.0, 3.0, 0.5, 0.0, Res.string.log_spec_wellness),
+            ValueSpec(
+                -3.0, 3.0, 0.5, 0.0, Res.string.log_spec_wellness,
+                hintArgs = listOf(signedFigure(CoreConstants.WELLNESS_SINGLE_DAY_Z)),
+            ),
         )
-        // lnRMSSD z vs rolling baseline; < −0.5 downgrades.
+        // lnRMSSD z vs rolling baseline; < HRV_SWC_LOWER_Z downgrades.
         ReadinessSignal.HrvLnRmssd -> SignalUi(
             Res.string.log_signal_hrv, Res.string.log_signal_hrv_explainer,
-            ValueSpec(-3.0, 3.0, 0.5, 0.0, Res.string.log_spec_hrv),
+            ValueSpec(
+                -3.0, 3.0, 0.5, 0.0, Res.string.log_spec_hrv,
+                hintArgs = listOf(signedFigure(CoreConstants.HRV_SWC_LOWER_Z)),
+            ),
         )
         // HRV coefficient of variation % (dormant, no autoreg gate yet).
         ReadinessSignal.HrvCv -> SignalUi(
             Res.string.log_signal_hrv_cv, Res.string.log_signal_hrv_cv_explainer,
             ValueSpec(0.0, 15.0, 0.5, 0.0, Res.string.log_spec_hrv_cv),
         )
-        // Aerobic-decoupling drift %; >10 keeps the run easy.
+        // Aerobic-decoupling drift %; DECOUPLING_HIGH_PCT keeps the run easy.
         ReadinessSignal.AerobicDecoupling -> SignalUi(
             Res.string.log_signal_decoupling, Res.string.log_signal_decoupling_explainer,
-            ValueSpec(0.0, 30.0, 1.0, 0.0, Res.string.log_spec_decoupling, 0),
+            ValueSpec(
+                0.0, 30.0, 1.0, 0.0, Res.string.log_spec_decoupling, 0,
+                hintArgs = listOf(trimDecimal(CoreConstants.DECOUPLING_HIGH_PCT)),
+            ),
         )
-        // RHR delta vs baseline, bpm; 5–9 downgrades, ≥10 stops. The label says
-        // "vs normal": this field submits a delta, not the absolute bpm the
-        // morning check-in takes.
+        // RHR delta vs baseline, bpm; RHR_DOWNGRADE_FLOOR_BPM for RHR_DOWNGRADE_STREAK
+        // days downgrades, RHR_STOP_BPM stops. The label says "vs normal": this field
+        // submits a delta, not the absolute bpm the morning check-in takes.
         ReadinessSignal.RestingHr -> SignalUi(
             Res.string.log_signal_rhr, Res.string.log_signal_rhr_explainer,
-            ValueSpec(-5.0, 20.0, 1.0, 0.0, Res.string.log_spec_rhr, 0),
+            ValueSpec(
+                -5.0, 20.0, 1.0, 0.0, Res.string.log_spec_rhr, 0,
+                hintArgs = listOf(
+                    signedFigure(CoreConstants.RHR_DOWNGRADE_FLOOR_BPM),
+                    CoreConstants.RHR_DOWNGRADE_STREAK.toString(),
+                    signedFigure(CoreConstants.RHR_STOP_BPM),
+                ),
+            ),
         )
-        // Soreness on the 1–7 Hooper scale; ≥6 downgrades intensity one level.
+        // Soreness on the 1–7 Hooper scale; ≥ SORENESS_HIGH downgrades intensity one level.
         ReadinessSignal.Soreness -> SignalUi(
             Res.string.log_signal_soreness, Res.string.log_signal_soreness_explainer,
-            ValueSpec(1.0, 7.0, 1.0, 3.0, Res.string.log_spec_soreness, 0),
+            ValueSpec(
+                1.0, 7.0, 1.0, 3.0, Res.string.log_spec_soreness, 0,
+                hintArgs = listOf(trimDecimal(CoreConstants.SORENESS_HIGH)),
+            ),
         )
         ReadinessSignal.Pain -> SignalUi(Res.string.log_signal_pain, Res.string.log_signal_pain_explainer)
         ReadinessSignal.Illness -> SignalUi(Res.string.log_signal_illness, Res.string.log_signal_illness_explainer)
@@ -710,6 +743,15 @@ private val ReadinessSignal.ui: SignalUi get() = SignalUis.getValue(this)
 
 /** The signal's picker label (the readiness editor and Today's chips). */
 internal val ReadinessSignal.labelRes: StringResource get() = ui.label
+
+/** The signal's value-scale hint and the core thresholds that fill it (null
+ *  for a signal without a scale). */
+internal val ReadinessSignal.valueHint: Pair<StringResource, List<String>>?
+    get() = ui.spec?.let { it.hint to it.hintArgs }
+
+/** The shortest steady effort whose decoupling counts, in minutes ("20"):
+ *  [CoreConstants.DECOUPLING_MIN_EFFORT_MIN], [trimDecimal]-trimmed. */
+internal fun decouplingMinEffortLabel(): String = trimDecimal(CoreConstants.DECOUPLING_MIN_EFFORT_MIN)
 
 /**
  * The Illness answer (AUTOREG-4, ILLNESS-RTT-001). [value] is the wire value the

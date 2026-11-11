@@ -638,7 +638,7 @@ fn a_sub_1_25kg_anchor_never_prescribes_at_0kg() {
         },
         ..Default::default()
     };
-    let it = flatten_prescription(&rx, &tiny, None, false);
+    let it = flatten_prescription(&rx, &tiny, None, false, DistanceUnit::Km);
     assert!(
         !it.summary.contains("@ 0"),
         "no '@ 0 kg' on a collapsed anchor: {}",

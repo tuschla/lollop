@@ -11,16 +11,9 @@ import app.milestone.widget.AndroidWidgets
 import app.milestone.widget.MidnightTick
 import app.milestone.widget.TileFace
 import app.milestone.widget.WidgetSnapshotStore
+import app.milestone.widget.drawable
 import app.milestone.widget.tileFace
 import app.milestone.widget.tileSubtitle
-
-/** The tile's icon for this face (`ic_stat_mark` names the tile in the picker). */
-internal val TileFace.icon: Int
-    get() = when (this) {
-        TileFace.Recording, TileFace.StartRun -> R.drawable.ic_content_track_run
-        TileFace.LogSet -> R.drawable.ic_content_set_dumbbell
-        TileFace.Log -> R.drawable.ic_action_log_plus
-    }
 
 /**
  * Quick Settings tile: one tap to today's next action. It reads only the widget's
@@ -70,14 +63,15 @@ class QuickTileService : TileService() {
         val tile = qsTile ?: return
         val snapshot = WidgetSnapshotStore.today(this)
         val face = tileFace(snapshot, RunSession.tracking.value)
-        val label = resources.getString(face.label)
-        val subtitle = tileSubtitle(snapshot, latinDigitResources())
+        val res = appResources()
+        val label = res.getString(face.label)
+        val subtitle = tileSubtitle(snapshot, res)
         tile.label = label
         tile.contentDescription = listOfNotNull(label, subtitle).joinToString(", ")
         // The widget's title under the label (Android 10+), so tile and widget say
         // the same; without one System UI writes the state ("On", "Off") there.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tile.subtitle = subtitle
-        tile.icon = Icon.createWithResource(this, face.icon)
+        tile.icon = Icon.createWithResource(this, face.icon.drawable)
         tile.state = if (face.active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.updateTile()
     }

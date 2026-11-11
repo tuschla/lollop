@@ -107,8 +107,11 @@ pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
 /// (HYB-RUNCAP-001, ExpertOpinion). The plan keeps per-run distance instead of
 /// lengthening the remaining runs when this trims days (hybrid-004).
 pub fn endurance_frequency_cap() -> Recommended<u8> {
-    Recommended::new(3, claims::HYB_RUNCAP_001)
+    Recommended::new(ENDURANCE_FREQUENCY_CAP_DAYS, claims::HYB_RUNCAP_001)
 }
+
+/// [`endurance_frequency_cap`]'s value: run days in a lift-led hybrid week.
+pub const ENDURANCE_FREQUENCY_CAP_DAYS: u8 = 3;
 
 /// True when weekly endurance days stay within the co-primary default (≤3 d/wk).
 pub fn endurance_frequency_ok(days_per_week: u8) -> Recommended<bool> {
@@ -164,8 +167,16 @@ pub fn capped_lower_weekly_sets(weekly_sets: u32, cap: &LowerLiftCap, min_sets: 
 /// hybrid-010; CONC-RE-001). Strength training improves running economy 2–8 %
 /// and does not harm VO2max, keep 2–3 sessions/week. Returns (min, max).
 pub fn maintenance_lift_sessions() -> Recommended<(u8, u8)> {
-    Recommended::new((2, 3), claims::CONC_RE_001)
+    Recommended::new(
+        (MAINTENANCE_LIFT_SESSIONS_MIN, MAINTENANCE_LIFT_SESSIONS_MAX),
+        claims::CONC_RE_001,
+    )
 }
+
+/// [`maintenance_lift_sessions`]' low end, sessions a week.
+pub const MAINTENANCE_LIFT_SESSIONS_MIN: u8 = 2;
+/// [`maintenance_lift_sessions`]' high end: lift days in a run-led hybrid week.
+pub const MAINTENANCE_LIFT_SESSIONS_MAX: u8 = 3;
 
 /// How likely concurrent running is to blunt lower-body maximal-strength gains
 /// for this athlete (13-hybrid-update hyb-upd-001 / -002).

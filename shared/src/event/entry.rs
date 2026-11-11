@@ -2,27 +2,27 @@
 //! (`DeleteEntry`, `AmendSet`, `AmendRun`, `TrimRunTrack`, `AmendRunMeta`)
 //! names, and which logging events store a row at all. `update` locates rows
 //! with [`find_entry`]; compaction pairs an edit with its log line by the same
-//! [`EntryRef::names`].
+//! [`EntryRef`].
 
 use super::{EntryKind, Event};
 
-/// A row's identity: the shell-assigned `entry_id`, and its `observed_at` for
-/// a legacy row logged without an id (`id == 0`).
+/// A row's identity: its id ([`row_id`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntryRef {
     pub(crate) id: u64,
-    pub(crate) observed_at: i64,
 }
 
-impl EntryRef {
-    /// Whether `row` is the row this reference names: the same id, or for a
-    /// legacy reference (`id == 0`) a legacy row with the same `observed_at`.
-    pub(crate) fn names(self, row: EntryRef) -> bool {
-        if self.id != 0 {
-            row.id == self.id
-        } else {
-            row.id == 0 && row.observed_at == self.observed_at
-        }
+/// The id a row is stored and named under: the shell-assigned `entry_id`.
+/// Builds before entry ids wrote `entry_id` 0 and named a row by its
+/// `observed_at`; such a row (and an edit naming one) takes the id its
+/// `observed_at` gives, so every replay and every compaction of an old log
+/// gives it the same id. Shell ids are epoch milliseconds, so an id from
+/// unix seconds never meets one; an undated row (`observed_at <= 0`) gets 0.
+pub(crate) fn row_id(entry_id: u64, observed_at: i64) -> u64 {
+    if entry_id != 0 {
+        entry_id
+    } else {
+        observed_at.max(0).unsigned_abs()
     }
 }
 
@@ -33,7 +33,7 @@ pub(crate) trait LoggedEntry {
 
 /// Index of the newest row `target` names.
 pub(crate) fn find_entry<T: LoggedEntry>(rows: &[T], target: EntryRef) -> Option<usize> {
-    rows.iter().rposition(|r| target.names(r.entry()))
+    rows.iter().rposition(|r| r.entry() == target)
 }
 
 /// Longest single activity `LogActivity` accepts, minutes (10 h).
@@ -83,7 +83,9 @@ impl Event {
     /// The row facts of a logging or edit event; `None` for every other
     /// event. Expects a [`Event::normalized`] event.
     pub(crate) fn entry_event(&self) -> Option<EntryEvent> {
-        let at = |id: u64, observed_at: i64| EntryRef { id, observed_at };
+        let at = |entry_id: u64, observed_at: i64| EntryRef {
+            id: row_id(entry_id, observed_at),
+        };
         let (kind, op, row, stored, target) = match *self {
             Event::LogSet {
                 entry_id,

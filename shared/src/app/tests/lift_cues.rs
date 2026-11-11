@@ -443,7 +443,13 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
                 if c.ladder == crate::schema::LadderId::HorizontalPull)
         })
         .expect("a row");
-    let view = flatten_prescription(row, &crate::plan::Anchors::default(), None, false);
+    let view = flatten_prescription(
+        row,
+        &crate::plan::Anchors::default(),
+        None,
+        false,
+        DistanceUnit::Km,
+    );
     assert_eq!(view.effort_cue, "use a sturdy table edge");
     assert!(view.summary.contains("sturdy table"), "{}", view.summary);
     // The compact row shows only the lead, so the setup rides it, also after
@@ -854,6 +860,12 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
         load_kg: Some(100.0),
         lead: "3×5".into(),
         rir: Some(2),
+        pieces: vec![
+            BasisPiece::Lead("3×5".into()),
+            BasisPiece::Text(" at 83% of your estimated max (120 kg): ".into()),
+            BasisPiece::Load(100.0),
+            BasisPiece::Text(". Aim for 2 reps left.".into()),
+        ],
     });
     let mut ns = session(vec![it]);
     let hold = AdjustmentKind::HrvHold.call(
@@ -881,6 +893,14 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
         load_kg: Some(100.0),
         lead: "3×5".into(),
         rir: Some(2),
+        pieces: vec![
+            BasisPiece::Lead("3×5".into()),
+            BasisPiece::Text(" at 83% of your estimated max (120 kg): ".into()),
+            BasisPiece::Load(100.0),
+            BasisPiece::Text(". Stop each set ".into()),
+            BasisPiece::RepsLeft(2),
+            BasisPiece::Text(". If a set feels much harder, you're below your estimate today: end the exercise there.".into()),
+        ],
     });
     let mut ns = session(vec![it]);
     let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
@@ -929,17 +949,13 @@ fn panel_load(basis: &str) -> &str {
         .map_or(rest.trim_end_matches('.'), |(l, _)| l)
 }
 
-/// Every loaded lift of today's hero (and its strip row): the panel states
-/// the hero's load and its last-time set.
-fn assert_panel_states_hero_loads(vm: &ViewModel) {
-    let ns = vm.next_session.as_ref().expect("hero");
-    let row = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == ns.epoch_day)
-        .expect("today's row");
+/// Every loaded lift of today's hero: the panel states the hero's load and
+/// its last-time set.
+fn assert_panel_states_hero_loads(model: &Model) {
+    let plan = working_plan(model);
+    let ns = plan.hero_day.and_then(|d| plan.row(d)).expect("hero");
     let mut checked = 0;
-    for it in ns.items.iter().chain(&row.items).filter(|i| !i.is_run()) {
+    for it in ns.items.iter().filter(|i| !i.is_run()) {
         let Some(kg) = it.load_kg else { continue };
         let basis = &it.why.basis;
         assert_eq!(
@@ -974,7 +990,7 @@ fn assert_panel_states_hero_loads(vm: &ViewModel) {
         }
         checked += 1;
     }
-    assert!(checked >= 2, "a loaded lift on the hero and its row");
+    assert!(checked >= 1, "a loaded lift on the hero");
 }
 
 #[test]
@@ -994,8 +1010,7 @@ fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
         &it.exercise,
         set(170.0, 1, 10.0, (MON - 2) * DAY_SEC),
     );
-    let planned = app.view(&model);
-    assert_panel_states_hero_loads(&planned);
+    assert_panel_states_hero_loads(&model);
     let planned_kg = loaded_item(&app, &model).load_kg.unwrap();
 
     report_low_hrv(&app, &mut model);
@@ -1010,7 +1025,7 @@ fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
         held_kg < planned_kg,
         "held {held_kg} < planned {planned_kg}"
     );
-    assert_panel_states_hero_loads(&held);
+    assert_panel_states_hero_loads(&model);
 
     let (app, mut model) = planned_strength_model(true);
     log(
@@ -1019,15 +1034,15 @@ fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
         &it.exercise,
         set(load, reps, 10.0, MON * DAY_SEC + 3_600),
     );
-    let cut = app.view(&model);
-    let cut_kg = cut
+    let cut_kg = app
+        .view(&model)
         .next_session
         .as_ref()
         .and_then(|ns| ns.items.iter().find(|i| i.exercise == it.exercise))
         .and_then(|i| i.load_kg)
         .unwrap();
     assert!(cut_kg < load, "the hard first set cuts the rest: {cut_kg}");
-    assert_panel_states_hero_loads(&cut);
+    assert_panel_states_hero_loads(&model);
 }
 
 #[test]

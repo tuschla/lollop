@@ -1,17 +1,17 @@
 //! Exercise-name folding: the one rule by which two typed spellings name the
 //! same exercise. The core keys e1RM chains, the lift audit and `SetExerciseEnded`
 //! compaction on [`exercise_key`], and compares movement tokens with
-//! [`fold_eq`]; the shell's `nameKey` (SetEditorState.kt) folds the same way,
-//! pinned by `tests/fixtures/names/fold.tsv`. ASCII is only lower-cased.
+//! [`fold_eq`]; the shell matches names through the bridge's `ExerciseKeys`
+//! op, so this is the only implementation. ASCII is only lower-cased.
 
 use std::borrow::Cow;
 
 /// `c` folded onto `out`: ASCII lower-cased; any other character upper-cased,
 /// then lower-cased, one char at a time (a step that would yield more than one
-/// char keeps the char), as Kotlin's `uppercaseChar()` / `lowercaseChar()`; a
-/// Latin letter with a diacritic, a ligature or the Turkish İ/ı, before or
-/// after that step, becomes its ASCII letters ([`ascii_fold`]). Folding the
-/// result again changes nothing (U+212B Å → å → "a", like U+00C5 Å).
+/// char keeps the char); a Latin letter with a diacritic, a ligature or the
+/// Turkish İ/ı, before or after that step, becomes its ASCII letters
+/// ([`ascii_fold`]). Folding the result again changes nothing (U+212B Å → å →
+/// "a", like U+00C5 Å).
 fn push_folded(c: char, out: &mut String) {
     if c.is_ascii() {
         out.push(c.to_ascii_lowercase());
@@ -111,21 +111,36 @@ fn ascii_fold(c: char) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// Every row of the fixture the shell's `nameKey` test reads too: the core
-    /// and the shell key each spelling the same.
+    /// Each spelling and the key [`exercise_key`] gives it: trimmed of
+    /// Unicode White_Space only (U+0085 yes, U+001F no), case-folded one code
+    /// point at a time (a supplementary one too), Latin diacritics, ligatures
+    /// and the Turkish İ/ı spelled in ASCII; other scripts only case-folded.
     #[test]
-    fn exercise_key_matches_the_shared_fixture() {
-        let fixture = include_str!("../tests/fixtures/names/fold.tsv");
-        let mut rows = 0;
-        for line in fixture
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        {
-            let (name, key) = line.split_once('\t').expect("name<TAB>key");
+    fn exercise_key_folds_each_spelling() {
+        for (name, key) in [
+            ("  Back Squat ", "back squat"),
+            ("Romanian deadlift", "romanian deadlift"),
+            ("İncline bench press", "incline bench press"),
+            ("İNCLİNE BENCH PRESS", "incline bench press"),
+            ("Inclıne bench press", "incline bench press"),
+            ("ıncline bench press", "incline bench press"),
+            ("PİSTOL SQUAT", "pistol squat"),
+            ("DEADLİFT", "deadlift"),
+            ("Straße", "strasse"),
+            ("STRAẞE", "strasse"),
+            ("Crème brûlée", "creme brulee"),
+            ("Ćwiczenie ŁÓDŹ", "cwiczenie lodz"),
+            ("Œuf Æ Ø Þ", "oeuf ae o th"),
+            ("Жим ЛЁЖА", "жим лёжа"),
+            ("ΣΚΟΥΑΤ ς", "σκουατ σ"),
+            ("\u{b5} curl", "\u{3bc} curl"),
+            ("\u{212b}ngström row", "angstrom row"),
+            ("\u{10400} curl", "\u{10428} curl"),
+            ("\u{85}squat", "squat"),
+            ("\u{1f}squat", "\u{1f}squat"),
+        ] {
             assert_eq!(exercise_key(name), key, "{name:?}");
-            rows += 1;
         }
-        assert!(rows >= 10, "{rows} rows");
     }
 
     #[test]

@@ -20,18 +20,18 @@ struct LollopControl: ControlWidget {
                 }
             }
         }
-        // Android's tile picker name (tile_log).
-        .displayName("Log")
-        .description("Opens today's next step: Start run, Log set or Log.")
+        // Android's tile picker name.
+        .displayName("tile_log")
+        .description("ios_control_description")
     }
 }
 
 /// Today's tile face from the payload; Log before the app has written one.
 @available(iOS 18.0, *)
 struct ControlFaceProvider: ControlValueProvider {
-    var previewValue: ControlFace { .fallback }
+    var previewValue: ControlFace { WidgetFallback.bundled.control }
 
     func currentValue() async throws -> ControlFace {
-        WidgetPayload.load()?.controlFace(at: Date()) ?? .fallback
+        WidgetPayload.load()?.controlFace(at: Date()) ?? WidgetFallback.bundled.control
     }
 }

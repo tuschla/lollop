@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppFileNames
 import app.milestone.ConsistencyView
+import app.milestone.DayMark
 import app.milestone.DistanceUnit
 import app.milestone.HealthScreen
 import app.milestone.HoldReason
@@ -19,6 +20,8 @@ import app.milestone.SessionDoneView
 import app.milestone.SessionPlanView
 import app.milestone.SessionStatus
 import app.milestone.SessionType
+import app.milestone.TodayState
+import app.milestone.TodaySurfaceView
 import app.milestone.ViewModel
 import app.milestone.YouthActivityView
 import app.milestone.nextLocalMidnightMillis
@@ -45,7 +48,7 @@ class WidgetSnapshotTest {
     private val day = 20_389L // Tue 2025-10-28
 
     private fun str(id: Int, vararg args: Any): String = res.getString(id, *args)
-    private fun item(name: String, detail: String) = keepUnits(str(R.string.widget_item_line, name, detail))
+    private fun item(name: String, detail: String) = str(R.string.widget_item_line, name, detail)
     private fun weekDone(done: Int, planned: Int) = res.getQuantityString(R.plurals.main_week_done_count, planned, done, planned)
 
     @Before
@@ -56,17 +59,23 @@ class WidgetSnapshotTest {
     private fun lift(name: String, lead: String, done: Boolean = false) =
         PrescriptionView(exercise = name, face_lead = lead, done = done)
 
+    /** A model as the core sends it; [state] is the core's today state for it. */
     private fun model(
         ns: SessionPlanView? = null,
         week: List<SessionPlanView> = listOfNotNull(ns),
         profile: Profile? = Profile(),
+        state: TodayState = if (ns == null) TodayState.NoPlan else TodayState.Session,
+        restToday: Boolean = false,
     ) = ViewModel(
         today_epoch_day = day,
         profile = profile,
         next_session = ns,
         week_plan = week,
         consistency = ConsistencyView(this_week_done = 2, this_week_planned = 4),
+        today_surface = TodaySurfaceView(state = state, rest_today = restToday),
     )
+
+    private val paused = TodaySurfaceView(state = TodayState.Paused)
 
     private fun face(m: ViewModel) = widgetFace(widgetSnapshotOf(m, DistanceUnit.Km), day, res)
 
@@ -210,15 +219,15 @@ class WidgetSnapshotTest {
         val snap = widgetSnapshotOf(model(ns, week = week), DistanceUnit.Km)
         assertEquals(
             listOf(
-                WidgetWeekMark.None, WidgetWeekMark.Missed, WidgetWeekMark.Done, WidgetWeekMark.Next,
-                WidgetWeekMark.Rest, WidgetWeekMark.Planned, WidgetWeekMark.Next,
+                DayMark.None, DayMark.Missed, DayMark.Done, DayMark.Next,
+                DayMark.Rest, DayMark.Planned, DayMark.Next,
             ),
             snap.week.map { it.mark },
         )
         assertEquals(week.map { it.epoch_day }, snap.week.map { it.epochDay })
         assertEquals(snap.week, widgetFace(snap, day, res).days)
         // A hold shows no week: it carries no plan.
-        assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain), DistanceUnit.Km).week.isEmpty())
+        assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain, today_surface = paused), DistanceUnit.Km).week.isEmpty())
         // A file written before the week was recorded still reads, without a strip.
         val f = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT)
         f.writeText("""{"version":$WIDGET_SNAPSHOT_VERSION,"epochDay":$day,"kind":"Rest"}""")
@@ -231,7 +240,7 @@ class WidgetSnapshotTest {
         // keeps today's row done in week_plan (calendar_edges.rs, "the hero moves on").
         val today = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Done, listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
         val next = SessionPlanView(day + 2, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Bench", "")))
-        val m = model(next, week = listOf(today, next))
+        val m = model(next, week = listOf(today, next), state = TodayState.Done)
             .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = ItemStatus.Done))))
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Lift, snap.kind)
@@ -256,8 +265,8 @@ class WidgetSnapshotTest {
         assertEquals(listOf(item(str(R.string.main_run), "8 km easy")), f.items)
         assertEquals(listOf(OpenDest.Track, OpenDest.Log), f.actions.map { it.dest })
         assertEquals(str(R.string.tile_start_run), f.actions.first().label)
-        assertEquals(keepUnits("8 km easy"), f.status)
-        assertEquals(keepUnits("8 km easy"), f.brief)
+        assertEquals("8 km easy", f.status)
+        assertEquals("8 km easy", f.brief)
         // A full run summary ("8 km easy") is a line, not a hero figure; a detail
         // that is only a figure is one, with or without a pace.
         assertNull(f.hero)
@@ -270,7 +279,7 @@ class WidgetSnapshotTest {
         assertFalse(logged.trackable)
         assertEquals(listOf(OpenDest.Log), widgetFace(logged, day, res).actions.map { it.dest })
         // A future run day (not today) is never trackable from the widget.
-        val future = widgetSnapshotOf(model(ns.copy(epoch_day = day + 1)), DistanceUnit.Km)
+        val future = widgetSnapshotOf(model(ns.copy(epoch_day = day + 1), state = TodayState.Rest), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Rest, future.kind)
         assertFalse(future.trackable)
     }
@@ -279,7 +288,7 @@ class WidgetSnapshotTest {
     fun restDayShowsTheNextSession() {
         val next = SessionPlanView(day + 1, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Planned)
         val rest = SessionPlanView(day, "", SessionType.Rest, SessionStatus.Rest)
-        val snap = widgetSnapshotOf(model(next, week = listOf(rest, next)), DistanceUnit.Km)
+        val snap = widgetSnapshotOf(model(next, week = listOf(rest, next), state = TodayState.Rest, restToday = true), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Rest, snap.kind)
         assertTrue(snap.restDay)
         val f = widgetFace(snap, day, res)
@@ -293,14 +302,14 @@ class WidgetSnapshotTest {
         // A tall card's hero: the next session by name over its date.
         assertEquals(WidgetHero("Upper body", str(R.string.widget_next_day, planDateLabel(day + 1)), figure = false), f.hero)
         // No plan day today at all (before the plan starts) reads as no session.
-        val none = widgetSnapshotOf(model(next, week = listOf(next)), DistanceUnit.Km)
+        val none = widgetSnapshotOf(model(next, week = listOf(next), state = TodayState.Rest), DistanceUnit.Km)
         assertEquals(str(R.string.widget_no_session), widgetFace(none, day, res).title)
     }
 
     @Test
     fun holdSaysTrainingIsPausedButNotWhy() {
         val ns = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Blocked, listOf(lift("Squat", "3 × 5 @ 100 kg")))
-        val m = model(ns).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain)
+        val m = model(ns, state = TodayState.Paused).copy(hold_reason = HoldReason.Pain, safety_tier = SafetyTier.Pain)
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Paused, snap.kind)
         // A paused day carries no session, items, week count or Track run.
@@ -318,7 +327,7 @@ class WidgetSnapshotTest {
 
     @Test
     fun underEighteenPauseIsGenericAndNotInTheDangerColour() {
-        val m = model().copy(
+        val m = model(state = TodayState.Paused).copy(
             hold_reason = HoldReason.Youth,
             youth_activity = YouthActivityView(minutes = 150, weekly_target_minutes = 420),
         )
@@ -343,7 +352,7 @@ class WidgetSnapshotTest {
         assertEquals(str(R.string.main_plan_withheld_empty_title), face(model().copy(plan_withheld = PlanWithheld.NothingToPlan)).title)
         assertEquals(str(R.string.main_plan_withheld_health_title), face(model().copy(plan_withheld = PlanWithheld.HealthHold)).title)
 
-        val setup = widgetSnapshotOf(model(profile = null), DistanceUnit.Km)
+        val setup = widgetSnapshotOf(model(profile = null, state = TodayState.Setup), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Setup, setup.kind)
         val s = widgetFace(setup, day, res)
         assertEquals(str(R.string.widget_setup_title), s.title)
@@ -353,15 +362,16 @@ class WidgetSnapshotTest {
 
     @Test
     fun cutItemsEndInACount() {
-        val f = WidgetFace("o", "t", WidgetTone.Normal, lead = listOf("lead"), items = listOf("a", "b", "c", "d"))
-        assertEquals(listOf("lead"), visibleLines(f, 1, res))
-        assertEquals(listOf("lead", "a", res.getQuantityString(R.plurals.widget_more_items, 3, 3)), visibleLines(f, 3, res))
-        assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 5, res))
-        assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 6, res))
+        val lead = listOf("lead")
+        val items = listOf("a", "b", "c", "d")
+        assertEquals(listOf("lead"), visibleLines(lead, items, 1, res))
+        assertEquals(listOf("lead", "a", res.getQuantityString(R.plurals.widget_more_items, 3, 3)), visibleLines(lead, items, 3, res))
+        assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(lead, items, 5, res))
+        assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(lead, items, 6, res))
         // A count never stands in for a single item: that slot shows the item.
-        assertEquals(listOf("lead", "a", "b"), visibleLines(f.copy(items = listOf("a", "b")), 3, res))
+        assertEquals(listOf("lead", "a", "b"), visibleLines(lead, listOf("a", "b"), 3, res))
         // Nor for every item: one slot left shows the first item, not "N more items".
-        assertEquals(listOf("lead", "a"), visibleLines(f.copy(items = listOf("a", "b")), 2, res))
-        assertEquals(listOf("a"), visibleLines(f.copy(lead = emptyList()), 1, res))
+        assertEquals(listOf("lead", "a"), visibleLines(lead, listOf("a", "b"), 2, res))
+        assertEquals(listOf("a"), visibleLines(emptyList(), items, 1, res))
     }
 }

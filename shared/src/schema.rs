@@ -879,6 +879,73 @@ pub struct PainDetail {
     pub location: Option<String>,
 }
 
+/// The preset body areas the pain triage offers. The wire name is the
+/// `PainDetail::location` the shell writes for it, a fixed English key that
+/// [`crate::autoreg::pain_region`] maps to a region (`Other` maps to none).
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PainArea {
+    #[serde(rename = "Left knee")]
+    LeftKnee,
+    #[serde(rename = "Right knee")]
+    RightKnee,
+    #[serde(rename = "Ankle / Achilles")]
+    Ankle,
+    #[serde(rename = "Hip")]
+    Hip,
+    #[serde(rename = "Lower back")]
+    LowerBack,
+    #[serde(rename = "Shoulder")]
+    Shoulder,
+    #[serde(rename = "Elbow / wrist")]
+    ElbowWrist,
+    #[serde(rename = "Neck")]
+    Neck,
+    #[serde(rename = "Foot")]
+    Foot,
+    #[serde(rename = "Other")]
+    Other,
+}
+
+impl PainArea {
+    pub const ALL: [PainArea; 10] = [
+        PainArea::LeftKnee,
+        PainArea::RightKnee,
+        PainArea::Ankle,
+        PainArea::Hip,
+        PainArea::LowerBack,
+        PainArea::Shoulder,
+        PainArea::ElbowWrist,
+        PainArea::Neck,
+        PainArea::Foot,
+        PainArea::Other,
+    ];
+
+    /// The location the triage writes for this area.
+    pub fn location(self) -> &'static str {
+        match self {
+            PainArea::LeftKnee => "Left knee",
+            PainArea::RightKnee => "Right knee",
+            PainArea::Ankle => "Ankle / Achilles",
+            PainArea::Hip => "Hip",
+            PainArea::LowerBack => "Lower back",
+            PainArea::Shoulder => "Shoulder",
+            PainArea::ElbowWrist => "Elbow / wrist",
+            PainArea::Neck => "Neck",
+            PainArea::Foot => "Foot",
+            PainArea::Other => "Other",
+        }
+    }
+
+    /// The preset area a report's `location` names (case ignored); `None` for
+    /// free text and for "Other", which names no area.
+    pub fn of_location(location: &str) -> Option<PainArea> {
+        PainArea::ALL
+            .into_iter()
+            .filter(|a| *a != PainArea::Other)
+            .find(|a| a.location().eq_ignore_ascii_case(location))
+    }
+}
+
 /// Neck-check illness classification (File 06). Encoded in a
 /// [`ReadinessInput`] whose `signal == ReadinessSignal::Illness`, this decodes
 /// the numeric `value` convention (0 = none, 1 = above-neck, ≥2 = below-neck /
@@ -1006,6 +1073,63 @@ pub const PARQ_SYMPTOM_BITS: u8 = 0b000_0110;
 /// PAR-Q+ Q6 (bone or joint problem): the injury / rehab gate (safety-048).
 pub const PARQ_INJURY_BIT: u8 = 0b010_0000;
 
+/// The seven PAR-Q+ general health questions (onboard-051), in form order;
+/// question `n` is bit `n` of [`HealthScreen::parq_yes`].
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParqQuestion {
+    /// Q1: a heart condition or high blood pressure (follow-up).
+    HeartOrBloodPressure,
+    /// Q2: chest pain (symptom).
+    ChestPain,
+    /// Q3: dizziness or fainting (symptom).
+    DizzyOrFainting,
+    /// Q4: another chronic condition (follow-up).
+    OtherCondition,
+    /// Q5: prescribed medication (follow-up).
+    Medication,
+    /// Q6: a bone or joint problem (the injury / rehab gate).
+    BoneOrJoint,
+    /// Q7: told to exercise only under supervision (follow-up).
+    SupervisedOnly,
+}
+
+impl ParqQuestion {
+    /// Every question, in form order.
+    pub const ALL: [ParqQuestion; 7] = [
+        ParqQuestion::HeartOrBloodPressure,
+        ParqQuestion::ChestPain,
+        ParqQuestion::DizzyOrFainting,
+        ParqQuestion::OtherCondition,
+        ParqQuestion::Medication,
+        ParqQuestion::BoneOrJoint,
+        ParqQuestion::SupervisedOnly,
+    ];
+
+    /// The question's bit in [`HealthScreen::parq_yes`].
+    pub const fn bit(self) -> u8 {
+        1 << self as u8
+    }
+
+    /// Q2/Q3: a symptom, never clearable (onboard-052).
+    pub const fn is_symptom(self) -> bool {
+        self.bit() & PARQ_SYMPTOM_BITS != 0
+    }
+
+    /// Q1/Q4/Q5/Q7: a doctor follow-up item, clearable (safety-044).
+    pub const fn is_follow_up(self) -> bool {
+        self.bit() & PARQ_FOLLOWUP_BITS != 0
+    }
+}
+
+/// One answer on the health screen, applied by [`HealthScreen::answered`].
+#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HealthAnswer {
+    /// A PAR-Q+ question answered Yes or No.
+    Parq { question: ParqQuestion, yes: bool },
+    /// The "cleared by a doctor" answer.
+    Clearance { cleared: bool },
+}
+
 impl HealthScreen {
     /// A PAR-Q+ follow-up answer is not covered by medical clearance
     /// (safety-044). With per-question answers, every follow-up Yes must sit in
@@ -1041,14 +1165,94 @@ impl HealthScreen {
     /// every follow-up answer is medically cleared no longer gates, safety-044;
     /// a symptomatic answer always gates, SCREEN-ACSM-001).
     pub fn any_gate(&self) -> bool {
-        self.youth
-            || self.parq_followup_uncleared()
+        self.youth || self.answers_defer()
+    }
+
+    /// The gates the health answers raise, the age gate (`youth`) apart.
+    pub fn answers_defer(&self) -> bool {
+        self.parq_followup_uncleared()
             || self.symptomatic_any()
             || self.acute_illness
             || self.pregnant
             || self.pregnancy_warning_sign
             || self.injury_any()
             || self.reds_signal
+    }
+
+    /// A "Doctor-flagged" answer from the old single toggle, before the seven
+    /// questions existed: raised, but no follow-up answer recorded.
+    pub fn legacy_parq(&self) -> bool {
+        self.parq_positive && self.parq_yes & PARQ_FOLLOWUP_BITS == 0
+    }
+
+    /// Question `q` answered Yes. Q6 also reads the injury flag, which
+    /// predates the questions and means the same thing.
+    pub fn answered_yes(&self, q: ParqQuestion) -> bool {
+        self.parq_yes & q.bit() != 0 || (q == ParqQuestion::BoneOrJoint && self.injury_or_rehab)
+    }
+
+    /// The screen after `answer`.
+    pub fn answered(&self, answer: HealthAnswer) -> HealthScreen {
+        match answer {
+            HealthAnswer::Parq { question, yes } => self.with_parq_answer(question, yes),
+            HealthAnswer::Clearance { cleared } => HealthScreen {
+                medically_cleared: cleared,
+                // The clearance covers exactly the follow-up answers given
+                // now, so a later new Yes is not covered (safety-044).
+                cleared_parq_mask: if cleared {
+                    self.parq_yes & PARQ_FOLLOWUP_BITS
+                } else {
+                    0
+                },
+                ..self.clone()
+            },
+        }
+    }
+
+    /// Answer one PAR-Q+ question and re-derive the gate flags from all seven.
+    /// A legacy flag stays until a question of its own kind is answered, so an
+    /// unrelated answer never drops a hold: a legacy doctor flag
+    /// ([`Self::legacy_parq`]) until a follow-up question is answered, a legacy
+    /// `symptomatic` flag (no symptom bit) until a symptom question is
+    /// (symptoms are never clearable, onboard-052). A clearance survives only
+    /// while every follow-up Yes was already covered by it: a NEW follow-up Yes
+    /// drops `medically_cleared` (safety-044).
+    fn with_parq_answer(&self, q: ParqQuestion, yes: bool) -> HealthScreen {
+        // Fold a legacy injury flag into its question first, so answering
+        // another question can't silently clear it.
+        let base = if self.injury_or_rehab {
+            self.parq_yes | PARQ_INJURY_BIT
+        } else {
+            self.parq_yes
+        };
+        let mask = if yes { base | q.bit() } else { base & !q.bit() };
+        let old_follow_ups = self.parq_yes & PARQ_FOLLOWUP_BITS;
+        let new_follow_ups = mask & PARQ_FOLLOWUP_BITS;
+        let follow_up = new_follow_ups != 0 || (self.legacy_parq() && !q.is_follow_up());
+        // What the existing clearance covers: the recorded mask, or (a
+        // clearance saved before the mask existed / a legacy toggle) the
+        // answers at the time.
+        let covered = if !self.medically_cleared {
+            0
+        } else if self.cleared_parq_mask != 0 {
+            self.cleared_parq_mask
+        } else {
+            old_follow_ups
+        };
+        let still_cleared = self.medically_cleared
+            && follow_up
+            && new_follow_ups & !covered == 0
+            && (new_follow_ups != 0 || covered == 0);
+        HealthScreen {
+            parq_yes: mask,
+            parq_positive: follow_up,
+            medically_cleared: still_cleared,
+            cleared_parq_mask: if still_cleared { new_follow_ups } else { 0 },
+            symptomatic: mask & PARQ_SYMPTOM_BITS != 0
+                || (self.symptomatic && self.parq_yes & PARQ_SYMPTOM_BITS == 0 && !q.is_symptom()),
+            injury_or_rehab: mask & PARQ_INJURY_BIT != 0,
+            ..self.clone()
+        }
     }
 }
 

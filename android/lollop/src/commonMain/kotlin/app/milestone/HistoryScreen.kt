@@ -1,20 +1,24 @@
 package app.milestone
 
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -30,10 +34,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.CompositionLocalProvider
@@ -221,19 +227,9 @@ internal fun HistoryDestination(
     CompositionLocalProvider(LocalDetailDock provides detailDock.takeIf { twoPane }) {
     EntryActionSheets(
         selected = selected,
-        // Memoized on model.lifts so the full-history scan isn't recomputed on
-        // every recomposition.
-        recentExercises = remember(model.lifts) {
-            model.lifts.asReversed().map { it.exercise }.distinct()
-        },
-        holdExercises = remember(model.next_session, model.week_plan) {
-            (model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items })
-                .filter { it.timed_hold }
-                .map { it.exercise }
-                .toSet()
-        },
+        editorInputs = remember(model) { SetEditorInputs.from(model) },
         weightUnit = weightUnit,
-        profile = model.profile,
+        hrMaxKnown = model.hr_max_known,
         nowMillis = nowMillis,
         onDismiss = { selectedKey = null },
         onEvent = onEvent,
@@ -463,13 +459,16 @@ internal fun HistoryDestination(
 
         if (activeFilter == HistoryFilter.Runs && model.runs.isNotEmpty()) {
             // Same month-header grouping as the Lifts segment, by the day each run started.
+            // Runs an old build logged without an id in one second share their id;
+            // the occurrence keeps their keys apart.
+            val seen = HashMap<String, Int>()
             runStream.forEachIndexed { i, r ->
                 monthNav.headerBefore[i]?.let { m ->
                     item(key = "run-month-$m") { MonthHeader(m, jumpMonths.takeIf { i == 0 }, onJump) }
                 }
-                // Legacy rows share entry_id 0; suffix the index so two in the same
-                // second can't collide.
-                item(key = if (r.entry_id != 0L) "${r.entry_id}|${r.observed_at}" else "legacy-run-$i|${r.observed_at}") {
+                val id = "${r.entry_id}|${r.observed_at}"
+                val n = (seen[id] ?: 0).also { seen[id] = it + 1 }
+                item(key = "$id#$n") {
                     val key = historyEntryKey(HistoryEntry.Run(r))
                     RunCard(r, nowMillis, selected = twoPane && key == selectedKey, onClick = { selectedKey = key })
                 }
@@ -610,12 +609,63 @@ private fun resolveHistoryEntry(key: String?, model: ViewModel): HistoryEntry? {
     val parts = key.substring(1).split("|")
     val id = parts.getOrNull(0)?.toLongOrNull() ?: return null
     val obs = parts.getOrNull(1)?.toLongOrNull() ?: return null
-    // Match on entry_id AND observed_at so legacy rows (entry_id 0) can't collide.
+    // Match on entry_id AND observed_at, the pair the list keys carry.
     return when (kind) {
         'L' -> model.lifts.firstOrNull { it.entry_id == id && it.observed_at == obs }
             ?.let { HistoryEntry.Lift(it) }
         'R' -> model.runs.firstOrNull { it.entry_id == id && it.observed_at == obs }
             ?.let { HistoryEntry.Run(it) }
         else -> null
+    }
+}
+
+/** A [StatTile]'s value: 19sp ExtraBold, tabular. */
+internal val StatValueStyle = androidx.compose.ui.text.TextStyle(
+    fontSize = 19.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
+    fontFeatureSettings = "tnum", textDirection = AppTextDirection,
+)
+
+/**
+ * One compact stat cell for a horizontal summary strip (History week header),
+ * using the app-wide tile anatomy: big tabular value (with optional small unit)
+ * over its label. A [RowScope] extension so callers place several across a row
+ * with `weight`. A [value] of [EmptyValuePlaceholder] ("nothing logged") renders
+ * as the faint dash with no unit, never a "0.0 t" that reads as a measurement.
+ */
+@Composable
+internal fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: String? = null) {
+    // History week-strip anatomy (spec 03-history §1): value ABOVE (19sp
+    // ExtraBold, tabular) with the unit inline muted, label below-left.
+    // fillMaxHeight: in a `height(IntrinsicSize.Min)` row every tile takes the
+    // tallest tile's height, so a glossary ⓘ never leaves a ragged bottom edge.
+    // A traversal group: TalkBack reads each tile's value and label together, tile
+    // by tile, even when a large font wraps one label to more lines than another.
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .traversalGroup()
+            .clip(RoundedCornerShape(12.dp))
+            .background(BgElevated)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+    ) {
+        val empty = value == EmptyValuePlaceholder
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                value,
+                color = if (empty) OnBgFaint else OnBgBody,
+                style = StatValueStyle,
+                maxLines = 1,
+            )
+            if (unit != null && !empty) {
+                Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+            }
+        }
+        // Label, with an optional glossary affordance for jargon tiles.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+            Text(label, color = OnBgFaint, style = Type.Caption)
+            glossaryKey?.let { GlossaryInfo(it) }
+        }
     }
 }

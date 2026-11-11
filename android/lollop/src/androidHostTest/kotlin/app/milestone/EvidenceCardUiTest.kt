@@ -45,18 +45,16 @@ class EvidenceCardUiTest {
         MilestoneTheme {
             EvidenceCard(
                 summary = summary,
-                grade = grade,
-                citation = citation,
-                confidence = confidence,
-                safetyCritical = safetyCritical,
-                contested = contested,
+                evidence = EvidenceTagView(grade, citation, confidence, safetyCritical, contested),
                 why = why,
+                // The core's subject of a one-clause summary is the summary.
+                spokenSubject = summary,
             )
         }
     }
 
     /** Tap the card's "?" disclosure, found by its spoken label (the card names
-     *  its subject after the summary's first clause). */
+     *  the subject the core gave it). */
     private fun openDetails(summary: String = DEFAULT_SUMMARY) {
         rule.onNodeWithContentDescription(str(R.string.main_details_subject, summary)).performClick()
     }
@@ -99,7 +97,7 @@ class EvidenceCardUiTest {
     @Test
     fun whyBlockRendersBasisGradeNoteWithConfidenceAndImprovement() {
         val why = WhyView(
-            basis = "Two randomized trials in trained lifters",
+            basis = listOf("Two randomized trials in trained lifters"),
             grade_note = "Consistent effect, small samples",
             improves = "Four more logged sessions",
         )
@@ -109,7 +107,7 @@ class EvidenceCardUiTest {
         openDetails()
 
         rule.onNodeWithText(str(R.string.main_why_based_on)).assertIsDisplayed()
-        rule.onNodeWithText(why.basis).assertIsDisplayed()
+        rule.onNodeWithText(why.basis.single()).assertIsDisplayed()
         rule.onNodeWithText(str(R.string.main_why_this_grade)).assertIsDisplayed()
         rule.onNodeWithText(str(R.string.main_grade_line_confidence, why.grade_note, 72)).assertIsDisplayed()
         rule.onNodeWithText(str(R.string.main_why_to_improve)).assertIsDisplayed()

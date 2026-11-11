@@ -20,7 +20,7 @@ struct RunLockScreen: View {
         let accent = Color(argb: scheme == .dark ? run.accentDark : run.accentLight)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                WidgetIcon.mark.image.resizable().scaledToFit().frame(width: 18, height: 18).foregroundColor(accent)
+                SurfaceIcon.mark.image.resizable().scaledToFit().frame(width: 18, height: 18).foregroundColor(accent)
                 Text(run.title).font(.headline).lineLimit(1)
                 Spacer(minLength: 0)
                 if !run.recording {
@@ -99,7 +99,7 @@ struct RunButtons: View {
         }
     }
 
-    private func pill(_ label: String, icon: WidgetIcon) -> some View {
+    private func pill(_ label: String, icon: SurfaceIcon) -> some View {
         HStack(spacing: 6) {
             icon.image.resizable().scaledToFit().frame(width: 14, height: 14)
             Text(label).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -121,7 +121,7 @@ struct RestLockScreen: View {
     var body: some View {
         let accent = Color(argb: scheme == .dark ? rest.accentDark : rest.accentLight)
         HStack(alignment: .center, spacing: 12) {
-            WidgetIcon.mark.image.resizable().scaledToFit().frame(width: 18, height: 18).foregroundColor(accent)
+            SurfaceIcon.mark.image.resizable().scaledToFit().frame(width: 18, height: 18).foregroundColor(accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(stale ? rest.doneTitle : rest.title).font(.headline).lineLimit(2)
                 if let next = rest.next {
@@ -166,7 +166,7 @@ struct ActivityChip: View {
                 RunTime(run: run, anchor: state.runAnchor)
                     .frame(maxWidth: minimal ? 40 : 56)
             } else if minimal {
-                WidgetIcon.mark.image.resizable().scaledToFit().frame(width: 16, height: 16)
+                SurfaceIcon.mark.image.resizable().scaledToFit().frame(width: 16, height: 16)
             } else {
                 Text(run.chip).lineLimit(1)
             }
@@ -184,8 +184,9 @@ struct LollopActivityState {
     var rest: RestLive?
     var stale: Bool
 
-    var accentLight: String { run?.accentLight ?? rest?.accentLight ?? "#FF000000" }
-    var accentDark: String { run?.accentDark ?? rest?.accentDark ?? "#FFFFFFFF" }
+    /// The theme's accent in the light and the dark appearance, from the frame.
+    var accentLight: Color? { (run?.accentLight ?? rest?.accentLight).map(Color.init(argb:)) }
+    var accentDark: Color? { (run?.accentDark ?? rest?.accentDark).map(Color.init(argb:)) }
     var openURL: URL { run != nil ? RunLive.openURL : RestLive.openURL }
 }
 
@@ -212,7 +213,7 @@ struct ActivityExpanded {
             RunStat(label: run.movingLabel) { RunTime(run: run, anchor: state.runAnchor) }
                 .padding(.leading, 4)
         } else if state.rest != nil {
-            WidgetIcon.mark.image.resizable().scaledToFit().frame(width: 20, height: 20).padding(.leading, 4)
+            SurfaceIcon.mark.image.resizable().scaledToFit().frame(width: 20, height: 20).padding(.leading, 4)
         }
     }
 
@@ -242,7 +243,7 @@ struct ActivityExpanded {
     }
 
     @ViewBuilder
-    func bottom(accent: Color) -> some View {
+    var bottom: some View {
         if let run = state.run {
             VStack(alignment: .leading, spacing: 6) {
                 if let step = run.step {
@@ -253,7 +254,7 @@ struct ActivityExpanded {
                 } else if let pace = run.pace {
                     Text(verbatim: "\(run.paceLabel) \(pace)").font(.subheadline).lineLimit(1)
                 }
-                RunButtons(run: run, accent: accent)
+                RunButtons(run: run, accent: Color(argb: run.accentDark))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let rest = state.rest, let next = rest.next {
@@ -270,19 +271,19 @@ struct LollopActivityWidget: Widget {
         ActivityConfiguration(for: LollopActivityAttributes.self) { context in
             let state = LollopActivityState(context.state, stale: context.isStale)
             ActivityLockScreen(state: state)
-                .activitySystemActionForegroundColor(Color(argb: state.accentLight))
+                .activitySystemActionForegroundColor(state.accentLight)
                 .widgetURL(state.openURL)
         } dynamicIsland: { context in
             let state = LollopActivityState(context.state, stale: context.isStale)
-            let accent = Color(argb: state.accentDark)
+            let accent = state.accentDark
             let expanded = ActivityExpanded(state: state)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { expanded.leading }
                 DynamicIslandExpandedRegion(.trailing) { expanded.trailing }
                 DynamicIslandExpandedRegion(.center) { expanded.center }
-                DynamicIslandExpandedRegion(.bottom) { expanded.bottom(accent: accent) }
+                DynamicIslandExpandedRegion(.bottom) { expanded.bottom }
             } compactLeading: {
-                WidgetIcon.mark.image.resizable().scaledToFit().frame(width: 16, height: 16).foregroundColor(accent)
+                SurfaceIcon.mark.image.resizable().scaledToFit().frame(width: 16, height: 16).foregroundColor(accent)
             } compactTrailing: {
                 ActivityChip(state: state, minimal: false).foregroundColor(accent)
             } minimal: {

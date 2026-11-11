@@ -6,7 +6,7 @@ use crate::app::anchors::{
     AnchorCtx, Layoff, build_last_working, build_plan_anchors, build_run_anchors, build_run_break,
     build_run_week_km,
 };
-use crate::app::calculators::build_hr_zones;
+use crate::app::calculators::{LoadFigures, build_hr_zones, load_figures, race_band};
 use crate::app::calis_anchors::build_calisthenics_anchors;
 use crate::app::evidence_views::grade_note_str;
 use crate::app::format::{
@@ -18,18 +18,18 @@ use crate::app::lift_audit::to_lift_view;
 use crate::app::logged_days::{DeloadDays, lift_deload_days};
 use crate::app::model::{LoggedRun, LoggedSet, RaceQuery};
 use crate::app::plan_views::{
-    apply_adjustments_to_session, apply_last_sets, flatten_prescription, plan_session_title,
-    program_name, refresh_item_statuses,
+    BasisPiece, BasisRx, PlanItem, PlanRow, RunAmount, apply_adjustments_to_session,
+    apply_last_sets, flatten_prescription, plan_session_title, program_name, refresh_item_statuses,
 };
 use crate::app::profile_age::whole_years_between;
 use crate::app::readiness::return_step_on;
 use crate::app::reviews::{MessageCtx, feedback_message, target_rir};
 use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
-use crate::app::run_views::{split_verdict_view, to_run_view};
+use crate::app::run_views::{run_card as memo_run_card, split_verdict_view};
 use crate::app::set_index::{NameFacts, SetIndex};
 use crate::app::view_types::{
-    BasisRx, EvidenceTagView, HeadlineKind, ItemSetView, ItemStatus, PaceVariability,
-    PlanIntensity, ProteinTargetKind, RunAmount, RunTargetView, SplitVerdict,
+    EvidenceTagView, HeadlineKind, ItemSetView, ItemStatus, PaceVariability, PlanIntensity,
+    ProteinTargetKind, RunTargetView, SplitVerdict,
 };
 use crate::autoreg::SignalGroup;
 use crate::autoreg::tests::input;
@@ -43,7 +43,7 @@ use crate::individualization::{Environment, ProgressionCadence};
 use crate::memo::MemoId;
 use crate::plates::{LB_PER_KG, plates_per_side, round_load_grid};
 use crate::profile::test_support::base_profile;
-use crate::profile::{CalisEquipment, Profile, RecentRace, ResistanceModality};
+use crate::profile::{CalisEquipment, DistanceUnit, Profile, RecentRace, ResistanceModality};
 use crate::running::{self, GoalDistance};
 use crate::schema::{
     AdjustmentKind, DeloadTrigger, HealthScreen, LiftIntensity, LiftSessionType, MesoPhase,
@@ -63,6 +63,7 @@ mod completion;
 mod copy_invariants;
 mod copy_tone;
 mod differential_calcs;
+mod draft_facts;
 mod entry_edits;
 mod event_fuzz;
 mod event_wire;
@@ -105,6 +106,8 @@ mod set_logging;
 mod stale_signals;
 mod strength_coaching;
 mod strength_plan;
+mod text_parts;
+mod today_surface;
 mod track_figures_consistency;
 mod training_load;
 mod view_equivalence;
@@ -380,7 +383,13 @@ fn profile_with_health(health: HealthScreen) -> Profile {
 /// One run's memoized card, as `view()` derives it.
 fn run_card(r: &LoggedRun) -> RunResultView {
     let facts = RunFacts::new(std::slice::from_ref(r));
-    to_run_view(r, facts.keys[0], facts.qc[0].as_deref())
+    memo_run_card(r, facts.keys[0], facts.qc[0].as_deref(), DistanceUnit::Km).view
+}
+
+/// The second-half slowdown percent behind one run's card ([`run_card`]).
+fn run_split_pct(r: &LoggedRun) -> Option<f64> {
+    let facts = RunFacts::new(std::slice::from_ref(r));
+    memo_run_card(r, facts.keys[0], facts.qc[0].as_deref(), DistanceUnit::Km).split_pct
 }
 
 /// [`build_run_anchors`] over `runs` with their realised distances, as
@@ -537,14 +546,14 @@ fn logrun(distance_km: f64, day: i64) -> Event {
     }
 }
 
-fn planned_long_run_item(app: &Engine, model: &Model) -> PrescriptionView {
-    app.view(model)
+fn planned_long_run_item(model: &Model) -> PlanItem {
+    working_plan(model)
         .week_plan
-        .iter()
+        .into_iter()
         .find(|s| s.title == "Long run")
         .expect("a running week has a long run")
-        .items[0]
-        .clone()
+        .items
+        .swap_remove(0)
 }
 
 // ── Calisthenics modality ────────────────────────────────────────────────
@@ -593,27 +602,82 @@ fn snapshot_fixture_model(ndjson: &str) -> Model {
 // ── Rendered-session fixtures ──────────────────────────────────────────────
 
 /// A 3 × 5 @ RIR 2 lift item at `load` kg.
-fn lift_item(name: &str, load: f64) -> PrescriptionView {
-    PrescriptionView {
-        exercise: name.into(),
-        sets: 3,
-        reps_low: 5,
-        reps_high: 5,
-        load_kg: Some(load),
+fn lift_item(name: &str, load: f64) -> PlanItem {
+    PlanItem {
+        view: PrescriptionView {
+            exercise: name.into(),
+            sets: 3,
+            reps_low: 5,
+            reps_high: 5,
+            load_kg: Some(load),
+            intensity_label: "RIR 2".into(),
+            target_rpe: Some(8.0),
+            ..PrescriptionView::default()
+        },
         intensity: PlanIntensity::Rir { rir: 2 },
-        intensity_label: "RIR 2".into(),
-        target_rpe: Some(8.0),
-        ..PrescriptionView::default()
+        ..PlanItem::default()
     }
 }
 
 /// Today's next session holding `items`.
-fn session(items: Vec<PrescriptionView>) -> SessionPlanView {
-    SessionPlanView {
+fn session(items: Vec<PlanItem>) -> PlanRow {
+    PlanRow {
         status: SessionStatus::Next,
         items,
-        ..SessionPlanView::default()
+        ..PlanRow::default()
     }
+}
+
+/// `view` as a plan item whose structured target is `intensity`.
+fn with_intensity(view: PrescriptionView, intensity: PlanIntensity) -> PlanItem {
+    PlanItem {
+        view,
+        intensity,
+        ..PlanItem::default()
+    }
+}
+
+/// The CTL/ATL/TSB figures behind `view()`'s training-load card.
+fn load_figures_of(model: &Model) -> Option<LoadFigures> {
+    load_figures(model, &ViewCtx::new(model).runs)
+}
+
+/// A race prediction as `view()` renders it, with the band it renders from.
+#[derive(Debug)]
+struct Race {
+    view: RacePredictionView,
+    agreed: bool,
+    low_sec: f64,
+    high_sec: f64,
+}
+
+impl std::ops::Deref for Race {
+    type Target = RacePredictionView;
+
+    fn deref(&self) -> &RacePredictionView {
+        &self.view
+    }
+}
+
+/// [`to_race_view`] and its [`race_band`].
+fn race(q: &RaceQuery, longest_logged_km: Option<f64>, unit: DistanceUnit) -> Race {
+    let band = race_band(q, longest_logged_km);
+    Race {
+        view: to_race_view(q, longest_logged_km, unit),
+        agreed: band.agreed,
+        low_sec: band.low_sec,
+        high_sec: band.high_sec,
+    }
+}
+
+/// `view()`'s race prediction, with its band.
+fn race_of(model: &Model) -> Race {
+    let q = model.race_query.as_ref().expect("a race query");
+    race(
+        q,
+        longest_logged_run_km(&ViewCtx::new(model).runs),
+        model.distance_unit(),
+    )
 }
 
 /// A pain report of `value`, graded severity 3 when `kind` is given.

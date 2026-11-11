@@ -137,9 +137,10 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
         .race_prediction
         .as_ref()
         .expect("a prediction is present after PredictRace");
+    let band = race_of(&model);
     for f in [
-        pred.low_sec,
-        pred.high_sec,
+        band.low_sec,
+        band.high_sec,
         pred.recent_distance_m,
         pred.recent_time_sec,
         pred.goal_distance_m,

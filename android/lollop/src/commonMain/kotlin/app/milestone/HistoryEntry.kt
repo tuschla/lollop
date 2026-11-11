@@ -1,8 +1,7 @@
 package app.milestone
 
-// A logged History entry as the screens hand it around, the events that delete
-// and restore it, and the GPS fix a run's route is parsed into (GPX/TCX/FIT
-// import, the core's own GPX export).
+// A logged History entry as the screens hand it around, and the events that
+// delete and restore it.
 
 /** A tapped History entry, routed to the detail sheet. */
 internal sealed interface HistoryEntry {
@@ -10,8 +9,7 @@ internal sealed interface HistoryEntry {
     data class Run(val v: RunResultView) : HistoryEntry
 }
 
-/** The [Event.DeleteEntry] for a logged entry: by entry_id, with observed_at as
- *  the legacy fallback the core uses when the id is 0. */
+/** The [Event.DeleteEntry] for a logged entry, by entry_id. */
 internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
     is HistoryEntry.Lift -> Event.DeleteEntry(
         EntryKind.Set, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
@@ -26,11 +24,11 @@ internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
  * observed_at and figures the view shows (the core re-derives everything else:
  * a typed bpm's %HRmax against the profile in force on the run's day, the spike
  * baseline from the runs around it). A GPS run is rebuilt from its [segments]
- * (parsed from the core's own GPX: the route, or for a run QC left unmeasurable
- * its recorded fixes), so it is null for a GPS run whose fixes haven't loaded;
- * the caller then confirms the delete instead of offering Undo.
+ * (the core's route fixes, [DurableCore.runTrack]: the route, or for a run QC
+ * left unmeasurable its recorded fixes), so it is null for a GPS run whose fixes
+ * haven't loaded; the caller then confirms the delete instead of offering Undo.
  */
-internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>): Event? = when (entry) {
+internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpsPoint>>): Event? = when (entry) {
     is HistoryEntry.Lift -> entry.v.let { v ->
         Event.LogSet(
             exercise = v.exercise, weightKg = v.weight_kg, reps = v.reps, rpe = v.rpe,
@@ -51,9 +49,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
             for (seg in segments) {
                 if (seg.isEmpty()) continue
                 if (points.isNotEmpty()) starts += points.size
-                // A fix without a recorded accuracy takes the import sentinel, which
-                // passes QC like the unknown accuracy the core exported it from.
-                seg.mapTo(points) { GpsPoint(it.lat, it.lon, it.timeSec, it.accuracyM ?: IMPORT_UNKNOWN_ACCURACY_M) }
+                points += seg
             }
             if (points.size < 2) {
                 null
@@ -72,22 +68,3 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
 /** The `hr_pct_max` a run was logged with: a bpm entry sends 0 and lets the core
  *  derive the percentage, so re-sending the derived figure would read as typed. */
 internal fun loggedHrPctMax(v: RunResultView): Double = if (v.avg_hr_bpm != null) 0.0 else v.hr_pct_max
-
-/** [accuracyM]: the fix's horizontal accuracy in metres from the file (FIT
- *  `gps_accuracy`, GPX `<hdop>` via [hdopToAccuracyM]); null when the file names
- *  none, see [IMPORT_UNKNOWN_ACCURACY_M]. */
-data class GpxFix(
-    val lat: Double,
-    val lon: Double,
-    val timeSec: Long,
-    val hrBpm: Int?,
-    val accuracyM: Double? = null,
-)
-
-/**
- * Accuracy (m) given to an imported fix whose file names none (TCX; GPX without
- * `<hdop>`; FIT without `gps_accuracy`). A sentinel, not a measurement: it sits at
- * the core's 30 m QC gate (`running::MAX_GPS_ACCURACY_M`), so the fix passes QC as
- * the least-trusted acceptable one. If the core tightens that gate, this must follow.
- */
-internal const val IMPORT_UNKNOWN_ACCURACY_M = 30.0

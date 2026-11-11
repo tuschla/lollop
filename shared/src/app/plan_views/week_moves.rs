@@ -4,7 +4,8 @@
 use crate::app::format::weekday_name;
 use crate::app::logged_days::LoggedDays;
 use crate::app::model::Model;
-use crate::app::view_types::{SessionPlanView, SessionStatus};
+use crate::app::plan_views::plan_item::PlanRow;
+use crate::app::view_types::SessionStatus;
 use crate::schema::Session;
 
 /// The one wording for "skipping a session is fine" (ADH-MISSED-001), shared
@@ -91,7 +92,7 @@ pub(super) fn movable(status: SessionStatus) -> bool {
 /// reason instead (never double up, ADH-MISSED-001). `idle`: see
 /// [`idle_days`].
 pub(super) fn fill_move_options(
-    row: &mut SessionPlanView,
+    row: &mut PlanRow,
     loads: [crate::plan::DayLoad; 7],
     idle: [bool; 7],
     from: usize,
@@ -175,12 +176,12 @@ mod tests {
         loads[3] = DayLoad::Run { hard: true };
         let monday = 700i64 - mon0_weekday(700);
         // Today is Wednesday (a rest day): the run can come forward to today.
-        let mut row = SessionPlanView::default();
+        let mut row = PlanRow::default();
         fill_move_options(&mut row, loads, [false; 7], 3, monday, monday + 2);
         assert_eq!(row.move_targets, vec![monday + 2, monday + 4, monday + 5]);
         assert_eq!(row.move_blocked_reason, None);
         // From Sunday on nothing is left this week.
-        let mut row = SessionPlanView::default();
+        let mut row = PlanRow::default();
         fill_move_options(&mut row, loads, [false; 7], 3, monday, monday + 7);
         assert!(row.move_targets.is_empty());
         let reason = row.move_blocked_reason.expect("explained");
@@ -193,13 +194,13 @@ mod tests {
             heavy_legs: true,
         };
         loads[3] = DayLoad::Run { hard: true };
-        let mut row = SessionPlanView::default();
+        let mut row = PlanRow::default();
         fill_move_options(&mut row, loads, [false; 7], 3, monday, monday + 2);
         assert!(!row.move_targets.contains(&(monday + 2)));
         let mut idle = [false; 7];
         idle[0] = true;
         idle[1] = true;
-        let mut row = SessionPlanView::default();
+        let mut row = PlanRow::default();
         fill_move_options(&mut row, loads, idle, 3, monday, monday + 2);
         assert_eq!(row.move_targets.first(), Some(&(monday + 2)));
     }

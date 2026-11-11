@@ -3,8 +3,9 @@ package app.milestone
 import kotlinx.coroutines.withContext
 
 // The app's boot sequence, the same on both platforms: probe the core, restore the
-// event log (replay + compaction), date the core with the shell's clock, reconcile
-// the plan-removed marker and the auto plan. [rememberCoachSession] runs it as one
+// event log (replay + compaction), date the core with the shell's clock, carry over
+// a legacy plan-removed pref and a legacy distance unit, then the auto plan.
+// [rememberCoachSession] runs it as one
 // exclusive turn of the event queue, then makes the once-per-process decisions
 // below (guided setup, the import confirmation, the interrupted-run offer).
 
@@ -39,13 +40,15 @@ internal data class BootTurn(val view: ViewModel, val fresh: Boolean)
  * The first turn of a process probes the core and [restore]s the log; a re-run
  * (rotation) skips the probe and resends SetToday only when the day or offset
  * ([today]) changed since the last send. [planDay] is the epoch day an automatic
- * GeneratePlan starts from. [store] is the setup store ([setupStore]): the
- * plan-removed marker ([KEY_PLAN_CLEARED]) is dropped when a program survived and
- * re-armed when the restored log ends with the plan removed.
+ * GeneratePlan starts from; a plan the user removed ([ViewModel.plan_removed])
+ * is not generated again. [store] is the setup store ([setupStore]), read for the
+ * legacy [KEY_PLAN_CLEARED] upgrade; [settings] the settings store, read for the
+ * legacy [LEGACY_DISTANCE_UNIT_KEY] upgrade.
  */
 internal suspend fun bootTurn(
     engine: DurableCore,
     store: KeyValueStore,
+    settings: KeyValueStore,
     ledger: BootLedger,
     restore: () -> Boolean,
     today: Pair<Long, Long> = todayEpochDay() to utcOffsetSec(),
@@ -69,19 +72,34 @@ internal suspend fun bootTurn(
         ledger.lastToday = today
         sent.view
     }
-    // A surviving program means a ClearPlan never landed: drop the stale marker.
-    if (v.program != null && store.getBoolean(KEY_PLAN_CLEARED, false)) {
-        store.edit { putBoolean(KEY_PLAN_CLEARED, false) }
+    // Upgrade from builds that also kept the removal in [KEY_PLAN_CLEARED]: an older
+    // compaction could drop the log's final ClearPlan, so the log gets it back once.
+    if (KEY_PLAN_CLEARED in store) {
+        if (store.getBoolean(KEY_PLAN_CLEARED, false) && v.program == null && !v.plan_removed) {
+            val cleared = withContext(CoreDispatcher) { engine.send(Event.ClearPlan) }
+            ledger.report(cleared)
+            v = cleared.view
+        }
+        store.edit { remove(KEY_PLAN_CLEARED) }
     }
-    // A log that ends with the plan removed re-arms a lost marker (first turn only).
-    if (!ledger.bootHandled && v.program == null && engine.restoredPlanRemoved &&
-        !store.getBoolean(KEY_PLAN_CLEARED, false)
-    ) {
-        store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
+    // Upgrade from builds that kept the distance unit in the settings store: the
+    // profile takes it once, as a dated edit like the Profile screen's. Without a
+    // profile it waits for the guided setup, which takes it as its first answer.
+    val legacyUnit = settings.legacyDistanceUnit()
+    val profile = v.profile
+    if (legacyUnit != null && profile != null) {
+        val applied = profile.distance_unit == legacyUnit || withContext(CoreDispatcher) {
+            engine.send(Event.SetProfile.from(profile).effectiveFrom(v.today()).copy(distanceUnit = legacyUnit))
+        }.let { sent ->
+            ledger.report(sent)
+            v = sent.view
+            sent.accepted
+        }
+        if (applied) settings.dropLegacyDistanceUnit()
     }
     // A set-up user without a plan gets one unless they removed it; a re-run then
     // sees the program and cannot fire twice.
-    if (v.profile != null && v.program == null && !store.getBoolean(KEY_PLAN_CLEARED, false)) {
+    if (v.profile != null && v.program == null && !v.plan_removed) {
         val plan = withContext(CoreDispatcher) { engine.send(Event.GeneratePlan(planDay())) }
         ledger.report(plan)
         v = plan.view
@@ -89,9 +107,29 @@ internal suspend fun bootTurn(
     return BootTurn(v, fresh)
 }
 
+/** Legacy setup store key: older builds recorded "the user removed the plan" here
+ *  as well as in the log. Read only by [bootTurn]'s one-time upgrade, which removes it. */
+internal const val KEY_PLAN_CLEARED = "plan_cleared"
+
 /** The setup store key of the onboarding flag: the guided setup was completed or
  *  skipped, so it never prompts again. */
 internal const val KEY_ONBOARDING_DONE = "onboarding_done"
+
+/** Settings-store key of the distance unit older builds kept there ("System",
+ *  "Km" or "Mi"); the unit is the profile's now ([Profile.distance_unit]).
+ *  [AppSettings.migrate] pins an in-use install's unset one to its locale's;
+ *  [bootTurn] moves it into an existing profile, the guided setup into a new one. */
+internal const val LEGACY_DISTANCE_UNIT_KEY = "distance_unit_override"
+
+/** The legacy distance unit ([LEGACY_DISTANCE_UNIT_KEY]): "System" reads as the
+ *  locale's; null when none is stored. */
+internal fun KeyValueStore.legacyDistanceUnit(): DistanceUnit? = when (val stored = getString(LEGACY_DISTANCE_UNIT_KEY, null)) {
+    null -> null
+    else -> DistanceUnit.entries.firstOrNull { it.name == stored } ?: localeDistanceUnit()
+}
+
+/** Forget the legacy distance unit once a profile carries one. */
+internal fun KeyValueStore.dropLegacyDistanceUnit() = edit { remove(LEGACY_DISTANCE_UNIT_KEY) }
 
 /** The guided setup shows on a first run ([fresh] log, no [view] profile) not yet
  *  completed or skipped. */

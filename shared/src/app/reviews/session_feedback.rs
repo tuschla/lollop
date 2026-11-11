@@ -11,13 +11,16 @@ use crate::app::reviews::exec::{
 use crate::app::reviews::mastery::{Mastery, MasteryKind};
 use crate::app::reviews::split::{FEEDBACK_FRESH_DAYS, fresh_within};
 use crate::app::run_metrics::{RunFacts, spike_baseline_km};
-use crate::app::run_views::to_run_view;
+use crate::app::run_views::run_card;
 use crate::app::view_ctx::ViewCtx;
-use crate::app::view_types::{EvidenceTagView, FeedbackView, SessionPlanView, WhyView};
+use crate::app::view_types::{
+    AdjustmentView, EvidenceTagView, FeedbackView, SessionPlanView, WhyView,
+};
 use crate::day::{is_undated, local_day};
 use crate::event::SessionReview;
 use crate::evidence::claims;
 use crate::feedback::FeedbackCategory;
+use crate::profile::DistanceUnit;
 use crate::schema::{Recommended, WorkoutType};
 use crate::{autoreg, feedback, running};
 
@@ -126,9 +129,9 @@ pub(in crate::app) fn feedback_track_split(model: &Model, facts: &RunFacts) -> O
     if r.workout_type == Some(WorkoutType::Interval) {
         return None;
     }
-    let card = to_run_view(r, facts.keys[i], facts.qc[i].as_deref());
+    let card = run_card(r, facts.keys[i], facts.qc[i].as_deref(), DistanceUnit::Km);
     Some(TrackSplit {
-        pct: card.split.and(card.split_pct)?,
+        pct: card.view.split.and(card.split_pct)?,
         // The day the run STARTED, the plan day completion credits it to: the
         // pacing cue attaches only to a split measured on the judged day.
         day: (!is_undated(r.observed_at))
@@ -160,7 +163,7 @@ fn latest_tracked_run(model: &Model) -> Option<usize> {
 /// day), the latest completed plan day judged from the logs (no form needed),
 /// and a mastery experience (a new best or a completed week). `None` when none
 /// of them has anything to say.
-pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
+pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<Feedback> {
     let model = c.cx.model;
     let offset = model.today_utc_offset_sec;
     let today = model.today_epoch_day;
@@ -249,13 +252,38 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
         double_progression,
         plain: verbosity.minimize_jargon,
         weight_lb: c.weight_lb,
-        distance_mi: false,
+        distance_unit: model.distance_unit(),
         today: model.today_epoch_day,
     };
-    let (message, message_mi) = card_messages(ctx, held, c.female_user);
-    Some(feedback_view(
-        category, message, message_mi, &resolved, ungraded,
-    ))
+    let message = card_message(&ctx, held, c.female_user);
+    Some(Feedback {
+        view: feedback_view(category, message, &resolved, ungraded),
+        win_lift: (!held).then(|| ctx.win_lift()).flatten().map(str::to_owned),
+    })
+}
+
+/// The feedback card and the lift its mastery message names ("New best on
+/// Back squat…"), which links that lift's next-time advice to the win
+/// ([`link_win_advice`]).
+pub(in crate::app) struct Feedback {
+    pub(in crate::app) view: FeedbackView,
+    pub(in crate::app) win_lift: Option<String>,
+}
+
+/// Mark the coaching rows that are next-time advice for `win_lift`, the lift
+/// today's win names: an item-scoped row for that lift that moves no load for
+/// the remaining sets and does not end the exercise.
+pub(in crate::app) fn link_win_advice(win_lift: Option<&str>, rows: &mut [AdjustmentView]) {
+    let Some(win) = win_lift.map(crate::names::exercise_key) else {
+        return;
+    };
+    for a in rows {
+        a.win_advice = a.suggested_load_kg.is_none()
+            && !a.suggests_end_exercise
+            && a.exercise
+                .as_deref()
+                .is_some_and(|e| !e.trim().is_empty() && crate::names::exercise_key(e) == win);
+    }
 }
 
 /// The weekly check-in's safety screens and the run spike for the safety gate:
@@ -283,19 +311,12 @@ fn lighter_next(cx: &ViewCtx, lift: Option<&LiftEval>) -> bool {
     })
 }
 
-/// The card message and its miles twin (empty when it reads the same).
-fn card_messages(mut ctx: MessageCtx, held: bool, female_user: bool) -> (String, String) {
-    let (mut message, mut message_mi) = if held {
-        (
-            "Session logged. Today's plan is eased: no extra weight for now.".to_string(),
-            String::new(),
-        )
+/// The card message.
+fn card_message(ctx: &MessageCtx, held: bool, female_user: bool) -> String {
+    let mut message = if held {
+        "Session logged. Today's plan is eased: no extra weight for now.".to_string()
     } else {
-        let km = feedback_message(&ctx);
-        ctx.distance_mi = true;
-        let mi = feedback_message(&ctx);
-        let mi = if mi == km { String::new() } else { mi };
-        (km, mi)
+        feedback_message(ctx)
     };
 
     // feedback-035: a female user routed to the bone-stress referral gets the
@@ -305,12 +326,8 @@ fn card_messages(mut ctx: MessageCtx, held: bool, female_user: bool) -> (String,
     if feedback::bsi_menstrual_nutrition_prompt(female_user, bsi_referral).value {
         message.push(' ');
         message.push_str(feedback::BSI_FEMALE_PROMPT);
-        if !message_mi.is_empty() {
-            message_mi.push(' ');
-            message_mi.push_str(feedback::BSI_FEMALE_PROMPT);
-        }
     }
-    (message, message_mi)
+    message
 }
 
 /// The execution input and the day it judges. The manual review leads for its
@@ -418,7 +435,6 @@ fn mastery_lead(exec: Option<Exec>, exec_day: Option<i64>, m: &Mastery) -> Optio
 fn feedback_view(
     category: FeedbackCategory,
     message: String,
-    message_mi: String,
     resolved: &Recommended<FeedbackCategory>,
     ungraded: bool,
 ) -> FeedbackView {
@@ -426,8 +442,10 @@ fn feedback_view(
         category,
         category_label: feedback_category_label(category).to_string(),
         message,
-        message_mi,
-        suppresses_praise: category.suppresses_competing_praise(),
+        glossary: Vec::new(),
+        subject: String::new(),
+        prose: false,
+        repeats_session: false,
         evidence: EvidenceTagView::default(),
         why: WhyView::default(),
     };
@@ -485,8 +503,8 @@ pub(in crate::app) struct MessageCtx<'a> {
     /// Beginner copy: plain words, no RIR/e1RM terms (feedback-023).
     pub(in crate::app) plain: bool,
     pub(in crate::app) weight_lb: bool,
-    /// Distances in miles (the `message_mi` twin).
-    pub(in crate::app) distance_mi: bool,
+    /// The unit distances read in.
+    pub(in crate::app) distance_unit: DistanceUnit,
     /// Today's local epoch-day: a lift from today is "today", not its weekday.
     pub(in crate::app) today: Option<i64>,
 }
@@ -500,6 +518,22 @@ impl<'a> MessageCtx<'a> {
     /// The judged lift's name.
     fn lift_name(&self) -> Option<&'a str> {
         self.detail().map(|o| o.exercise.as_str())
+    }
+
+    /// The lift a mastery message names: a new best's or a done lift's.
+    fn win_lift(&self) -> Option<&'a str> {
+        if self.cat != FeedbackCategory::PositiveMastery {
+            return None;
+        }
+        match (self.trigger, self.mastery) {
+            (
+                Some(Trigger::Mastery),
+                Some(MasteryKind::E1rmPr { exercise, .. } | MasteryKind::RepPr { exercise, .. }),
+            ) => Some(exercise),
+            (Some(Trigger::Mastery), Some(_))
+            | (Some(Trigger::RunCompleted | Trigger::IntervalMastery), _) => None,
+            _ => self.lift_name(),
+        }
     }
 
     /// " at 70 kg": the lift's top-set load; empty when unknown.
@@ -633,10 +667,10 @@ fn spike_message(m: &MessageCtx) -> String {
     match (m.spike, m.manual_spike) {
         (Some(s), _) => format!(
             "This run was {}, {:.0}% longer than your longest in the last 30 days ({}). Increases this big raise injury risk: keep your next long run at or below {}.",
-            fmt_km_or_mi(s.km, m.distance_mi),
+            fmt_km_or_mi(s.km, m.distance_unit),
             s.frac * 100.0,
-            fmt_km_or_mi(s.baseline_km, m.distance_mi),
-            fmt_km_or_mi(s.baseline_km * (1.0 + running::SPIKE_FRAC), m.distance_mi)
+            fmt_km_or_mi(s.baseline_km, m.distance_unit),
+            fmt_km_or_mi(s.baseline_km * (1.0 + running::SPIKE_FRAC), m.distance_unit)
         ),
         (None, Some(f)) => format!(
             "That run was {:.0}% longer than your longest in the last 30 days. Increases this big raise injury risk: keep your next long run within {:.0}% of that longest run.",
@@ -657,7 +691,10 @@ fn intensity_message(m: &MessageCtx) -> String {
         Some(Trigger::PositiveSplit) => format!(
             "Second half {:.0}% slower than the first. Start about {} easier next time to hold an even pace.",
             m.split_pct.unwrap_or(0.0),
-            if m.distance_mi { "8 s/mi" } else { "5 s/km" }
+            match m.distance_unit {
+                DistanceUnit::Km => "5 s/km",
+                DistanceUnit::Mi => "8 s/mi",
+            }
         ),
         _ => format!(
             "About {:.0}% of this easy run was above easy effort. Next time slow down until you can talk in full sentences.",
@@ -719,7 +756,10 @@ fn corrective_message(m: &MessageCtx) -> String {
         Some(Trigger::DecouplingHigh) => format!(
             "Heart-rate drift hit {:.0}%: the pace was too hard for this distance, or heat or low fluids pushed it up. Start about {} slower next time.",
             m.drift_pct.unwrap_or(0.0),
-            if m.distance_mi { "30–50 s/mi" } else { "20–30 s/km" }
+            match m.distance_unit {
+                DistanceUnit::Km => "20–30 s/km",
+                DistanceUnit::Mi => "30–50 s/mi",
+            }
         ),
         _ => match detail {
             Some(o) => {
@@ -777,7 +817,7 @@ fn positive_mastery_message(m: &MessageCtx) -> String {
             None => "Every set hit the target reps.".to_string(),
         },
         (Some(Trigger::RunCompleted), _) => match m.run {
-            Some(r) => run_done_message(r, m.distance_mi),
+            Some(r) => run_done_message(r, m.distance_unit),
             None => "Run done, as planned.".to_string(),
         },
         (Some(Trigger::IntervalMastery), _) => {
@@ -871,8 +911,8 @@ fn mastery_message(k: &MasteryKind, m: &MessageCtx) -> String {
         ),
         MasteryKind::LongestRun { km, prior_km } => format!(
             "Longest run in 90 days: {} (previous longest {}).",
-            fmt_km_or_mi(*km, m.distance_mi),
-            fmt_km_or_mi(*prior_km, m.distance_mi)
+            fmt_km_or_mi(*km, m.distance_unit),
+            fmt_km_or_mi(*prior_km, m.distance_unit)
         ),
         MasteryKind::WeekComplete { sessions } => {
             format!("All {sessions} planned sessions this week done.")
@@ -922,7 +962,7 @@ mod tests {
             double_progression: false,
             plain: true,
             weight_lb: true,
-            distance_mi: false,
+            distance_unit: DistanceUnit::Km,
             today: Some(100),
         })
     }

@@ -7,36 +7,42 @@ import app.milestone.resources.tile_log
 import app.milestone.resources.tile_log_set
 import app.milestone.resources.tile_run_recording
 import app.milestone.resources.tile_start_run
+import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.StringResource
+
+/**
+ * The icons the system surfaces draw: Android's drawables (`SurfaceIcon.drawable`,
+ * androidMain) and the iOS widget extension's image sets `Icon<name>`, which
+ * iosApp/make-assets.py renders from those drawables.
+ */
+@Serializable
+internal enum class SurfaceIcon { TrackRun, LogSet, Log, Mark, Pause, Play, Stop }
 
 /**
  * What the one-tap system action shows and opens: Android's Quick Settings tile
  * and the widget's primary button, iOS's Control Center control and the widget's
- * button. Each platform draws its own icon for a face (Android: `TileFace.icon`,
- * QuickTileService.kt; iOS: the widget extension's symbols, named by [wire]).
+ * button, with its [icon]. A Control Center control shows SF Symbols only:
+ * [iosSymbol].
  */
-internal enum class TileFace(val label: StringResource, val dest: OpenDest, val active: Boolean) {
+internal enum class TileFace(
+    val label: StringResource,
+    val dest: OpenDest,
+    val active: Boolean,
+    val icon: SurfaceIcon,
+    val iosSymbol: String,
+) {
     /** A GPS run is recording: the tile is lit and reopens the tracker. */
-    Recording(Res.string.tile_run_recording, OpenDest.Track, true),
+    Recording(Res.string.tile_run_recording, OpenDest.Track, true, SurfaceIcon.TrackRun, "location.fill"),
 
     /** Today's open session is a run: the tracker's pre-start screen. */
-    StartRun(Res.string.tile_start_run, OpenDest.Track, false),
+    StartRun(Res.string.tile_start_run, OpenDest.Track, false, SurfaceIcon.TrackRun, "location"),
 
     /** Today's open session is a lift: the set editor at the next plan item. */
-    LogSet(Res.string.tile_log_set, OpenDest.LogSet, false),
+    LogSet(Res.string.tile_log_set, OpenDest.LogSet, false, SurfaceIcon.LogSet, "dumbbell"),
 
     /** Anything else (rest day, session done, hold, no plan, no snapshot): the Log chooser. */
-    Log(Res.string.tile_log, OpenDest.Log, false),
+    Log(Res.string.tile_log, OpenDest.Log, false, SurfaceIcon.Log, "plus"),
 }
-
-/** The face's name in the iOS widget payload. */
-internal val TileFace.wire: String
-    get() = when (this) {
-        TileFace.Recording -> "recording"
-        TileFace.StartRun -> "start_run"
-        TileFace.LogSet -> "log_set"
-        TileFace.Log -> "log"
-    }
 
 /**
  * The tile for today's widget snapshot [today] (null when there is none for today,

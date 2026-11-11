@@ -99,9 +99,10 @@ targets:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLOP_WIDGET_EXTENSION"
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
-  # The extension's model and views in a simulator: the payload the app wrote
-  # (LOLLOP_WIDGET_PAYLOAD), the timeline's midnight roll-over, and renders of
-  # every family, state and activity (LOLLOP_RENDER_DIR). No host app.
+  # The extension's model and views in a simulator, on fixtures.json (the Kotlin
+  # payload of every widget state) and the payload the app wrote
+  # (LOLLOP_WIDGET_PAYLOAD), with renders of every family, state and activity
+  # (LOLLOP_RENDER_DIR). No host app.
   LollopWidgetsTests:
     type: bundle.unit-test
     platform: iOS

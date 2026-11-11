@@ -974,7 +974,7 @@ impl Sim {
                     it.summary,
                     it.load_kg,
                     it.suggested_load_kg,
-                    it.intensity,
+                    it.intensity_label,
                     it.anchored_on,
                     it.adjusted_note
                 );
@@ -994,7 +994,7 @@ impl Sim {
         if vm.program.is_some() && self.holds.is_empty() {
             self.check_strip(vm);
             self.check_runs(vm);
-            self.check_lifts(vm);
+            self.check_lifts();
             self.check_reentry(vm);
             self.snapshot_week(vm);
         }
@@ -1053,7 +1053,7 @@ impl Sim {
                 bad.push(format!("run row {} / {}", r.distance_km, r.duration_min));
             }
         }
-        if let Some(tl) = &vm.training_load
+        if let Some(tl) = load_figures_of(&self.model)
             && (!tl.ctl.is_finite() || !tl.atl.is_finite() || tl.ctl < 0.0 || tl.atl < 0.0)
         {
             bad.push(format!("training load {} / {}", tl.ctl, tl.atl));
@@ -1103,25 +1103,30 @@ impl Sim {
             .filter(|t| mentions_unit(t, wrong))
             .map(|t| format!("{right} user sees {t:?}"))
             .collect();
-        let mut mi: Vec<&str> = Vec::new();
+        // The distance lines the core renders in the profile's unit.
+        let (wrong_d, wrong_pace) = match self.profile.distance_unit {
+            DistanceUnit::Km => ("mi", "/mi"),
+            DistanceUnit::Mi => ("km", "/km"),
+        };
+        let mut dist: Vec<&str> = Vec::new();
         for s in vm.next_session.iter().chain(&vm.week_plan) {
             for it in &s.items {
-                mi.push(&it.safety_reason_mi);
-                mi.extend(it.run_target.iter().map(|t| t.pace_label_mi.as_str()));
-                if let Some(t) = &it.run_target
-                    && t.pace_label_km.contains("/mi")
-                {
-                    bad.push(format!("km pace label {:?}", t.pace_label_km));
-                }
+                dist.push(&it.safety_reason);
+                dist.extend(it.run_target.iter().map(|t| t.pace_label.as_str()));
             }
         }
-        mi.extend(vm.guidance.iter().map(|g| g.summary_mi.as_str()));
-        mi.extend(vm.weekly_report.iter().map(|g| g.summary_mi.as_str()));
-        mi.extend(vm.feedback.iter().map(|f| f.message_mi.as_str()));
+        dist.extend(vm.guidance.iter().map(|g| g.summary.as_str()));
+        dist.extend(vm.weekly_report.iter().map(|g| g.summary.as_str()));
+        dist.extend(vm.feedback.iter().map(|f| f.message.as_str()));
         bad.extend(
-            mi.iter()
-                .filter(|t| mentions_unit(t, "km") || t.contains("/km"))
-                .map(|t| format!("miles text carries km: {t:?}")),
+            dist.iter()
+                .filter(|t| mentions_unit(t, wrong_d) || t.contains(wrong_pace))
+                .map(|t| {
+                    format!(
+                        "{wrong_d} in a {:?} view: {t:?}",
+                        self.profile.distance_unit
+                    )
+                }),
         );
         if !texts.is_empty() {
             self.hit("units");
@@ -1163,7 +1168,7 @@ impl Sim {
                 }
             }
             if let Some(h) = self.returning {
-                self.check_return(vm, h);
+                self.check_return(h);
             }
             return;
         };
@@ -1232,8 +1237,13 @@ impl Sim {
     /// The first session after a pain/illness hold is the easy return
     /// (RETURN-HOLD-001: lifts with 3+ reps left, runs at easy effort;
     /// ILLNESS-RTT-001: the 10–20 min return check).
-    fn check_return(&mut self, vm: &ViewModel, h: Hold) {
-        let Some(ns) = vm.next_session.as_ref().filter(|ns| !ns.items.is_empty()) else {
+    fn check_return(&mut self, h: Hold) {
+        let plan = working_plan(&self.model);
+        let Some(ns) = plan
+            .hero_day
+            .and_then(|d| plan.row(d))
+            .filter(|ns| !ns.items.is_empty())
+        else {
             return;
         };
         self.hit("easy return");
@@ -1540,11 +1550,12 @@ impl Sim {
         }
     }
 
-    fn check_lifts(&mut self, vm: &ViewModel) {
+    fn check_lifts(&mut self) {
         let lb_slack = if self.profile.weight_lb { 2.3 } else { 0.0 };
         let mut bad = Vec::new();
         let mut seen_today: Vec<((String, u8), f64, f64)> = Vec::new();
-        for row in vm
+        let plan = working_plan(&self.model);
+        for row in plan
             .week_plan
             .iter()
             .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
@@ -2221,7 +2232,10 @@ fn goal_and_unit_switcher() {
     sim.generate_plan();
     sim.run(days, |s, i| {
         if i == at(1) {
-            s.edit_profile(|p| p.weight_lb = true);
+            s.edit_profile(|p| {
+                p.weight_lb = true;
+                p.distance_unit = DistanceUnit::Mi;
+            });
         } else if i == at(2) {
             s.edit_profile(|p| {
                 p.goal_distance = GoalDistance::Marathon;
@@ -2230,7 +2244,10 @@ fn goal_and_unit_switcher() {
                 p.running_km_per_week = 32.0;
             });
         } else if i == at(3) {
-            s.edit_profile(|p| p.weight_lb = false);
+            s.edit_profile(|p| {
+                p.weight_lb = false;
+                p.distance_unit = DistanceUnit::Km;
+            });
         } else if i == at(4) {
             s.edit_profile(|p| {
                 p.lift_goal = LiftGoal::Hypertrophy;
@@ -2240,6 +2257,7 @@ fn goal_and_unit_switcher() {
         } else if i == at(5) {
             s.edit_profile(|p| {
                 p.weight_lb = true;
+                p.distance_unit = DistanceUnit::Mi;
                 p.running_days_per_week = 5;
             });
         }

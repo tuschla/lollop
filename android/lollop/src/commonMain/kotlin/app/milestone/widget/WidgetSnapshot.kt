@@ -1,5 +1,6 @@
 package app.milestone.widget
 
+import app.milestone.DayMark
 import app.milestone.DistanceUnit
 import app.milestone.HoldReason
 import app.milestone.PlanWithheld
@@ -8,15 +9,14 @@ import app.milestone.SessionDiscipline
 import app.milestone.SessionPlanView
 import app.milestone.SessionStatus
 import app.milestone.SessionType
+import app.milestone.TodayState
 import app.milestone.ViewModel
 import app.milestone.actionable
-import app.milestone.isDone
 import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
-import app.milestone.paceLabel
+import app.milestone.mark
 import app.milestone.runFaceHead
 import app.milestone.today
-import app.milestone.train_blocked
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.Serializable
 
@@ -121,46 +121,17 @@ internal data class WidgetSnapshot(
     val week: List<WidgetWeekDay> = emptyList(),
 )
 
-/** How one day of the plan week reads on the widget's week strip, the app's
- *  Today week strip in short ([app.milestone.ThisWeekCard]). */
-@Serializable
-internal enum class WidgetWeekMark {
-    /** Trained (done, or done lighter). */
-    Done,
-
-    /** The plan's next session (adjusted or not). */
-    Next,
-
-    /** A session still to come. */
-    Planned,
-
-    /** A past session not logged, or only partly done. */
-    Missed,
-
-    /** A plan rest day. */
-    Rest,
-
-    /** Before the plan started. */
-    None,
-}
+/** This snapshot when it describes local day [today] and is not marked stale; null
+ *  otherwise, so a snapshot of another day never shows as today's. */
+internal fun WidgetSnapshot.currentOn(today: Long): WidgetSnapshot? = takeIf { !stale && epochDay == today }
 
 @Serializable
-internal data class WidgetWeekDay(val epochDay: Long, val mark: WidgetWeekMark)
-
-private fun weekMarkOf(s: SessionPlanView): WidgetWeekMark = when {
-    s.isDone -> WidgetWeekMark.Done
-    s.status == SessionStatus.Next || s.status == SessionStatus.Adjusted -> WidgetWeekMark.Next
-    s.status == SessionStatus.Missed || s.status == SessionStatus.Partial -> WidgetWeekMark.Missed
-    s.status == SessionStatus.Rest -> WidgetWeekMark.Rest
-    s.status == SessionStatus.BeforePlan -> WidgetWeekMark.None
-    else -> WidgetWeekMark.Planned
-}
+internal data class WidgetWeekDay(val epochDay: Long, val mark: DayMark)
 
 /**
  * The snapshot of [model] for its own day ([ViewModel.today], the day the core
- * last set), written in time zone [zone]. Mirrors the Today screen's gates: a hold
- * wins over any plan, then the setup / plan prompts, then today's session or the
- * next one.
+ * last set), written in time zone [zone], in the core's today state
+ * ([ViewModel.today_surface]).
  */
 internal fun widgetSnapshotOf(
     model: ViewModel,
@@ -168,6 +139,7 @@ internal fun widgetSnapshotOf(
     zone: String = TimeZone.currentSystemDefault().id,
 ): WidgetSnapshot {
     val today = model.today()
+    val surface = model.today_surface
     val consistency = model.consistency?.takeIf { model.week_plan.isNotEmpty() && it.this_week_planned > 0 }
     val base = WidgetSnapshot(
         epochDay = today,
@@ -175,33 +147,31 @@ internal fun widgetSnapshotOf(
         weekDone = consistency?.this_week_done ?: 0,
         weekPlanned = consistency?.this_week_planned ?: 0,
         zone = zone,
-        week = if (consistency == null) emptyList() else model.week_plan.map { WidgetWeekDay(it.epoch_day, weekMarkOf(it)) },
+        week = if (consistency == null) emptyList() else model.week_plan.map { WidgetWeekDay(it.epoch_day, it.status.mark) },
     )
-    if (model.train_blocked) {
-        return base.copy(kind = WidgetDayKind.Paused, holdReason = model.hold_reason, weekDone = 0, weekPlanned = 0, week = emptyList())
+    when (surface.state) {
+        TodayState.Paused -> return base.copy(kind = WidgetDayKind.Paused, holdReason = model.hold_reason, weekDone = 0, weekPlanned = 0, week = emptyList())
+        TodayState.Setup -> return base
+        TodayState.NoPlan -> return base.copy(kind = WidgetDayKind.NoPlan, planWithheld = model.plan_withheld)
+        TodayState.Session, TodayState.Done, TodayState.Rest -> Unit
     }
-    val ns = model.next_session
-    if (ns == null) {
-        return if (model.profile == null) {
-            base
-        } else {
-            base.copy(kind = WidgetDayKind.NoPlan, planWithheld = model.plan_withheld)
-        }
-    }
+    val ns = model.next_session ?: return base
     val ahead = aheadDays(model, ns, today, distanceUnit)
+    val done = surface.state == TodayState.Done
     // Once today's session is finished the core moves next_session on; today's
     // row in week_plan still says what was done.
-    val doneToday = model.week_plan.firstOrNull { it.epoch_day == today && it.isDone && it.items.isNotEmpty() }
-    val session = ns.takeIf { it.epoch_day == today } ?: doneToday
-        ?: return base.copy(
-            kind = WidgetDayKind.Rest,
-            restDay = model.week_plan.any { it.epoch_day == today && it.status == SessionStatus.Rest },
-            next = WidgetNext(ns.epoch_day, ns.title),
-            ahead = ahead,
-        )
+    val session = when (surface.state) {
+        TodayState.Session -> ns
+        TodayState.Done -> model.week_plan.firstOrNull { it.epoch_day == today }
+        else -> null
+    } ?: return base.copy(
+        kind = WidgetDayKind.Rest,
+        restDay = surface.rest_today,
+        next = WidgetNext(ns.epoch_day, ns.title),
+        ahead = ahead,
+    )
     val isRun = session.session_type.discipline == SessionDiscipline.Run
     val items = session.items.map { widgetItemOf(it, session.session_type, distanceUnit) }
-    val done = session === doneToday
     return base.copy(
         kind = if (isRun) WidgetDayKind.Run else WidgetDayKind.Lift,
         title = session.title,
@@ -247,6 +217,6 @@ private fun widgetItemOf(item: PrescriptionView, sessionType: SessionType, unit:
         },
         done = item.done,
         // Only beside a volume head: a run's full summary already states its pace.
-        pace = item.run_target?.takeIf { runHead != null }?.paceLabel(unit).orEmpty(),
+        pace = item.run_target?.takeIf { runHead != null }?.pace_label.orEmpty(),
     )
 }

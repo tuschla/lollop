@@ -23,14 +23,8 @@ import org.jetbrains.compose.resources.StringResource
 // What a run shows outside the app: Android's ongoing notification (and its Live
 // Update chip), iOS's Live Activity. Both render the same text from here.
 
-/** Where a run is, as its system surface titles it; [wire] names it for the Live Activity. */
-internal enum class RunSurfacePhase(val wire: String) {
-    Locating("locating"),
-    Armed("armed"),
-    Recording("recording"),
-    Paused("paused"),
-    SignalLost("signal_lost"),
-}
+/** Where a run is, as its system surface titles it. */
+internal enum class RunSurfacePhase { Locating, Armed, Recording, Paused, SignalLost }
 
 /** The phase of the recorder's state. A pause outranks a lost signal; both only
  *  count while recording. */
@@ -119,7 +113,7 @@ internal fun RunRecorder.surfaceState(): RunSurfaceState = RunSurfaceState(
     movingSec = RunSession.elapsedSec.value,
     distanceKm = RunSession.distanceKm.value,
     paceMinPerKm = RunSession.currentPaceMinPerKm.value,
-    miles = resolveDistanceUnit(AppSettings.distanceUnitOverride.value) == DistanceUnit.Mi,
+    miles = EventDispatcher.model.value.distanceUnit() == DistanceUnit.Mi,
     hasTrack = RunSession.points.value.size >= 2,
     step = if (recording) RunSession.stepProgress.value else null,
 )

@@ -9,9 +9,8 @@ use crate::app::plan_views::adjustments::{
 };
 use crate::app::plan_views::completion::refresh_item_statuses;
 use crate::app::plan_views::item_render::{resync_intensity, round_load_or_drop};
-use crate::app::view_types::{
-    AdjustmentView, PlanIntensity, PrescriptionView, SessionPlanView, SessionStatus,
-};
+use crate::app::plan_views::plan_item::{PlanItem, PlanRow};
+use crate::app::view_types::{AdjustmentView, PlanIntensity, SessionStatus};
 use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind};
 
 /// Per-item performance autoregulation on TODAY's session, from the item's own
@@ -29,7 +28,7 @@ use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind};
 /// (`fresh`) and the matched e1RM-gate recs already in `recommended`, each with
 /// the plate-grid load for the remaining sets when the cue moves the load.
 pub(in crate::app) fn apply_first_set_autoreg(
-    ns: &mut SessionPlanView,
+    ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
     review_recs: &[AdjustmentCall],
     hold: bool,
@@ -102,7 +101,7 @@ struct FirstSetCtx<'a> {
 /// One lift item's first-set autoregulation: applies the deepest cut, the RPE
 /// cap and the add/failed-set notes to `it`, and returns its cues (empty when
 /// nothing changed it or the exercise is finished).
-fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
+fn item_cues(it: &mut PlanItem, cx: &FirstSetCtx) -> Vec<ItemCue> {
     let FirstSetCtx {
         recommended,
         hold,

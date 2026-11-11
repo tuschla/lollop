@@ -40,12 +40,20 @@ data class Palette(
 /** A dark palette: its ground has low luminance (a forced Dark on a light OS too). */
 internal val Palette.isDark: Boolean get() = bgTop.luminance() < 0.5f
 
+/** Text and icons on the [Palette.accent] fill (spec "Accent fill + BgTop text"):
+ *  the ground, the deep tinted one on the dark palettes (white fails AA on their
+ *  light, bright accents: 2.2:1 on Rose-dark's #FF8AB5 vs 8.1:1 for its plum
+ *  #24111F) and the soft one on the light palettes, whose accents are deepened for it. */
+internal val Palette.onAccent: Color get() = bgTop
+
 // Subtext tuned to pair with the theme-fixed danger surface (StatusColors.danger).
 // It does not vary by theme: the danger ground is identical in every theme.
 // #FFE4E4 clears WCAG AA (≈4.9:1) on the #C1272D danger ground at caption size.
 internal val DangerOn = Color(0xFFFFE4E4) // subtext on the danger surface
-// Labels and glyphs on the danger surface (white, 5.8:1 on #C1272D).
-internal val DangerLabel = Color.White
+// Labels and glyphs on a fixed status fill, the same in every theme: the danger
+// surface (5.8:1 on #C1272D), the warn fill (4.9:1) and the evidence fills
+// (ThemeContrastTest).
+internal val OnStatusFill = Color.White
 
 // Warn ochre for text. #E0A33A clears ≥5.85:1 on every dark ground (worst
 // Meadow-dark bgElevated), #8A5300 ≥5.19:1 on every light ground (worst
@@ -195,8 +203,8 @@ internal val PaperDarkPalette = Palette(
 /**
  * User-selectable visual themes (visual-design-system.md §1, §9). Each carries a
  * [dark] and [light] palette; the theme root picks between them by system setting.
- * Persisted by [name]; [Paper] is the default (AppSettings pins it, with the system
- * accent, on a fresh install).
+ * Persisted by [name]; [Default] is what a fresh install, an unknown stored name
+ * and a composition outside the theme root get.
  */
 enum class AppTheme(
     val dark: Palette,
@@ -211,11 +219,13 @@ enum class AppTheme(
     Paper(PaperDarkPalette, PaperLightPalette, takesSystemAccent = true);
 
     companion object {
+        val Default: AppTheme = Paper
+
         /** Theme names older builds persisted → the theme that took each one's
          *  place, so a stored choice never silently falls back. */
         private val retired = mapOf("Beton" to Rose, "Werkstatt" to Meadow, "Signal" to Iris)
 
         fun from(name: String?): AppTheme =
-            entries.firstOrNull { it.name == name } ?: name?.let(retired::get) ?: Paper
+            entries.firstOrNull { it.name == name } ?: name?.let(retired::get) ?: Default
     }
 }

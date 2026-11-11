@@ -4,7 +4,7 @@ package app.milestone
  * The Swift side of the app's surfaces outside its window (iosApp/iosApp/Surfaces.swift):
  * it stores the widget payload in the App Group container the widget extension
  * reads, reloads the widgets and the control, and runs the Live Activities. Every
- * argument is JSON the extension decodes (the payloads in :lollop's IosSurfaces.kt).
+ * argument is JSON the extension decodes (the payloads in :lollop's widget/IosSurfacePayload.kt).
  * Called on the main thread.
  */
 public interface SurfaceHost {

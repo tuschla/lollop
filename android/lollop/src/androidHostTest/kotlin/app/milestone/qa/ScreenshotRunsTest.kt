@@ -204,8 +204,8 @@ class ScreenshotRunsTest {
                 band = "interval",
                 pace_fast_sec_per_km = 250,
                 pace_slow_sec_per_km = 260,
-                pace_label_km = "4:10–4:20 /km",
-                pace_label_mi = "6:43–6:59 /mi",
+                // The seeded US install shows miles; the core renders the label in them.
+                pace_label = "6:43–6:59 /mi",
                 hr_label = "170–181 bpm",
                 effort_cue = "effort 8–9 of 10",
                 effort_detail = "8–9 of 10",

@@ -120,6 +120,10 @@ fn diffs(path: &str, expected: &Value, got: &Value, out: &mut Vec<String>) {
         // figure, and a %1RM item's effort target comes from its plate-floored
         // load, so it can be up to one RPE lower.
         (Value::Number(_), Value::Number(_)) if path == ".run_progress.planned_weekly_km" => {}
+        // A row an old build logged without an id showed id 0; it now carries
+        // the id its date gives (`event::entry::row_id`), which the shell edits by.
+        (Value::Number(a), Value::Number(b))
+            if path.ends_with(".entry_id") && a.as_u64() == Some(0) && b.as_u64() != Some(0) => {}
         (Value::Number(a), Value::Number(b))
             if path.ends_with(".target_rpe")
                 && (0.0..=1.0).contains(&(a.as_f64().unwrap() - b.as_f64().unwrap())) => {}
@@ -133,6 +137,9 @@ fn diffs(path: &str, expected: &Value, got: &Value, out: &mut Vec<String>) {
         // that as false; `Profile.female` is now an Option and an absent field is
         // None, "read as not-female" (app/model.rs).
         (Value::Bool(false), Value::Null) if path == ".profile.female" => {}
+        // Copy, sent as its sentences now so the shell never splits the text.
+        (Value::String(_), Value::Array(g))
+            if path.ends_with(".why.basis") && g.iter().all(Value::is_string) => {}
         // Text is copy: it was reworded between these builds.
         (Value::String(a), Value::String(_)) if is_copy(path, a) => {}
         _ if expected == got => {}
@@ -151,8 +158,16 @@ fn expected(v: &str) -> Value {
 }
 
 fn assert_shows(v: &str, file: &str, view: &Value) {
+    // The profile's guidance row (the training-age row these builds listed
+    // first in `guidance`) is sent apart as `profile_guidance` now.
+    let mut view = view.clone();
+    if let Some(Value::Array(profile)) = view.get("profile_guidance").cloned()
+        && let Some(Value::Array(rows)) = view.get_mut("guidance")
+    {
+        rows.splice(0..0, profile);
+    }
     let mut out = Vec::new();
-    diffs("", &expected(v), &data_only(view), &mut out);
+    diffs("", &expected(v), &data_only(&view), &mut out);
     assert!(
         out.is_empty(),
         "{file} shows other data than {v} did:\n{}",

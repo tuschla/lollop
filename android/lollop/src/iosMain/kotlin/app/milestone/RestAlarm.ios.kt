@@ -55,7 +55,7 @@ internal actual object RestAlarmPlatform {
 
     /** (Re)schedule the rest-done alert [leftMs] from now, naming [exercise] ("" none). */
     private fun postDone(exercise: String, leftMs: Long) {
-        val res = systemResources()
+        val res = PlatformContext.INSTANCE.appResources()
         val content = UNMutableNotificationContent().apply {
             setTitle(res.getString(Res.string.log_rest_notif_done_title))
             if (exercise.isNotEmpty()) setBody(res.getString(Res.string.log_rest_notif_done_body, exercise))

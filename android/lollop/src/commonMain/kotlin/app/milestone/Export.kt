@@ -44,7 +44,7 @@ private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /** Cap on a whole import candidate, from what the app really writes. A backup is
  *  the compacted log, and every GPS run is one LogRunTrack line of up to
- *  [TRACK_DECIMATION_CAP] fixes: one year of a hybrid athlete recording at the
+ *  [CoreConstants.TRACK_DECIMATION_CAP] fixes: one year of a hybrid athlete recording at the
  *  tracker's screen-off cadence (1 fix / 4 s) exports to about 11.7 MiB (146 GPS
  *  runs, PersistenceTortureTest.aOneYearBackupWithGpsRunsIsImportable), five years
  *  to about 50 MiB. 256 MiB is two decades of that, so any backup the app produced
@@ -55,7 +55,7 @@ private fun Int.twoDigits(): String = toString().padStart(2, '0')
 internal const val MAX_IMPORT_BYTES = 256L * 1024 * 1024
 
 /** Cap on one import line. The longest line the app writes is a LogRunTrack: at
- *  most [TRACK_DECIMATION_CAP] fixes (plus kept pause boundaries) of at most ~140
+ *  most [CoreConstants.TRACK_DECIMATION_CAP] fixes (plus kept pause boundaries) of at most ~140
  *  wire bytes each (four full-precision numbers and their keys), so under 1 MiB.
  *  16 MiB leaves room for an undecimated track from an older build; a longer
  *  "line" (a newline-less binary pick) is refused before it can fill the line
@@ -78,20 +78,13 @@ internal expect fun rememberDataExport(onExported: () -> Unit = {}): () -> Unit
 /** The compacted event log as a backup holds it, or null when it couldn't be read.
  *  The log is read with the read-only [EventLog.read] inside an exclusive
  *  dispatcher turn, so no append interleaves with the read and the export never
- *  rewrites the live log.
- *
- *  A removed plan ([KEY_PLAN_CLEARED]) is normally the log's own final `ClearPlan`
- *  line, which compaction keeps ([RestoredLog.planRemoved]). A log rewritten by an
- *  older build dropped it with the plan it cleared, so the backup ends with a
- *  `ClearPlan` line when the log holds no plan line: restoring it
- *  ([replaceEventLog]) then keeps the plan removed instead of generating one. */
+ *  rewrites the live log. A removed plan is the log's own final `ClearPlan` line,
+ *  which compaction keeps, so the backup restores with the plan removed. */
 internal suspend fun readDataExport(ctx: PlatformContext): List<String>? = runCatching {
     var read = emptyList<String>()
     EventDispatcher.exclusive {
         read = withContext(Dispatchers.IO) {
-            val log = EventLog.read(ctx.eventLogPath(), AppRuntime.engine).lines
-            val planRemoved = ctx.setupStore().getBoolean(KEY_PLAN_CLEARED, false)
-            if (planRemoved && lastPlanEvent(log) == null) log + CLEAR_PLAN_LINE else log
+            EventLog.read(ctx.eventLogPath(), AppRuntime.engine).lines
         }
         null
     }
@@ -100,18 +93,6 @@ internal suspend fun readDataExport(ctx: PlatformContext): List<String>? = runCa
     PlatformLog.e("Export", "couldn't read the event log for export", it)
     null
 }
-
-/** [Event.ClearPlan] as a log line. */
-private val CLEAR_PLAN_LINE = Event.ClearPlan.toJson().toString()
-
-/** The variant of the last `GeneratePlan` / `ClearPlan` line in [lines], or null
- *  when there is none: "ClearPlan" means the log ends with the plan removed. */
-internal fun lastPlanEvent(lines: List<String>): String? =
-    lines.asReversed().firstNotNullOfOrNull { line ->
-        // Substring pre-check so the scan never JSON-parses a large track line.
-        if ("GeneratePlan" !in line && "ClearPlan" !in line) return@firstNotNullOfOrNull null
-        EventLog.variantOf(line)?.takeIf { it == "GeneratePlan" || it == "ClearPlan" }
-    }
 
 /** Outcome of reading + validating an import candidate before it can replace the log. */
 sealed interface ImportCheck {
@@ -229,14 +210,9 @@ enum class DataImportResult { Replaced, RunInProgress, Failed }
  * [DataImportResult.Failed]. Refused while a run is recording or armed: the
  * reboot that must follow replaces the model the run would be saved into. On
  * [DataImportResult.Replaced] the caller reboots with [AppRuntime.requestReboot].
- *
- * The "plan removed" marker ([KEY_PLAN_CLEARED]) describes the log, so it is set
- * from the imported one (its last plan line is a `ClearPlan`, see [readDataExport]):
- * a backup of a removed plan restores without one, and this device's own marker
- * never outlives its replaced log.
  */
 internal suspend fun replaceEventLog(ctx: PlatformContext, lines: List<String>): DataImportResult {
-    if (RunSession.tracking.value || RunSession.armed.value) return DataImportResult.RunInProgress
+    if (RunSession.runActive) return DataImportResult.RunInProgress
     return try {
         EventDispatcher.exclusive {
             withContext(CoreDispatcher + NonCancellable) {
@@ -248,7 +224,6 @@ internal suspend fun replaceEventLog(ctx: PlatformContext, lines: List<String>):
                     engine.reattachLog(previous)
                     throw t
                 }
-                ctx.setupStore().edit(commit = true) { putBoolean(KEY_PLAN_CLEARED, lastPlanEvent(lines) == "ClearPlan") }
             }
             null
         }

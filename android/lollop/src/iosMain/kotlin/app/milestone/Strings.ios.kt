@@ -20,8 +20,7 @@ import org.jetbrains.compose.resources.stringResource
  *  reads block, as CMP's own `stringResource` does outside the web targets. */
 actual open class PlatformResources internal constructor(internal val environment: ResourceEnvironment)
 
-/** The resources for the system's current locale, for text built outside composition. */
-internal fun systemResources(): PlatformResources = PlatformResources(getSystemResourceEnvironment())
+internal actual fun PlatformContext.appResources(): PlatformResources = PlatformResources(getSystemResourceEnvironment())
 
 internal actual fun PlatformResources.getString(resource: StringResource, vararg formatArgs: Any): String =
     runBlocking { cmpString(environment, resource, *formatArgs) }

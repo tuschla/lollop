@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -325,14 +326,16 @@ class EventLogTest {
     }
 
     @Test
-    fun loadReportsARemovedPlan() {
+    fun aRemovedPlanSurvivesLoadAndReplaysAsRemoved() {
         val file = tempLog()
         val lines = listOf(line(Event.GeneratePlan(1)), line(Event.ClearPlan))
         file.writeText(lines.joinToString("\n", postfix = "\n"))
-        val restored = EventLog.load(file, Core)
         // The removed plan keeps its span (`Model::past_plans`): both lines stay.
-        assertEquals(lines, restored.lines)
-        assertTrue(restored.planRemoved)
+        assertEquals(lines, EventLog.load(file, Core).lines)
+        Core.restoreFrom(file)
+        val view = Core.send(Event.SetToday(2)).view
+        assertNull(view.program)
+        assertTrue(view.plan_removed)
     }
 
     @Test

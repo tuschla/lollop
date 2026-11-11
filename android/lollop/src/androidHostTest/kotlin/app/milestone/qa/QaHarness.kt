@@ -237,15 +237,22 @@ object QaHarness {
         (app.milestone.todayEpochDay() - days) * 86_400L + 43_200L + plusSec
 
     /**
-     * The exact RunCard distance label for [km] under the current locale's default
-     * unit (miles for US/GB/…, km elsewhere), computed with the app's own
-     * formatter so the run-history assertion is unit-locale-independent.
+     * The exact RunCard distance label for [km] in the unit a seeded install shows
+     * (its locale's, which boot moves into the profile), computed with the app's
+     * own formatter so the run-history assertion is unit-locale-independent.
      */
     fun expectedRunDistanceLabel(km: Double): String =
-        app.milestone.runDistLabel(
-            km,
-            app.milestone.resolveDistanceUnit(app.milestone.DistanceUnitOverride.System),
-        )
+        app.milestone.runDistLabel(km, app.milestone.localeDistanceUnit())
+
+    /**
+     * An install upgrading from builds that kept the distance unit in the settings
+     * store, with [unit] chosen there: boot moves it into the profile
+     * ([app.milestone.LEGACY_DISTANCE_UNIT_KEY]). Call after [reset], before launch.
+     */
+    fun legacyDistanceUnit(ctx: Context, unit: app.milestone.DistanceUnit) {
+        ctx.getSharedPreferences(AppFileNames.SETTINGS_STORE, Context.MODE_PRIVATE).edit()
+            .putString(app.milestone.LEGACY_DISTANCE_UNIT_KEY, unit.name).commit()
+    }
 
     /**
      * A set-up strength lifter with no logged history. Boot sees a profile but no

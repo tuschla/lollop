@@ -245,11 +245,7 @@ private fun InlineDisclosureLink(description: String, onClick: () -> Unit) {
 @Composable
 internal fun EvidenceCard(
     summary: String,
-    grade: EvidenceGrade?,
-    citation: String,
-    confidence: Float,
-    safetyCritical: Boolean,
-    contested: Boolean,
+    evidence: EvidenceTagView,
     section: String? = null,
     confidenceInWhy: Boolean = true,
     container: Color = BgElevated,
@@ -281,32 +277,34 @@ internal fun EvidenceCard(
     // Card-owned detail rendered INSIDE the "?" panel, after the evidence lines
     // (e.g. a hold card's follow-up evidence), so the card keeps ONE "?".
     panelExtra: (@Composable () -> Unit)? = null,
-    // Force the regular prose weight whatever the summary's length: a family of
-    // sibling cards (Today's coaching cards) then wears one style.
+    // The summary reads as prose: the row's `prose` (a long paragraph), or a
+    // family of sibling cards (Today's coaching cards) that wears one style.
     proseSummary: Boolean = false,
+    // The glossary terms the core marked in [summary] (the row's `glossary`).
+    glossary: List<GlossarySpan> = emptyList(),
+    // What the card is about in the core's words (the row's `subject`), when the
+    // caller passes no [subject], [section] or [statusOverline].
+    spokenSubject: String? = null,
 ) {
     val statusColors = LocalStatusColors.current
     // Every "?" names what it explains ("Details: <subject>"): the caller's
-    // subject, else the card's overline, else the summary's first clause.
-    val disclosureSubject = subject ?: section ?: statusOverline ?: summary.substringBefore(". ").take(DisclosureSubjectChars)
+    // subject, else the card's overline, else the core's subject of the summary.
+    val disclosureSubject = subject ?: section ?: statusOverline ?: spokenSubject
     // Keyed on the card's identity (summary+citation), not composition position:
     // in an unkeyed/reordered list a positional saveable can re-attach an open
     // "?" panel to a DIFFERENT card after reorder. Keying
     // also resets the panel when a slot's content changes, correct, since the
     // disclosure belongs to the claim, not the slot.
-    var expanded by rememberSaveable(summary, citation) { mutableStateOf(false) }
+    var expanded by rememberSaveable(summary, evidence.citation) { mutableStateOf(false) }
     // Jargon in the summary (RIR, RPE, e1RM, …) gets glossary links inside the
     // "?" panel, so the face stays clean (ONE "?") but every term has a path to
     // its meaning.
-    val panelGlossaryKeys = remember(summary) { glossaryKeysIn(summary) }
-    // Bold is a summary weight: a long coaching paragraph (or a sectioned
-    // note under its own overline) reads as prose, so it drops to regular
-    // weight and stops outweighing the card titles around it. A safety card
-    // keeps bold (maximal emphasis).
-    val summaryStyle = if (
-        !safetyCritical &&
-        (proseSummary || section != null || summary.length > ProseSummaryChars)
-    ) {
+    val panelGlossaryKeys = remember(glossary) { glossary.terms() }
+    // Bold is a summary weight: a coaching paragraph (prose, or a sectioned note
+    // under its own overline) drops to regular weight and stops outweighing the
+    // card titles around it. A safety card keeps bold (maximal emphasis).
+    val safetyCritical = evidence.safety_critical
+    val summaryStyle = if (!safetyCritical && (proseSummary || section != null)) {
         Type.Body
     } else {
         Type.BodyBold
@@ -321,10 +319,7 @@ internal fun EvidenceCard(
         if (expanded) {
             WhyDetail(
                 why = why,
-                grade = grade,
-                citation = citation,
-                confidence = confidence,
-                contested = contested,
+                evidence = evidence,
                 // Confidence appears inside the "?" for every card except a
                 // safety hold (safety is a rule, not a probability).
                 showConfidence = confidenceInWhy,
@@ -458,12 +453,6 @@ internal fun EvidenceCard(
     }
 }
 
-/** Summary length (chars) past which a face summary reads as prose: regular weight. */
-private const val ProseSummaryChars = 90
-
-/** Longest summary clause used as a "?" button's spoken subject. */
-private const val DisclosureSubjectChars = 60
-
 /** Height of the chip/section header row on a two-row EvidenceCard face. */
 private val CompactHeaderHeight = 28.dp
 
@@ -484,17 +473,14 @@ internal val DisclosureEdgeInset = (ActionMinHeight - DisclosureDiscSize) / 2
 @Composable
 internal fun WhyDetail(
     why: WhyView?,
-    grade: EvidenceGrade?,
-    citation: String,
-    confidence: Float,
-    contested: Boolean,
+    evidence: EvidenceTagView,
     showConfidence: Boolean,
     extraDetail: String? = null,
-    glossaryKeys: List<String> = emptyList(),
+    glossaryKeys: List<GlossaryTerm> = emptyList(),
     confidenceHigh: Float? = null,
 ) {
     val hasWhy = why != null &&
-        (why.basis.isNotBlank() || why.grade_note.isNotBlank() || why.improves.isNotBlank())
+        (why.basis.isNotEmpty() || why.grade_note.isNotBlank() || why.improves.isNotBlank())
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         // Grade badge (it opens the grading legend) + the CONTESTED marker.
         // SAFETY stays on the card face (HARD RULE), never here.
@@ -502,22 +488,20 @@ internal fun WhyDetail(
             horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GradeChip(grade)
+            GradeChip(evidence.grade)
             // Warn as TEXT: the per-theme WarnText token (the fixed warn fill fails
             // AA as text on most grounds).
-            if (contested) OutlinedChip(stringResource(Res.string.main_chip_contested), WarnText)
+            if (evidence.contested) OutlinedChip(stringResource(Res.string.main_chip_contested), WarnText)
         }
         if (hasWhy) {
             // 1. What this is based on.
-            if (why.basis.isNotBlank()) {
-                WhyLine(stringResource(Res.string.main_why_based_on), why.basis)
+            if (why.basis.isNotEmpty()) {
+                WhyLine(stringResource(Res.string.main_why_based_on), why.basis.joinToString(" "))
             }
             // 2. Why THIS grade (+ confidence figure when the card shows one).
-            val gradeLine = why.grade_note.ifBlank {
-                gradeLabel(grade)?.let { stringResource(Res.string.main_evidence_grade, it) } ?: ""
-            }
+            val gradeLine = why.grade_note
             if (gradeLine.isNotBlank()) {
-                val low = (confidence * 100).roundOrZero()
+                val low = (evidence.confidence * 100).roundOrZero()
                 val high = confidenceHigh?.let { (it * 100).roundOrZero() } ?: low
                 val gradeLineFull = when {
                     !showConfidence -> gradeLine
@@ -535,10 +519,10 @@ internal fun WhyDetail(
         } else {
             // No why block: the one-line grade restatement. Hidden for an
             // unmapped grade rather than leaking a raw Debug string.
-            gradeLabel(grade)?.let { label ->
+            gradeLabel(evidence.grade)?.let { label ->
                 Text(
                     if (showConfidence) {
-                        stringResource(Res.string.main_evidence_confidence, label, (confidence * 100).roundOrZero())
+                        stringResource(Res.string.main_evidence_confidence, label, (evidence.confidence * 100).roundOrZero())
                     } else {
                         stringResource(Res.string.main_evidence_label, label)
                     },
@@ -547,16 +531,14 @@ internal fun WhyDetail(
                 )
             }
         }
-        Text(citationLabel(citation), color = OnBgFaint, style = Type.Caption)
-        // Internal KB claim ids ("(AUTOREG-RIR-001)") are engine bookkeeping, never
-        // user copy: keep only the human clause of a core-composed detail line.
-        extraDetail?.let(::stripClaimIds)?.takeIf { it.isNotBlank() }?.let {
+        Text(citationLabel(evidence.citation), color = OnBgFaint, style = Type.Caption)
+        extraDetail?.takeIf { it.isNotBlank() }?.let {
             Text(it, color = OnBgMuted, style = Type.Caption)
         }
         // The core composes a contested grade note whenever it has one (it names
         // the open question); only a card with no grade note needs the generic
         // explainer.
-        if (contested && why?.grade_note.isNullOrBlank()) {
+        if (evidence.contested && why?.grade_note.isNullOrBlank()) {
             Text(
                 stringResource(Res.string.main_contested_explainer),
                 color = OnBgMuted,
@@ -665,7 +647,7 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
             style = Type.Body,
         )
         definitions.forEach { d ->
-            val label = d.label.ifBlank { gradeLabel(d.grade) }
+            val label = gradeLabel(d.grade)
             if (label != null) {
                 LegendRow(
                     label,
@@ -689,53 +671,40 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
 // as a static shell resource (HARD RULE 1 concerns training claims; a
 // definition of "RPE" asserts none).
 
-/** One glossary entry: a stable key, the string resources for its display
- *  term and plain definition (resolved at the @Composable call sites), and the
- *  pattern that spots the term in card copy (null = too generic a word to
- *  auto-detect; reachable only from an explicit [GlossaryInfo]). */
-private data class GlossaryEntry(val key: String, val termRes: StringResource, val defRes: StringResource, val pattern: Regex?)
+/** One glossary entry: the core's term (its wire name is the key the sheet
+ *  opens at) and the string resources for its display term and plain
+ *  definition (resolved at the @Composable call sites). */
+private data class GlossaryEntry(val term: GlossaryTerm, val termRes: StringResource, val defRes: StringResource) {
+    val key: String get() = term.wire
+}
 
 private val GLOSSARY: List<GlossaryEntry> = listOf(
-    GlossaryEntry("e1rm", Res.string.main_glossary_e1rm_term, Res.string.main_glossary_e1rm_def, Regex("""\be1RM\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("1rm", Res.string.main_glossary_1rm_term, Res.string.main_glossary_1rm_def, Regex("""(?<![A-Za-z0-9])1RM\b""")),
-    GlossaryEntry("rpe", Res.string.main_glossary_rpe_term, Res.string.main_glossary_rpe_def, Regex("""\bRPE\b""")),
-    GlossaryEntry("rir", Res.string.main_glossary_rir_term, Res.string.main_glossary_rir_def, Regex("""\bRIR\b""")),
-    GlossaryEntry("zscore", Res.string.main_glossary_zscore_term, Res.string.main_glossary_zscore_def, Regex("""\bz-scores?\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("vdot", Res.string.main_glossary_vdot_term, Res.string.main_glossary_vdot_def, Regex("""\bVDOT\b""")),
-    GlossaryEntry("decoupling", Res.string.main_glossary_decoupling_term, Res.string.main_glossary_decoupling_def, Regex("""\bdecoupling\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("vi", Res.string.main_glossary_vi_term, Res.string.main_glossary_vi_def, Regex("""\bvariability index\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("tonnage", Res.string.main_glossary_tonnage_term, Res.string.main_glossary_tonnage_def, Regex("""\btonnage\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("spike", Res.string.main_glossary_spike_term, Res.string.main_glossary_spike_def, null),
-    GlossaryEntry("hrmax", Res.string.main_glossary_hrmax_term, Res.string.main_glossary_hrmax_def, Regex("""HRmax""")),
-    GlossaryEntry("deload", Res.string.main_glossary_deload_term, Res.string.main_glossary_deload_def, Regex("""\bdeload""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("mesocycle", Res.string.main_glossary_mesocycle_term, Res.string.main_glossary_mesocycle_def, Regex("""\bmesocycles?\b""", RegexOption.IGNORE_CASE)),
-    GlossaryEntry("ctl", Res.string.main_glossary_ctl_term, Res.string.main_glossary_ctl_def, Regex("""\bCTL\b""")),
-    GlossaryEntry("trimp", Res.string.main_glossary_trimp_term, Res.string.main_glossary_trimp_def, Regex("""\bTRIMP\b""")),
-    GlossaryEntry("hrzones", Res.string.main_glossary_hrzones_term, Res.string.main_glossary_hrzones_def, Regex("""\bHR zones?\b""")),
-    GlossaryEntry("volume", Res.string.main_glossary_volume_term, Res.string.main_glossary_volume_def, null),
-    GlossaryEntry("maf", Res.string.main_glossary_maf_term, Res.string.main_glossary_maf_def, Regex("""\bMAF\b""")),
-    GlossaryEntry("pap", Res.string.main_glossary_pap_term, Res.string.main_glossary_pap_def, Regex("""\bPAPE?\b""")),
-    GlossaryEntry("reds", Res.string.main_glossary_reds_term, Res.string.main_glossary_reds_def, Regex("""\bRED-S\b""")),
+    GlossaryEntry(GlossaryTerm.E1rm, Res.string.main_glossary_e1rm_term, Res.string.main_glossary_e1rm_def),
+    GlossaryEntry(GlossaryTerm.OneRm, Res.string.main_glossary_1rm_term, Res.string.main_glossary_1rm_def),
+    GlossaryEntry(GlossaryTerm.Rpe, Res.string.main_glossary_rpe_term, Res.string.main_glossary_rpe_def),
+    GlossaryEntry(GlossaryTerm.Rir, Res.string.main_glossary_rir_term, Res.string.main_glossary_rir_def),
+    GlossaryEntry(GlossaryTerm.ZScore, Res.string.main_glossary_zscore_term, Res.string.main_glossary_zscore_def),
+    GlossaryEntry(GlossaryTerm.Vdot, Res.string.main_glossary_vdot_term, Res.string.main_glossary_vdot_def),
+    GlossaryEntry(GlossaryTerm.Decoupling, Res.string.main_glossary_decoupling_term, Res.string.main_glossary_decoupling_def),
+    GlossaryEntry(GlossaryTerm.VariabilityIndex, Res.string.main_glossary_vi_term, Res.string.main_glossary_vi_def),
+    GlossaryEntry(GlossaryTerm.Tonnage, Res.string.main_glossary_tonnage_term, Res.string.main_glossary_tonnage_def),
+    GlossaryEntry(GlossaryTerm.Spike, Res.string.main_glossary_spike_term, Res.string.main_glossary_spike_def),
+    GlossaryEntry(GlossaryTerm.HrMax, Res.string.main_glossary_hrmax_term, Res.string.main_glossary_hrmax_def),
+    GlossaryEntry(GlossaryTerm.Deload, Res.string.main_glossary_deload_term, Res.string.main_glossary_deload_def),
+    GlossaryEntry(GlossaryTerm.Mesocycle, Res.string.main_glossary_mesocycle_term, Res.string.main_glossary_mesocycle_def),
+    GlossaryEntry(GlossaryTerm.Ctl, Res.string.main_glossary_ctl_term, Res.string.main_glossary_ctl_def),
+    GlossaryEntry(GlossaryTerm.Trimp, Res.string.main_glossary_trimp_term, Res.string.main_glossary_trimp_def),
+    GlossaryEntry(GlossaryTerm.HrZones, Res.string.main_glossary_hrzones_term, Res.string.main_glossary_hrzones_def),
+    GlossaryEntry(GlossaryTerm.Volume, Res.string.main_glossary_volume_term, Res.string.main_glossary_volume_def),
+    GlossaryEntry(GlossaryTerm.Maf, Res.string.main_glossary_maf_term, Res.string.main_glossary_maf_def),
+    GlossaryEntry(GlossaryTerm.Pap, Res.string.main_glossary_pap_term, Res.string.main_glossary_pap_def),
+    GlossaryEntry(GlossaryTerm.RedS, Res.string.main_glossary_reds_term, Res.string.main_glossary_reds_def),
 )
 
-/**
- * Glossary keys for the jargon terms that appear in [text], in glossary order,
- * each at most once. Drives the term links inside a card's "?" panel so a bare
- * "RIR 3" / "85% e1RM" on the face always has a path to its meaning.
- */
-internal fun glossaryKeysIn(text: String): List<String> =
-    GLOSSARY.filter { e -> e.pattern?.containsMatchIn(text) == true }.map { it.key }
-
-// A parenthesised internal KB claim id, e.g. " (AUTOREG-RIR-001)" or
-// " (SAFE-PAIN-001)", or the "(-)" placeholder for a missing id.
-private val CLAIM_ID_PAREN = Regex("""\s*\((?:-|[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\)""")
-
-/**
- * [text] with every parenthesised internal claim id removed. Claim ids are
- * engine bookkeeping, never user copy: "load −10%: readiness (AUTOREG-RIR-001)"
- * renders as "load −10%: readiness". Plain parentheticals ("(RPE 8)") survive.
- */
-internal fun stripClaimIds(text: String): String = text.replace(CLAIM_ID_PAREN, "").trim()
+/** The terms the core marked in a text, each once, in glossary order: the term
+ *  links inside a card's "?" panel, so a bare "RIR 3" / "85% e1RM" on the face
+ *  always has a path to its meaning. */
+internal fun List<GlossarySpan>.terms(): List<GlossaryTerm> = map { it.term }.distinct().sortedBy { it.ordinal }
 
 /** Opens the glossary sheet at a given term key. Provided by the app scaffold. */
 val LocalGlossary = staticCompositionLocalOf<(String) -> Unit> { {} }
@@ -764,19 +733,19 @@ internal fun GlossaryInfo(key: String) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GlossaryTermLinks(keys: List<String>) {
+private fun GlossaryTermLinks(terms: List<GlossaryTerm>) {
     val open = LocalGlossary.current
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Text(stringResource(Res.string.main_why_terms), color = Accent, style = Type.Chip)
         // Offset so the first term's label (not its touch padding) lines up with
         // the panel's text edge.
         FlowRow(Modifier.offset(x = -TextActionInset)) {
-            keys.forEach { key ->
-                val entry = GLOSSARY.firstOrNull { it.key == key } ?: return@forEach
+            terms.forEach { t ->
+                val entry = GLOSSARY.firstOrNull { it.term == t } ?: return@forEach
                 val term = stringResource(entry.termRes)
                 TextAction(
                     term,
-                    onClick = { open(key) },
+                    onClick = { open(entry.key) },
                     description = stringResource(Res.string.main_explain, term),
                     chevron = true,
                 )
@@ -914,4 +883,13 @@ private fun gradeLabelRes(grade: EvidenceGrade?): StringResource? = when (grade)
 /** The core's citation verbatim; "-" when blank. */
 internal fun citationLabel(citation: String): String =
     citation.ifBlank { "-" }
+
+/** Grade badge color from the theme-fixed status palette. See design spec §2. */
+fun StatusColors.gradeColor(grade: EvidenceGrade?): Color = when (grade) {
+    EvidenceGrade.Strong -> evidenceStrong
+    EvidenceGrade.Moderate -> evidenceModerate
+    EvidenceGrade.Weak -> evidenceWeak
+    EvidenceGrade.ExpertOpinion -> evidenceExpert
+    EvidenceGrade.MarketingMyth, null -> evidenceUnknown
+}
 

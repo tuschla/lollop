@@ -770,3 +770,70 @@ fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
         "extensions precede the segments\n{gpx}"
     );
 }
+
+// ── Save and crash-recovery thinning (the recorder's `ThinTrack` op) ─────────
+
+#[test]
+fn thinning_keeps_a_track_at_or_under_the_cap_whole() {
+    assert_eq!(
+        decimation_keep(3, TRACK_DECIMATION_CAP as usize, &[]),
+        [0, 1, 2]
+    );
+    let (kept, starts) = thin_track(100, TRACK_DECIMATION_CAP as usize, &[]);
+    assert_eq!(kept, (0..100).collect::<Vec<_>>());
+    assert!(starts.is_empty());
+    // No cap (the shell's whole-track read): every start where it was.
+    let (kept, starts) = thin_track(60, i32::MAX as usize, &[51, 7]);
+    assert_eq!(kept.len(), 60);
+    assert_eq!(starts, [7, 51]);
+    // A cap under two can't hold both ends: nothing is dropped.
+    assert_eq!(thin_track(5, 1, &[2]), (vec![0, 1, 2, 3, 4], vec![2]));
+    assert_eq!(thin_track(0, 4, &[]), (vec![], vec![]));
+}
+
+#[test]
+fn thinning_keeps_both_ends_within_the_cap() {
+    // A 20-minute 1 Hz save to 300, and a very long interrupted run recovered
+    // to the save cap. Without segment starts only the last fix can push the
+    // count one past the cap.
+    for (n, cap) in [(1_200, 300), (20_000, TRACK_DECIMATION_CAP as usize)] {
+        let kept = decimation_keep(n, cap, &[]);
+        assert!(kept.len() < n, "thins below the source: {}", kept.len());
+        assert!(kept.len() <= cap + 1, "respects the cap: {}", kept.len());
+        assert_eq!(kept.first(), Some(&0), "first fix kept");
+        assert_eq!(kept.last(), Some(&(n - 1)), "last fix kept");
+        assert!(kept.windows(2).all(|w| w[0] < w[1]), "ascending");
+    }
+}
+
+#[test]
+fn thinning_keeps_every_segments_first_fix_off_the_stride() {
+    // 401 fixes to 40: stride 11, so the pause boundary at 201 is off the
+    // uniform grid and only the segment-start rule keeps it; its remapped
+    // position points back at the same fix.
+    let kept = decimation_keep(401, 40, &[201]);
+    assert_eq!(201 % 11, 3, "off the stride");
+    let starts = remap_starts(&kept, &[201]);
+    assert_eq!(starts.len(), 1, "one remapped boundary");
+    assert_eq!(kept[starts[0] as usize], 201);
+    // A recovered run: 100 fixes to 10 (stride 10), a segment opened at 37.
+    let (kept, starts) = thin_track(100, 10, &[37]);
+    assert!(kept.len() < 100, "thinned: {}", kept.len());
+    assert_eq!(starts.len(), 1);
+    assert_eq!(
+        kept[starts[0] as usize], 37,
+        "the segment's first fix opens it"
+    );
+}
+
+#[test]
+fn thinning_reads_starts_in_any_order_and_ignores_those_off_the_track() {
+    // Ten fixes to ~4: stride 3 (0, 3, 6, 9) plus the start 5, position 2.
+    // Index 0 opens no segment and 12 is past the end; a repeat counts once.
+    assert_eq!(
+        thin_track(10, 4, &[12, 5, 0, 5]),
+        (vec![0, 3, 5, 6, 9], vec![2])
+    );
+    let kept = decimation_keep(10, 4, &[5]);
+    assert_eq!(remap_starts(&kept, &[5]), [2]);
+}

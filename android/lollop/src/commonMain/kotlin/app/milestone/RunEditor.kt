@@ -1,9 +1,14 @@
 package app.milestone
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,7 +16,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import app.milestone.resources.Res
+import app.milestone.resources.history_workout_type
+import app.milestone.resources.history_workout_type_cd
 import app.milestone.resources.import_view
 import app.milestone.resources.log_duration_invalid
 import app.milestone.resources.log_field_distance
@@ -44,9 +53,8 @@ private fun runEditEvent(
     avgHrBpm: Double?,
 ): Event = when {
     initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt = observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
-    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate. A row
-    // without an entry id (entry_id 0) keeps its original stamp.
-    else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = if (initial.entry_id != 0L) observedAt else initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
+    else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
 /** Which numeric field the run editor's shared keypad currently edits. */
@@ -64,18 +72,10 @@ internal fun runDistanceMax(unit: DistanceUnit): Double =
 /** The run editor's duration ceiling, minutes (10 h). */
 private const val RunDurationMaxMin = 600.0
 
-/** Average heart-rate entry bounds: a floor shared by bpm and % of max, the bpm
- *  ceiling, and 100 % of max (the core's `MAX_HR_PCT_MAX`). */
+/** Average heart-rate entry bounds: a floor shared by bpm and % of max, and the
+ *  bpm ceiling; % of max tops out at the core's ceiling. */
 private const val RunHrMin = 40.0
 private const val RunAvgHrMaxBpm = 230.0
-private const val RunHrMaxPct = 100.0
-
-/** A measured HRmax the core trusts over the Tanaka estimate
- *  (`running::plausible_measured_hr_max`). */
-internal val PlausibleHrMaxBpm = 100.0..240.0
-
-/** The ages the core's Tanaka HRmax estimate covers (`running::tanaka_age_in_range`). */
-internal val TanakaAgeRange = 5.0..100.0
 
 /**
  * Manual run entry for runs recorded without GPS tracking.
@@ -96,18 +96,16 @@ fun LogRunEditor(
     // NEW-mode run type of the planned run this entry logs (the Finish review's
     // rule, [workoutTypeForPlan]); preselected, still the user's to change.
     plannedType: WorkoutType? = null,
-    // The athlete's profile: whether the core can turn an average bpm into %HRmax.
-    profile: Profile?,
+    // Whether the core can turn an average bpm into %HRmax ([ViewModel.hr_max_known]).
+    hrMaxKnown: Boolean,
     onClose: () -> Unit = {},
-    // Report unsaved-edits state so a host sheet's swipe-down can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
     onSave: (Event) -> Unit,
 ) {
     // Distance honors the mi override symmetric with the lb weight field: entry is in
     // the display unit, canonical km on the wire. `unit` is resolved once and saved
     // with the typed text, so a locale or override change mid-edit never reads a
     // typed mi figure as km.
-    val unit = rememberSaveable { resolveDistanceUnit(AppSettings.distanceUnitOverride.value) }
+    val unit = rememberSaveable { EventDispatcher.model.value.distanceUnit() }
     var distText by rememberSaveable {
         // km-native prefill is lossless; mi shows the converted %.2f figure. A blank
         // buffer (a fresh entry with nothing to seed) stays empty.
@@ -148,8 +146,6 @@ fun LogRunEditor(
     // bpm with the logged bpm; an edit of a row stored as % opens on % with the
     // stored value. Either way an untouched Save re-emits exactly what was logged
     // (the view's hr_pct_max of a bpm row is the core's derived figure, never typed).
-    val hrMaxKnown = profile != null &&
-        ((profile.measured_hr_max ?: 0.0) in PlausibleHrMaxBpm || (profile.age_years ?: 0.0) in TanakaAgeRange)
     val loggedBpm = initial?.avg_hr_bpm?.takeIf { it > 0.0 }
     val loggedPct = initial?.let { loggedHrPctMax(it) }?.takeIf { it > 0.0 }
     var hrInBpm by rememberSaveable { mutableStateOf(loggedPct == null) }
@@ -160,7 +156,7 @@ fun LogRunEditor(
         mutableStateOf((loggedBpm ?: loggedPct)?.let { fmtLosslessPrefill(it) } ?: "")
     }
     val hrParsed = parseKeypadNumber(hrText)
-    val hrMax = if (bpmMode) RunAvgHrMaxBpm else RunHrMaxPct
+    val hrMax = if (bpmMode) RunAvgHrMaxBpm else CoreConstants.HR_PCT_MAX_CEILING
     // Blank is a legitimate "no HR"; anything typed must be in range.
     val hrValid = hrText.isBlank() || (hrParsed != null && hrParsed in RunHrMin..hrMax)
     // Whole-session effort (CR-10), optional; prefilled from the row when editing.
@@ -171,10 +167,6 @@ fun LogRunEditor(
         )
     }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
-    // A legacy row (entry_id == 0) is amended by matching its original stamp,
-    // so its date can't be changed without orphaning it; lock the date chip.
-    val dateEditable = initial == null || initial.entry_id != 0L
     // User-declared run-intent label. Optional; null = untagged, which the
     // editor never fabricates. Prefilled from the row when editing, and from
     // the planned run a new entry logs.
@@ -331,7 +323,7 @@ fun LogRunEditor(
                 workoutType = if (picked == workoutType) null else picked
                 dirty = true
             })
-            ObservedAtRow(observedAt, withTime = true, enabled = dateEditable) { observedAt = it; dirty = true }
+            ObservedAtRow(observedAt, withTime = true) { observedAt = it; dirty = true }
         }
     }
 }
@@ -371,4 +363,43 @@ internal fun editDurationDigits(digits: String, key: Char, replaceAll: Boolean):
     if (base.length >= HMS_DIGITS_MAX) return base
     if (base.isEmpty() && key == '0') return base
     return base + key
+}
+
+/** Run types in the order a runner thinks of them, easiest first. */
+private val RunTypeOrder = listOf(
+    WorkoutType.Easy,
+    WorkoutType.Recovery,
+    WorkoutType.Steady,
+    WorkoutType.LongRun,
+    WorkoutType.Tempo,
+    WorkoutType.Interval,
+)
+
+/**
+ * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]:
+ * Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only; [onSelect]
+ * gets the tapped type, and the caller toggles a re-tapped type off.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+        FieldLabel(stringResource(Res.string.history_workout_type))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+            verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+        ) {
+            RunTypeOrder.forEach { wt ->
+                val label = stringResource(wt.text.label)
+                ChoiceChip(
+                    label = label,
+                    selected = wt == selected,
+                    description = stringResource(Res.string.history_workout_type_cd, label),
+                    onClick = { onSelect(wt) },
+                    modifier = Modifier.testTag("run-type-${wt.name}"),
+                )
+            }
+        }
+    }
 }

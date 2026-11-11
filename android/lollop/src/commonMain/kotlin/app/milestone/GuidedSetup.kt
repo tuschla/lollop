@@ -151,6 +151,7 @@ import app.milestone.resources.setup_step_train_q
 import app.milestone.resources.setup_unit_bpm
 import app.milestone.resources.setup_unit_per_week
 import app.milestone.resources.setup_weekdays_q
+import kotlinx.serialization.builtins.nullable
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -218,8 +219,11 @@ internal fun GuidedSetup(
 ) {
     val ctx = currentPlatformContext()
     // The distance unit can be picked on the first number step (one Units row with
-    // the weight unit); the pick is an answer, saved as the app setting on Finish.
-    val systemDistanceUnit = rememberDistanceUnit()
+    // the weight unit); the pick is an answer the profile carries. A first run
+    // starts from an older build's setting when one was left ([legacyDistanceUnit]).
+    val settings = remember { ctx.keyValueStore(AppFileNames.SETTINGS_STORE) }
+    val modelUnit = rememberDistanceUnit()
+    val systemDistanceUnit = remember(modelUnit) { settings.legacyDistanceUnit() ?: modelUnit }
     val today = remember { todayEpochDay() }
     val seedModality = initial?.let(::modalityOf)
     // A Focus switch that turns a side back on seeds that side's answers kept when
@@ -245,14 +249,14 @@ internal fun GuidedSetup(
     // mode against the profile's current path.
     val switchReturn = if (switchTarget != null) seed.path else null
 
-    var answers by rememberSaveable {
+    var answers by rememberSaveable(stateSaver = jsonSaver(SetupAnswers.serializer())) {
         mutableStateOf(if (switchTarget != null && initial != null) switchedAnswers(seed, switchTarget, initial, runStash, liftStash) else seed)
     }
     val update: UpdateAnswers = { edit -> answers = edit(answers) }
     var step by rememberSaveable { mutableIntStateOf(if (switchReturn != null) switchStartStep(answers, switchReturn) else 0) }
     // Set while an edit started from the review (or a Focus switch) is walking
     // only the screens it changed; Next then returns to the review.
-    var reviewReturn by rememberSaveable { mutableStateOf(switchReturn) }
+    var reviewReturn by rememberSaveable(stateSaver = jsonSaver(ReviewReturn.serializer().nullable)) { mutableStateOf(switchReturn) }
     // The review row an edit started from (null for a Focus switch, which never
     // showed the review): it names the way back "Back to review" and is the row the
     // review scrolls to on return.
@@ -591,10 +595,8 @@ internal fun GuidedSetup(
                                     } else {
                                         emptyList()
                                     }
-                                    // The units picked in the setup become the app setting.
-                                    done.distanceChoice?.let {
-                                        AppSettings.setDistanceUnitOverride(ctx, if (it == DistanceUnit.Mi) DistanceUnitOverride.Mi else DistanceUnitOverride.Km)
-                                    }
+                                    // The profile now carries the unit; an older build's setting is spent.
+                                    settings.dropLegacyDistanceUnit()
                                     if (done.modality == Modality.Both) done.runLevel?.let { RunLevelAnswer.save(ctx, it) }
                                     onComplete(draft, rungs)
                                 }
@@ -715,7 +717,7 @@ private fun PlacementStep(a: SetupAnswers, kept: Set<LadderId>, update: UpdateAn
     SubHeading(stringResource(Res.string.setup_equip_q))
     EquipmentChips(a.equipment) { e ->
         // Without a bar or rings no pull-up rung can be trained.
-        update { it.copy(equipment = e, pullPlace = if (e.canHang) it.pullPlace else null) }
+        update { it.copy(equipment = e, pullPlace = if (canHang(e) != false) it.pullPlace else null) }
     }
     Spacer(Modifier.size(Space.Sm.dp))
     PLACEMENT_LADDERS.forEach { (ladder, questionRes) ->
@@ -723,7 +725,7 @@ private fun PlacementStep(a: SetupAnswers, kept: Set<LadderId>, update: UpdateAn
         val answer = a.placement(ladder)
         // Pull-up rungs need something to hang from (the core's rung_available);
         // unanswered equipment means "everything".
-        val rungsOff = ladder == LadderId.VerticalPull && a.equipment?.canHang == false
+        val rungsOff = ladder == LadderId.VerticalPull && canHang(a.equipment) == false
         // null = "Not sure, start easy" (the first rung), or on a kept ladder "Keep
         // my current level". One full-width row per rung, easy → hard top to
         // bottom, so the ladder's order survives every screen width.
@@ -901,7 +903,7 @@ private fun AboutStep(
         a.birthDay,
         today,
         hint = when {
-            isMinor(v.ageYears) -> stringResource(Res.string.setup_health_defer_youth)
+            v.youth -> stringResource(Res.string.setup_health_defer_youth)
             a.birthSkipped -> if (v.measuredHrMax == null) stringResource(Res.string.setup_birthday_skipped_note) else null
             a.birthDay == null && v.ageYears != null -> stringResource(Res.string.setup_birthday_legacy, trimDecimal(v.ageYears))
             else -> null
@@ -979,8 +981,8 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     // nothing while the core silently holds their plan (HARD RULE 3: the safety
     // consequence has to be surfaced). When age is the only reason, say so: no
     // toggle here is on.
-    val healthHold = healthDefers(a.health)
-    if (healthHold || isMinor(v.ageYears)) {
+    val healthHold = v.healthDefers
+    if (healthHold || v.youth) {
         Text(
             stringResource(if (healthHold) Res.string.setup_health_defer_notice else Res.string.setup_health_defer_youth),
             color = OnBgMuted,
@@ -1055,7 +1057,7 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
         val d = a.days ?: 0
         val count = pluralStringResource(Res.plurals.setup_days_count, d, d)
         val daysHead = if (m == Modality.Both) {
-            val lift = draft.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS
+            val lift = draft.liftDaysPerWeek ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS
             val run = draft.runningDaysPerWeek
             val rest = (d - lift - run).coerceAtLeast(0)
             count + " · " + if (rest > 0) {
@@ -1113,18 +1115,19 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
             a.sex?.let { stringResource(it.labelRes) },
             draft.restingHrBpm?.let { stringResource(Res.string.setup_bpm_value, trimDecimal(it)) },
         )
-        // The youth hold comes from age, so it shows here, not under Health (whose
-        // answers may all be "No").
+        // The core's gates for the draft Finish sends. The youth hold comes from
+        // age, so it shows here, not under Health (whose answers may all be "No").
+        val facts = draftFacts(ProfileDraft(health = draft.health, ageYears = draft.ageYears))
         val aboutLines = listOfNotNull(
             aboutFacts.joinToString(" · "),
-            if (isMinor(draft.ageYears)) stringResource(Res.string.setup_review_about_hold) else null,
+            if (facts.youth) stringResource(Res.string.setup_review_about_hold) else null,
         )
         add(ReviewEntry(stringResource(Res.string.setup_review_about), aboutLines.joinToString("\n"), SetupStep.About))
         // Health: how many answers apply, and the hold whenever one defers (the
         // safety call stays on the face).
         val healthLines = listOfNotNull(
-            healthSummary(draft.health),
-            if (healthDefers(draft.health)) stringResource(Res.string.setup_review_health_hold) else null,
+            healthSummary(facts),
+            if (facts.health_defers) stringResource(Res.string.setup_review_health_hold) else null,
         )
         add(ReviewEntry(stringResource(Res.string.setup_review_health), healthLines.joinToString("\n"), SetupStep.Health))
     }

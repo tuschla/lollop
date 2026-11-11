@@ -465,7 +465,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         if (c.rtl) RuntimeEnvironment.setQualifiers("+ar-rEG")
         RuntimeEnvironment.setFontScale(c.font)
         AppSettings.setDarkMode(ctx, if (c.dark) DarkMode.Dark else DarkMode.Light)
-        if (start == Start.MilesLb) AppSettings.setDistanceUnitOverride(ctx, app.milestone.DistanceUnitOverride.Mi)
+        if (start == Start.MilesLb) QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
         (seedEvents(start).orEmpty() + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
         this.start = start
         if (start == Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()

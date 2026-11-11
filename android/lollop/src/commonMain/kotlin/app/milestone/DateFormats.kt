@@ -70,6 +70,16 @@ internal enum class WeekdayWidth {
 /** [day]'s name in [locale] at [width]. */
 internal expect fun weekdayName(day: DayOfWeek, width: WeekdayWidth, locale: PlatformLocale = appLocale()): String
 
+/** [day]'s short name ("Thu") in the app's language: the setup weekday chips and
+ *  lists, the widget's next-session day. */
+internal fun weekdayShort(day: DayOfWeek, locale: PlatformLocale = appLocale()): String =
+    weekdayName(day, WeekdayWidth.Short, locale)
+
+/** [day]'s two-letter label ("Mo", "Tu") in the app's language, for every week
+ *  strip (Today's and the widgets'): a single narrow initial collides (M/T/T, S/S). */
+internal fun weekdayStripLabel(day: DayOfWeek, locale: PlatformLocale = appLocale()): String =
+    weekdayName(day, WeekdayWidth.ShortStandalone, locale).take(2)
+
 /** A local epoch day as a medium date in the app's language ("Oct 6, 2026"). */
 internal fun epochDayLabel(day: Long, locale: PlatformLocale = appLocale()): String =
     formatMediumDate(LocalDate.fromEpochDays(day), locale)

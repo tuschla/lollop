@@ -71,9 +71,9 @@ class RunDetailLogicTest {
     @Test
     fun routeTrack_pointAtWalksCumulativeDistanceAcrossSegments() {
         val metresPerDegLat = 111_195.0
-        val seg1 = (0..10).map { GpxFix(47.0 + it * 100.0 / metresPerDegLat, 8.0, it * 30L, null) }
-        val seg2 = (0..10).map { GpxFix(47.01 + it * 100.0 / metresPerDegLat, 8.0, 400L + it * 30L, null) }
-        val track = RouteTrack(listOf(seg1, seg2, listOf(GpxFix(0.0, 0.0, 0L, null))))
+        val seg1 = (0..10).map { GpsPoint(47.0 + it * 100.0 / metresPerDegLat, 8.0, it * 30L, 5.0) }
+        val seg2 = (0..10).map { GpsPoint(47.01 + it * 100.0 / metresPerDegLat, 8.0, 400L + it * 30L, 5.0) }
+        val track = RouteTrack(listOf(seg1, seg2, listOf(GpsPoint(0.0, 0.0, 0L, 5.0))))
         assertEquals(2, track.segs.size)
         // Two 1 km legs; the gap between segments adds nothing.
         assertEquals(2000.0, track.totalM, 5.0)

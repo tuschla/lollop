@@ -48,6 +48,9 @@ object RunSession {
     // already recording, never armed.
     val armed: StateFlow<Boolean> get() = session.armed
 
+    /** A run is under way: recording, or armed to start at the first good fix. */
+    val runActive: Boolean get() = session.tracking.value || session.armed.value
+
     // The location stream could not be started or died on start (no GPS provider on
     // the device, the fused client's async failure, a permission race). Set by the
     // recorder's failure unwind; the screen stops re-launching the locate preview while
@@ -98,7 +101,7 @@ object RunSession {
     val distanceKm: StateFlow<Double> get() = session.distanceKm
 
     // Live elapsed MOVING time (seconds): the accumulated duration of MOVING legs
-    // only, pause-bridge legs AND sub-[MIN_MOVING_SPEED_MPS] standing-still legs are
+    // only, pause-bridge legs AND sub-[CoreConstants.MIN_MOVING_SPEED_MPS] standing-still legs are
     // excluded, exactly as the core's of-record `moving_duration_min` excludes them -
     // so this live figure matches the saved run's moving-time duration/pace instead of
     // freezing at a pause then JUMPING the pause span back in on resume. Driven by
@@ -250,7 +253,7 @@ object RunSession {
      * Repopulate an interrupted run recovered from [ActiveRunStore] and put the
      * session back into recording state. Segments break at [recordedStarts] (the
      * live run's own boundaries, Pause/Resume included) and at any fix-time gap
-     * over [MAX_FIX_GAP_SEC]; distance and moving time are the same segment-aware
+     * over [CoreConstants.MAX_FIX_GAP_SEC]; distance and moving time are the same segment-aware
      * sums used live (a single O(n) pass, not per-fix), so a recovered run never
      * shows more than it had before the crash.
      */
@@ -259,17 +262,17 @@ object RunSession {
 
     /**
      * The track the save sends the core: the true coordinates, thinned to ~[maxPoints]
-     * fixes by [decimationKeep] so one long run can't bloat the append-only log (the
-     * endpoints and every segment start are kept). [decimatedSegmentStarts] with the
-     * same cap gives the matching boundaries. Below the cap the track is whole.
+     * fixes by the core ([thinTrack]) so one long run can't bloat the append-only log
+     * (the endpoints and every segment start are kept). [decimatedSegmentStarts] with
+     * the same cap gives the matching boundaries. Below the cap the track is whole.
      */
-    fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> =
-        session.decimatedTrackForCore(maxPoints)
+    fun decimatedTrackForCore(maxPoints: Int = CoreConstants.TRACK_DECIMATION_CAP): List<GpsPoint> =
+        session.decimated(maxPoints).first
 
     /** The segment starts remapped to positions in [decimatedTrackForCore] (same
      *  [maxPoints]); sent as `LogRunTrack.segment_starts`. Empty for an unpaused run. */
-    fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> =
-        session.decimatedSegmentStarts(maxPoints)
+    fun decimatedSegmentStarts(maxPoints: Int = CoreConstants.TRACK_DECIMATION_CAP): List<Int> =
+        session.decimated(maxPoints).second
 
     /**
      * The `LogRunTrack` that saves this run, built under ONE lock so its points and
@@ -397,12 +400,12 @@ object RunSession {
         }
 
         /** True when a fix arriving [dtMs] (monotonic) after [prev] opens a new segment:
-         *  a pause boundary or a fix gap longer than [MAX_FIX_GAP_SEC]. [add] drops a
+         *  a pause boundary or a fix gap longer than [CoreConstants.MAX_FIX_GAP_SEC]. [add] drops a
          *  fix with dtMs < 0 before this check. */
         private fun isBoundary(prev: GpsPoint?, dtMs: Long): Boolean {
             if (prev == null) return false
             if (pendingBreak) return true
-            return dtMs > MAX_FIX_GAP_SEC * 1000L
+            return dtMs > CoreConstants.MAX_FIX_GAP_SEC * 1000L
         }
 
         // Locked so the read-modify-write of points + distance is atomic.
@@ -544,7 +547,7 @@ object RunSession {
             var movingSec = 0.0
             for (i in 1 until recovered.size) {
                 val dtSec = (recovered[i].observedAt - recovered[i - 1].observedAt).toDouble()
-                if (i in recorded || dtSec > MAX_FIX_GAP_SEC) {
+                if (i in recorded || dtSec > CoreConstants.MAX_FIX_GAP_SEC) {
                     segmentStarts.add(i)
                 } else {
                     val legKm = movingLegKm(segmentKm(recovered[i - 1], recovered[i]), dtSec)
@@ -579,23 +582,20 @@ object RunSession {
             rebuildPaceBuckets()
         }
 
-        fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> = synchronized(this) {
-            val full = points.value
-            return decimationKeep(full.size, maxPoints, segmentStarts).map { full[it] }
-        }
-
-        fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> = synchronized(this) {
-            remapStarts(decimationKeep(points.value.size, maxPoints, segmentStarts), segmentStarts)
+        /** The track thinned to ~[maxPoints] ([thinTrack]) and its remapped segment starts. */
+        fun decimated(maxPoints: Int): Pair<List<GpsPoint>, List<Int>> = synchronized(this) {
+            thinTrack(points.value, maxPoints, segmentStarts)
         }
 
         fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack = synchronized(this) {
+            val (track, starts) = decimated(CoreConstants.TRACK_DECIMATION_CAP)
             Event.LogRunTrack(
-                points = decimatedTrackForCore(),
+                points = track,
                 hrPctMax = 0.0,
                 observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec(),
                 entryId = entryId,
                 workoutType = workoutType,
-                segmentStarts = decimatedSegmentStarts(),
+                segmentStarts = starts,
                 sessionRpe = sessionRpe,
             )
         }
@@ -739,49 +739,24 @@ internal class RollingPace {
         else (spanMs / 60_000.0) / (meters / 1000.0)
 }
 
-/** A leg implying a ground speed above this (m/s) is GPS jitter, not a
- *  footfall-to-footfall run leg: its distance is capped at this speed·dt so a
- *  wander/spike can't inflate live distance. Matches the core's File-07 QC threshold
- *  (`load::MAX_PLAUSIBLE_SPEED_MPS` = 12.0 m/s) so live and of-record agree; the
- *  core re-gates the saved run on top. */
-internal const val MAX_PLAUSIBLE_SPEED_MPS = 12.0
-
-/** A leg whose implied ground speed is BELOW this (m/s) is standing still, not a
- *  run leg: it accrues neither live distance (so GPS wander at a red light / café
- *  can't inflate `distanceKm`) nor moving time. Mirrors the core's auto-pause floor
- *  (`load::is_stopped` returns true below 0.5 m/s) so the live figures match the
- *  of-record `moving_duration_min`; same pattern as the [MAX_PLAUSIBLE_SPEED_MPS]
- *  upper-bound mirror above. */
-internal const val MIN_MOVING_SPEED_MPS = 0.5
-
 /** The distance (km) a leg of [km] over [dtSec] adds to a run, or null when it is not
- *  a moving leg (no elapsed time, or slower than [MIN_MOVING_SPEED_MPS]). A moving
- *  leg keeps all its time; its distance is capped at [MAX_PLAUSIBLE_SPEED_MPS]·dt
- *  (GPS jitter). Shared by the live figures, the pace slices, crash recovery, the
- *  import gates and the trim preview, which test it against null for the moving rule. */
+ *  a moving leg (no elapsed time, or slower than [CoreConstants.MIN_MOVING_SPEED_MPS]:
+ *  standing still, so GPS wander at a red light accrues nothing). A moving leg keeps
+ *  all its time; its distance is capped at [CoreConstants.MAX_PLAUSIBLE_SPEED_MPS]·dt
+ *  (GPS jitter), so the live figures match the saved run's. Shared by the live
+ *  figures, the pace slices, crash recovery and the trim preview, which test it
+ *  against null for the moving rule. */
 internal fun movingLegKm(km: Double, dtSec: Double): Double? {
-    if (dtSec <= 0.0 || km * 1000.0 / dtSec < MIN_MOVING_SPEED_MPS) return null
-    return minOf(km, MAX_PLAUSIBLE_SPEED_MPS * dtSec / 1000.0)
+    if (dtSec <= 0.0 || km * 1000.0 / dtSec < CoreConstants.MIN_MOVING_SPEED_MPS) return null
+    return minOf(km, CoreConstants.MAX_PLAUSIBLE_SPEED_MPS * dtSec / 1000.0)
 }
-
-/** A gap longer than this (seconds) between consecutive accepted fixes opens a
- *  new recording segment: the straight-line bridge across it (a pause+relocation,
- *  a tunnel, a signal dropout) is not counted as run distance. Conservative, a
- *  normal ~1–2 s fix cadence never trips it, so only genuine pauses/losses break. */
-internal const val MAX_FIX_GAP_SEC = 30L
 
 // ── GPS fix-quality & freshness gates ────────────────────────────────────────
 // Single-sourced here so the foreground service (live map + distance), the UI lock
-// pill, and [isFreshLock] can never drift apart, and so the live figures stay in
-// step with the core's of-record QC.
-
-/** Worst reported accuracy (m) a live fix may carry to reach the map/distance AND to
- *  count as a usable GPS lock (drives the "GPS lock · ±N m" pill / [isFreshLock]).
- *  Mirrors the core's of-record QC bound `running::MAX_GPS_ACCURACY_M` (= 30 m,
- *  running.rs) so a fix the saved run would drop never counts live — live distance/
- *  pace cannot exceed the of-record figures. The 20 m precise-start gate
- *  ([GPS_PRECISE_ACCURACY_M], RunTracking.kt) is stricter still. */
-internal const val MAX_GPS_ACCURACY_M = 30.0
+// pill, and [isFreshLock] can never drift apart. A live fix counts only within the
+// core's accuracy bound ([CoreConstants.MAX_GPS_ACCURACY_M]), so live distance and
+// pace cannot exceed the saved run's; the 20 m precise-start gate
+// ([GPS_PRECISE_ACCURACY_M]) is stricter still.
 
 /** Max age (ms, monotonic) of an armed or preview fix; see [armedFixPassesAgeGate]. */
 internal const val ARMED_FIX_MAX_AGE_MS = 10_000L
@@ -802,7 +777,7 @@ internal const val LOCK_FRESH_MS = ARMED_FIX_MAX_AGE_MS
 
 /** No accepted fix for this long (ms) while recording surfaces the signal-loss pill.
  *  Above the worst healthy fix cadence (~4 s screen-off) so a normal gap never trips
- *  it, and below [MAX_FIX_GAP_SEC] (30 s, the segment-break gap) so the runner is
+ *  it, and below [CoreConstants.MAX_FIX_GAP_SEC] (30 s, the segment-break gap) so the runner is
  *  warned BEFORE the track actually breaks a segment. */
 internal const val SIGNAL_LOSS_MS = 15_000L
 
@@ -831,14 +806,14 @@ private const val MOVING_ARM_MIN_NET_M = 5.0
 
 /**
  * True when [accuracyM] is a lock the tracker can start from: within
- * [MAX_GPS_ACCURACY_M] and fixed within [LOCK_FRESH_MS]. Accuracy alone would let one
+ * [CoreConstants.MAX_GPS_ACCURACY_M] and fixed within [LOCK_FRESH_MS]. Accuracy alone would let one
  * good fix latch "locked" forever. [fixElapsedMs] == 0 means no fix yet → false; a
  * null accuracy → false.
  */
 internal fun isFreshLock(accuracyM: Double?, fixElapsedMs: Long, nowElapsedMs: Long): Boolean {
     if (accuracyM == null || fixElapsedMs == 0L) return false
     val ageMs = nowElapsedMs - fixElapsedMs
-    return accuracyM in 0.0..MAX_GPS_ACCURACY_M && ageMs in 0L..LOCK_FRESH_MS
+    return accuracyM in 0.0..CoreConstants.MAX_GPS_ACCURACY_M && ageMs in 0L..LOCK_FRESH_MS
 }
 
 /**
@@ -891,8 +866,8 @@ internal class ArmTrigger(
         val netMeters = segmentKm(anchor.first, point) * 1000.0
         val avgSpeedMps = netMeters / dtSec
         return if (netMeters >= MOVING_ARM_MIN_NET_M &&
-            avgSpeedMps >= MIN_MOVING_SPEED_MPS &&
-            avgSpeedMps <= MAX_PLAUSIBLE_SPEED_MPS
+            avgSpeedMps >= CoreConstants.MIN_MOVING_SPEED_MPS &&
+            avgSpeedMps <= CoreConstants.MAX_PLAUSIBLE_SPEED_MPS
         ) {
             window.toList()
         } else {
@@ -936,31 +911,20 @@ internal fun pillState(
     else -> TrackerPill.Acquiring
 }
 
-/** Cap on the number of GPS fixes a saved run keeps in one `LogRunTrack` line (the
- *  heaviest thing the append-only log stores). 5400 ≈ 90 min at 1 Hz, so ordinary
- *  runs keep full detail and only very long runs are thinned ([decimationKeep]). */
-const val TRACK_DECIMATION_CAP = 5400
-
 /**
- * The indices (ascending) kept when thinning an [n]-fix track to ~[maxPoints]: a
- * uniform stride (ceil division, so the strided count stays within the cap) plus the
- * last fix and every segment start in [starts]. At or below the cap, every index.
- * Shared by the save ([RunSession.decimatedTrackForCore]), crash recovery
- * ([ActiveRunStore.thinForRecovery]) and the import ([importedRunEvent]).
+ * [pts] thinned to ~[maxPoints] fixes by the core's save rule (`ThinTrack` op): a
+ * uniform stride plus the last fix and every segment start in [starts], with the
+ * starts remapped to positions in the thinned track. Shared by the save
+ * ([RunSession.decimatedTrackForCore]) and crash recovery
+ * ([ActiveRunStore.thinForRecovery]); [CoreConstants.TRACK_DECIMATION_CAP] is the cap.
+ * A core that can't answer thins nothing: every fix, the starts as recorded.
  */
-internal fun decimationKeep(n: Int, maxPoints: Int, starts: Collection<Int>): List<Int> {
-    if (n <= maxPoints || maxPoints < 2) return (0 until n).toList()
-    val keep = BooleanArray(n)
-    val stride = (n + maxPoints - 1) / maxPoints
-    for (i in 0 until n step stride) keep[i] = true
-    keep[n - 1] = true
-    for (s in starts) if (s in 1 until n) keep[s] = true
-    return (0 until n).filter { keep[it] }
+internal fun thinTrack(pts: List<GpsPoint>, maxPoints: Int, starts: Collection<Int>): Pair<List<GpsPoint>, List<Int>> {
+    val thin = AppRuntime.engine.thinTrack(TrackThinning(pts.size, maxPoints, starts.toList()))
+        ?: return pts to starts.sorted()
+    val kept = thin.kept
+    return (if (kept.size == pts.size) pts else kept.map(pts::get)) to thin.segment_starts
 }
-
-/** The positions in [kept] (original indices, ascending) of the segment [starts]. */
-internal fun remapStarts(kept: List<Int>, starts: Set<Int>): List<Int> =
-    kept.indices.filter { kept[it] in starts }
 
 /** Initial capacity of the append-only GPS backing array ([RunSession]'s growable
  *  store). ~4 min at 1 Hz; it doubles on overflow (amortised O(1) append), so the

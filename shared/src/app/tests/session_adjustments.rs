@@ -60,7 +60,6 @@ fn cap_rpe_notes_only_the_items_it_relabels() {
     let lift = PrescriptionView {
         exercise: "Back Squat".into(),
         intensity_label: "RIR 3".into(),
-        intensity: PlanIntensity::Rir { rir: 3 },
         ..Default::default()
     };
     let run = PrescriptionView {
@@ -68,8 +67,11 @@ fn cap_rpe_notes_only_the_items_it_relabels() {
         intensity_label: "Easy pace".into(),
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
-        items: vec![lift, run],
+    let mut ns = PlanRow {
+        items: vec![
+            with_intensity(lift, PlanIntensity::Rir { rir: 3 }),
+            run.into(),
+        ],
         ..Default::default()
     };
     let recs =
@@ -105,10 +107,6 @@ fn a_load_cut_rewrites_the_percent_e1rm_label() {
         reps_high: 3,
         load_kg: Some(100.0),
         intensity_label: "80% e1RM".into(),
-        intensity: PlanIntensity::PercentE1rm {
-            pct: 80,
-            reduced_from: None,
-        },
         ..Default::default()
     };
     let rir_lift = PrescriptionView {
@@ -118,11 +116,19 @@ fn a_load_cut_rewrites_the_percent_e1rm_label() {
         reps_high: 8,
         load_kg: Some(20.0),
         intensity_label: "RIR 2".into(),
-        intensity: PlanIntensity::Rir { rir: 2 },
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
-        items: vec![lift, rir_lift],
+    let mut ns = PlanRow {
+        items: vec![
+            with_intensity(
+                lift,
+                PlanIntensity::PercentE1rm {
+                    pct: 80,
+                    reduced_from: None,
+                },
+            ),
+            with_intensity(rir_lift, PlanIntensity::Rir { rir: 2 }),
+        ],
         ..Default::default()
     };
     let recs = vec![AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
@@ -348,12 +354,11 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     let lift = PrescriptionView {
         exercise: "Back Squat".into(),
         intensity_label: "RIR 3".into(),
-        intensity: PlanIntensity::Rir { rir: 3 },
         target_rpe: Some(crate::strength::rir_to_rpe(3.0)),
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
-        items: vec![lift],
+    let mut ns = PlanRow {
+        items: vec![with_intensity(lift, PlanIntensity::Rir { rir: 3 })],
         ..Default::default()
     };
     apply_adjustments_to_session(
@@ -376,12 +381,14 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     let aggressive = PrescriptionView {
         exercise: "Full push-up".into(),
         intensity_label: "RIR 1–2".into(),
-        intensity: PlanIntensity::RirRange { lo: 1, hi: 2 },
         target_rpe: Some(8.0),
         ..Default::default()
     };
-    let mut ns2 = SessionPlanView {
-        items: vec![aggressive],
+    let mut ns2 = PlanRow {
+        items: vec![with_intensity(
+            aggressive,
+            PlanIntensity::RirRange { lo: 1, hi: 2 },
+        )],
         ..Default::default()
     };
     apply_adjustments_to_session(

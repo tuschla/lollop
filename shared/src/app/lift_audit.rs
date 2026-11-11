@@ -301,8 +301,8 @@ pub(super) fn lift_views(sets: &[LoggedSet], sets_fp: u64, weight_lb: bool) -> V
 /// The uncached lift-list derivation (see [`lift_views`]).
 fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultView> {
     // Log order: `observed_at`, then `entry_id` (an amend or Undo re-pushes a
-    // row at the tail with the same id); legacy `entry_id == 0` ties keep their
-    // logged order through the stable sort.
+    // row at the tail with the same id); ties (an old build's id-less pair)
+    // keep their logged order through the stable sort.
     let mut ordered: Vec<&LoggedSet> = sets.iter().collect();
     ordered.sort_by_key(|s| (s.observed_at, s.entry_id));
     // Per distinct exercise name, resolved once (a history repeats a handful

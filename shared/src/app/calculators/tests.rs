@@ -6,8 +6,8 @@ use crate::app::view_types::GuidanceView;
 use crate::day::DAY_SEC as DAY;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::ProgressionCadence;
-use crate::profile::Profile;
 use crate::profile::test_support::base_profile;
+use crate::profile::{DistanceUnit, Profile};
 use crate::schema::WorkoutType;
 use crate::strength::LiftGoal;
 
@@ -39,6 +39,14 @@ fn profile_with_run_days(days: u8, km: f64) -> Profile {
         running_km_per_week: km,
         ..base_profile()
     }
+}
+
+/// The weekly report of `model` with its profile switched to miles.
+fn miles_report(mut model: Model) -> Vec<GuidanceView> {
+    for p in &mut model.profile_history {
+        p.distance_unit = DistanceUnit::Mi;
+    }
+    build_weekly_report(&ViewCtx::new(&model), &[])
 }
 
 // The ≤2×-daily bound averages over RUN days, not calendar days, so the
@@ -199,7 +207,7 @@ fn repetition_hr_row_reads_cleanly() {
 
 #[test]
 fn low_mileage_long_run_within_2x_daily_average_is_informational() {
-    let model = Model {
+    let model = || Model {
         profile_history: vec![profile_with_run_days(3, 20.0)],
         runs: vec![
             run(5.0, 30.0, 75.0, None, MON),
@@ -208,20 +216,19 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
         ],
         ..Default::default()
     };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
+    let report = build_weekly_report(&ViewCtx::new(&model()), &[]);
     assert!(
         report
             .iter()
             .any(|r| r.summary.contains(SHARE_CAP_FROM_64KM)),
         "a sub-64 km long run within 2× daily average is informational: {report:#?}"
     );
+    let miles = miles_report(model());
     assert!(
-        report
-            .iter()
-            .any(|r| r.summary_mi.contains("Long run 6.2 mi")
-                && r.summary_mi
-                    .contains("The 25% limit applies from 40 mi a week")),
-        "the informational row carries a miles twin: {report:#?}"
+        miles.iter().any(|r| r.summary.contains("Long run 6.2 mi")
+            && r.summary
+                .contains("The 25% limit applies from 40 mi a week")),
+        "a miles profile reads the row in miles: {miles:#?}"
     );
     assert!(
         !report.iter().any(|r| r.summary.contains(OVER_SHARE_CAP)),
@@ -297,7 +304,7 @@ fn long_run_rows(report: &[GuidanceView]) -> Vec<&str> {
 // and without a second and third row restating the share.
 #[test]
 fn low_mileage_long_run_over_2x_daily_average_is_one_row() {
-    let model = Model {
+    let model = || Model {
         profile_history: vec![profile_with_run_days(3, 20.0)],
         runs: vec![
             run(14.0, 84.0, 75.0, None, MON),
@@ -306,24 +313,21 @@ fn low_mileage_long_run_over_2x_daily_average_is_one_row() {
         ],
         ..Default::default()
     };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
-    let rows = long_run_rows(&report);
+    let report = build_weekly_report(&ViewCtx::new(&model()), &[]);
     assert_eq!(
-        rows,
+        long_run_rows(&report),
         [
             "Long run 14.0 km is 70% of the week and more than twice your average daily distance (6.7 km)."
         ],
         "{report:#?}"
     );
-    let mi = report
-        .iter()
-        .find(|r| r.summary == rows[0])
-        .map(|r| r.summary_mi.as_str());
+    let miles = miles_report(model());
     assert_eq!(
-        mi,
-        Some(
+        long_run_rows(&miles),
+        [
             "Long run 8.7 mi is 70% of the week and more than twice your average daily distance (4.2 mi)."
-        )
+        ],
+        "{miles:#?}"
     );
 }
 

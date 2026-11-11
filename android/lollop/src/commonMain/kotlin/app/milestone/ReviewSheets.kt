@@ -87,8 +87,6 @@ private const val DriftSeedPct = 4.0
 @Composable
 fun SessionReviewSheet(
     onClose: () -> Unit = {},
-    // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
     // Whether the run questions apply: a lift-only day never asks them.
     showRun: Boolean,
     onSubmit: (Event.SubmitReview) -> Unit,
@@ -115,7 +113,6 @@ fun SessionReviewSheet(
     // is off are never sent, so they answer nothing.
     val answered = badDay || (showRun && (hasDecoupling || hasEasyIntensity || hasPositiveSplit))
     val dirty = answered || dateEdited
-    ReportDirty(dirty, onDirtyChange)
 
     EditorScaffold(
         title = stringResource(Res.string.log_review_title),
@@ -191,9 +188,24 @@ internal fun reviewAsksRun(model: ViewModel, zone: TimeZone = TimeZone.currentSy
     return plannedRun || model.runs.any { localEpochDay(it.observed_at, zone) == today }
 }
 
-/** "How long?" answers for the overtraining signs, in weeks: < 1, 1–2, > 2. The
- *  core acts only on 2+ signs held for a week or more (feedback-036). */
-private val OvertrainingWeeks = listOf(0.5, 1.5, 3.0)
+/** The "How long?" band edges for the overtraining signs, in weeks: the
+ *  duration the core's recovery concern needs ([CoreConstants.OVERTRAINING_MIN_WEEKS],
+ *  feedback-036) and the decline the overtraining referrals need
+ *  ([CoreConstants.NFOR_DECLINE_WEEKS], safety-042 / autoreg-042). */
+private val OvertrainingWeeksMin = CoreConstants.OVERTRAINING_MIN_WEEKS
+private val OvertrainingWeeksNfor = CoreConstants.NFOR_DECLINE_WEEKS.toDouble()
+
+/** "How long?" answers, one value inside each band: below the minimum, between
+ *  the two edges, past the NFOR edge (0.5, 1.5, 3.0 weeks). */
+internal val OvertrainingWeeks = listOf(
+    OvertrainingWeeksMin / 2,
+    (OvertrainingWeeksMin + OvertrainingWeeksNfor) / 2,
+    2 * OvertrainingWeeksNfor - OvertrainingWeeksMin,
+)
+
+/** The band edges as the answer labels state them ("1", "2"). */
+internal fun overtrainingWeekEdgeLabels(): Pair<String, String> =
+    trimDecimal(OvertrainingWeeksMin) to trimDecimal(OvertrainingWeeksNfor)
 
 /** The explicit "Nothing to report this week" check-in: every count stated as
  *  0, no sign ticked, every clinical screen answered no. Only ever sent by that
@@ -224,8 +236,6 @@ fun WeeklyCheckinSheet(
     female: Boolean? = null,
     checkinPresent: Boolean = false,
     onClose: () -> Unit = {},
-    // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
     onClear: () -> Unit = {},
     onSubmit: (Event.SubmitWeeklyCheckin) -> Unit,
 ) {
@@ -270,7 +280,6 @@ fun WeeklyCheckinSheet(
     val answered = signs.any || failedKeySessions != null || rpeLoadGapSessions != null ||
         velocityText.isNotEmpty() || compulsive != null || bonePain != null || reds != null
     val dirty = answered || dateEdited
-    ReportDirty(dirty, onDirtyChange)
     val savedMessage = stringResource(Res.string.log_weekly_saved)
     fun submit(checkin: Event.SubmitWeeklyCheckin) {
         onSubmit(checkin)
@@ -375,10 +384,11 @@ fun WeeklyCheckinSheet(
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it }
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it }
             if (signs.any) {
+                val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
                 val weekLabels = listOf(
                     stringResource(Res.string.log_weekly_signs_lt1),
-                    stringResource(Res.string.log_weekly_signs_1to2),
-                    stringResource(Res.string.log_weekly_signs_gt2),
+                    stringResource(Res.string.log_weekly_signs_1to2, minWeeks, nforWeeks),
+                    stringResource(Res.string.log_weekly_signs_gt2, nforWeeks),
                 )
                 FieldLabel(stringResource(Res.string.log_weekly_signs_how_long))
                 OptionList(OvertrainingWeeks, signWeeks ?: -1.0, { weekLabels[OvertrainingWeeks.indexOf(it)] }) {

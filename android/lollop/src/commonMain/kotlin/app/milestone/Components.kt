@@ -121,7 +121,7 @@ internal fun PlainCard(
 internal fun Chip(text: String, bg: Color) {
     Text(
         text,
-        color = Color.White,
+        color = OnStatusFill,
         style = Type.Chip,
         modifier = Modifier
             .background(bg, SegmentShape)
@@ -150,16 +150,10 @@ internal fun ReferenceRow(row: GuidanceView) {
 }
 
 /** A guidance row's title: the training-age row in the copy deck's grammar
- *  ("Training age · Intermediate"), every other row as [guidanceSummary]. */
+ *  ("Training age · Intermediate"), every other row its summary. */
 @Composable
 internal fun guidanceTitle(row: GuidanceView): String =
-    if (row.training_age.isNotEmpty()) stringResource(Res.string.main_training_age_row, row.training_age) else guidanceSummary(row)
-
-/** A guidance row's summary in the user's distance unit: the core's miles twin
- *  (`summary_mi`) for a miles user when the row states a distance, else `summary`. */
-@Composable
-internal fun guidanceSummary(row: GuidanceView): String =
-    if (rememberDistanceUnit() == DistanceUnit.Mi) row.summary_mi.ifBlank { row.summary } else row.summary
+    if (row.training_age.isNotEmpty()) stringResource(Res.string.main_training_age_row, row.training_age) else row.summary
 
 /** The app's [AlertDialog]: the card shape, and a [traversalGroup] so an RTL
  *  locale hears the buttons start to end. Every dialog window goes through it,
@@ -261,6 +255,10 @@ private fun ShortDatePickerDialog(
         }
     }
 }
+
+/** Width of the typed date picker in a short window's date dialog, Cancel/OK
+ *  beside it: Material's date picker dialog width. */
+private val DateFieldDialogWidth = 360.dp
 
 /** A [TimePicker] titled [title] in an [AppDialog]: OK closes through
  *  [onDismiss] and sends the picked hour and minute to [onConfirm]. */

@@ -6,16 +6,14 @@ struct TodayEntry: TimelineEntry {
     let date: Date
     let payload: WidgetPayload?
 
-    /// The face for this entry's day: the snapshot's while it is current, else
-    /// "Open lollop to update" (Android's day rule, WidgetSnapshotStore.today).
-    var face: Face { payload?.shownFace(at: date) ?? Face.fallback }
-
-    var current: Bool { payload?.isCurrent(at: date) ?? false }
+    /// The face for this entry's moment: the snapshot's while it is current, else
+    /// "Open lollop to update" (Android's day rule, WidgetSnapshot.currentOn).
+    var face: WidgetFace { payload?.shownFace(at: date) ?? WidgetFallback.bundled.face }
 }
 
 /// Reads the payload the app writes (never the core) and rolls the widget over to
-/// "Open lollop to update" at local midnight, as Android's midnight tick does. The
-/// app reloads the timelines whenever it writes a new payload.
+/// "Open lollop to update" when the snapshot's day ends, as Android's midnight tick
+/// does. The app reloads the timelines whenever it writes a new payload.
 struct TodayProvider: TimelineProvider {
     var load: () -> WidgetPayload? = { WidgetPayload.load() }
 
@@ -31,16 +29,14 @@ struct TodayProvider: TimelineProvider {
         completion(timeline(at: Date()))
     }
 
-    /// Now, then the stale face from the next local midnight while today's
-    /// snapshot is current; a new timeline is asked for after that midnight.
+    /// Now, then an entry wherever the shown face changes (the start and the end of
+    /// the snapshot's day); nothing to ask for after the last one until the app
+    /// writes again.
     func timeline(at now: Date) -> Timeline<TodayEntry> {
         let payload = load()
-        let midnight = nextMidnight(after: now)
-        var entries = [TodayEntry(date: now, payload: payload)]
-        if payload?.isCurrent(at: now) == true {
-            entries.append(TodayEntry(date: midnight, payload: payload))
-        }
-        return Timeline(entries: entries, policy: .after(midnight))
+        let changes = payload?.changes(after: now) ?? []
+        let entries = ([now] + changes).map { TodayEntry(date: $0, payload: payload) }
+        return Timeline(entries: entries, policy: changes.isEmpty ? .never : .atEnd)
     }
 }
 
@@ -54,10 +50,9 @@ struct TodayWidget: Widget {
         StaticConfiguration(kind: Self.kind, provider: TodayProvider()) { entry in
             TodayEntryView(entry: entry)
         }
-        // Android's widget picker name and description (widget_overline_today,
-        // widget_description in strings_widget.xml).
-        .configurationDisplayName("Today")
-        .description("Today's session, rest day or pause, with its next step and the plan week.")
+        // Android's widget picker name and description.
+        .configurationDisplayName("widget_overline_today")
+        .description("widget_description")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryCircular, .accessoryInline])
         .contentMarginsDisabled()
     }
@@ -70,14 +65,14 @@ struct TodayEntryView: View {
 
     var body: some View {
         let face = entry.face
-        let colors = entry.payload?.palette.colors(for: scheme) ?? .system
+        let colors = entry.payload?.colors(for: scheme) ?? .system
         switch family {
         case .accessoryRectangular:
             RectangularView(face: face)
                 .widgetURL(LollopScreen.today.url)
                 .widgetBackground(Color.clear)
         case .accessoryCircular:
-            CircularView(face: face, week: entry.current ? entry.payload.map { (done: $0.snapshot.weekDone, planned: $0.snapshot.weekPlanned) } : nil)
+            CircularView(face: face)
                 .widgetURL(LollopScreen.today.url)
                 .widgetBackground(Color.clear)
         case .accessoryInline:
@@ -88,7 +83,6 @@ struct TodayEntryView: View {
             TodayCard(
                 face: face,
                 colors: colors,
-                moreItems: entry.payload?.moreItems ?? [],
                 wide: family != .systemSmall,
                 buttons: family == .systemSmall ? Self.smallButtons : .links
             )

@@ -23,10 +23,11 @@ fn predict_race_produces_graded_two_method_estimate() {
     )
     .expect_only_render();
 
-    let pred = app
-        .view(&model)
-        .race_prediction
-        .expect("a prediction must be present after PredictRace");
+    assert!(
+        app.view(&model).race_prediction.is_some(),
+        "a prediction must be present after PredictRace"
+    );
+    let pred = race_of(&model);
     assert_eq!(pred.goal_label, "10K");
     // Carries a real grade + citation (evidence discipline).
     assert!(pred.evidence.grade.is_some() && !pred.evidence.citation.is_empty());
@@ -68,10 +69,11 @@ fn predict_race_with_degenerate_input_surfaces_no_false_time() {
     )
     .expect_only_render();
 
-    let pred = app
-        .view(&model)
-        .race_prediction
-        .expect("the section is present, just with no numeric estimate");
+    assert!(
+        app.view(&model).race_prediction.is_some(),
+        "the section is present, just with no numeric estimate"
+    );
+    let pred = race_of(&model);
     assert_eq!(pred.predicted, "-");
     assert_eq!(pred.low_sec, 0.0);
     assert!(!pred.agreed);
@@ -406,6 +408,7 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
                             weeks_since_race: None,
                         },
                         None,
+                        DistanceUnit::Km,
                     );
                     assert!(
                         !v.predicted.contains("NaN"),
@@ -627,11 +630,25 @@ fn race_prediction_notes_flag_stale_input_and_marathon_optimism() {
             .iter()
             .any(|n| n.summary.contains(MARATHON_OPTIMISM)
                 && n.summary.contains("about 2–3 VDOT points")
-                && n.summary.contains("20.0 km")
-                && n.summary_mi.contains("12.4 mi")
-                && !n.summary_mi.contains("km")),
-        "optimism note carries the running-008 derate and a miles twin: {:#?}",
+                && n.summary.contains("20.0 km")),
+        "optimism note carries the running-008 derate: {:#?}",
         pred.notes
+    );
+    let query = RaceQuery {
+        recent_distance_m: 10_000.0,
+        recent_time_sec: 2_520.0,
+        goal_distance_m: 42_195.0,
+        weekly_km: 50.0,
+        weeks_since_race: Some(10),
+    };
+    let miles = to_race_view(&query, Some(20.0), DistanceUnit::Mi);
+    assert!(
+        miles
+            .notes
+            .iter()
+            .any(|n| n.summary.contains("12.4 mi") && !n.summary.contains("km")),
+        "a miles user reads the optimism note in miles: {:#?}",
+        miles.notes
     );
 
     // A fresh input race against a 5K goal carries no notes.
@@ -669,8 +686,8 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
         weekly_km: 50.0,
         weeks_since_race: Some(2), // fresh → no freshness note in the way
     };
-    let supported = to_race_view(&marathon, Some(32.0)); // ≥30 km → no derate
-    let under = to_race_view(&marathon, Some(20.0)); // <30 km → derate
+    let supported = race(&marathon, Some(32.0), DistanceUnit::Km); // ≥30 km → no derate
+    let under = race(&marathon, Some(20.0), DistanceUnit::Km); // <30 km → derate
 
     // The displayed band shifts strictly SLOWER (later finish) at both ends.
     assert!(
@@ -718,8 +735,8 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
             goal_distance_m: goal,
             ..marathon.clone()
         };
-        let a = to_race_view(&q, Some(20.0));
-        let b = to_race_view(&q, Some(32.0));
+        let a = race(&q, Some(20.0), DistanceUnit::Km);
+        let b = race(&q, Some(32.0), DistanceUnit::Km);
         assert_eq!(
             (a.low_sec, a.high_sec, a.predicted.clone()),
             (b.low_sec, b.high_sec, b.predicted.clone()),
@@ -736,7 +753,7 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
 
     // The well-supported marathon is itself identical to the raw
     // (no-history) prediction: the derate is the ONLY thing 20 km changes.
-    let no_history = to_race_view(&marathon, None);
+    let no_history = race(&marathon, None, DistanceUnit::Km);
     assert_eq!(
         (
             supported.low_sec,
@@ -771,7 +788,8 @@ fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
         &mut model,
     )
     .expect_only_render();
-    let pred = app.view(&model).race_prediction.expect("prediction");
+    assert!(app.view(&model).race_prediction.is_some(), "prediction");
+    let pred = race_of(&model);
     assert_eq!(pred.predicted, "-", "absurd goal → degenerate dash");
     assert!(pred.summary.contains("enter a recent race"));
     assert!(
@@ -902,7 +920,7 @@ fn degenerate_race_view_has_no_prediction_notes() {
         weekly_km: 40.0,
         weeks_since_race: Some(12),
     };
-    let v = to_race_view(&q, Some(10.0));
+    let v = to_race_view(&q, Some(10.0), DistanceUnit::Km);
     assert_eq!(v.predicted, "-");
     let notes: Vec<_> = v.notes.iter().map(|n| n.summary.clone()).collect();
     assert!(notes.is_empty(), "{notes:#?}");

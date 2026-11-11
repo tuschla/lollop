@@ -232,7 +232,7 @@ class RunTrackingService : Service() {
      *  key, so a pause or a lost signal re-posts. */
     private fun currentNotifFrame(): RunNotifFrame {
         val state = recorder.surfaceState()
-        val text = runSurfaceText(state, latinDigitResources())
+        val text = runSurfaceText(state, appResources())
         return RunNotifFrame(content = text.line, chip = text.chip, steps = state.step?.let(::stepBar))
     }
 
@@ -295,7 +295,7 @@ class RunTrackingService : Service() {
         super.onCreate()
         AppRuntime.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
-        ensureLiveChannel(this, CHANNEL, getString(R.string.track_notif_channel_name), RETIRED_CHANNEL)
+        ensureLiveChannel(this, CHANNEL, appResources().getString(R.string.track_notif_channel_name), RETIRED_CHANNEL)
         // Screen on/off drives the GPS cadence: while the screen is off the
         // engine drops to a coarser interval to cut idle battery drain.
         // SCREEN_ON/OFF are protected system broadcasts (dynamic registration only,
@@ -434,7 +434,7 @@ class RunTrackingService : Service() {
      *  reused across every fix that keeps the same shape; the content text, chip and
      *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
-        val res = latinDigitResources()
+        val res = appResources()
         val builder = runNotificationBuilder(
             this,
             CHANNEL,
@@ -447,7 +447,7 @@ class RunTrackingService : Service() {
         if (shape.canPause) {
             builder.addAction(
                 0,
-                if (shape.paused) getString(R.string.track_action_resume) else getString(R.string.track_action_pause),
+                if (shape.paused) res.getString(R.string.track_action_resume) else res.getString(R.string.track_action_pause),
                 if (shape.paused) resumePending else pausePending,
             )
         }
@@ -457,12 +457,12 @@ class RunTrackingService : Service() {
         // choice). An auto-save action would bypass those gates and could silently
         // log a drift/accidental run.
         if (shape.ownsRun) {
-            builder.addAction(0, getString(R.string.track_btn_stop), openTrackerPending)
+            builder.addAction(0, res.getString(R.string.track_btn_stop), openTrackerPending)
         } else {
             // Locate-only preview: there is no captured run to route through the save
             // gate, so Stop just tears the service down (ACTION_STOP), freeing the GPS
             // radio if the user opened the tracker to check a fix and walked away.
-            builder.addAction(0, getString(R.string.track_btn_stop), stopServicePending)
+            builder.addAction(0, res.getString(R.string.track_btn_stop), stopServicePending)
         }
         return builder
     }
@@ -721,14 +721,14 @@ private const val PLATFORM_FG_INTERVAL_MS = 1000L
 
 /** Background (screen-off) cadence: coarser to save battery while the phone is
  *  pocketed; the deliberate power/fidelity tradeoff. Long runs are thinned to a
- *  ~2–3 s cadence at save time anyway ([TRACK_DECIMATION_CAP]). */
+ *  ~2–3 s cadence at save time anyway ([CoreConstants.TRACK_DECIMATION_CAP]). */
 private const val FUSED_BG_INTERVAL_MS = 4000L
 private const val FUSED_BG_MIN_INTERVAL_MS = 3000L
 private const val PLATFORM_BG_INTERVAL_MS = 4000L
 
 /** Platform GPS minimum displacement (m) between updates: none, so every fix is
  *  delivered and standing-still wander is handled by the moving-speed floor
- *  ([MIN_MOVING_SPEED_MPS]) like the fused stream. */
+ *  ([CoreConstants.MIN_MOVING_SPEED_MPS]) like the fused stream. */
 private const val PLATFORM_MIN_DISTANCE_M = 0f
 
 /** Google fused provider (Play Services). Batches several fixes per callback

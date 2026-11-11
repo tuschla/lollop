@@ -66,9 +66,9 @@ private val ActivityBarHeight = 6.dp
 /** Opacity of the bar's track behind the accent fill (OnBgFaint). */
 private const val ActivityBarTrackAlpha = 0.4f
 
-/** The Log activity editor's minutes range: the core keeps 0 < minutes ≤ 600. */
+/** The Log activity editor's whole-minute floor; the core stores any minutes above
+ *  0 up to [CoreConstants.ACTIVITY_MAX_MINUTES]. */
 private const val ActivityMinutesMin = 1.0
-private const val ActivityMinutesMax = 600.0
 
 /**
  * The under-18 weekly activity card (WHO 5–17, youth-pa-001): this week's
@@ -95,11 +95,7 @@ internal fun YouthActivityCard(view: YouthActivityView, onLog: () -> Unit, onEve
     }
     EvidenceCard(
         summary = summary,
-        grade = view.grade,
-        citation = view.citation,
-        confidence = view.confidence,
-        safetyCritical = view.safety_critical,
-        contested = view.contested,
+        evidence = view.evidence,
         why = view.why,
         subject = stringResource(Res.string.activity_subject),
         actionLabel = stringResource(Res.string.activity_log_action),
@@ -193,7 +189,6 @@ internal fun restoreActivityEvent(a: ActivityResultView): Event.LogActivity =
 @Composable
 fun LogActivityEditor(
     onClose: () -> Unit,
-    onDirtyChange: (Boolean) -> Unit,
     onSave: (Event) -> Unit,
 ) {
     var kind by rememberSaveable { mutableStateOf<ActivityKind?>(null) }
@@ -205,10 +200,9 @@ fun LogActivityEditor(
     var strengtheningSet by rememberSaveable { mutableStateOf(false) }
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
 
     val minutes = parseKeypadNumber(minutesText)
-    val minutesValid = minutes != null && minutes in ActivityMinutesMin..ActivityMinutesMax
+    val minutesValid = minutes != null && minutes in ActivityMinutesMin..CoreConstants.ACTIVITY_MAX_MINUTES
     val savedText = stringResource(Res.string.activity_saved)
 
     EditorScaffold(
@@ -235,12 +229,12 @@ fun LogActivityEditor(
                 stringResource(Res.string.activity_field_minutes), stringResource(Res.string.log_unit_min), minutesText,
                 active = keypadOpen,
                 invalid = minutesText.isNotEmpty() && !minutesValid,
-                min = ActivityMinutesMin, max = ActivityMinutesMax, decimals = 0,
+                min = ActivityMinutesMin, max = CoreConstants.ACTIVITY_MAX_MINUTES, decimals = 0,
                 adjustments = listOf(-5.0, 5.0, 15.0),
                 onActivate = { fresh = true; keypadOpen = true },
                 onText = { minutesText = it; fresh = false; dirty = true },
                 hint = if (minutesText.isNotEmpty() && !minutesValid) {
-                    stringResource(Res.string.activity_minutes_invalid)
+                    stringResource(Res.string.activity_minutes_invalid, trimDecimal(CoreConstants.ACTIVITY_MAX_MINUTES))
                 } else {
                     stringResource(Res.string.activity_minutes_hint)
                 },

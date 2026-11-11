@@ -792,7 +792,12 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
     let vm = s.vm();
     assert!(vm.hold_reason.is_none());
     assert_no_load_increase(&vm, "return");
-    let ns = vm.next_session.clone().expect("a session after recovery");
+    assert!(vm.next_session.is_some(), "a session after recovery");
+    let plan = working_plan(&s.model);
+    let ns = plan
+        .hero_day
+        .and_then(|d| plan.row(d))
+        .expect("a session after recovery");
     assert!(!ns.items.is_empty());
     for it in &ns.items {
         if it.is_run() {

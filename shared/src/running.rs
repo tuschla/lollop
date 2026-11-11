@@ -35,17 +35,45 @@ pub const TANAKA_INTERCEPT_BPM: f64 = 208.0;
 pub const TANAKA_SLOPE_BPM_PER_YEAR: f64 = 0.7;
 
 /// Whether an age (years) is one the Tanaka estimate may be emitted for: a
-/// realistic adult/junior age, 5–100. Outside it no HRmax is fabricated.
+/// realistic adult/junior age, [`TANAKA_AGE_MIN_YEARS`]–[`TANAKA_AGE_MAX_YEARS`].
+/// Outside it no HRmax is fabricated.
 pub fn tanaka_age_in_range(age_years: f64) -> bool {
-    (5.0..=100.0).contains(&age_years)
+    (TANAKA_AGE_MIN_YEARS..=TANAKA_AGE_MAX_YEARS).contains(&age_years)
 }
 
+/// Youngest age the Tanaka HRmax estimate is emitted for, years.
+pub const TANAKA_AGE_MIN_YEARS: f64 = 5.0;
+/// Oldest age the Tanaka HRmax estimate is emitted for, years.
+pub const TANAKA_AGE_MAX_YEARS: f64 = 100.0;
+
 /// A measured HRmax worth trusting over the Tanaka estimate: finite and
-/// physiologically plausible (100–240 bpm). The one gate the HR-zone
-/// calculator and run targets share.
+/// physiologically plausible ([`MEASURED_HR_MAX_MIN_BPM`]–
+/// [`MEASURED_HR_MAX_MAX_BPM`]). The one gate the HR-zone calculator and run
+/// targets share.
 pub fn plausible_measured_hr_max(measured_bpm: Option<f64>) -> Option<f64> {
-    measured_bpm.filter(|m| m.is_finite() && (100.0..=240.0).contains(m))
+    measured_bpm.filter(|m| {
+        m.is_finite() && (MEASURED_HR_MAX_MIN_BPM..=MEASURED_HR_MAX_MAX_BPM).contains(m)
+    })
 }
+
+/// Lowest measured HRmax the core trusts, bpm.
+pub const MEASURED_HR_MAX_MIN_BPM: f64 = 100.0;
+/// Highest measured HRmax the core trusts, bpm.
+pub const MEASURED_HR_MAX_MAX_BPM: f64 = 240.0;
+
+/// A resting HR the Karvonen %HRR ceiling (RUN-KARVONEN-001) may anchor on:
+/// finite and [`RESTING_HR_MIN_BPM`]–[`RESTING_HR_MAX_BPM`].
+pub fn plausible_resting_hr(bpm: f64) -> bool {
+    bpm.is_finite() && (RESTING_HR_MIN_BPM..=RESTING_HR_MAX_BPM).contains(&bpm)
+}
+
+/// Lowest plausible resting HR, bpm.
+pub const RESTING_HR_MIN_BPM: f64 = 25.0;
+/// Highest plausible resting HR, bpm.
+pub const RESTING_HR_MAX_BPM: f64 = 120.0;
+
+/// The highest average heart rate a logged run states, % of HRmax.
+pub const HR_PCT_MAX_CEILING: f64 = 100.0;
 
 // ---------------------------------------------------------------------------
 // 2. Three-zone classification (pure calculation)
@@ -152,6 +180,12 @@ pub fn vdot_band_uses_hr(band: VdotBand) -> bool {
 
 /// The marathon distance in metres (42.195 km).
 pub const MARATHON_M: f64 = 42_195.0;
+
+/// The 5K race distance in metres.
+pub const FIVE_K_M: f64 = 5_000.0;
+
+/// The 10K race distance in metres.
+pub const TEN_K_M: f64 = 10_000.0;
 
 /// Pace band (fast, slow) in seconds per km for a workout row that states its
 /// pace relative to marathon pace (running-015 Easy 15–25 %, running-016 Long
@@ -1395,8 +1429,8 @@ impl GoalDistance {
     pub const fn metres(self) -> Option<f64> {
         match self {
             GoalDistance::General | GoalDistance::C25k => None,
-            GoalDistance::FiveK => Some(5_000.0),
-            GoalDistance::TenK => Some(10_000.0),
+            GoalDistance::FiveK => Some(FIVE_K_M),
+            GoalDistance::TenK => Some(TEN_K_M),
             GoalDistance::HalfMarathon => Some(MARATHON_M / 2.0),
             GoalDistance::Marathon => Some(MARATHON_M),
         }

@@ -53,14 +53,14 @@ class AppLocaleTest {
     }
 
     @Test
-    fun latinDigitResourcesLeaveTheJvmDefaultAlone() {
+    fun appResourcesLeaveTheJvmDefaultAlone() {
         Locale.setDefault(arabic)
         val defaults = LocaleList.getDefault()
         val cfg = Configuration(ctx.resources.configuration).apply { setLocale(arabic) }
-        val res = ctx.createConfigurationContext(cfg).latinDigitResources()
+        val res = ctx.createConfigurationContext(cfg).appResources()
         assertEquals("latn", res.configuration.locales[0].getUnicodeLocaleType("nu"))
         assertEquals(arabic, Locale.getDefault())
         assertEquals(defaults, LocaleList.getDefault())
-        assertSame("one copy per configuration", res, ctx.createConfigurationContext(cfg).latinDigitResources())
+        assertSame("one copy per configuration", res, ctx.createConfigurationContext(cfg).appResources())
     }
 }

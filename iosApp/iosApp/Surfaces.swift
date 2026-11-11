@@ -120,7 +120,7 @@ final class LiveActivities {
         if let run {
             Task { await run.update(content) }
         } else {
-            run = request(kind: "run", content)
+            run = request(content)
         }
     }
 
@@ -143,7 +143,7 @@ final class LiveActivities {
         if let rest {
             Task { await rest.update(content) }
         } else {
-            rest = request(kind: "rest", content)
+            rest = request(content)
         }
         restEnd = frame.end
         restEndWork?.cancel()
@@ -169,10 +169,10 @@ final class LiveActivities {
         }
     }
 
-    private func request(kind: String, _ content: ActivityContent<LollopActivityAttributes.ContentState>) -> LollopActivity? {
+    private func request(_ content: ActivityContent<LollopActivityAttributes.ContentState>) -> LollopActivity? {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return nil }
         do {
-            return try LollopActivity.request(attributes: LollopActivityAttributes(kind: kind), content: content, pushType: nil)
+            return try LollopActivity.request(attributes: LollopActivityAttributes(), content: content, pushType: nil)
         } catch {
             NSLog("lollop: Live Activity not started: \(error)")
             return nil

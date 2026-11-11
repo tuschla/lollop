@@ -73,7 +73,7 @@ pub fn training_age_years(ta: TrainingAge) -> f64 {
 
 /// KB masters threshold, years: the NSCA masters bracket begins at 65
 /// (`MASTERS-001`, Fragala et al. 2019; File 08 indiv-013/014 "masters (65+)").
-const MASTERS_AGE_YEARS: f64 = 65.0;
+pub const MASTERS_AGE_YEARS: f64 = 65.0;
 
 /// Whether the conservative 2:1 running deload cadence applies
 /// (`RUN-DELOAD-001`: "2:1 for older / injury-prone / low training-age"):
@@ -82,7 +82,13 @@ const MASTERS_AGE_YEARS: f64 = 65.0;
 /// exists (HARD RULE 1, the KB states no other age-based load/intensity
 /// modification).
 pub fn conservative_deload(age_years: Option<f64>, training_age: TrainingAge) -> bool {
-    age_years.is_some_and(|a| a >= MASTERS_AGE_YEARS) || matches!(training_age, TrainingAge::Novice)
+    masters_age(age_years) || matches!(training_age, TrainingAge::Novice)
+}
+
+/// A stated age in the masters bracket ([`MASTERS_AGE_YEARS`]+); an unknown
+/// age is not.
+pub fn masters_age(age_years: Option<f64>) -> bool {
+    age_years.is_some_and(|a| a >= MASTERS_AGE_YEARS)
 }
 
 // ---------------------------------------------------------------------------

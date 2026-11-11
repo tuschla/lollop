@@ -21,7 +21,6 @@ import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.Core
 import app.milestone.DarkMode
-import app.milestone.DistanceUnitOverride
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.ViewModel
@@ -122,7 +121,7 @@ class RandomUiWalkTest : UiProbeTest() {
         landscape = false
         val rng = java.util.Random(seed)
 
-        if (s == Start.MilesLb) AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        if (s == Start.MilesLb) QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
         seedEvents(s)?.let { QaHarness.seedLog(ctx, it) }
         trace += "boot $s"
         guard("boot") {

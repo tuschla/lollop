@@ -191,14 +191,21 @@ pub struct SafetySignals {
     pub single_session_spike_frac: Option<f64>,
 }
 
-/// The feedback-036 overtraining condition: ≥2 co-occurring signs (worse
-/// performance, low mood, higher resting HR / lower HRV, worse sleep) that have
-/// lasted at least a week. `weeks == None` = the duration was not reported, and
-/// the gate errs protective and fires on the count alone. The ONE predicate the
-/// recovery concern and the recovery-week deload share, so the card and the
-/// lighter plan always appear together.
+/// Co-occurring overtraining signs that raise the feedback-036 concern.
+pub const OVERTRAINING_MIN_SIGNS: u8 = 2;
+/// Weeks the signs must have lasted for the feedback-036 concern (the KB's
+/// "over >=1-2 wks; do not fire on a single noisy night", lower end).
+pub const OVERTRAINING_MIN_WEEKS: f64 = 1.0;
+
+/// The feedback-036 overtraining condition: ≥ [`OVERTRAINING_MIN_SIGNS`]
+/// co-occurring signs (worse performance, low mood, higher resting HR / lower
+/// HRV, worse sleep) that have lasted at least [`OVERTRAINING_MIN_WEEKS`].
+/// `weeks == None` = the duration was not reported, and the gate errs
+/// protective and fires on the count alone. The ONE predicate the recovery
+/// concern and the recovery-week deload share, so the card and the lighter
+/// plan always appear together.
 pub fn overtraining_sustained(signal_count: u8, weeks: Option<f64>) -> bool {
-    signal_count >= 2 && weeks.is_none_or(|w| w >= 1.0)
+    signal_count >= OVERTRAINING_MIN_SIGNS && weeks.is_none_or(|w| w >= OVERTRAINING_MIN_WEEKS)
 }
 
 /// Run the safety gates in priority order (Pain > Energy > Behavior >

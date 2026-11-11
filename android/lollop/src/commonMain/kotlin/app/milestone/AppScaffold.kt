@@ -20,9 +20,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -100,22 +98,10 @@ private fun CoachScaffoldBody(session: CoachSession) {
     // The plan DAY a past-session Log/Track targets: drives the editor's seed
     // stamp + the missed-day prescription lookup. null = today's flow.
     var sheetPlanDay by rememberSaveable { mutableStateOf<Long?>(null) }
-    // Whether the currently-shown editor has unsaved edits, hoisted here so the
-    // sheet's SWIPE-DOWN dismissal can honor the same "Discard this entry?" guard
-    // the editor's X already enforces. The Set/Run editors report their dirty state
-    // up; other quick forms leave it false (swipe-down just closes them).
-    var sheetDirty by rememberSaveable { mutableStateOf(false) }
-    var confirmDiscardSheet by rememberSaveable { mutableStateOf(false) }
-    // A set loop in progress (reported by the Set editor): the sheet refuses to be
-    // swiped or scrim-tapped away; X or "Done for now" close it.
-    var sheetLocked by rememberSaveable { mutableStateOf(false) }
-    // A set loop in progress, or an editor holding unsaved edits: what a sheet
-    // close or an open intent must not drop.
-    fun loopLocked() = sheetLocked && sheetMode == LogMode.Set
-    fun editorDirty() = sheetDirty && sheetMode != LogMode.Chooser
+    // The shown editor's unsaved edits and set-loop lock: what a sheet close or an
+    // open intent must not drop.
+    val logGuard = remember { EditorGuard() }
     fun resetSheet() {
-        sheetDirty = false
-        sheetLocked = false
         sheetPlanExercise = null
         sheetPlanDay = null
     }
@@ -147,14 +133,10 @@ private fun CoachScaffoldBody(session: CoachSession) {
             dest,
             nav,
             session.model,
-            sheetBusy = loopLocked() || editorDirty(),
+            sheetBusy = logGuard.busy,
             trackerPinned = !RunSession.tracking.value && (RunSession.armed.value || RunSession.locating.value),
             canTrack = canTrack,
         )
-        if (next.sheetOpen && (!nav.sheetOpen || next.sheetMode != nav.sheetMode)) {
-            sheetDirty = false
-            sheetLocked = false
-        }
         session.showTracker = next.showTracker
         selected = next.selected
         sheetMode = next.sheetMode
@@ -261,36 +243,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
     // once the list leaves the top.
     val todayListState = rememberLazyListState()
     val fabExpanded by remember { derivedStateOf { todayListState.firstVisibleItemIndex == 0 } }
-    val sheetState = rememberModalBottomSheetState(
-        // Open fully expanded: the chooser list and the editors (with their
-        // in-sheet keypad) must be visible without a second drag; the partial
-        // detent left them below the fold.
-        skipPartiallyExpanded = true,
-        // A locked set loop refuses to hide. A dirty editor blocks the
-        // swipe-to-hide and raises the discard confirm INSTEAD, so the sheet stays
-        // VISIBLE under the dialog. That way "Keep editing" (and an outside-tap on
-        // the dialog) leave the sheet in place; no stranded invisible sheet / dead
-        // Log FAB). Discard and the programmatic close clear both flags first.
-        confirmValueChange = { target ->
-            when {
-                target != SheetValue.Hidden -> true
-                loopLocked() -> false
-                editorDirty() -> {
-                    confirmDiscardSheet = true
-                    false
-                }
-                else -> true
-            }
-        },
-    )
     val scope = rememberCoroutineScope()
-    // Animate the sheet closed, then drop it from composition once hidden.
-    val dismissSheet: () -> Unit = {
-        resetSheet()
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            if (!sheetState.isVisible) sheetOpen = false
-        }
-    }
 
     // The Today Log FAB. Reopening always resets to the chooser so the sheet
     // never reappears mid-editor.
@@ -414,8 +367,8 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     // Every logged family + derived coaching output; the profile
                     // (training configuration) stays. ONE batch: a single core turn with
                     // one view decode and one published model, never a run of partial
-                    // models. The ClearPlan echo also marks the plan cleared, so it is
-                    // not regenerated on the next boot.
+                    // models. The logged ClearPlan keeps the plan removed on the next
+                    // boot.
                     session.dispatchAll(
                         listOf(
                             Event.ClearSets, Event.ClearRuns, Event.ClearReadiness,
@@ -493,25 +446,11 @@ private fun CoachScaffoldBody(session: CoachSession) {
                 val planObservedAt = sheetPlanDay?.takeIf { it != session.model.today() }?.let(::planDayObservedAt)
 
                 if (sheetOpen) {
-                    // A set loop in progress can't be swiped or scrim-tapped away (a scroll
-                    // back up to the timer closed the whole loop); it closes via X or Finish.
-                    AppSheet(
-                        // The dirty-editor and loop guards live in sheetState.confirmValueChange
-                        // (which keeps the sheet visible while confirming). By the time
-                        // onDismissRequest fires the hide is already committed on a clean,
-                        // unlocked sheet, so this just finishes the close.
-                        onDismiss = {
-                            resetSheet()
-                            sheetOpen = false
-                        },
-                        sheetState = sheetState,
-                        sheetGesturesEnabled = !loopLocked(),
-                    ) {
+                    EditorSheet(logGuard, onClosed = { resetSheet(); sheetOpen = false }) { close ->
+                        val dismissSheet: () -> Unit = { resetSheet(); close() }
                         LogSheetContent(
                             mode = sheetMode,
                             model = session.model,
-                            // Returning to the chooser clears the dirty flag (the entry was
-                            // handled or discarded via the editor's own guard).
                             onMode = {
                                 if (it == LogMode.Chooser) resetSheet()
                                 sheetMode = it
@@ -520,25 +459,15 @@ private fun CoachScaffoldBody(session: CoachSession) {
                             // No tracker: the chooser leaves its "Track run" row out.
                             onTrackRun = if (canTrack) ({ session.showTracker = true }) else null,
                             onDismiss = dismissSheet,
-                            onDirtyChange = { sheetDirty = it },
                             planPrefill = planPrefill,
                             onPlanPrefill = { sheetPlanExercise = it },
                             planObservedAt = planObservedAt,
-                            onSheetLockChange = { sheetLocked = it },
                             // Finishing a session lands on Today's top, where its done state is.
                             onFinishSession = {
                                 dismissSheet()
                                 scope.launch { todayListState.animateScrollToItem(0) }
                             },
                         )
-                    }
-                }
-                // The swipe-down discard confirmation for a dirty Log editor.
-                if (confirmDiscardSheet) {
-                    DiscardEntryDialog(onKeepEditing = { confirmDiscardSheet = false }) {
-                        confirmDiscardSheet = false
-                        resetSheet()
-                        sheetOpen = false
                     }
                 }
                 // "How evidence grading works" legend, reached from the "?" on any

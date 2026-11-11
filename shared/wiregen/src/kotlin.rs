@@ -2,7 +2,9 @@
 //! Rust wire type, written so kotlinx reads and writes exactly serde's JSON.
 //!
 //! - Structs are `@Serializable data class`es; `#[serde(flatten)]` fields are
-//!   inlined, `skip_serializing_if` fields are `@EncodeDefault(NEVER)` with the
+//!   inlined, and the flattened struct is a class of its own that the outer
+//!   class hands out whole (a non-serialized getter named after the Rust
+//!   field). `skip_serializing_if` fields are `@EncodeDefault(NEVER)` with the
 //!   skipped value as their default.
 //! - Unit-only enums are `enum class`es with serde's names; `Event` (the one
 //!   enum with data) is a sealed interface with a serializer for serde's
@@ -76,23 +78,25 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
     ("Event::SubmitWeeklyCheckin", "bad_day", "false"),
 ];
 
-/// Extra Kotlin supertypes: the profile editor keeps its draft in a
-/// `rememberSaveable` bundle.
-const SUPERTYPES: &[(&str, &str)] = &[
-    ("Event::SetProfile", "JvmSerializable"),
-    ("HealthScreen", "JvmSerializable"),
-    ("RecentRace", "JvmSerializable"),
-    ("CalisEquipment", "JvmSerializable"),
-];
-
 /// Types the shell writes, and the types it reads (`shared::wire::roots`).
-const INPUT_ROOTS: &[&str] = &["Event", "RunRef"];
+const INPUT_ROOTS: &[&str] = &[
+    "Event",
+    "RunRef",
+    "WarmUpQuery",
+    "ProfileDraft",
+    "TrackThinning",
+    "ImportedHr",
+];
 const OUTPUT_ROOTS: &[&str] = &[
     "ViewModel",
     "ErrorEnvelope",
     "TrackFigures",
     "Compaction",
-    "FitTrack",
+    "ImportVerdict",
+    "RunTrack",
+    "WarmUpStep",
+    "DraftFacts",
+    "ThinnedTrack",
 ];
 
 pub(crate) fn wire_types() -> Output {
@@ -106,12 +110,6 @@ pub(crate) fn wire_types() -> Output {
             "wiregen DEFAULTS names no field: {owner}.{field}"
         );
     }
-    for (owner, _) in SUPERTYPES {
-        assert!(
-            generator.used_supertypes.contains(owner),
-            "wiregen SUPERTYPES names no type: {owner}"
-        );
-    }
     Output {
         path: PATH,
         contents: body,
@@ -121,11 +119,13 @@ pub(crate) fn wire_types() -> Output {
 /// How a generated class treats its fields.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
-    /// Only the shell writes it: Kotlin names, serde's defaults only.
+    /// The shell writes it and reads it only as an op's answer (a run file's
+    /// fixes): Kotlin names, serde's defaults only.
     Input,
     /// Read (and maybe written): wire names, every field defaulted.
     Output,
-    /// Read and written: wire names, every field defaulted, `f32` as `Double`.
+    /// Written, and read in the view model: wire names, every field
+    /// defaulted, `f32` as `Double`.
     Shared,
 }
 
@@ -142,7 +142,6 @@ struct Gen<'a> {
     emitted: HashSet<&'static str>,
     imports: BTreeSet<&'static str>,
     used_defaults: HashSet<(&'static str, &'static str)>,
-    used_supertypes: HashSet<&'static str>,
     /// `OptionAs` serializers to emit: (inner type, none label).
     option_as: Vec<(&'static str, &'static str)>,
 }
@@ -151,10 +150,12 @@ impl<'a> Gen<'a> {
     fn new(reg: &'a Registry) -> Self {
         let mut input = HashSet::new();
         let mut output = HashSet::new();
+        let mut viewed = HashSet::new();
         let mut emitted = HashSet::new();
         for root in OUTPUT_ROOTS {
             mark(reg, root, &mut output, &mut emitted, false);
         }
+        mark(reg, "ViewModel", &mut viewed, &mut HashSet::new(), false);
         for root in INPUT_ROOTS {
             mark(reg, root, &mut input, &mut emitted, false);
         }
@@ -168,7 +169,7 @@ impl<'a> Gen<'a> {
         let roles = reg
             .types()
             .map(|def| {
-                let role = match (input.contains(def.name), output.contains(def.name)) {
+                let role = match (input.contains(def.name), viewed.contains(def.name)) {
                     (true, true) => Role::Shared,
                     (true, false) => Role::Input,
                     _ => Role::Output,
@@ -182,7 +183,6 @@ impl<'a> Gen<'a> {
             emitted,
             imports: BTreeSet::new(),
             used_defaults: HashSet::new(),
-            used_supertypes: HashSet::new(),
             option_as: Vec::new(),
         }
     }
@@ -289,20 +289,51 @@ impl<'a> Gen<'a> {
             self.property(out, def.name, f, role, false, "    ");
         }
         out.push(')');
-        self.supertypes(out, def.name, None);
+        self.flattened_getters(out, def.name, s, role);
         out.push('\n');
     }
 
-    fn supertypes(&mut self, out: &mut String, owner: &str, base: Option<&str>) {
-        let mut supers: Vec<&str> = base.into_iter().collect();
-        for (o, s) in SUPERTYPES {
-            if *o == owner {
-                supers.push(s);
-                self.used_supertypes.insert(o);
-            }
+    /// `{ val <field>: <Struct> get() = <Struct>(…) }` for each flattened field
+    /// of `s`, so a shell passes the flattened group as one value.
+    fn flattened_getters(&self, out: &mut String, owner: &str, s: &'a Struct, role: Role) {
+        let flat: Vec<&Field> = s.fields.iter().filter(|f| f.flatten).collect();
+        if flat.is_empty() {
+            return;
         }
-        if !supers.is_empty() {
-            let _ = write!(out, " : {}", supers.join(", "));
+        out.push_str(" {\n");
+        for f in flat {
+            let Shape::Named(inner) = &f.shape else {
+                panic!("flattened {} is not a struct", f.name)
+            };
+            assert!(
+                self.role(inner) == role,
+                "{owner} flattens {inner}, which the shell reads or writes differently"
+            );
+            let Body::Struct(inner_struct) = &self.def(inner).body else {
+                panic!("flattened {inner} is not a struct")
+            };
+            let args: Vec<String> = self
+                .flat_fields(inner_struct)
+                .iter()
+                .map(|g| Self::name_in(g.name, role))
+                .collect();
+            let _ = writeln!(
+                out,
+                "    val {}: {inner}\n        get() = {inner}({})",
+                Self::name_in(f.name, role),
+                args.join(", ")
+            );
+        }
+        out.push('}');
+    }
+
+    /// A field's Kotlin property name in a class of `role`: the shell's
+    /// camelCase for the types only it writes, serde's names for the rest.
+    fn name_in(name: &str, role: Role) -> String {
+        if role == Role::Input {
+            camel(name)
+        } else {
+            name.to_owned()
         }
     }
 
@@ -317,11 +348,7 @@ impl<'a> Gen<'a> {
         omit_defaults: bool,
         indent: &str,
     ) {
-        let name = if role == Role::Input {
-            camel(f.name)
-        } else {
-            f.name.to_owned()
-        };
+        let name = Self::name_in(f.name, role);
         let ty = Self::kt_type(&f.shape, role.double_floats());
         let skipped = f.skip_if.map(|p| match p {
             "Option::is_none" => Value::Null,
@@ -442,11 +469,12 @@ impl<'a> Gen<'a> {
                     .flat_fields(s)
                     .into_iter()
                     .filter_map(|f| {
-                        let v = map.get(f.name).unwrap_or(&Value::Null);
                         let zero = f
                             .default
                             .clone()
                             .unwrap_or_else(|| self.zero_json(&f.shape));
+                        // A key a `skip_serializing_if` left out holds its default.
+                        let v = map.get(f.name).unwrap_or(&zero);
                         (v != &zero).then(|| {
                             format!(
                                 "{} = {}",
@@ -685,7 +713,7 @@ impl<'a> Gen<'a> {
             match &v.body {
                 VariantBody::Unit => {
                     let _ = write!(out, "    data object {}", v.ident);
-                    self.supertypes(out, owner, Some(name));
+                    let _ = write!(out, " : {name}");
                     out.push('\n');
                 }
                 VariantBody::Struct(fields) => {
@@ -694,7 +722,7 @@ impl<'a> Gen<'a> {
                         self.property(out, owner, f, Role::Input, false, "        ");
                     }
                     out.push_str("    )");
-                    self.supertypes(out, owner, Some(name));
+                    let _ = write!(out, " : {name}");
                     out.push('\n');
                 }
                 VariantBody::Newtype(Shape::Named(payload)) => {
@@ -722,7 +750,7 @@ impl<'a> Gen<'a> {
                         );
                     }
                     out.push_str("    )");
-                    self.supertypes(out, owner, Some(name));
+                    let _ = write!(out, " : {name}");
                     out.push('\n');
                 }
                 VariantBody::Newtype(shape) => panic!("{owner}: unsupported newtype {shape:?}"),
@@ -852,7 +880,7 @@ fn mark(
         Body::Struct(s) => {
             for f in &s.fields {
                 match &f.shape {
-                    Shape::Named(inner) if f.flatten => mark(reg, inner, into, emitted, true),
+                    Shape::Named(inner) if f.flatten => mark(reg, inner, into, emitted, false),
                     shape => mark_shape(reg, shape, into, emitted),
                 }
             }
@@ -905,6 +933,10 @@ fn strings_entry(wire: &str) -> String {
 }
 
 fn set_of(items: &[&str]) -> String {
+    if items.is_empty() {
+        // An enum with no unit (or no payload) variant: Kotlin can't infer `setOf()`.
+        return "emptySet<String>()".to_owned();
+    }
     format!(
         "setOf({})",
         items

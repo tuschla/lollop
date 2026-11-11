@@ -713,8 +713,8 @@ fn claim_plan_rest_days_and_no_history_are_no_break() {
 
 #[test]
 fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
-    let (app, m) = setup(runner(3, 40.0), MON);
-    let it = planned_long_run_item(&app, &m);
+    let (_, m) = setup(runner(3, 40.0), MON);
+    let it = planned_long_run_item(&m);
     let km = it.run_head_km.unwrap();
     let cites_share = it.why.basis.contains("25–30% of your weekly distance");
     assert!(
@@ -732,8 +732,8 @@ fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
         it.evidence.citation
     );
     // A 4-day week keeps its 30 % share and the claim's own statement.
-    let (app, m) = setup(runner(4, 40.0), MON);
-    let it = planned_long_run_item(&app, &m);
+    let (_, m) = setup(runner(4, 40.0), MON);
+    let it = planned_long_run_item(&m);
     assert_eq!(it.run_head_km, Some(12.0));
     assert!(
         it.why.basis.contains("25–30% of your weekly distance"),

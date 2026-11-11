@@ -24,7 +24,7 @@ fn review_bone_pain_short_circuits_to_injury_concern() {
 
     let fb = app.view(&model).feedback.expect("feedback present");
     assert_eq!(fb.category, FeedbackCategory::ConcernInjury);
-    assert!(fb.suppresses_praise);
+    assert!(fb.category.suppresses_competing_praise());
     assert!(fb.evidence.safety_critical);
     assert!(!fb.message.is_empty());
 }
@@ -46,7 +46,7 @@ fn review_clean_lift_yields_mastery() {
 
     let fb = app.view(&model).feedback.expect("feedback present");
     assert_eq!(fb.category, FeedbackCategory::PositiveMastery);
-    assert!(!fb.suppresses_praise);
+    assert!(!fb.category.suppresses_competing_praise());
 }
 
 #[test]

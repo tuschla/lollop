@@ -6,7 +6,7 @@ use crate::app::model::{
     EndedMarker, LoggedActivity, LoggedRun, LoggedSet, Model, PlanRequest, RaceQuery,
     RetractedInput, SessionMove, profile_at,
 };
-use crate::app::profile_age::{PROFILE_EPOCH_DAY_RANGE, derive_birthday_age};
+use crate::app::profile_age::{PROFILE_EPOCH_DAY_RANGE, derive_age_gate, derive_birthday_age};
 use crate::app::run_metrics::{in_spike_window, spike_km};
 use crate::app::run_targets;
 use crate::app::{HrZoneInputView, HypertrophyInputView, ProteinInputView};
@@ -22,12 +22,14 @@ use crate::{gps::GpsPoint, sanitize::Sanitize};
 
 /// `update`: fold one event into the model. The event is normalized first
 /// ([`Event::normalized`]: legacy shapes upgraded, every value sanitized), and
-/// whether a logging event stores a row and which row an edit names are read
-/// off [`Event::entry_event`], the facts compaction reads.
+/// whether a logging event stores a row, the id it stores it under and which
+/// row an edit names are read off [`Event::entry_event`], the facts
+/// compaction reads.
 pub(super) fn apply(model: &mut Model, event: Event) {
     let event = event.normalized();
     let entry = event.entry_event();
     let stores_row = entry.is_some_and(|e| e.stored);
+    let row_id = entry.map_or(0, |e| e.row.id);
     let target = entry.and_then(|e| e.target);
     let (family, _) = event.family();
     match event {
@@ -80,7 +82,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             reps,
             rpe,
             observed_at,
-            entry_id,
+            entry_id: _,
             hold_sec,
         } => {
             if stores_row {
@@ -90,7 +92,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                     reps,
                     rpe,
                     observed_at,
-                    entry_id,
+                    entry_id: row_id,
                     hold_sec,
                 }));
             }
@@ -134,7 +136,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             hr_pct_max,
             longest_recent_km,
             observed_at,
-            entry_id,
+            entry_id: _,
             workout_type,
             session_rpe,
             avg_hr_bpm,
@@ -146,7 +148,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                 hr_pct_max,
                 longest_recent_km,
                 observed_at,
-                entry_id,
+                entry_id: row_id,
                 workout_type,
                 session_rpe,
                 avg_hr_bpm,
@@ -159,7 +161,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             hr_pct_max,
             longest_recent_km,
             observed_at,
-            entry_id,
+            entry_id: _,
             workout_type,
             session_rpe,
             segment_starts,
@@ -173,7 +175,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                 hr_pct_max,
                 longest_recent_km,
                 observed_at,
-                entry_id,
+                entry_id: row_id,
                 workout_type,
                 session_rpe,
                 avg_hr_bpm,
@@ -189,7 +191,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             vigorous,
             strengthening,
             observed_at,
-            entry_id,
+            entry_id: _,
         } => {
             if stores_row {
                 model.activities.push(LoggedActivity {
@@ -198,7 +200,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                     vigorous,
                     strengthening,
                     observed_at,
-                    entry_id,
+                    entry_id: row_id,
                 });
             }
         }
@@ -221,7 +223,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             }
         },
         Event::AmendSet {
-            entry_id,
+            entry_id: _,
             exercise,
             weight_kg,
             reps,
@@ -243,13 +245,13 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                     reps,
                     rpe,
                     observed_at,
-                    entry_id,
+                    entry_id: row_id,
                     hold_sec,
                 }));
             }
         }
         Event::AmendRun {
-            entry_id,
+            entry_id: _,
             distance_km,
             duration_min,
             hr_pct_max,
@@ -271,7 +273,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                     hr_pct_max,
                     longest_recent_km,
                     observed_at,
-                    entry_id,
+                    entry_id: row_id,
                     workout_type,
                     session_rpe,
                     avg_hr_bpm,
@@ -398,6 +400,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             });
         }
         Event::GeneratePlan { start_epoch_day } => {
+            model.plan_removed = false;
             if PlanStep::of(true, model.plan_request.is_some()) == PlanStep::Start {
                 model.plan_request = Some(PlanRequest { start_epoch_day });
             }
@@ -679,15 +682,7 @@ fn apply_profile(model: &mut Model, mut profile: Profile) {
     if !profile.running_km_per_week_set {
         profile.running_km_per_week = 0.0;
     }
-    if let Some(today) = model.today_epoch_day {
-        derive_birthday_age(&mut profile, today);
-    }
-    // HARD RULE 3: derive the pediatric gate from age (18 y; safety-011 gives no
-    // cutoff). No age = adult, not gated (KB onboard-050). A NaN age arrives
-    // as 0, so it gates.
-    if profile.age_years.is_some_and(Profile::youth_age) {
-        profile.health.youth = true;
-    }
+    derive_age_gate(&mut profile, model.today_epoch_day);
     // Profile history: an edit supersedes every entry at or after its own
     // [`Profile::history_key`] (effective day, then the instant it was made;
     // an undated edit, −∞, the whole history), so a later goal/weekly-set

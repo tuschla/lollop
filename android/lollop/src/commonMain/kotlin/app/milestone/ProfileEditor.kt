@@ -314,9 +314,10 @@ internal enum class ProfileRowId {
 /** The PAR-Q+ question a focus on [id] reveals inside the open health
  *  questions: the first symptom answered Yes, or the bone/joint answer. Null when
  *  [id] names no question or no such Yes is recorded (a legacy flag). */
-internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqItem? = when (id) {
-    ProfileRowId.ParqSymptom -> ParqItem.entries.firstOrNull { it.symptom && health.parqYes(it) }
-    ProfileRowId.ParqInjury -> ParqItem.BoneOrJoint.takeIf { health.parqYes(it) }
+internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqQuestion? = when (id) {
+    ProfileRowId.ParqSymptom -> draftFacts(ProfileDraft(health = health)).first_symptom
+    ProfileRowId.ParqInjury ->
+        ParqQuestion.BoneOrJoint.takeIf { it in draftFacts(ProfileDraft(health = health)).parq_yes }
     else -> null
 }
 
@@ -343,10 +344,9 @@ internal fun Event.SetProfile.Companion.from(p: Profile) = Event.SetProfile(
     ageYears = p.age_years,
     restingHrBpm = p.resting_hr_bpm,
     measuredHrMax = p.measured_hr_max,
+    distanceUnit = p.distance_unit,
     weightLb = p.weight_lb,
-    // Drop the core-DERIVED youth flag from the editable draft so a later
-    // edit never re-asserts it (youth is owned by the core, keyed off age).
-    health = p.health.copy(youth = false),
+    health = p.health,
     resistanceModality = p.resistance_modality,
     highLoadBlock = p.high_load_block,
     environment = p.environment,
@@ -452,7 +452,7 @@ internal fun Event.SetProfile.withLiftGoal(goal: LiftGoal): Event.SetProfile {
  *  the guided setup uses), with the day counts fitted to that lead's caps. */
 internal fun Event.SetProfile.withLead(lead: BothPriority): Event.SetProfile {
     val liftDays = liftDaysPerWeek?.coerceIn(hybridLiftDayRange(lead))
-    val runMax = hybridRunDayOptions(liftDays ?: HYBRID_DEFAULT_LIFT_DAYS, lead).last
+    val runMax = hybridRunDayOptions(liftDays ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS, lead).last
     return copy(
         concurrentGoal = leadingConcurrentGoal(lead, liftGoal),
         liftDaysPerWeek = liftDays,
@@ -494,7 +494,7 @@ internal fun ProfileEditor(
     // Saveable: this item leaves composition when scrolled away. Keyed on
     // `initial` so a new core profile (e.g. after a re-run setup) replaces a stale
     // draft that the next edit would otherwise re-send over it (HARD RULE 3).
-    var draft by rememberSaveable(initial) { mutableStateOf(initial) }
+    var draft by rememberSaveable(initial, stateSaver = jsonSaver(Event.SetProfile.serializer())) { mutableStateOf(initial) }
     // Commit-and-apply: the single funnel every edit goes through.
     val commit: (Event.SetProfile) -> Unit = {
         draft = it
@@ -633,7 +633,7 @@ internal fun ProfileEditor(
                 // The setup's rule: the ticked weekdays must cover every training
                 // day (or be "Any days"). Picks stage here and apply only once
                 // they agree; collapsing the row drops a mismatched pick.
-                var work by rememberSaveable(draft) { mutableStateOf(draft) }
+                var work by rememberSaveable(draft, stateSaver = jsonSaver(Event.SetProfile.serializer())) { mutableStateOf(draft) }
                 val stage: (Event.SetProfile) -> Unit = { next ->
                     work = next
                     if (weekdaysCover(next.trainingWeekdays, next.trainingDayTotal())) commit(next)
@@ -954,7 +954,7 @@ internal fun ProfileEditor(
                     birthDay,
                     today,
                     hint = when {
-                        isMinor(draft.ageYears) -> stringResource(Res.string.setup_health_defer_youth)
+                        draftFacts(ProfileDraft(ageYears = draft.ageYears)).youth -> stringResource(Res.string.setup_health_defer_youth)
                         !ageGiven && draft.measuredHrMax == null -> stringResource(Res.string.setup_birthday_skipped_note)
                         else -> null
                     },
@@ -965,7 +965,7 @@ internal fun ProfileEditor(
                         else -> null
                     },
                     onSkip = { if (ageGiven) commit(draft.copy(birthEpochDay = null, ageYears = null)) },
-                ) { day -> commit(draft.copy(birthEpochDay = day, ageYears = ageOnDay(day, today).toDouble())) }
+                ) { day -> commit(draft.copy(birthEpochDay = day, ageYears = birthdayAge(day, today))) }
             }
             RowHairline()
             val bwUnit = draft.weightUnit
@@ -1031,6 +1031,7 @@ internal fun ProfileEditor(
             // "2 apply") that expands to the questions and the clearance follow-up.
             // A banner's deep link lands on the answer that holds training: a
             // question or the clearance inside the open list, else a switch row.
+            val parqFacts = draftFacts(ProfileDraft(health = draft.health))
             val parqItem = parqRevealItem(reveal, draft.health)
             val clearanceReveal = reveal == ProfileRowId.ParqClearance && draft.health.parq_positive
             val parqInner = parqItem != null || clearanceReveal
@@ -1038,7 +1039,7 @@ internal fun ProfileEditor(
                 open == ProfileRowId.HealthQuestions,
                 { toggle(ProfileRowId.HealthQuestions) },
                 stringResource(Res.string.setup_row_health_questions),
-                healthSummary(draft.health, count = draft.health.parqYesCount),
+                healthSummary(parqFacts, count = parqFacts.parq_yes.size),
                 revealRequest = reveal?.pickerRow == ProfileRowId.HealthQuestions && !parqInner,
                 onRevealed = { reveal = null },
                 revealOnExpand = !parqInner,
@@ -1172,9 +1173,9 @@ internal fun Event.SetProfile.withoutSide(keep: Modality): Event.SetProfile = wh
 }
 
 /** Lift days as the Training days row shows them: unanswered = what the engine
- *  schedules (plan::mod). */
+ *  schedules (the core's default for a hybrid or a lifting-only week). */
 internal fun Event.SetProfile.shownLiftDays(): Int =
-    liftDaysPerWeek ?: if (runningDaysPerWeek > 0) HYBRID_DEFAULT_LIFT_DAYS else LIFT_ONLY_DEFAULT_DAYS
+    liftDaysPerWeek ?: if (runningDaysPerWeek > 0) CoreConstants.HYBRID_DEFAULT_LIFT_DAYS else CoreConstants.LIFT_ONLY_DEFAULT_LIFT_DAYS
 
 /** The week's session days: lift days, run days, or both added up. */
 internal fun Event.SetProfile.trainingDayTotal(): Int {
@@ -1226,10 +1227,9 @@ private fun RecentRaceEditor(race: RecentRace?, onChange: (RecentRace?) -> Unit)
 }
 
 /** Accepted keypad ranges for the person numbers (wizard, Profile and the morning
- *  check-in share them). Resting HR matches the core's plausible band
- *  (run_targets.rs `hr_rest_anchor`, 25..=120). */
+ *  check-in share them). Resting HR is the core's plausible band. */
 internal val AGE_RANGE = 14.0..100.0
-internal val RESTING_HR_RANGE = 25.0..120.0
+internal val RESTING_HR_RANGE = CoreConstants.RESTING_HR_MIN_BPM..CoreConstants.RESTING_HR_MAX_BPM
 internal val MAX_HR_RANGE = 120.0..230.0
 
 /** Weekly sets per muscle the Profile scale offers. Starts at 1, not 0: a

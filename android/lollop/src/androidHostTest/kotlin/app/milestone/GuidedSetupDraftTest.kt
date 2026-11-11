@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -16,6 +17,11 @@ import org.junit.Test
  * come from [keepFlags], the same function [GuidedSetup] calls on Finish.
  */
 class GuidedSetupDraftTest {
+
+    // The draft's facts come from the real core: start from a fresh process,
+    // not an engine another test class left installed.
+    @Before
+    fun setUp() = AppRuntime.resetForTest()
 
     // A Both profile whose training-field values were CUSTOMISED past the plain
     // level-derived seeds (weeklySets 21 ≠ the level's 12; km 37; advanced ON while
@@ -51,13 +57,13 @@ class GuidedSetupDraftTest {
             seedLevel = seedLevel,
             seedRunLevel = seedLevel,
             seedDays = seedDays,
-            seedLiftSplit = HYBRID_DEFAULT_LIFT_DAYS,
+            seedLiftSplit = CoreConstants.HYBRID_DEFAULT_LIFT_DAYS,
             seedBothPriority = customised.concurrentGoal.lead(),
             modality = Modality.Both,
             level = level,
             runLevel = level,
             days = seedDays,
-            liftSplit = HYBRID_DEFAULT_LIFT_DAYS,
+            liftSplit = CoreConstants.HYBRID_DEFAULT_LIFT_DAYS,
             bothPriority = BothPriority.LiftLean,
         )
         return deriveDraft(
@@ -72,6 +78,7 @@ class GuidedSetupDraftTest {
             female = false,
             restingHrBpm = 55.0,
             weightLb = false,
+            distanceUnit = DistanceUnit.Km,
             health = HealthScreen(),
             initial = customised,
             keepLiftVolume = keep.liftVolume,
@@ -167,6 +174,7 @@ class GuidedSetupDraftTest {
             female = true,
             restingHrBpm = seed.restingHrBpm,
             weightLb = false,
+            distanceUnit = DistanceUnit.Km,
             health = HealthScreen(),
             initial = seed,
             keepLiftVolume = true,
@@ -211,6 +219,7 @@ class GuidedSetupDraftTest {
             female = false,
             restingHrBpm = 55.0,
             weightLb = false,
+            distanceUnit = DistanceUnit.Km,
             health = HealthScreen(),
             initial = seed,
             keepLiftVolume = true,
@@ -256,6 +265,7 @@ class GuidedSetupDraftTest {
         female = female,
         restingHrBpm = null,
         weightLb = weightLb,
+        distanceUnit = DistanceUnit.Km,
         health = HealthScreen(),
         initial = null,
         keepLiftVolume = false,
@@ -349,15 +359,6 @@ class GuidedSetupDraftTest {
         assertFalse(SetupStep.Placement in setupSteps(Modality.Run, calisthenics = true))
     }
 
-    @Test
-    fun youthAndHealthFlagsDefer() {
-        assertTrue(isMinor(16.0))
-        assertFalse(healthDefers(HealthScreen()))
-        assertTrue(healthDefers(HealthScreen(parq_positive = true)))
-        assertFalse(healthDefers(HealthScreen(parq_positive = true, medically_cleared = true)))
-        assertTrue(healthDefers(HealthScreen(acute_illness = true)))
-    }
-
     /** A first-run answer set; only the arguments a test cares about change. */
     private fun firstRun(
         modality: Modality,
@@ -385,6 +386,7 @@ class GuidedSetupDraftTest {
         female = null,
         restingHrBpm = null,
         weightLb = false,
+        distanceUnit = DistanceUnit.Km,
         health = health,
         initial = null,
         keepLiftVolume = false,
@@ -459,6 +461,7 @@ class GuidedSetupDraftTest {
             female = null,
             restingHrBpm = null,
             weightLb = false,
+            distanceUnit = DistanceUnit.Km,
             health = HealthScreen(),
             initial = seed,
             keepLiftVolume = true,
@@ -471,28 +474,12 @@ class GuidedSetupDraftTest {
     }
 
     @Test
-    fun parqChestPainIsASymptomThatClearanceCannotLift() {
-        val chest = HealthScreen().withParqAnswer(ParqItem.ChestPain, true)
+    fun theCoreAnsweredHealthScreenReachesTheDraft() {
+        // The PAR-Q+ rules are the core's (shared/src/app/tests/draft_facts.rs); the
+        // draft carries the screen they produce.
+        val chest = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.ChestPain, true))).health
         assertTrue(chest.symptomatic)
-        assertFalse(chest.parq_positive)
-        assertEquals(1, chest.parqYesCount)
-        assertTrue(healthDefers(chest))
-        assertTrue(healthDefers(chest.copy(medically_cleared = true)))
         assertTrue(firstRun(Modality.Lift, days = 3, health = chest).health.symptomatic)
-        // Doctor follow-up items raise parq_positive, which clearance does lift.
-        val heart = HealthScreen().withParqAnswer(ParqItem.HeartOrBloodPressure, true).copy(medically_cleared = true)
-        assertTrue(heart.parq_positive)
-        assertFalse(healthDefers(heart))
-        // Answering it No again drops the follow-up AND its clearance.
-        val cleared = heart.withParqAnswer(ParqItem.HeartOrBloodPressure, false)
-        assertFalse(cleared.parq_positive)
-        assertFalse(cleared.medically_cleared)
-        // The bone/joint question is the injury/rehab hold.
-        assertTrue(HealthScreen().withParqAnswer(ParqItem.BoneOrJoint, true).injury_or_rehab)
-        // A legacy single-toggle answer stays raised until a follow-up question is answered.
-        val legacy = HealthScreen(parq_positive = true)
-        assertTrue(legacy.legacyParq)
-        assertTrue(legacy.withParqAnswer(ParqItem.ChestPain, false).parq_positive)
     }
 
     @Test
@@ -679,7 +666,7 @@ class GuidedSetupDraftTest {
         val hybrid = customised.copy(liftDaysPerWeek = null, runningDaysPerWeek = 3)
         assertEquals(5, hybrid.trainingDayTotal())
         assertEquals(4, hybrid.copy(weeklySets = 0, runningDaysPerWeek = 4).trainingDayTotal())
-        assertEquals(LIFT_ONLY_DEFAULT_DAYS, hybrid.copy(runningDaysPerWeek = 0).trainingDayTotal())
+        assertEquals(CoreConstants.LIFT_ONLY_DEFAULT_LIFT_DAYS, hybrid.copy(runningDaysPerWeek = 0).trainingDayTotal())
     }
 
     @Test
@@ -780,44 +767,21 @@ class GuidedSetupDraftTest {
 
     @Test
     fun pullUpRungsNeedSomethingToHangFrom() {
-        assertFalse(CalisEquipment().canHang)
-        assertTrue(CalisEquipment(pull_up_bar = true).canHang)
-        assertTrue(CalisEquipment(rings = true).canHang)
-        assertFalse(CalisEquipment(dip_bars = true).canHang)
-    }
-
-    @Test
-    fun theYouthHoldIsAboutAgeNotHealthAnswers() {
-        assertTrue(isMinor(17.0))
-        assertFalse(isMinor(18.0))
-        assertFalse(isMinor(null))
-        // The health answers alone don't defer a 16-year-old: the review shows the
-        // hold under About you instead.
-        assertFalse(healthDefers(HealthScreen()))
-        assertTrue(isMinor(16.0))
-    }
-
-    @Test
-    fun ageOnDayCountsCompletedCalendarYears() {
-        val born = 7_740L // 1991-03-12
-        assertEquals(34, ageOnDay(born, 20_523L)) // 2026-03-11
-        assertEquals(35, ageOnDay(born, 20_524L)) // 2026-03-12
-        // A 29 February birthday completes its year on 1 March in a common year,
-        // as the core counts it.
-        val leap = 13_938L // 2008-02-29
-        assertEquals(17, ageOnDay(leap, 20_512L)) // 2026-02-28
-        assertEquals(18, ageOnDay(leap, 20_513L)) // 2026-03-01
-        assertEquals(0, ageOnDay(20_600L, 20_500L))
+        assertNull("no stated equipment", canHang(null))
+        assertEquals(false, canHang(CalisEquipment()))
+        assertEquals(true, canHang(CalisEquipment(pull_up_bar = true)))
+        assertEquals(true, canHang(CalisEquipment(rings = true)))
+        assertEquals(false, canHang(CalisEquipment(dip_bars = true)))
     }
 
     @Test
     fun theBirthdayPickerOffersOnlyAgesFourteenToAHundred() {
         val today = 20_743L // 2026-10-17
         val range = birthdayRange(today)
-        assertEquals(14, ageOnDay(range.last, today))
-        assertEquals(13, ageOnDay(range.last + 1, today))
-        assertEquals(100, ageOnDay(range.first, today))
-        assertEquals(101, ageOnDay(range.first - 1, today))
+        assertEquals(14.0, birthdayAge(range.last, today))
+        assertEquals(13.0, birthdayAge(range.last + 1, today))
+        assertEquals(100.0, birthdayAge(range.first, today))
+        assertEquals(101.0, birthdayAge(range.first - 1, today))
         assertTrue("no future birthday", range.last < today)
     }
 
@@ -843,14 +807,14 @@ class GuidedSetupDraftTest {
         val eve = SetupValues(answered, seed, null, null, DistanceUnit.Km, eveOfBirthday)
         assertTrue(eve.ready(SetupStep.About))
         assertEquals(17.0, eve.ageYears!!, 0.0)
-        assertTrue(isMinor(eve.ageYears))
+        assertTrue(eve.youth)
         val draft = eve.draft()!!
         assertEquals(born, draft.birthEpochDay)
         assertEquals(17.0, draft.ageYears!!, 0.0)
 
         val birthday = SetupValues(answered, seed, null, null, DistanceUnit.Km, eveOfBirthday + 1)
         assertEquals(18.0, birthday.ageYears!!, 0.0)
-        assertFalse(isMinor(birthday.ageYears))
+        assertFalse(birthday.youth)
     }
 
     @Test

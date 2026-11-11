@@ -31,6 +31,7 @@ fn build_reference_impl(reds_present: bool) -> Vec<GuidanceView> {
     push_nutrition_reference(reds_present, &mut rows);
     push_running_reference(&mut rows);
     push_coaching_reference(&mut rows);
+    crate::app::text_parts::mark_guidance(&mut rows);
     rows
 }
 

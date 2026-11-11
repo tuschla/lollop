@@ -2,7 +2,7 @@ use crate::app::format::{
     fmt_frac_pct_range, fmt_km_or_mi, fmt_u8_range, fmt_whole_km_or_mi, is_ratio_base_km,
     local_week, week_monday,
 };
-use crate::app::guidance::{push_guidance, push_guidance_mi};
+use crate::app::guidance::push_guidance;
 use crate::app::lift_audit::set_intensity_pct;
 use crate::app::logged_days::plan_week_index;
 use crate::app::model::Model;
@@ -11,7 +11,7 @@ use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{GuidanceView, SessionPlanView};
 use crate::day::{DAY_SEC, is_undated, local_day};
 use crate::evidence::claims;
-use crate::profile::PlanProfile;
+use crate::profile::{DistanceUnit, PlanProfile};
 use crate::sanitize::sum0;
 use crate::schema::{Recommended, SessionType, WorkoutType};
 use crate::{hybrid, individualization, running};
@@ -120,6 +120,8 @@ struct WeekRuns {
     hard_runs: Vec<i64>,
     recovery_this_week: bool,
     prev_was_recovery: bool,
+    /// The unit every row's distances read in.
+    unit: DistanceUnit,
 }
 
 impl WeekRuns {
@@ -199,6 +201,7 @@ impl WeekRuns {
             hard_runs,
             recovery_this_week,
             prev_was_recovery,
+            unit: model.distance_unit(),
         })
     }
 
@@ -227,17 +230,25 @@ impl WeekRuns {
     }
 }
 
-/// A km figure as a number in the line's unit, one decimal ("12.3"), the
-/// miles form dropping a trailing ".0" like [`fmt_mi_of_km`].
-fn dist_num(km: f64, mi: bool) -> String {
-    let s = fmt_km_or_mi(km, mi);
-    s.strip_suffix(if mi { " mi" } else { " km" })
+/// A km figure as a number in `unit`, one decimal ("12.3"), the miles form
+/// dropping a trailing ".0" like [`crate::app::format::fmt_mi_of_km`].
+fn dist_num(km: f64, unit: DistanceUnit) -> String {
+    let s = fmt_km_or_mi(km, unit);
+    let suffix = match unit {
+        DistanceUnit::Km => " km",
+        DistanceUnit::Mi => " mi",
+    };
+    s.strip_suffix(suffix)
         .map_or_else(|| s.clone(), str::to_string)
 }
 
 /// "20.0 → 26.0 km" / "12.4 → 16.2 mi": a week-to-week distance change.
-fn dist_change(from_km: f64, to_km: f64, mi: bool) -> String {
-    format!("{} → {}", dist_num(from_km, mi), fmt_km_or_mi(to_km, mi))
+fn dist_change(from_km: f64, to_km: f64, unit: DistanceUnit) -> String {
+    format!(
+        "{} → {}",
+        dist_num(from_km, unit),
+        fmt_km_or_mi(to_km, unit)
+    )
 }
 
 /// The weekly running-volume system (File 04): aggregates the most recent
@@ -300,18 +311,16 @@ fn push_increase_row(rows: &mut Vec<GuidanceView>, age_years: f64, week: &WeekRu
     let weekly_km = week.weekly_km;
     let ok = running::weekly_increase_ok(base_km, weekly_km, age_years);
     let pct = (weekly_km - base_km) / base_km * 100.0;
-    let text = |mi: bool| {
-        format!(
-            "Week-over-week {} ({pct:+.0}%): {}{base_label}",
-            dist_change(base_km, weekly_km, mi),
-            if ok.value {
-                "within the increase cap"
-            } else {
-                "over the increase cap; hold or trim next week"
-            }
-        )
-    };
-    push_guidance_mi(rows, "Weekly volume", text(false), text(true), &ok);
+    let text = format!(
+        "Week-over-week {} ({pct:+.0}%): {}{base_label}",
+        dist_change(base_km, weekly_km, week.unit),
+        if ok.value {
+            "within the increase cap"
+        } else {
+            "over the increase cap; hold or trim next week"
+        }
+    );
+    push_guidance(rows, "Weekly volume", text, &ok);
 }
 
 /// Two-week ramp flag (running-028: >30% over two weeks ≈ 1.6× injury odds).
@@ -331,13 +340,11 @@ fn push_two_week_ramp_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     if is_ratio_base_km(ramp_baseline) {
         let flag = running::two_week_increase_flag(ramp_baseline, weekly_km);
         if flag.value {
-            let text = |mi: bool| {
-                format!(
-                    "Distance up more than 30% in two weeks ({}). That raises injury risk; build more slowly",
-                    dist_change(ramp_baseline, weekly_km, mi)
-                )
-            };
-            push_guidance_mi(rows, "Weekly volume", text(false), text(true), &flag);
+            let text = format!(
+                "Distance up more than 30% in two weeks ({}). That raises injury risk; build more slowly",
+                dist_change(ramp_baseline, weekly_km, week.unit)
+            );
+            push_guidance(rows, "Weekly volume", text, &flag);
         }
     }
 }
@@ -362,7 +369,7 @@ fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
 /// so the tag governs when present. Each exceeded cap gets its own row.
 /// Returns whether a long-run row was pushed.
 fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_km: f64) -> bool {
-    let (weekly_km, long_run_km) = (week.weekly_km, week.long_run_km);
+    let (weekly_km, long_run_km, unit) = (week.weekly_km, week.long_run_km, week.unit);
     let hard_km = |kind| sum0(week.current().filter(|r| r.hard == kind).map(|r| r.km));
     let threshold_km = hard_km(running::HardRunKind::Threshold);
     let interval_km = hard_km(running::HardRunKind::Interval);
@@ -375,62 +382,52 @@ fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_
         // (running-016), and a long run inside it is informational.
         let pct = long_run_km / weekly_km * 100.0;
         if weekly_km >= running::LONG_RUN_SHARE_SPLIT_KM {
-            let text = |mi: bool| {
-                format!(
-                    "Long run {} is {pct:.0}% of the week: over the 25% limit for one run.",
-                    fmt_km_or_mi(long_run_km, mi)
-                )
-            };
-            push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+            let text = format!(
+                "Long run {} is {pct:.0}% of the week: over the 25% limit for one run.",
+                fmt_km_or_mi(long_run_km, unit)
+            );
+            push_guidance(rows, "Weekly volume", text, &caps);
         } else {
             let daily = running::long_run_within_daily_avg(long_run_km, daily_avg_km);
-            let text = |mi: bool| {
-                let long = fmt_km_or_mi(long_run_km, mi);
-                if daily.value {
-                    format!(
-                        "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
-                        fmt_whole_km_or_mi(running::LONG_RUN_SHARE_SPLIT_KM, mi),
-                        fmt_km_or_mi(running::DAILY_AVG_RUN_MULTIPLE * daily_avg_km, mi)
-                    )
-                } else {
-                    format!(
-                        "Long run {long} is {pct:.0}% of the week and more than twice your average daily distance ({}).",
-                        fmt_km_or_mi(daily_avg_km, mi)
-                    )
-                }
+            let long = fmt_km_or_mi(long_run_km, unit);
+            let text = if daily.value {
+                format!(
+                    "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
+                    fmt_whole_km_or_mi(running::LONG_RUN_SHARE_SPLIT_KM, unit),
+                    fmt_km_or_mi(running::DAILY_AVG_RUN_MULTIPLE * daily_avg_km, unit)
+                )
+            } else {
+                format!(
+                    "Long run {long} is {pct:.0}% of the week and more than twice your average daily distance ({}).",
+                    fmt_km_or_mi(daily_avg_km, unit)
+                )
             };
-            push_guidance_mi(rows, "Weekly volume", text(false), text(true), &daily);
+            push_guidance(rows, "Weekly volume", text, &daily);
         }
     }
     if v.threshold {
-        let text = |mi: bool| {
-            format!(
-                "Threshold running {} is over 10% of the week's distance",
-                fmt_km_or_mi(threshold_km, mi)
-            )
-        };
-        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+        let text = format!(
+            "Threshold running {} is over 10% of the week's distance",
+            fmt_km_or_mi(threshold_km, unit)
+        );
+        push_guidance(rows, "Weekly volume", text, &caps);
     }
     if v.interval {
-        let text = |mi: bool| {
-            format!(
-                "Interval running {} is over 8% of the week's distance",
-                fmt_km_or_mi(interval_km, mi)
-            )
-        };
-        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+        let text = format!(
+            "Interval running {} is over 8% of the week's distance",
+            fmt_km_or_mi(interval_km, unit)
+        );
+        push_guidance(rows, "Weekly volume", text, &caps);
     }
     if !(v.long_run || v.threshold || v.interval) {
-        let text = |mi: bool| {
-            format!(
-                "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
-                fmt_km_or_mi(weekly_km, mi),
-                dist_num(long_run_km, mi),
-                dist_num(threshold_km, mi),
-                dist_num(interval_km, mi)
-            )
-        };
-        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+        let text = format!(
+            "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
+            fmt_km_or_mi(weekly_km, unit),
+            dist_num(long_run_km, unit),
+            dist_num(threshold_km, unit),
+            dist_num(interval_km, unit)
+        );
+        push_guidance(rows, "Weekly volume", text, &caps);
     }
     v.long_run
 }
@@ -439,15 +436,13 @@ fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_
 fn push_long_run_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     let long_run_km = week.long_run_km;
     let share = running::long_run_share_default();
-    let text = |mi: bool| {
-        format!(
-            "Long run {} is {:.0}% of the week (usual share {}%)",
-            fmt_km_or_mi(long_run_km, mi),
-            long_run_km / week.weekly_km * 100.0,
-            fmt_frac_pct_range(share.value.0, share.value.1)
-        )
-    };
-    push_guidance_mi(rows, "Weekly volume", text(false), text(true), &share);
+    let text = format!(
+        "Long run {} is {:.0}% of the week (usual share {}%)",
+        fmt_km_or_mi(long_run_km, week.unit),
+        long_run_km / week.weekly_km * 100.0,
+        fmt_frac_pct_range(share.value.0, share.value.1)
+    );
+    push_guidance(rows, "Weekly volume", text, &share);
 }
 
 /// Easy-share floor (running-011): ~80% of running time easy, counted over
@@ -536,13 +531,11 @@ fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, pp: Option<&PlanProfile>, 
     {
         let ok = hybrid::combined_load_progression_ok(ramp_base_km, weekly_km);
         if ok.value == Some(false) {
-            let text = |mi: bool| {
-                format!(
-                    "Running distance up more than 10% ({}{ramp_base_label}) while you also lift: keep the weekly increase to about 10% or less",
-                    dist_change(ramp_base_km, weekly_km, mi)
-                )
-            };
-            push_guidance_mi(rows, "Hybrid", text(false), text(true), &ok);
+            let text = format!(
+                "Running distance up more than 10% ({}{ramp_base_label}) while you also lift: keep the weekly increase to about 10% or less",
+                dist_change(ramp_base_km, weekly_km, week.unit)
+            );
+            push_guidance(rows, "Hybrid", text, &ok);
         }
     }
 }

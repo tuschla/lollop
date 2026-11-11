@@ -12,23 +12,13 @@ import java.io.InputStream
 /** Chunk size of the bounded import read. */
 private const val READ_BUFFER_BYTES = 64 * 1024
 
-internal actual fun decodeImportText(bytes: ByteArray, offset: Int, length: Int, charset: ImportCharset): String =
-    String(
-        bytes, offset, length,
-        when (charset) {
-            ImportCharset.Utf8 -> Charsets.UTF_8
-            ImportCharset.Utf16Be -> Charsets.UTF_16BE
-            ImportCharset.Utf16Le -> Charsets.UTF_16LE
-        },
-    )
-
 /**
  * Read at most [cap] bytes from [stream], throwing [ImportFailure.TooLarge] if the
- * source is larger, so the bytes are size-checked BEFORE they reach the parsers /
- * JNI. minSdk-24-safe (a manual bounded copy, not InputStream.readNBytes) and never
+ * source is larger, so the bytes are size-checked BEFORE they reach the core.
+ * minSdk-24-safe (a manual bounded copy, not InputStream.readNBytes) and never
  * buffers more than the cap.
  */
-internal fun readCappedBytes(stream: InputStream, cap: Int = MAX_RUN_IMPORT_BYTES): ByteArray {
+internal fun readCappedBytes(stream: InputStream, cap: Int = CoreConstants.MAX_RUN_IMPORT_BYTES): ByteArray {
     val out = ByteArrayOutputStream()
     val buf = ByteArray(READ_BUFFER_BYTES)
     var total = 0L
@@ -79,7 +69,7 @@ internal object RunImport {
     fun importRuns(ctx: Context, uris: List<Uri>) {
         if (uris.isEmpty()) return
         val app = ctx.applicationContext
-        launchRunImport(uris.map { UriRunImportFile(app, it) }) { app.latinDigitResources() }
+        launchRunImport(uris.map { UriRunImportFile(app, it) }) { app.appResources() }
     }
 
     private class UriRunImportFile(private val ctx: Context, private val uri: Uri) : RunImportFile {
@@ -93,7 +83,7 @@ internal object RunImport {
             }.onFailure { PlatformLog.w("lollop", "import file name not readable from its provider", it) }.getOrNull()
             return fromProvider?.takeIf { it.isNotBlank() }
                 ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-                ?: ctx.getString(R.string.import_unnamed_file)
+                ?: ctx.appResources().getString(R.string.import_unnamed_file)
         }
 
         override fun readBytes(): ByteArray =

@@ -17,7 +17,7 @@ class RouteGeometryTest {
 
     /** A straight north-bound leg of [n] fixes [stepM] apart from (lat, lon), one per [stepSec]. */
     private fun north(lat: Double, lon: Double, n: Int, stepM: Double, t0: Long = 0L, stepSec: Long = 10L) =
-        (0 until n).map { GpxFix(lat + it * stepM / metresPerDegLat, lon, t0 + it * stepSec, null) }
+        (0 until n).map { GpsPoint(lat + it * stepM / metresPerDegLat, lon, t0 + it * stepSec, 5.0) }
 
     /** Label metrics with a fixed advance per character, so pill sizes are exact. */
     private val metrics = object : RouteTextMetrics {
@@ -35,7 +35,7 @@ class RouteGeometryTest {
     fun trackKeepsRealSegmentsAndCountsNoGap() {
         val a = north(47.0, 8.0, 11, 100.0)
         val b = north(47.02, 8.0, 11, 100.0, t0 = 1000L)
-        val track = RouteTrack(listOf(a, listOf(GpxFix(0.0, 0.0, 0L, null)), b))
+        val track = RouteTrack(listOf(a, listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), b))
         assertEquals(2, track.segs.size, "a one-fix segment draws nothing")
         assertEquals(2000.0, track.totalM, 5.0)
         // Cumulative distance carries over the gap unchanged.
@@ -123,8 +123,8 @@ class RouteGeometryTest {
     @Test
     fun datelineRouteStaysContiguous() {
         val seg = listOf(
-            GpxFix(-17.0, 179.99, 0L, null),
-            GpxFix(-17.0, -179.99, 10L, null),
+            GpsPoint(-17.0, 179.99, 0L, 5.0),
+            GpsPoint(-17.0, -179.99, 10L, 5.0),
         )
         val track = RouteTrack(listOf(seg))
         assertTrue(track.crossesDateLine)
@@ -177,8 +177,8 @@ class RouteGeometryTest {
     @Test
     fun loopGetsOneCombinedLabel() {
         val out = north(47.0, 8.0, 11, 100.0)
-        val back = out.reversed().mapIndexed { i, f -> f.copy(lon = 8.002, timeSec = 200L + i * 10L) }
-        val home = GpxFix(47.0, 8.0, 400L, null)
+        val back = out.reversed().mapIndexed { i, f -> f.copy(lon = 8.002, observedAt = 200L + i * 10L) }
+        val home = GpsPoint(47.0, 8.0, 400L, 5.0)
         val track = RouteTrack(listOf(out + back + home))
         val l = layout()
         l.layout(track, fitted(track), RouteRect(0f, 0f, 400f, 300f), RouteDrawOptions(distanceMarkers = false))

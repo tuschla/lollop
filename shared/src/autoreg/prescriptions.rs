@@ -298,6 +298,11 @@ pub fn threshold_retest_due(improved_ge_swc: bool, weeks_sustained: u8) -> Recom
 // Overtraining continuum (File 08 safety-041/042 Table 4.4; File 06 autoreg-042)
 // ---------------------------------------------------------------------------
 
+/// Weeks of unexplained performance decline at which the overtraining
+/// referrals fire (File 08 safety-042, SAFE-OTS-001; File 06 autoreg-042,
+/// AUTOREG-NFOR-001: both "≥2 weeks").
+pub(crate) const NFOR_DECLINE_WEEKS: u8 = 2;
+
 /// File 08 safety-042: ≥2 weeks of unexplained performance decline plus
 /// elevated fatigue/mood/sleep disturbance DESPITE a deload → REST and DEFER
 /// (rule out NFOR/OTS/RED-S/medical cause). Monitoring inputs are trend flags,
@@ -307,7 +312,7 @@ pub fn unexplained_decline_rest_defer(
     wellness_disturbed: bool,
     despite_deload: bool,
 ) -> Option<AdjustmentCall> {
-    (decline_weeks >= 2 && wellness_disturbed && despite_deload).then(|| {
+    (decline_weeks >= NFOR_DECLINE_WEEKS && wellness_disturbed && despite_deload).then(|| {
         AdjustmentKind::OvertrainingReferral.call(Adjustment::Defer {
             reason: "Performance down for 2+ weeks with no clear cause, plus tiredness, low mood or poor sleep, even after a lighter week. Rest, and see a doctor to rule out overtraining, under-eating (RED-S) or another medical cause."
                 .into(),
@@ -325,7 +330,7 @@ pub fn nfor_cluster_defer(
     decrement_weeks: u8,
     suppressed_wellness_domains: u8,
 ) -> Option<AdjustmentCall> {
-    (decrement_weeks >= 2 && suppressed_wellness_domains >= 2).then(|| {
+    (decrement_weeks >= NFOR_DECLINE_WEEKS && suppressed_wellness_domains >= 2).then(|| {
         AdjustmentKind::NforReferral.call(Adjustment::Defer {
             reason: "Possible overreaching: performance down for 2+ weeks with no clear cause, and 2+ check-in scores low. Take a recovery break; see a doctor if it doesn't improve."
                 .into(),

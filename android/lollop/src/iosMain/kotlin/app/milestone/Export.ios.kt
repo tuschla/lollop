@@ -33,7 +33,7 @@ import platform.posix.read
 internal actual suspend fun shareGpx(ctx: PlatformContext, gpx: String, runStartEpochSec: Long) {
     val file = withContext(Dispatchers.IO) { writeTempFile(gpxFileName(runStartEpochSec), gpx.encodeToByteArray()) }
     if (file == null) {
-        showNotice(ctx, systemResources().getString(Res.string.main_export_gpx_failed), long = true)
+        showNotice(ctx, ctx.appResources().getString(Res.string.main_export_gpx_failed), long = true)
         return
     }
     presentShareSheet(listOf(file))
@@ -49,7 +49,7 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
         {
             AppRuntime.scope.launch {
                 val ctx = PlatformContext.INSTANCE
-                val res = systemResources()
+                val res = ctx.appResources()
                 val file = readDataExport(ctx)?.let { lines -> withContext(Dispatchers.IO) { writeBackupFile(lines) } }
                 if (file == null) {
                     showNotice(ctx, res.getString(Res.string.main_export_failed), long = true)

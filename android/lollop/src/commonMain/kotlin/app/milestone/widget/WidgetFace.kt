@@ -1,16 +1,22 @@
 package app.milestone.widget
 
+import androidx.compose.ui.graphics.Color
+import app.milestone.DarkStatusColors
+import app.milestone.DayMark
 import app.milestone.HoldReason
 import app.milestone.OpenDest
 import app.milestone.PlanWithheld
+import app.milestone.Palette
 import app.milestone.PlatformResources
 import app.milestone.Reminder
-import app.milestone.WeekdayWidth
-import app.milestone.appLocale
+import app.milestone.StatusColors
+import app.milestone.accentTint
 import app.milestone.getQuantityString
 import app.milestone.getString
+import app.milestone.onAccent
 import app.milestone.planDateLabel
 import app.milestone.reminderLine
+import app.milestone.weekdayShort
 import app.milestone.resources.Res
 import app.milestone.resources.main_plan_withheld_empty_title
 import app.milestone.resources.main_plan_withheld_health_body
@@ -36,18 +42,51 @@ import app.milestone.resources.widget_session_done
 import app.milestone.resources.widget_setup_body
 import app.milestone.resources.widget_setup_title
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.Serializable
 
-/** How the widget colours its title. */
-internal enum class WidgetTone {
+/** A colour role of the widgets: the same roles on the Glance widget and the iOS widgets. */
+@Serializable
+internal enum class WidgetInk { Ground, Body, Muted, Faint, Accent, OnAccent, AccentTint, Danger, Done }
+
+/** [ink] in this palette; [dark]: a dark palette, whose done mark is the lighter green. */
+internal fun Palette.ink(ink: WidgetInk, dark: Boolean): Color = when (ink) {
+    WidgetInk.Ground -> bgTop
+    WidgetInk.Body -> onBgBody
+    WidgetInk.Muted -> onBgMuted
+    WidgetInk.Faint -> onBgFaint
+    WidgetInk.Accent -> accent
+    WidgetInk.OnAccent -> onAccent
+    WidgetInk.AccentTint -> accentTint()
+    WidgetInk.Danger -> dangerText
+    WidgetInk.Done -> (if (dark) DarkStatusColors else StatusColors()).done
+}
+
+/** How the widget colours its title: [ink]. */
+internal enum class WidgetTone(val ink: WidgetInk) {
     /** A plan day, rest day or prompt. */
-    Normal,
+    Normal(WidgetInk.Body),
 
     /** Training is paused by a safety hold: the danger text colour, like the app's banner. */
-    Paused,
+    Paused(WidgetInk.Danger),
 
     /** Nothing current to show ("Open lollop to update"). */
-    Muted,
+    Muted(WidgetInk.Muted),
 }
+
+/** A week-strip day's mark as drawn: its [text] in [ink]. */
+internal data class WeekGlyph(val text: String, val ink: WidgetInk)
+
+/** ✓ trained, ● the next session, ○ planned, a muted ○ missed, nothing on a rest
+ *  day, – before the plan. */
+internal val DayMark.glyph: WeekGlyph
+    get() = when (this) {
+        DayMark.Done -> WeekGlyph("\u2713", WidgetInk.Done)
+        DayMark.Next -> WeekGlyph("\u25CF", WidgetInk.Accent)
+        DayMark.Planned -> WeekGlyph("\u25CB", WidgetInk.Faint)
+        DayMark.Missed -> WeekGlyph("\u25CB", WidgetInk.Muted)
+        DayMark.Rest -> WeekGlyph("\u00A0", WidgetInk.Faint)
+        DayMark.None -> WeekGlyph("\u2013", WidgetInk.Faint)
+    }
 
 /** One button on the widget: its label, the screen it opens, and the tile [face]
  *  it shows (the platform draws that face's icon). */
@@ -91,6 +130,11 @@ internal data class WidgetFace(
     val day: Long? = null,
 )
 
+/** The lone lead line's short form ([WidgetFace.brief]), which a card shows where
+ *  that line would wrap past two lines; null without a lone lead line. */
+internal val WidgetFace.shortLead: String?
+    get() = brief?.takeIf { lead.size == 1 }
+
 /** The widget button for the tile's [face]: the same label, icon and destination. */
 internal fun widgetAction(face: TileFace, res: PlatformResources) = WidgetAction(res.getString(face.label), face.dest, face)
 
@@ -101,7 +145,7 @@ internal fun widgetAction(face: TileFace, res: PlatformResources) = WidgetAction
  */
 internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformResources, recording: Boolean = false): WidgetFace {
     val todayLabel = res.getString(Res.string.widget_overline_today)
-    val current = snapshot?.takeIf { !it.stale && it.epochDay == today }
+    val current = snapshot?.currentOn(today)
     val primary = widgetAction(tileFace(current, recording), res)
     val actions = listOf(primary) + listOfNotNull(widgetAction(TileFace.Log, res).takeIf { primary.dest != OpenDest.Log })
     if (current == null) {
@@ -149,7 +193,7 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
             status = next,
             // "Next: Thu" within the week, the date further out.
             brief = current.next?.let {
-                val day = if (it.epochDay - current.epochDay < 7) weekdayName(it.epochDay) else planDateLabel(it.epochDay)
+                val day = if (it.epochDay - current.epochDay < 7) weekdayShort(LocalDate.fromEpochDays(it.epochDay).dayOfWeek) else planDateLabel(it.epochDay)
                 res.getString(Res.string.widget_next_day, day)
             },
             lead = listOfNotNull(next),
@@ -174,11 +218,11 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
                 status = if (current.sessionDone) {
                     sessionDone
                 } else {
-                    reminderLine(res, Reminder(current.kind, current.title, current.items))?.let(::keepUnits) ?: lines.firstOrNull()
+                    reminderLine(res, Reminder(current.kind, current.title, current.items)) ?: lines.firstOrNull()
                 },
                 brief = when {
                     current.sessionDone -> sessionDone
-                    current.kind == WidgetDayKind.Run && firstRun != null && firstRun.detail.isNotBlank() -> keepUnits(firstRun.detail)
+                    current.kind == WidgetDayKind.Run && firstRun != null && firstRun.detail.isNotBlank() -> firstRun.detail
                     firstLift != null -> firstLift.name
                     else -> lines.firstOrNull()
                 },
@@ -186,7 +230,7 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
                 items = lines,
                 hero = when {
                     current.sessionDone -> nextHero
-                    heroRun != null -> WidgetHero(keepUnits(heroRun.detail), heroRun.pace.ifBlank { null }?.let(::keepUnits), figure = true)
+                    heroRun != null -> WidgetHero(heroRun.detail, heroRun.pace.ifBlank { null }, figure = true)
                     else -> null
                 },
                 heroLead = if (current.sessionDone) listOf(sessionDone) else emptyList(),
@@ -200,23 +244,10 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
     }
 }
 
-/** A space between a figure and its unit ("117.5 kg", "5:40 /km") and the ones
- *  around "@", that never break: a wrapped line keeps the number with its unit and
- *  a prescription whole, so "Back squat · 5×3 @ 117.5 kg" in two cells wraps after
- *  the "·" ("Back squat ·" / "5×3 @ 117.5 kg"), never to a line that starts or ends
- *  on "@". */
-private val UnitSpace = Regex("(?<=\\d) (?=(?:kg|lb|km|mi|min|/km|/mi)(?!\\p{L}))|(?<=@) | (?=@)")
-
-internal fun keepUnits(text: String): String = text.replace(UnitSpace, "\u00A0")
-
 /** Whether [text] is only a figure and its units ("3.4 mi", "45 min", "6 × 800 m"):
  *  it leads with a digit and has no word longer than a unit. */
 internal fun isFigure(text: String): Boolean =
     text.firstOrNull()?.isDigit() == true && text.split(' ', '\u00A0').none { t -> t.count(Char::isLetter) > 3 }
-
-/** The short weekday ("Thu") in the app's language. */
-private fun weekdayName(epochDay: Long): String =
-    app.milestone.weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Short, appLocale())
 
 private fun itemLine(item: WidgetItem, res: PlatformResources): String {
     val name = when (item.kind) {
@@ -230,20 +261,37 @@ private fun itemLine(item: WidgetItem, res: PlatformResources): String {
         // A run's volume head with its pace range ("8 km · 5:40–6:00 /km"), as the reminder.
         listOf(item.detail.takeIf { it != name }.orEmpty(), item.pace).filter { it.isNotBlank() }.joinToString(" \u00b7 ").ifBlank { null }
     }
-    return keepUnits(detail?.let { res.getString(Res.string.widget_item_line, name, it) } ?: name)
+    return detail?.let { res.getString(Res.string.widget_item_line, name, it) } ?: name
 }
 
 /**
- * The body lines that fit [maxLines]: every lead line first, then items; when
+ * The body lines that fit [maxLines]: every [lead] line first, then [items]; when
  * items are cut, the last slot reads "N more items" instead, unless it is the
  * only item slot: that one shows the first item, never a count of everything.
  */
-internal fun visibleLines(face: WidgetFace, maxLines: Int, res: PlatformResources): List<String> {
-    val lead = face.lead.take(maxLines)
-    val room = maxLines - lead.size
-    if (room <= 0 || face.items.isEmpty()) return lead
-    if (face.items.size <= room || room == 1) return lead + face.items.take(room)
-    val shown = face.items.take(room - 1)
-    val cut = face.items.size - shown.size
-    return lead + shown + res.getQuantityString(Res.plurals.widget_more_items, cut, cut)
+internal fun visibleLines(lead: List<String>, items: List<String>, maxLines: Int, res: PlatformResources): List<String> {
+    val shownLead = lead.take(maxLines)
+    val room = maxLines - shownLead.size
+    if (room <= 0 || items.isEmpty()) return shownLead
+    if (items.size <= room || room == 1) return shownLead + items.take(room)
+    val shown = items.take(room - 1)
+    val cut = items.size - shown.size
+    return shownLead + shown + res.getQuantityString(Res.plurals.widget_more_items, cut, cut)
 }
+
+/**
+ * A character's advance in em, for estimating where a line wraps: about the
+ * system font's (Roboto) widths by class, a little wide, so a line estimated to
+ * fit does.
+ */
+private fun charEm(c: Char): Float = when {
+    c == ' ' || c == '\u00A0' -> 0.27f
+    c in "iljtfrI.,:;·'!|()" -> 0.32f
+    c in "mwMW@" -> 0.82f
+    c.isUpperCase() -> 0.64f
+    c.isDigit() -> 0.57f
+    else -> 0.54f
+}
+
+/** [text]'s estimated width in em of its font size ([charEm]). */
+internal fun textEm(text: String): Float = text.sumOf { charEm(it).toDouble() }.toFloat()

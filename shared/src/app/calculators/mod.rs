@@ -11,7 +11,11 @@ mod weekly_report;
 pub(super) use hr::build_hr_zones;
 pub(super) use hr::hr_zones_for;
 pub(super) use lift_calcs::{build_hypertrophy_plan, build_protein_targets, calculator_hold};
+#[cfg(test)]
+pub(super) use race::race_band;
 pub(super) use race::to_race_view;
+#[cfg(test)]
+pub(super) use training_load::{LoadFigures, load_figures};
 pub(super) use training_load::{build_srpe_load, build_training_load};
 pub(super) use weekly_report::build_weekly_report;
 

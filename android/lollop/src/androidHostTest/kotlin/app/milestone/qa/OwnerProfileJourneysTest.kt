@@ -22,13 +22,15 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.HeadlineKind
+import app.milestone.HealthAnswer
 import app.milestone.HealthScreen
 import app.milestone.HoldReason
-import app.milestone.ParqItem
+import app.milestone.ParqQuestion
+import app.milestone.ProfileDraft
 import app.milestone.R
+import app.milestone.draftFacts
 import app.milestone.epochDayLabel
 import app.milestone.train_blocked
-import app.milestone.withParqAnswer
 import java.time.LocalDate
 import java.util.Locale
 import org.junit.After
@@ -163,7 +165,7 @@ class OwnerProfileJourneysTest {
     // ── 7c. "Review health answers" (PAR-Q) lands on the answer behind it ─────
     @Test
     fun parqHold_reviewHealthAnswersRevealsTheQuestionsAndTheirClearance() {
-        reviewHealthLands(HealthScreen().withParqAnswer(ParqItem.HeartOrBloodPressure, true))
+        reviewHealthLands(draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.HeartOrBloodPressure, true))).health)
         // A doctor-follow-up Yes is lifted by the clearance right under the
         // questions: that row is on screen (off), with the questions unfolded
         // above it and the Yes that raised the hold switched on.

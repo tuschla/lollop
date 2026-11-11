@@ -62,7 +62,7 @@ fn a_fragment_too_short_for_a_verdict_gives_no_pacing_feedback() {
         .expect_only_render();
     app.update(log_run_at(4.0, 40.0, 70.0, 600), &mut model)
         .expect_only_render();
-    assert!(run_card(&model.runs[0]).split_pct.is_some());
+    assert!(run_split_pct(&model.runs[0]).is_some());
     assert_eq!(feedback_split(&model), None);
     let vm = app.view(&model);
     assert!(
@@ -102,7 +102,7 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
     };
     let view = run_card(&run);
     assert!(
-        view.split_pct.expect("split derived") < 0.0,
+        run_split_pct(&run).expect("split derived") < 0.0,
         "back-half-faster track should read as a negative split"
     );
     assert!(view.summary.contains("second half"), "{}", view.summary);
@@ -144,7 +144,7 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
     app.update(log_run_track(pts.clone(), 70.0, 12.0, 0, 0), &mut model)
         .expect_only_render();
 
-    let row_split = run_card(&model.runs[0]).split_pct.expect("run-row split");
+    let row_split = run_split_pct(&model.runs[0]).expect("run-row split");
     let fb_split = feedback_split(&model).expect("feedback split");
     assert_eq!(
         row_split, fb_split,
@@ -159,7 +159,7 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
         track: short.clone(),
         ..model.runs[0].clone()
     };
-    let qc_split = run_card(&short_run).split_pct.expect("qc split");
+    let qc_split = run_split_pct(&short_run).expect("qc split");
     let raw_split = crate::gps::track_positive_split_pct(&short, &[]).expect("raw split");
     assert!(
         (raw_split - qc_split).abs() > 3.0,
@@ -188,7 +188,7 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
     };
     let view = run_card(&run);
     assert!(
-        view.split_pct.expect("split derived") > feedback::POSITIVE_SPLIT_FLAG_PCT,
+        run_split_pct(&run).expect("split derived") > feedback::POSITIVE_SPLIT_FLAG_PCT,
         "back-half-slower track should read as a positive split above the flag"
     );
     // A ~445 m track has no full km split, so it gets no pacing verdict or
@@ -286,11 +286,10 @@ fn manual_run_has_no_split_verdict() {
         ..logged_run(8.0, 45.0, 70.0, 0)
     };
     let view = run_card(&run);
-    assert!(view.split_pct.is_none());
+    assert!(run_split_pct(&run).is_none());
     assert!(view.split.is_none());
     // A hand-entered run has no track to walk → no per-unit splits either.
-    assert!(view.splits_km.is_empty());
-    assert!(view.splits_mi.is_empty());
+    assert!(view.splits.is_empty());
 }
 
 #[test]

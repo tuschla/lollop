@@ -461,8 +461,8 @@ fn a_downgrade_on_a_calisthenics_hold_shows_no_zero_reps_or_rir_advice() {
         timed_hold: false,
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
-        items: vec![hold, dynamic],
+    let mut ns = PlanRow {
+        items: vec![hold.into(), dynamic.into()],
         ..Default::default()
     };
     let recs = vec![AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001)];
@@ -596,17 +596,20 @@ fn cap_rpe_caps_a_calisthenics_rir_band() {
     // CapRpe must cap a "RIR lo–hi" dynamic rung off the STRUCTURED field
     // (not by parsing the label), raising both ends and resyncing the prefill
     // RPE to the new conservative (high) bound.
-    let dynamic = PrescriptionView {
-        exercise: "Full push-up".into(),
-        sets: 3,
-        reps_low: 5,
-        reps_high: 8,
-        intensity_label: "RIR 1–2".into(),
+    let dynamic = PlanItem {
+        view: PrescriptionView {
+            exercise: "Full push-up".into(),
+            sets: 3,
+            reps_low: 5,
+            reps_high: 8,
+            intensity_label: "RIR 1–2".into(),
+            target_rpe: Some(crate::strength::rir_to_rpe(2.0)),
+            ..Default::default()
+        },
         intensity: PlanIntensity::RirRange { lo: 1, hi: 2 },
-        target_rpe: Some(crate::strength::rir_to_rpe(2.0)),
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
+    let mut ns = PlanRow {
         items: vec![dynamic],
         ..Default::default()
     };
@@ -646,11 +649,10 @@ fn cap_rpe_over_a_holds_only_session_does_not_mark_adjusted() {
         timed_hold: true,
         rep_volume: "5–15 s hold".into(),
         intensity_label: "clean hold, stop before your form breaks".into(),
-        intensity: PlanIntensity::Prose,
         ..Default::default()
     };
-    let mut ns = SessionPlanView {
-        items: vec![hold],
+    let mut ns = PlanRow {
+        items: vec![hold.into()],
         ..Default::default()
     };
     apply_adjustments_to_session(

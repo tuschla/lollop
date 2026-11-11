@@ -45,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.nullable
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -122,7 +123,9 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // "Re-run guided setup" row seeds it from the current profile). null = a genuine
     // first-run pass. Drives the onboarding-flag behaviour at the call site: only a
     // first-run pass (null) touches the onboarding pref on complete/skip.
-    val setupInitialState = rememberSaveable { mutableStateOf<Event.SetProfile?>(null) }
+    val setupInitialState = rememberSaveable(stateSaver = jsonSaver(Event.SetProfile.serializer().nullable)) {
+        mutableStateOf<Event.SetProfile?>(null)
+    }
     val setupStore = remember { ctx.setupStore() }
     val markOnboardingDone = { setupStore.edit { putBoolean(KEY_ONBOARDING_DONE, true) } }
 
@@ -142,7 +145,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // Not persisted across process death (the core's persisted detail covers that).
     val lastPainState = remember { mutableStateOf<PainDetail?>(null) }
 
-    // One dispatch path so shell-side echoes (lastPain, the plan-cleared marker) stay
+    // One dispatch path so the shell-side lastPain echo stays
     // in lockstep with the core. The echoes run on the caller (main) thread in call
     // order before the event is enqueued on the process-scoped [EventDispatcher],
     // whose single consumer applies events in order off the main thread.
@@ -153,12 +156,6 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             // "I'm pain-free now" retracts every pain report: the banner's echo goes too.
             e is Event.ResolveHold && e.signal == ReadinessSignal.Pain -> lastPainState.value = null
             e is Event.ClearReadiness -> lastPainState.value = null
-            // Plan-cleared marker (persisted): a "Remove plan" must STICK across
-            // rotation AND relaunch, so the boot auto-GeneratePlan is gated on it
-            // ([bootTurn]). Generating any plan (the plan prompt card, or a guided-setup
-            // completion) clears the marker so auto-generation resumes normally.
-            e is Event.ClearPlan -> setupStore.edit { putBoolean(KEY_PLAN_CLEARED, true) }
-            e is Event.GeneratePlan -> setupStore.edit { putBoolean(KEY_PLAN_CLEARED, false) }
         }
     }
     val dispatch: (Event) -> Unit = { e ->
@@ -203,7 +200,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             // First touch of the engine on its own thread: Android's loads the native
             // library in its initializer, which must not run on the UI thread.
             val engine = withContext(CoreDispatcher) { AppRuntime.engine }
-            bootTurn(engine, setupStore, AppRuntime, restore = {
+            bootTurn(engine, setupStore, ctx.keyValueStore(AppFileNames.SETTINGS_STORE), AppRuntime, restore = {
                 if (reboot) engine.resetForReboot()
                 engine.restore(ctx)
             })?.also { fresh = it.fresh }?.view
@@ -221,7 +218,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             AppRuntime.bootHandled = true
             // A new process restored with the tracker flag set records nothing (the
             // service is NOT_STICKY): leave it so the resume prompt is the way back.
-            if (!RunSession.tracking.value && !RunSession.armed.value && !RunSession.locating.value) {
+            if (!RunSession.runActive && !RunSession.locating.value) {
                 session.showTracker = false
             }
             // The guided setup only on a first run not yet completed or skipped.
@@ -296,7 +293,6 @@ internal fun ResumeRunDialog(session: CoachSession) {
     // A run started since boot owns the sidecar now (Start truncated the
     // interrupted one): resuming would replace its live track and discarding would
     // delete its crash-recovery file, so both just drop the stale offer.
-    val liveRun = { RunSession.tracking.value || RunSession.armed.value }
     AppDialog(
         onDismiss = { /* deliberate choice required */ },
         title = { Text(stringResource(Res.string.main_resume_run_title)) },
@@ -304,7 +300,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
         confirmButton = {
             TextButton(onClick = {
                 session.showResumePrompt = false
-                if (liveRun()) {
+                if (RunSession.runActive) {
                     session.recoveredRun = null
                     return@TextButton
                 }
@@ -334,7 +330,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
             TextButton(onClick = {
                 session.showResumePrompt = false
                 session.recoveredRun = null
-                if (!liveRun()) tracker.discardInterruptedRun()
+                if (!RunSession.runActive) tracker.discardInterruptedRun()
             }) { Text(stringResource(Res.string.main_discard), color = DangerText) }
         },
     )

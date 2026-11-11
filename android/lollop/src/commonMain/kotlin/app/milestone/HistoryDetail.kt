@@ -6,16 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -48,8 +46,7 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * The amend that puts an edited entry back as it was, for "Undo" after an edit
- * [saved] from the edit sheet; null for anything that isn't an amend. A legacy
- * (entry_id 0) row is matched on the stamp the edit gave it.
+ * [saved] from the edit sheet; null for anything that isn't an amend.
  */
 internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
     entry is HistoryEntry.Lift && saved is Event.AmendSet -> entry.v.let { v ->
@@ -82,11 +79,11 @@ internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
 @Composable
 internal fun EntryActionSheets(
     selected: HistoryEntry?,
-    recentExercises: List<String>,
-    holdExercises: Set<String>,
+    // The model's exercise lists, as every set editor host passes them.
+    editorInputs: SetEditorInputs,
     weightUnit: WeightUnit,
-    // The athlete's profile, for the run editor's bpm entry.
-    profile: Profile?,
+    // Whether the core converts a run's average bpm ([ViewModel.hr_max_known]).
+    hrMaxKnown: Boolean,
     // The caller's ticking wall clock, so a sheet left open across midnight
     // re-labels "Today" instead of freezing at its composition time.
     nowMillis: Long,
@@ -113,60 +110,30 @@ internal fun EntryActionSheets(
         postUndoable(updatedText, undoLabel, listOfNotNull(undoEditFor(selected, ev)))
     }
 
-    // Edit-sheet hardening, mirroring the Log sheet host: hoist the editor's dirty
-    // state so the sheet's swipe-down honors the same discard guard the editor's
-    // X enforces. Keyed on `selected` so switching entries resets it.
-    var editDirty by rememberSaveable(selected) { mutableStateOf(false) }
-    var confirmDiscardEdit by rememberSaveable { mutableStateOf(false) }
-    val editSheetState = rememberModalBottomSheetState(
-        // Open fully expanded so Save isn't stranded below the partial detent.
-        skipPartiallyExpanded = true,
-        // A dirty editor blocks the swipe-to-hide and raises the discard confirm
-        // INSTEAD, keeping the sheet VISIBLE under the dialog; "Keep editing"
-        // leaves it in place. Discard/Save drop it via `editing = false`.
-        confirmValueChange = { target ->
-            if (target == SheetValue.Hidden && editDirty) {
-                confirmDiscardEdit = true
-                false
-            } else {
-                true
-            }
-        },
-    )
+    // Keyed on `selected` so switching entries starts a fresh guard.
+    val editGuard = remember(selected) { EditorGuard() }
 
     if (editing) {
-        // The dirty-editor guard lives in editSheetState.confirmValueChange (which
-        // keeps the sheet visible while confirming); by the time onDismiss fires the
-        // hide is committed on a clean sheet, so it just finishes closing. The Log
-        // sheet's ground, since the same editors render on it.
-        AppSheet(onDismiss = { editDirty = false; editing = false }, sheetState = editSheetState) {
+        EditorSheet(editGuard, onClosed = { editing = false }) {
             // The editor scrolls its own form and pins Save in thumb reach, as in the
             // Log sheet, so Save sits in one place for a new and an edited entry.
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Grow the bottom inset with the keyboard so the exercise-search
-                    // IME can't cover the form (mirrors LogSheetContent).
-                    .imePadding()
-                    .sheetPadding(),
+                modifier = Modifier.fillMaxWidth().sheetPadding(),
                 verticalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
             ) {
               CompositionLocalProvider(LocalEditorPinnedActions provides true) {
                 when (selected) {
                     is HistoryEntry.Lift -> LogSetEditor(
-                        recentExercises = recentExercises,
-                        holdExercises = holdExercises,
+                        inputs = editorInputs,
                         initial = selected.v,
                         weightUnit = weightUnit,
-                        onClose = { editDirty = false; editing = false },
-                        onDirtyChange = { editDirty = it },
+                        onClose = { editing = false },
                         onSave = saveEdit,
                     )
                     is HistoryEntry.Run -> LogRunEditor(
                         initial = selected.v,
-                        profile = profile,
-                        onClose = { editDirty = false; editing = false },
-                        onDirtyChange = { editDirty = it },
+                        hrMaxKnown = hrMaxKnown,
+                        onClose = { editing = false },
                         onSave = saveEdit,
                     )
                 }
@@ -228,16 +195,6 @@ internal fun EntryActionSheets(
                     onDelete = onDelete,
                 )
             }
-        }
-    }
-
-    // The swipe-down discard confirmation for a dirty edit sheet (the editor's
-    // own X routes through EditorScaffold's identical guard).
-    if (confirmDiscardEdit) {
-        DiscardEntryDialog(onKeepEditing = { confirmDiscardEdit = false }) {
-            confirmDiscardEdit = false
-            editDirty = false
-            editing = false
         }
     }
 }
@@ -316,7 +273,7 @@ private fun EntryDetailContent(
                     weightFigure(low, weightUnit), weightFigure(high, weightUnit),
                     weightSuffix(weightUnit), cc.formulas,
                 ),
-                cc.grade, cc.citation, cc.confidence, cc.safety_critical, cc.contested,
+                cc.evidence,
                 border = if (cc.safety_critical) null else SheetCardBorder,
             )
         }

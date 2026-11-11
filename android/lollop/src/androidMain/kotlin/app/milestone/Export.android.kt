@@ -34,7 +34,7 @@ internal actual suspend fun shareGpx(ctx: Context, gpx: String, runStartEpochSec
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    ctx.startActivity(Intent.createChooser(send, ctx.getString(R.string.ui_export_chooser_title)).apply {
+    ctx.startActivity(Intent.createChooser(send, ctx.appResources().getString(R.string.ui_export_chooser_title)).apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     })
 }
@@ -66,7 +66,7 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
         if (uri != null) AppRuntime.scope.launch {
             val ok = exportDataTo(app, uri)
             if (ok) exported()
-            showNotice(app, app.resources.getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed), long = true)
+            showNotice(app, app.appResources().getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed), long = true)
         }
     }
     return { launcher.launch(dataExportFilename()) }

@@ -109,9 +109,8 @@ pub(crate) fn f32_load_ceil(kg: f64) -> f64 {
     kg + kg.abs() * f64::from(f32::EPSILON) / 2.0
 }
 
-/// A display-unit warm-up figure in kg as the set screen stores it
-/// (`warmUpSteps` in `SetEditorState.kt`): a lb figure converted and kept to
-/// 0.01 kg.
+/// A display-unit warm-up figure in kg as the set screen stores it: a lb
+/// figure converted and kept to 0.01 kg.
 fn warm_up_kg(display: f64, weight_lb: bool) -> f64 {
     if weight_lb {
         (display / LB_PER_KG * 100.0).round() / 100.0

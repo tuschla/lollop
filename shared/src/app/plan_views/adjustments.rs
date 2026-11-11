@@ -5,7 +5,6 @@ use crate::app::evidence_views::{
     CallCtx, RETURN_CHECK_STOP, RETURN_DOSE_EFFORT_PCT, RETURN_DOSE_MIN, deload_cut_clauses,
     lift_work_logged, reps_word, return_check_headline, to_view_in, why_from,
 };
-use crate::app::format::fmt_weight;
 use crate::app::logged_days::LoggedDays;
 use crate::app::model::{Model, profile_for_day};
 use crate::app::plan_views::adjust_fold::{
@@ -16,15 +15,13 @@ use crate::app::plan_views::adjust_fold::{
 use crate::app::plan_views::adjust_fold::{fold_completion_adjustments, fold_item_numbers};
 use crate::app::plan_views::completion::refresh_item_statuses;
 use crate::app::plan_views::item_render::{
-    cap_run_item_easy, clear_run_reps, refresh_lift_summary, repoint_evidence, resync_intensity,
-    set_easy_run_face, set_named_summary, set_run_summary, sets_reps_lead, shown_rir,
-    with_reps_left,
+    FaceClause, cap_run_item_easy, clear_run_reps, refresh_lift_summary, repoint_evidence,
+    resync_intensity, set_easy_run_face, set_named_summary, set_run_summary,
 };
+use crate::app::plan_views::plan_item::{PlanItem, PlanRow, RunAmount};
 use crate::app::readiness::readiness_picture;
 use crate::app::review_deloads::review_deloads;
-use crate::app::view_types::{
-    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, SessionPlanView, SessionStatus,
-};
+use crate::app::view_types::{EvidenceTagView, PlanIntensity, PrescriptionView, SessionStatus};
 use crate::day::{is_undated, local_day};
 use crate::event::SessionReview;
 use crate::evidence::{ClaimId, claims};
@@ -239,7 +236,7 @@ fn cap_rpe_intensity(intensity: &mut PlanIntensity, d: u8) -> Option<i32> {
 /// compounding, matching the per-day completion judgement.
 #[cfg(test)]
 pub(in crate::app) fn apply_adjustments_to_session(
-    ns: &mut SessionPlanView,
+    ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
     weight_lb: bool,
 ) {
@@ -249,14 +246,14 @@ pub(in crate::app) fn apply_adjustments_to_session(
     }
     annotate_and_rejudge(ns, recommended, None, weight_lb);
     for it in ns.items.iter_mut() {
-        restate_basis(it, weight_lb);
+        super::basis::render_basis(it, weight_lb);
     }
 }
 
 /// The hero's fold: [`annotate_adjustments`], then each item's status
 /// re-judged against the same adjustments.
 pub(super) fn annotate_and_rejudge(
-    ns: &mut SessionPlanView,
+    ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
     today: Option<&CallCtx>,
     weight_lb: bool,
@@ -277,7 +274,7 @@ pub(super) fn annotate_and_rejudge(
 /// the session adjusted. `today` carries today's call wording when `ns` is
 /// today's session.
 pub(super) fn annotate_adjustments(
-    ns: &mut SessionPlanView,
+    ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
     today: Option<&CallCtx>,
     weight_lb: bool,
@@ -323,7 +320,7 @@ pub(super) fn annotate_adjustments(
             (Adjustment::ReturnCheck, _) => {
                 // ready-upd-003 (IOC 2022): the first session after a fever or
                 // chest illness is a short, easy self-test, not the planned work.
-                let logged = ns.items.iter().any(PrescriptionView::has_work);
+                let logged = ns.items.iter().any(|it| it.has_work());
                 ns.items = vec![return_check_item(r, logged)];
                 stopped = vec![false];
                 applied = Some(r);
@@ -382,11 +379,7 @@ struct EffortPass {
 }
 
 impl EffortPass {
-    fn apply(
-        items: &mut [PrescriptionView],
-        recommended: &[AdjustmentCall],
-        weight_lb: bool,
-    ) -> Self {
+    fn apply(items: &mut [PlanItem], recommended: &[AdjustmentCall], weight_lb: bool) -> Self {
         let hold_cap = recommended.iter().map(lift_effort_hold).max().unwrap_or(0);
         let rpe_cap = recommended
             .iter()
@@ -421,89 +414,10 @@ impl EffortPass {
     }
 }
 
-/// The why? basis states the prescription the plan derived ("3×5 at …: 100
-/// kg. Stop each set with ~2 reps left."). Once a fold, a hold or an
-/// in-session cue moved the face, restate it: the load as planned against
-/// today's, the sets×reps and the reps left as today's (a pick-a-weight
-/// face's reserve included), so the session panel reads the prescription the
-/// face shows. Run once, after every change of the view.
-pub(in crate::app) fn restate_basis(it: &mut PrescriptionView, weight_lb: bool) {
-    let Some(rx) = it.basis_rx.take() else {
-        return;
-    };
-    let lead = sets_reps_lead(it);
-    if lead != rx.lead {
-        replace_lead(&mut it.why.basis, &rx.lead, &lead);
-    }
-    if let (Some(from), Some(to)) = (rx.rir, shown_rir(it))
-        && from != to
-    {
-        restate_reps_left(&mut it.why.basis, from, to, i64::from(it.reps_low));
-    }
-    if let Some(from) = rx.load_kg {
-        restate_load(it, from, weight_lb);
-    }
-}
-
-/// Replace the first `old` sets×reps lead that stands as a whole word ("3×5",
-/// not the "3×5" inside "13×5" or "3×5–8").
-fn replace_lead(basis: &mut String, old: &str, new: &str) {
-    let at = basis.match_indices(old).map(|(i, _)| i).find(|&i| {
-        let before_ok = basis[..i].chars().next_back().is_none_or(|c| c == ' ');
-        let after_ok = basis[i + old.len()..]
-            .chars()
-            .next()
-            .is_none_or(|c| !c.is_ascii_digit() && c != '–');
-        before_ok && after_ok
-    });
-    if let Some(i) = at {
-        basis.replace_range(i..i + old.len(), new);
-    }
-}
-
-/// Restate the basis's reps-left clause ("with ~2 reps left", or a lighter
-/// week's "with at least 2 reps left") and the "could lift about N times"
-/// weight hint that follows from it.
-fn restate_reps_left(basis: &mut String, from: i64, to: i64, reps: i64) {
-    let at_least = |n: i64| format!("at least {} left", reps_word(n.clamp(0, 255) as u8));
-    for (old, new) in [
-        (with_reps_left(from), with_reps_left(to)),
-        (at_least(from), at_least(to)),
-    ] {
-        if basis.contains(&old) {
-            *basis = basis.replacen(&old, &new, 1);
-            break;
-        }
-    }
-    let times = |n: i64| format!("could lift about {} times", reps + n.max(0));
-    *basis = basis.replacen(&times(from), &times(to), 1);
-}
-
-/// Restate the planned load against today's ("…: 100 kg planned, 95 kg
-/// today").
-fn restate_load(it: &mut PrescriptionView, from: f64, weight_lb: bool) {
-    let planned = fmt_weight(from, weight_lb);
-    let today = match it.load_kg {
-        Some(to) if fmt_weight(to, weight_lb) == planned => return,
-        Some(to) if it.load_held => format!(
-            "held at {} today (the most you've already lifted for these reps)",
-            fmt_weight(to, weight_lb)
-        ),
-        Some(to) => format!("{} today", fmt_weight(to, weight_lb)),
-        None => "pick the weight today".to_string(),
-    };
-    // The space keeps "10 lb" from matching inside "310 lb".
-    let at = format!(" {planned}");
-    it.why.basis = it
-        .why
-        .basis
-        .replacen(&at, &format!("{at} planned, {today}"), 1);
-}
-
 /// `ReduceLoadPct`: the weight is already cut by the fold; annotate the
 /// affected items and re-render their label off the folded numbers. A day
 /// with no prescribed weight is unchanged.
-fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> bool {
+fn note_load_cut(items: &mut [PlanItem], pct: f32, weight_lb: bool) -> bool {
     let mut any_changed = false;
     for it in items.iter_mut() {
         if !it.is_run() && it.load_kg.is_some() {
@@ -519,7 +433,7 @@ fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> b
 /// re-render. A recovery / failed-session week also defers hard running: every
 /// run goes easy at its cut volume.
 fn note_deload(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     r: &AdjustmentCall,
     (volume_reduction_pct, load_reduction_pct): (f32, f32),
     weight_lb: bool,
@@ -547,7 +461,7 @@ fn note_deload(
 /// bands) off the STRUCTURED field; the session is "adjusted" ONLY when a rung
 /// actually moved (a holds-only / prose / %e1RM session is a genuine no-op, not
 /// an "adjusted" chip over an unchanged top-end — HARD RULE 3).
-fn note_rpe_cap(items: &mut [PrescriptionView], eased: &[u8]) -> bool {
+fn note_rpe_cap(items: &mut [PlanItem], eased: &[u8]) -> bool {
     let mut any_changed = false;
     for (it, &d) in items.iter_mut().zip(eased) {
         if d > 0 && !it.is_run() {
@@ -566,7 +480,7 @@ fn note_rpe_cap(items: &mut [PrescriptionView], eased: &[u8]) -> bool {
 /// (except for soreness: "keep systemic intensity"), citing the trigger's own
 /// run-side rule rather than the lifting-only hold claim.
 fn apply_progression_hold(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     r: &AdjustmentCall,
     trigger: ReadinessSignal,
     effort: &EffortPass,
@@ -592,7 +506,7 @@ fn apply_progression_hold(
 /// reserve (from the effort pass); runs go easy, keeping their duration. HRV
 /// and velocity loss only hold lifts; decoupling leaves them alone.
 fn apply_one_level_downgrade(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     r: &AdjustmentCall,
     effort: &EffortPass,
     weight_lb: bool,
@@ -638,11 +552,7 @@ fn apply_one_level_downgrade(
 /// A safety easy day (reactive tendon pain, a head cold, the first session
 /// back after a hold): no heavy load, at least [`EASY_DAY_RIR`] reps in
 /// reserve.
-fn apply_safety_easy_day(
-    items: &mut [PrescriptionView],
-    r: &AdjustmentCall,
-    weight_lb: bool,
-) -> bool {
+fn apply_safety_easy_day(items: &mut [PlanItem], r: &AdjustmentCall, weight_lb: bool) -> bool {
     let note = match r.kind() {
         AdjustmentKind::ReturnHold => "first session back: keep it easy",
         AdjustmentKind::HeadCold => "head cold: light, half the sets",
@@ -670,7 +580,7 @@ fn apply_safety_easy_day(
 /// `ReduceVolumePct` (autoreg-045): lifts' set counts and runs'
 /// duration/distance (or interval reps) are already folded; only the lift note
 /// is left.
-fn note_volume_cut(items: &mut [PrescriptionView], pct: f32) -> bool {
+fn note_volume_cut(items: &mut [PlanItem], pct: f32) -> bool {
     for it in items.iter_mut() {
         if !it.is_run() && it.adjusted_note.is_empty() {
             it.adjusted_note = format!("{pct:.0}% fewer sets today");
@@ -683,7 +593,7 @@ fn note_volume_cut(items: &mut [PrescriptionView], pct: f32) -> bool {
 /// the painful region stop, marked in `stopped`; the rest goes ahead (no load
 /// is ever auto-added while pain is active, autoreg-044).
 fn apply_pain_stop(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     r: &AdjustmentCall,
     (location, region): (&str, PainRegion),
     clamped: &[bool],
@@ -715,7 +625,7 @@ fn apply_pain_stop(
 /// added, one rep earlier, from the effort pass, autoreg-044); runs go easy.
 /// No fabricated % (the KB states none for this response).
 fn apply_modify_and_monitor(
-    items: &mut [PrescriptionView],
+    items: &mut [PlanItem],
     r: &AdjustmentCall,
     (location, region): (&str, Option<PainRegion>),
     effort: &EffortPass,
@@ -806,7 +716,7 @@ fn hold_note(eased: u8) -> String {
 /// for its reps (`hold_load_cap_kg`): the prescribed load (its %e1RM label
 /// following) or, for an effort-prescribed lift, the suggested start. The
 /// logged sets are re-judged at the held load. Returns whether it moved.
-fn clamp_to_hold_cap(it: &mut PrescriptionView, weight_lb: bool) -> bool {
+fn clamp_to_hold_cap(it: &mut PlanItem, weight_lb: bool) -> bool {
     let Some(cap) = it.hold_load_cap_kg.filter(|c| *c > 0.0) else {
         return false;
     };
@@ -858,7 +768,7 @@ pub(super) fn percent_effort_rpe(pct: f64, reps_low: u8) -> f64 {
 /// target form: a RIR target is capped structurally; a %e1RM target keeps its
 /// load and gets a lowered RPE ceiling ([`percent_effort_rpe`]). Returns
 /// whether anything changed.
-pub(super) fn cap_item_effort(it: &mut PrescriptionView, d: u8, weight_lb: bool) -> bool {
+pub(super) fn cap_item_effort(it: &mut PlanItem, d: u8, weight_lb: bool) -> bool {
     if let Some(reserve) = cap_rpe_intensity(&mut it.intensity, d) {
         it.target_rpe = Some(crate::strength::rir_to_rpe(reserve as f64));
         resync_intensity(it, weight_lb);
@@ -887,7 +797,7 @@ pub(super) fn cap_item_effort(it: &mut PrescriptionView, d: u8, weight_lb: bool)
 /// and the numeric prefill capped at the easy [`EASY_DAY_RIR`] reps-in-reserve
 /// ceiling, never raising an already-lower target nor seeding one above the
 /// light, pain-free intent (HARD RULE 3).
-fn ease_lift_item(it: &mut PrescriptionView, label: &str, note: &str, weight_lb: bool) {
+fn ease_lift_item(it: &mut PlanItem, label: &str, note: &str, weight_lb: bool) {
     it.load_kg = None;
     it.pick_load = true;
     it.intensity_label = label.into();
@@ -900,7 +810,7 @@ fn ease_lift_item(it: &mut PrescriptionView, label: &str, note: &str, weight_lb:
 }
 
 /// Drop the "anchored on" basis of an item whose load no longer comes from it.
-fn clear_anchored_on(it: &mut PrescriptionView) {
+fn clear_anchored_on(it: &mut PlanItem) {
     it.anchored_on.clear();
     it.anchored_on_last = false;
     it.anchored_on_single_set = false;
@@ -908,7 +818,7 @@ fn clear_anchored_on(it: &mut PrescriptionView) {
 
 /// Render one plan item as stopped for a localized pain report:
 /// no load, nothing to log, the evidence re-pointed to the pain rule.
-fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &AdjustmentCall) {
+fn stop_item_for_pain(it: &mut PlanItem, location: &str, r: &AdjustmentCall) {
     it.load_kg = None;
     it.intensity = PlanIntensity::Prose;
     it.intensity_label = "Skip today, or swap for a movement that doesn't hurt".into();
@@ -916,7 +826,8 @@ fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &AdjustmentC
         let line = format!("Run: skip today ({location} pain)");
         set_run_summary(it, None, None, &line, &line);
     } else {
-        set_named_summary(it, ": ", format!("skip today ({location} pain)"), &[]);
+        let lead = FaceClause::plain(format!("skip today ({location} pain)"));
+        set_named_summary(it, ": ", &[lead], &[]);
     }
     clear_run_reps(it);
     it.run_volume = None;
@@ -931,21 +842,20 @@ fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &AdjustmentC
 /// The one-item post-illness return check (ready-upd-003, ILLNESS-RTT-001):
 /// [`RETURN_DOSE_MIN`] minutes at [`RETURN_DOSE_EFFORT_PCT`] of usual effort,
 /// with the stop list. `done` once anything was logged today.
-fn return_check_item(r: &AdjustmentCall, done: bool) -> PrescriptionView {
+fn return_check_item(r: &AdjustmentCall, done: bool) -> PlanItem {
     let (pct_lo, pct_hi) = RETURN_DOSE_EFFORT_PCT;
     let summary = return_check_headline();
-    PrescriptionView {
+    PlanItem::from(PrescriptionView {
         face_lead: summary.clone(),
         summary,
         intensity_label: format!("{pct_lo}–{pct_hi}% of your usual effort"),
-        intensity: PlanIntensity::Prose,
         adjusted_note: format!("{RETURN_CHECK_STOP} Check in again tomorrow morning."),
         return_check: true,
         evidence: EvidenceTagView::of(r),
         why: why_from(None, r),
         done,
         ..PrescriptionView::default()
-    }
+    })
 }
 
 /// A head cold (above-neck symptoms only): any planned run, long, hard or
@@ -954,7 +864,7 @@ fn return_check_item(r: &AdjustmentCall, done: bool) -> PrescriptionView {
 /// the IOC 2022 exercise-challenge dose). The
 /// planned distance, reps and tracker structure are dropped, never shown. Done
 /// once any run is logged on its day.
-fn cap_run_for_head_cold(it: &mut PrescriptionView) {
+fn cap_run_for_head_cold(it: &mut PlanItem) {
     let r = AdjustmentKind::HeadCold.call(Adjustment::DowngradeSession, HEAD_COLD_RUN_CLAIM);
     clear_run_reps(it);
     it.run_volume = Some(RunAmount::MinutesRange(

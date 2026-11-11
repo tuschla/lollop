@@ -42,6 +42,14 @@ class DateFormatsTest : PlatformTest() {
         assertEquals("Sun", weekdayName(DayOfWeek.SUNDAY, WeekdayWidth.Short, us))
     }
 
+    /** The week strips' two-letter labels, and the short name of the setup and the widget. */
+    @Test
+    fun weekdayStripLabelsAndShortNames() {
+        assertEquals(listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"), DayOfWeek.entries.map { weekdayStripLabel(it, us) })
+        assertEquals(listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"), DayOfWeek.entries.map { weekdayStripLabel(it, uk) })
+        assertEquals("Thu", weekdayShort(DayOfWeek.THURSDAY, us))
+    }
+
     @Test
     fun mediumDatesAndShortLabels() {
         assertEquals("Oct 15, 2026", formatMediumDate(oct15, us))

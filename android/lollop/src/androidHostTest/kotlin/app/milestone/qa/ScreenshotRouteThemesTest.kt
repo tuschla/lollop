@@ -15,7 +15,6 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.DarkMode
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.GpsPoint
 import app.milestone.R
@@ -44,7 +43,7 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
     fun setUp() {
         QaHarness.reset(ctx)
         AppSettings.setShowRouteMaps(ctx, false)
-        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
+        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
     }
 
     @After

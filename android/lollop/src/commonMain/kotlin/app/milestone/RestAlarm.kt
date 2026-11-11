@@ -241,7 +241,7 @@ internal data class RestNextSet(val exercise: String, val detail: String?)
 
 /** The countdown's body line: "Next: Set 3 of 4 · 100 kg × 5" for another set of
  *  the rested [exercise], "Next: Bench press · Set 1 of 3" when the loop moves on.
- *  Null when the loop shows no next set. Pure. */
+ *  Null when the loop shows no next set. */
 internal fun countdownText(res: PlatformResources, exercise: String, next: RestNextSet?): String? {
     next ?: return null
     val what = when {

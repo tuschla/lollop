@@ -1,60 +1,42 @@
 package app.milestone
 
 /**
- * Distance/pace units. The core (crux) is unit-agnostic: it stores and reasons in
- * SI (meters, min/km). Unit choice is pure shell chrome, resolved here and applied
- * only at the display edge. Everything in this file is a pure function of its inputs
- * (the locale defaults [localeDistanceUnit] and [localeWeightUnit] read the device
- * locale) so the math is unit-testable without an Android context.
+ * Distance/pace units. The core reasons in SI (meters, min/km) and renders its own
+ * distance text in the profile's [DistanceUnit]; the helpers here cover the figures
+ * the SHELL formats itself, in that same unit. Everything in this file is a pure
+ * function of its inputs (the locale defaults [localeDistanceUnit] and
+ * [localeWeightUnit] read the device locale) so the math is unit-testable without an
+ * Android context.
  */
-enum class DistanceUnit(
-    /** Short distance label, e.g. "5.2 km" / "3.2 mi". */
-    val distanceLabel: String,
-    /** Pace suffix, e.g. "5:30 /km" / "8:51 /mi". */
-    val paceSuffix: String,
-) {
-    Km("km", "/km"),
-    Mi("mi", "/mi"),
-}
 
-/**
- * User override for the distance unit. [System] defers to the device locale
- * ([localeDistanceUnit]); [Km]/[Mi] force a fixed unit regardless of locale. Stored
- * in [AppSettings] (shell chrome, not coaching state), consumed by [resolveDistanceUnit].
- */
-enum class DistanceUnitOverride { System, Km, Mi }
+/** Short distance label, e.g. "5.2 km" / "3.2 mi". */
+val DistanceUnit.distanceLabel: String
+    get() = when (this) {
+        DistanceUnit.Km -> "km"
+        DistanceUnit.Mi -> "mi"
+    }
 
-/** Exact international mile in meters (NIST). 1 mi = 1609.344 m. */
-const val METERS_PER_MILE: Double = 1609.344
+/** Pace suffix, e.g. "5:30 /km" / "8:51 /mi". */
+val DistanceUnit.paceSuffix: String get() = "/$distanceLabel"
+
+/** The unit every distance reads in: the profile's; before a profile exists, the
+ *  device locale's ([localeDistanceUnit]). */
+internal fun ViewModel?.distanceUnit(): DistanceUnit = this?.profile?.distance_unit ?: localeDistanceUnit()
 
 /** Countries that conventionally use miles for road/running distance. */
 private val MILE_COUNTRIES = setOf("US", "GB", "LR", "MM")
 
 /**
  * Locale-derived default unit: miles for US/GB/LR/MM, kilometers everywhere else.
- * Reads the device locale ([deviceLocale]) by default. Kept separate from
- * the pure math so tests can drive [resolveDistanceUnit] with an explicit locale.
+ * Reads the device locale ([deviceLocale]) by default; tests pass a locale.
  */
 fun localeDistanceUnit(locale: PlatformLocale = deviceLocale()): DistanceUnit =
     if (locale.region.uppercase() in MILE_COUNTRIES) DistanceUnit.Mi else DistanceUnit.Km
 
-/**
- * Resolve the effective unit: an explicit [DistanceUnitOverride] wins; [System] falls
- * back to the locale. Pure given [locale] (default = the device locale).
- */
-fun resolveDistanceUnit(
-    override: DistanceUnitOverride,
-    locale: PlatformLocale = deviceLocale(),
-): DistanceUnit = when (override) {
-    DistanceUnitOverride.Km -> DistanceUnit.Km
-    DistanceUnitOverride.Mi -> DistanceUnit.Mi
-    DistanceUnitOverride.System -> localeDistanceUnit(locale)
-}
-
 /** Meters → display distance in the chosen unit (km or mi). Pure. */
 fun metersToDisplay(meters: Double, unit: DistanceUnit): Double = when (unit) {
     DistanceUnit.Km -> meters / 1000.0
-    DistanceUnit.Mi -> meters / METERS_PER_MILE
+    DistanceUnit.Mi -> meters / CoreConstants.MILE_M
 }
 
 /**
@@ -66,15 +48,11 @@ fun paceInUnit(minPerKm: Double, unit: DistanceUnit): Double = when (unit) {
     DistanceUnit.Mi -> miToKm(minPerKm) // min/km × km/mi = min/mi
 }
 
-/** The run target's pace label in [unit], falling back to the other unit's label. */
-internal fun RunTargetView.paceLabel(unit: DistanceUnit): String =
-    if (unit == DistanceUnit.Mi) pace_label_mi.ifBlank { pace_label_km } else pace_label_km.ifBlank { pace_label_mi }
-
 /** Kilometers → miles. Pure. */
-fun kmToMi(km: Double): Double = km / (METERS_PER_MILE / 1000.0)
+fun kmToMi(km: Double): Double = km / (CoreConstants.MILE_M / 1000.0)
 
 /** Miles → kilometers. Pure. */
-fun miToKm(mi: Double): Double = mi * (METERS_PER_MILE / 1000.0)
+fun miToKm(mi: Double): Double = mi * (CoreConstants.MILE_M / 1000.0)
 
 /** Miles → kilometers for the WIRE, rounded to 2 decimals (0.01 km, below the 0.01 mi
  *  display step), so a mi-entered distance doesn't put a full binary double on the
@@ -88,22 +66,19 @@ private fun round2(x: Double): Double = (x * 100.0).roundOrZero() / 100.0
  * Weight units. As with distance, the core (crux) reasons in SI (kilograms) and its
  * verbatim weight STRINGS are already rendered in the profile's chosen unit core-side
  * (see app::Profile::weight_lb). These helpers cover the few weights the SHELL formats
- * itself (never the core-rendered strings), and mirror the core's conversion factor so
- * kg↔lb can never drift between the two sides. Pure functions of their inputs.
+ * itself (never the core-rendered strings), with the core's conversion factor
+ * ([CoreConstants.LB_PER_KG]). Pure functions of their inputs.
  */
 enum class WeightUnit { Kg, Lb }
 
 /** The display unit for every kg figure, from the profile's weight-unit flag. */
 internal fun ViewModel.weightUnit(): WeightUnit = if (profile?.weight_lb == true) WeightUnit.Lb else WeightUnit.Kg
 
-/** Pounds per kilogram (mirrors app/mod.rs `LB_PER_KG`). 1 kg = 2.2046226218 lb. */
-const val LB_PER_KG: Double = 2.2046226218
-
 /** Kilograms → pounds. Pure. */
-fun kgToLb(kg: Double): Double = kg * LB_PER_KG
+fun kgToLb(kg: Double): Double = kg * CoreConstants.LB_PER_KG
 
 /** Pounds → kilograms. Pure. */
-fun lbToKg(lb: Double): Double = lb / LB_PER_KG
+fun lbToKg(lb: Double): Double = lb / CoreConstants.LB_PER_KG
 
 /** Pounds → kilograms for the WIRE (225 lb → 102.06 kg, not 102.05828325225797);
  *  see [miToKmWire]. 102.06 kg still formats "225.0" lb. */
