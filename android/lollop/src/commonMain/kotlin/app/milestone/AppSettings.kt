@@ -6,18 +6,6 @@ import kotlinx.coroutines.flow.StateFlow
 /** Default live-tracking pace bucket, in minutes (AppSettings and RunSession). */
 internal const val DEFAULT_PACE_BUCKET_MINUTES = 4
 
-/** Light/dark selection: follow the OS, or force one. */
-enum class DarkMode {
-    System, Light, Dark;
-
-    /** Dark under this selection, where the OS is dark when [systemDark]. */
-    fun isDark(systemDark: Boolean): Boolean = when (this) {
-        System -> systemDark
-        Light -> false
-        Dark -> true
-    }
-}
-
 /**
  * Shell preferences persisted outside the core: appearance (theme, dark mode,
  * dynamic accent), route maps, the tracker's pace bucket and keep-screen-on,

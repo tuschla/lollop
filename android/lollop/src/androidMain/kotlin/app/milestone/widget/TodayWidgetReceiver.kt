@@ -10,22 +10,15 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import app.milestone.AndroidIds
 import app.milestone.AppClock
-import app.milestone.PlatformLog
+import app.milestone.AppRuntime
 import app.milestone.keyValueStore
 import app.milestone.nextLocalMidnightMillis
-import app.milestone.requestTileRefresh
-import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
  * The widget's receiver. Besides Glance's own updates it gets the local-midnight
- * tick ([ACTION_MIDNIGHT], [AndroidWidgets.onMidnight]), which marks a snapshot
- * from the day that ended stale, and the locale change, which redraws the Quick
- * Settings tile ([requestTileRefresh]), whose face depends on the language. Both
- * redraw the widget. Clock and time zone changes reach the widget through the
- * app's time-change receiver (app.milestone.TimeChangeReceiver).
+ * tick ([ACTION_MIDNIGHT]): the local day changed, which every feature hears as a
+ * time change ([AppRuntime.onTimeChanged]). Clock, time zone and language changes
+ * reach the widget through app.milestone.SystemChangeReceiver.
  */
 class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = TodayWidget()
@@ -41,28 +34,10 @@ class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        val midnight = when (intent.action) {
-            ACTION_MIDNIGHT -> true
-            Intent.ACTION_LOCALE_CHANGED -> false
-            else -> return super.onReceive(context, intent)
-        }
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                if (midnight) {
-                    AndroidWidgets.onMidnight(context)
-                } else {
-                    requestTileRefresh(context)
-                    MidnightTick.update(context)
-                }
-                AndroidWidgets.redraw(context)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                PlatformLog.w("TodayWidget", "day change not applied", e)
-            } finally {
-                pending.finish()
-            }
+        if (intent.action == ACTION_MIDNIGHT) {
+            AppRuntime.onTimeChanged(context, zoneChanged = false)
+        } else {
+            super.onReceive(context, intent)
         }
     }
 

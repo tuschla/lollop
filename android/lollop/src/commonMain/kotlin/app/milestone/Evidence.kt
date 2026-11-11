@@ -174,9 +174,6 @@ internal fun DisclosureButton(
     }
 }
 
-/** Visual size of the "?" disc (it grows into a pill at a large font scale). */
-private val DisclosureDiscSize = 24.dp
-
 /**
  * The drawing of the app's one "explain this" glyph: a [DisclosureDiscSize] disc
  * holding a Bold `Type.Chip` "?" in `tint` inside a 1dp `tint` ring on the host
@@ -455,10 +452,6 @@ internal fun EvidenceCard(
 
 /** Height of the chip/section header row on a two-row EvidenceCard face. */
 private val CompactHeaderHeight = 28.dp
-
-/** A [DisclosureButton]'s 48dp target is wider than its disc: a trailing "?"
- *  shifts by this so the disc (not the target) ends at the content edge. */
-internal val DisclosureEdgeInset = (ActionMinHeight - DisclosureDiscSize) / 2
 
 /**
  * The three-part "why?" disclosure body. Renders the core-provided [WhyView] as:
@@ -879,10 +872,6 @@ private fun gradeLabelRes(grade: EvidenceGrade?): StringResource? = when (grade)
     EvidenceGrade.MarketingMyth -> Res.string.main_grade_myth
     null -> null
 }
-
-/** The core's citation verbatim; "-" when blank. */
-internal fun citationLabel(citation: String): String =
-    citation.ifBlank { "-" }
 
 /** Grade badge color from the theme-fixed status palette. See design spec §2. */
 fun StatusColors.gradeColor(grade: EvidenceGrade?): Color = when (grade) {

@@ -1,5 +1,7 @@
 package app.milestone
 
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -59,7 +61,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromRecents) {
             RunImport.importRuns(this, RunImport.urisFrom(intent))
             openDestOf(intent)?.let { openRequest.value = it }
-            AndroidReminder.onOpenIntent(this, intent)
+            cancelTappedNotification(this, intent)
         }
         // The window ground under the first Compose frame (and the import restart's
         // "Restoring your data…" screen) is the resolved palette's, not the theme's
@@ -106,7 +108,7 @@ class MainActivity : ComponentActivity() {
         // A widget / tile / notification tap while the Activity is alive. It only
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
-        AndroidReminder.onOpenIntent(this, intent)
+        cancelTappedNotification(this, intent)
         // A share/open into an already-running Activity imports too.
         RunImport.importRuns(this, RunImport.urisFrom(intent))
     }
@@ -117,4 +119,44 @@ class MainActivity : ComponentActivity() {
         private const val NAV_SCRIM_ALPHA = 0.9f
         private val NAV_SCRIM_DARK = android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
+}
+
+// The open intents ([OpenDest] as an explicit activity intent): built by the widget,
+// the Quick Settings tile and the notifications, read by [MainActivity].
+
+internal const val ACTION_OPEN = "app.milestone.action.OPEN"
+internal const val EXTRA_DEST = "dest"
+
+/** The notification an open intent takes down: an action tap does not auto-cancel it. */
+private const val EXTRA_CANCEL_NOTIFICATION = "app.milestone.cancel_notification"
+
+/** The explicit intent that opens [MainActivity] at [dest]; with [cancels], opening
+ *  it takes that notification down ([cancelTappedNotification]). */
+internal fun openIntent(ctx: Context, dest: OpenDest, cancels: Int? = null): Intent =
+    Intent(ACTION_OPEN)
+        .setClass(ctx, MainActivity::class.java)
+        .putExtra(EXTRA_DEST, dest.wire)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        .apply { if (cancels != null) putExtra(EXTRA_CANCEL_NOTIFICATION, cancels) }
+
+/**
+ * Immutable activity PendingIntent for [openIntent]. PendingIntents match on the
+ * intent without its extras, so each destination gets its own request code.
+ */
+internal fun openPendingIntent(ctx: Context, dest: OpenDest): PendingIntent =
+    PendingIntent.getActivity(
+        ctx,
+        AndroidIds.OPEN_REQUEST_BASE + dest.ordinal,
+        openIntent(ctx, dest),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+/** The destination an incoming intent asks for, or null when it isn't an open intent. */
+internal fun openDestOf(intent: Intent?): OpenDest? =
+    if (intent?.action == ACTION_OPEN) OpenDest.fromWire(intent.getStringExtra(EXTRA_DEST)) else null
+
+/** [intent] came from a notification action that names its notification: take it down. */
+internal fun cancelTappedNotification(ctx: Context, intent: Intent?) {
+    if (intent?.hasExtra(EXTRA_CANCEL_NOTIFICATION) != true) return
+    ctx.getSystemService(NotificationManager::class.java)?.cancel(intent.getIntExtra(EXTRA_CANCEL_NOTIFICATION, 0))
 }

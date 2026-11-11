@@ -5,9 +5,7 @@ import android.app.AlarmManager
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
-import android.content.BroadcastReceiver
 import android.content.Intent
-import android.os.Bundle
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.core.JniCore
@@ -30,7 +28,6 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.TimeZone
-import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlinx.datetime.toKotlinTimeZone
 import org.junit.After
@@ -45,10 +42,6 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
-import org.robolectric.shadow.api.Shadow
-import org.robolectric.shadows.ShadowBroadcastPendingResult
-import org.robolectric.util.ReflectionHelpers
-import org.robolectric.util.ReflectionHelpers.ClassParameter
 
 /**
  * Seeded walks over the surfaces that read the widget snapshot (session reminder,
@@ -538,10 +531,10 @@ class SurfaceStateMachineTest {
         }
 
         /** [TodayWidgetReceiver] gets the midnight tick. */
-        private fun dayChanged(intent: Intent) = rederiving { receive(TodayWidgetReceiver(), intent) }
+        private fun dayChanged(intent: Intent) = rederiving { TodayWidgetReceiver().onReceive(app, intent) }
 
         /** The system's clock or time zone change ([changed]) reaches every feature. */
-        private fun timeChanged(changed: Intent) = rederiving { TimeChangeReceiver().onReceive(app, changed) }
+        private fun timeChanged(changed: Intent) = rederiving { SystemChangeReceiver().onReceive(app, changed) }
 
         /** Run [mark]; a stale mark that ticks [WidgetSnapshotStore.staleMarks] makes
          *  [app.milestone.widget.WidgetSurfaces] derive the snapshot again from the
@@ -550,19 +543,6 @@ class SurfaceStateMachineTest {
             val marks = WidgetSnapshotStore.staleMarks.value
             mark()
             if (WidgetSnapshotStore.staleMarks.value != marks && alive) writeHeld()
-        }
-
-        /** [receiver] gets [intent] as from the system (with a pending result for
-         *  goAsync); returns once it finished its work. */
-        private fun receive(receiver: BroadcastReceiver, intent: Intent) {
-            val pending = ReflectionHelpers.callStaticMethod<BroadcastReceiver.PendingResult>(
-                ShadowBroadcastPendingResult::class.java, "create",
-                ClassParameter.from(Int::class.javaPrimitiveType, 0), ClassParameter.from(String::class.java, null),
-                ClassParameter.from(Bundle::class.java, null), ClassParameter.from(Boolean::class.javaPrimitiveType, false),
-            )
-            ReflectionHelpers.callInstanceMethod<Any?>(receiver, "setPendingResult", ClassParameter.from(BroadcastReceiver.PendingResult::class.java, pending))
-            receiver.onReceive(app, intent)
-            Shadow.extract<ShadowBroadcastPendingResult>(pending).future.get(10, TimeUnit.SECONDS)
         }
 
         private fun writeHeld() {

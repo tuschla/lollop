@@ -1,14 +1,5 @@
 package app.milestone
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,23 +14,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.milestone.resources.Res
-import app.milestone.resources.main_core_unavailable_message
-import app.milestone.resources.main_core_unavailable_title
 import app.milestone.resources.main_data_unreadable
 import app.milestone.resources.main_discard
 import app.milestone.resources.main_restored_entries
-import app.milestone.resources.main_restoring_data
 import app.milestone.resources.main_resume_run_message
 import app.milestone.resources.main_resume_run_title
 import app.milestone.resources.main_save_failed
-import app.milestone.resources.profile_export_data
 import app.milestone.resources.track_action_resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -62,9 +46,6 @@ internal class CoachSession(
     setupInitialState: MutableState<Event.SetProfile?>,
     showTrackerState: MutableState<Boolean>,
     showResumePromptState: MutableState<Boolean>,
-    lastPainState: MutableState<PainDetail?>,
-    val dispatch: (Event) -> Unit,
-    val dispatchAll: (List<Event>) -> Unit,
     val markOnboardingDone: () -> Unit,
     /** A pending [OpenDest] from an open intent or URL; [CoachScaffold] applies and clears it. */
     val openRequest: OpenRequests,
@@ -78,7 +59,6 @@ internal class CoachSession(
     var setupInitial by setupInitialState
     var showTracker by showTrackerState
     var showResumePrompt by showResumePromptState
-    var lastPain by lastPainState
 
     /** The interrupted run's fixes boot read for the resume offer, so Resume reuses
      *  them instead of re-reading the file; null once consumed. */
@@ -86,7 +66,7 @@ internal class CoachSession(
 }
 
 @Composable
-private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
+internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     val ctx = currentPlatformContext()
     val res = currentResources()
     // Seed from the process-level EventDispatcher.model so a rotation renders the
@@ -110,7 +90,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
                 CoreNotice.NotSaved -> Res.string.main_save_failed
                 CoreNotice.Unreadable -> Res.string.main_data_unreadable
             }
-            showNotice(ctx, res.getString(text), long = true)
+            UiMessages.post(UiMessage(res.getString(text), long = true))
         }
     }
 
@@ -139,34 +119,6 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // stale sidecar (newest fix older than RESUME_STALE_SEC) is discarded outright.
     val showResumePromptState = rememberSaveable { mutableStateOf(false) }
 
-    // Shell echo of the most recent pain report, so the DO-NOT-TRAIN banner can
-    // name the body part immediately after triage even before the core surfaces
-    // its own `detail` string. Cleared when the hold is removed/readiness cleared.
-    // Not persisted across process death (the core's persisted detail covers that).
-    val lastPainState = remember { mutableStateOf<PainDetail?>(null) }
-
-    // One dispatch path so the shell-side lastPain echo stays
-    // in lockstep with the core. The echoes run on the caller (main) thread in call
-    // order before the event is enqueued on the process-scoped [EventDispatcher],
-    // whose single consumer applies events in order off the main thread.
-    val echo: (Event) -> Unit = { e ->
-        when {
-            e is Event.SubmitReadiness && e.pain != null -> lastPainState.value = e.pain
-            e is Event.RemoveReadiness && e.signal == ReadinessSignal.Pain -> lastPainState.value = null
-            // "I'm pain-free now" retracts every pain report: the banner's echo goes too.
-            e is Event.ResolveHold && e.signal == ReadinessSignal.Pain -> lastPainState.value = null
-            e is Event.ClearReadiness -> lastPainState.value = null
-        }
-    }
-    val dispatch: (Event) -> Unit = { e ->
-        echo(e)
-        EventDispatcher.send(e)
-    }
-    val dispatchAll: (List<Event>) -> Unit = { events ->
-        events.forEach(echo)
-        EventDispatcher.sendAll(events)
-    }
-
     val session = remember {
         CoachSession(
             loadedState = loadedState,
@@ -175,9 +127,6 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             setupInitialState = setupInitialState,
             showTrackerState = showTrackerState,
             showResumePromptState = showResumePromptState,
-            lastPainState = lastPainState,
-            dispatch = dispatch,
-            dispatchAll = dispatchAll,
             markOnboardingDone = markOnboardingDone,
             openRequest = openRequest,
             tracker = platformRunTracker(),
@@ -199,7 +148,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
         val vm = EventDispatcher.exclusive {
             // First touch of the engine on its own thread: Android's loads the native
             // library in its initializer, which must not run on the UI thread.
-            val engine = withContext(CoreDispatcher) { AppRuntime.engine }
+            val engine = withContext(CoreDispatcher) { AppCore.engine }
             bootTurn(engine, setupStore, ctx.keyValueStore(AppFileNames.SETTINGS_STORE), AppRuntime, restore = {
                 if (reboot) engine.resetForReboot()
                 engine.restore(ctx)
@@ -261,7 +210,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
                     val last = AppRuntime.lastToday
                     if (last != null && last != now) {
                         AppRuntime.lastToday = now
-                        session.dispatch(Event.SetToday(now.first, now.second))
+                        EventDispatcher.send(Event.SetToday(now.first, now.second))
                     }
                 }
             }
@@ -334,61 +283,4 @@ internal fun ResumeRunDialog(session: CoachSession) {
             }) { Text(stringResource(Res.string.main_discard), color = DangerText) }
         },
     )
-}
-
-/**
- * The app: boot (the loading state until the first model, or the core-unavailable
- * state), then the scaffold with its tabs, sheets and snackbars. Each platform's host
- * calls it under [MilestoneTheme]: Android's `MainActivity`, iOS's `LollopIosRoot`.
- * [openRequest] is the host's deep-link state (an open intent, a URL, a reminder tap).
- */
-@Composable
-internal fun LollopApp(openRequest: OpenRequests) {
-    val session = rememberCoachSession(openRequest)
-
-    val coreUnavailable by EventDispatcher.coreUnavailable.collectAsState()
-    if (coreUnavailable) {
-        CoreUnavailableScreen()
-        return
-    }
-
-    if (!session.loaded) {
-        val ctx = currentPlatformContext()
-        // An import restart is still replaying the restored log (the key goes once boot runs).
-        val restoring = remember { restoringImport(ctx.setupStore()) }
-        Box(Modifier.fillMaxSize().background(BgTop), contentAlignment = Alignment.Center) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
-            ) {
-                CircularProgressIndicator(color = Accent)
-                if (restoring) Text(stringResource(Res.string.main_restoring_data), color = OnBgMuted, style = Type.Body)
-            }
-        }
-        return
-    }
-
-    CoachScaffold(session)
-}
-
-/**
- * Boot found the core unusable ([DurableCore.probe]): say so instead of rendering an
- * empty model as a fresh install. Nothing here can dispatch an event (the core
- * refuses them anyway, [DurableCore.unavailable]); the one action is the raw-log
- * export, which reads the durable log in pure Kotlin ([exportDataTo]), so the
- * user's data can leave the phone before an update or reinstall.
- */
-@Composable
-internal fun CoreUnavailableScreen() {
-    val exportData = rememberDataExport()
-    Box(
-        Modifier.fillMaxSize().background(BgTop).safeDrawingPadding().padding(Space.Screen.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
-            SheetTitle(stringResource(Res.string.main_core_unavailable_title))
-            Text(stringResource(Res.string.main_core_unavailable_message), color = OnBgBody, style = Type.Body)
-            PrimaryButton(stringResource(Res.string.profile_export_data), onClick = exportData, modifier = Modifier.fillMaxWidth())
-        }
-    }
 }

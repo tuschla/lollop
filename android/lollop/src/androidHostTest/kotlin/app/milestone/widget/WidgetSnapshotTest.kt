@@ -267,11 +267,13 @@ class WidgetSnapshotTest {
         assertEquals(str(R.string.tile_start_run), f.actions.first().label)
         assertEquals("8 km easy", f.status)
         assertEquals("8 km easy", f.brief)
-        // A full run summary ("8 km easy") is a line, not a hero figure; a detail
-        // that is only a figure is one, with or without a pace.
+        // A full run summary ("8 km easy") is a line, not a hero figure, though it
+        // leads with the run's volume head; a detail that is only the head is one.
         assertNull(f.hero)
-        assertTrue(isFigure("3.4 mi") && isFigure("45 min") && isFigure("6 × 800 m"))
-        assertFalse(isFigure("8 km easy") || isFigure("Easy run") || isFigure(""))
+        fun heroOf(p: PrescriptionView) = widgetFace(widgetSnapshotOf(model(ns.copy(items = listOf(p))), DistanceUnit.Km), day, res).hero
+        assertNull(heroOf(PrescriptionView(face_lead = "8 km easy", run_head = "8 km")))
+        assertEquals(WidgetHero("6 × 800 m", null, figure = true), heroOf(PrescriptionView(face_lead = "6 × 800 m", run_head = "6 × 800 m")))
+        assertNull("a digit-led line the core marks as no head", heroOf(PrescriptionView(face_lead = "45 min")))
         // A recording run in this process: the tile's Recording action.
         assertEquals(str(R.string.tile_run_recording), widgetFace(snap, day, res, recording = true).actions.first().label)
         // Once the run is logged, no Track run.

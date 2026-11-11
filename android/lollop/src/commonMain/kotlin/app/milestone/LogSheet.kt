@@ -393,7 +393,7 @@ private fun LogOptionRow(
     tone: LogRowTone = LogRowTone.Plain,
     onClick: () -> Unit,
 ) {
-    val danger = StatusTone.Danger.colors()
+    val danger = StatusTone.Danger.toneColors()
     val ground = if (tone == LogRowTone.Plan) Accent else BgElevated
     val titleColor = when (tone) {
         LogRowTone.Plain -> OnBgBody

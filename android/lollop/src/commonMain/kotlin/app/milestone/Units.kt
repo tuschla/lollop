@@ -74,6 +74,9 @@ enum class WeightUnit { Kg, Lb }
 /** The display unit for every kg figure, from the profile's weight-unit flag. */
 internal fun ViewModel.weightUnit(): WeightUnit = if (profile?.weight_lb == true) WeightUnit.Lb else WeightUnit.Kg
 
+/** The kg|lb the profile shows weights in. */
+internal val Event.SetProfile.weightUnit: WeightUnit get() = if (weightLb) WeightUnit.Lb else WeightUnit.Kg
+
 /** Kilograms → pounds. Pure. */
 fun kgToLb(kg: Double): Double = kg * CoreConstants.LB_PER_KG
 

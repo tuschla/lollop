@@ -5,14 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalView
-
-internal actual fun showNotice(ctx: PlatformContext, text: String, long: Boolean) {
-    Toast.makeText(ctx, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
-}
 
 @Composable
 internal actual fun KeepScreenOn() {

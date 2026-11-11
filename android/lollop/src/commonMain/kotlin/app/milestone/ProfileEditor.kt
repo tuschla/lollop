@@ -24,13 +24,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.Role
@@ -59,10 +55,6 @@ import app.milestone.resources.setup_days_scale_label
 import app.milestone.resources.setup_days_split_sub
 import app.milestone.resources.setup_days_weekdays_hint
 import app.milestone.resources.setup_distance_value
-import app.milestone.resources.setup_env_altitude
-import app.milestone.resources.setup_env_cold
-import app.milestone.resources.setup_env_heat
-import app.milestone.resources.setup_env_neutral
 import app.milestone.resources.setup_focus_add_lift_body
 import app.milestone.resources.setup_focus_add_lift_title
 import app.milestone.resources.setup_focus_add_run_body
@@ -82,16 +74,7 @@ import app.milestone.resources.setup_focus_to_run_body
 import app.milestone.resources.setup_focus_to_run_only_body
 import app.milestone.resources.setup_focus_to_run_only_title
 import app.milestone.resources.setup_focus_to_run_title
-import app.milestone.resources.setup_goaldist_10k
-import app.milestone.resources.setup_goaldist_5k
-import app.milestone.resources.setup_goaldist_c25k
-import app.milestone.resources.setup_goaldist_general
-import app.milestone.resources.setup_goaldist_half
-import app.milestone.resources.setup_goaldist_marathon
 import app.milestone.resources.setup_health_defer_youth
-import app.milestone.resources.setup_liftgoal_muscle
-import app.milestone.resources.setup_liftgoal_power
-import app.milestone.resources.setup_liftgoal_strength
 import app.milestone.resources.setup_max_hr_hint
 import app.milestone.resources.setup_modality_calis_short
 import app.milestone.resources.setup_modality_strength_q
@@ -147,326 +130,9 @@ import app.milestone.resources.setup_weekdays_q
 import app.milestone.resources.setup_weeks_value
 import app.milestone.resources.ui_cd_collapsed
 import app.milestone.resources.ui_cd_expanded
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
-
-/**
- * Durable stash of one side's answers while that side is switched OFF, so a later
- * Focus switch back resumes (or seeds the guided setup with) the user's prior
- * goal, days and weekdays instead of a blank. Shell chrome (not coaching state) →
- * SharedPreferences, not the crux event log.
- */
-internal object ModalityStash {
-    private const val PREFS = "milestone_modality"
-    private const val K_DAYS = "stash_running_days"
-    // Raw Double bits: a Float round-trip would re-send 24.1401 as 24.140100479….
-    private const val K_KM_BITS = "stash_running_km_bits"
-    private const val K_RUN_GOAL = "stash_running_goal"
-    private const val K_RACE_DAY = "stash_running_race_day"
-    private const val K_RUN_WEEKDAYS = "stash_running_weekdays"
-    private const val K_LIFT_DAYS = "stash_lift_days"
-    private const val K_LIFT_GOAL = "stash_lift_goal"
-    private const val K_LIFT_SETS = "stash_lift_sets"
-    private const val K_LIFT_WEEKDAYS = "stash_lift_weekdays"
-    // A stored weekday mask of "Any days" (null on the draft).
-    private const val ANY_WEEKDAYS = -1
-
-    private fun p(ctx: PlatformContext) = ctx.keyValueStore(PREFS)
-
-    /** Keep [draft]'s running answers as running is switched off. */
-    fun stashRun(ctx: PlatformContext, draft: Event.SetProfile) {
-        // A side already at 0 has nothing worth keeping: writing it would
-        // clobber the last real numbers.
-        if (draft.runningDaysPerWeek <= 0) return
-        val km = draft.runningKmPerWeek.takeIf { draft.runningKmPerWeekSet && it > 0.0 }
-        p(ctx).edit {
-            putInt(K_DAYS, draft.runningDaysPerWeek)
-            if (km != null) putLong(K_KM_BITS, km.toRawBits()) else remove(K_KM_BITS)
-            putString(K_RUN_GOAL, draft.goalDistance.name)
-            draft.goalRaceEpochDay?.let { putLong(K_RACE_DAY, it) } ?: remove(K_RACE_DAY)
-            putInt(K_RUN_WEEKDAYS, draft.trainingWeekdays ?: ANY_WEEKDAYS)
-        }
-    }
-
-    /** Keep [draft]'s lifting answers as lifting is switched off. */
-    fun stashLift(ctx: PlatformContext, draft: Event.SetProfile) {
-        if (draft.weeklySets <= 0) return
-        p(ctx).edit {
-            putInt(K_LIFT_SETS, draft.weeklySets)
-            putString(K_LIFT_GOAL, draft.liftGoal.name)
-            draft.liftDaysPerWeek?.let { putInt(K_LIFT_DAYS, it) } ?: remove(K_LIFT_DAYS)
-            putInt(K_LIFT_WEEKDAYS, draft.trainingWeekdays ?: ANY_WEEKDAYS)
-        }
-    }
-
-    /** The stashed running answers, or null when running was never switched off. */
-    fun run(ctx: PlatformContext): StashedRun? = p(ctx).takeIf { it.contains(K_DAYS) }?.let { s ->
-        StashedRun(
-            days = s.getInt(K_DAYS, 0),
-            km = if (s.contains(K_KM_BITS)) Double.fromBits(s.getLong(K_KM_BITS, 0L)) else null,
-            goal = s.getString(K_RUN_GOAL, null)?.let { g -> GoalDistance.entries.firstOrNull { it.name == g } },
-            raceEpochDay = if (s.contains(K_RACE_DAY)) s.getLong(K_RACE_DAY, 0L) else null,
-            weekdays = weekdaysOf(s.getInt(K_RUN_WEEKDAYS, ANY_WEEKDAYS)),
-        )
-    }
-
-    /** The stashed lifting answers, or null when lifting was never switched off. */
-    fun lift(ctx: PlatformContext): StashedLift? = p(ctx).let { s ->
-        val goal = s.getString(K_LIFT_GOAL, null)?.let { g -> LiftGoal.entries.firstOrNull { it.name == g } }
-        if (goal == null || !s.contains(K_LIFT_SETS)) return null
-        StashedLift(
-            days = if (s.contains(K_LIFT_DAYS)) s.getInt(K_LIFT_DAYS, 0) else null,
-            goal = goal,
-            weeklySets = s.getInt(K_LIFT_SETS, 0),
-            weekdays = weekdaysOf(s.getInt(K_LIFT_WEEKDAYS, ANY_WEEKDAYS)),
-        )
-    }
-
-    private fun weekdaysOf(mask: Int): Int? = mask.takeIf { it != ANY_WEEKDAYS && it and ALL_WEEKDAYS != 0 }
-}
-
-/** Running answers kept while running is off ([km]/[goal]/[raceEpochDay] null =
- *  never given; [weekdays] null = "Any days"). */
-internal data class StashedRun(val days: Int, val km: Double?, val goal: GoalDistance?, val raceEpochDay: Long?, val weekdays: Int?)
-
-/** Lifting answers kept while lifting is off ([days] null = never answered). */
-internal data class StashedLift(val days: Int?, val goal: LiftGoal, val weeklySets: Int, val weekdays: Int?)
-
-/**
- * The profile switched back to a single side the user already set up, when the
- * stash holds every answer that side's setup would ask (its goal and days, with the
- * stashed weekdays still covering them); the other side is dropped as
- * [withoutSide] does. Null = ask in the guided setup. Both always asks (which side
- * leads is never stashed).
- */
-internal fun Event.SetProfile.resumedSide(target: Modality, lift: StashedLift?, run: StashedRun?, today: Long): Event.SetProfile? = when (target) {
-    Modality.Lift -> lift?.takeIf { s ->
-        weeklySets == 0 && s.weeklySets > 0 && s.days != null && s.days in LIFT_DAYS && weekdaysCover(s.weekdays, s.days)
-    }?.let { s ->
-        copy(weeklySets = s.weeklySets, liftDaysPerWeek = s.days, liftGoal = s.goal, trainingWeekdays = s.weekdays)
-            .withoutSide(Modality.Lift)
-    }
-    Modality.Run -> run?.takeIf { s ->
-        runningDaysPerWeek == 0 && s.days in dayOptions(Modality.Run) && weekdaysCover(s.weekdays, s.days)
-    }?.let { s ->
-        val goal = s.goal ?: return@let null
-        copy(
-            runningDaysPerWeek = s.days,
-            runningKmPerWeek = s.km ?: 0.0,
-            runningKmPerWeekSet = s.km != null,
-            goalDistance = goal,
-            goalRaceEpochDay = s.raceEpochDay?.takeIf { it > today && goal.isRace },
-            liftDaysPerWeek = null,
-            trainingWeekdays = s.weekdays,
-        ).withoutSide(Modality.Run)
-    }
-    Modality.Both -> null
-}
-
-/**
- * A Both profile's running level as the user answered it. The core stores only
- * what that answer drives (`advanced` = Advanced), so the answer itself is kept
- * here for the setup seed and Profile › Running experience, trusted only while it
- * still agrees with that flag.
- */
-internal object RunLevelAnswer {
-    private const val PREFS = "milestone_run_level"
-    private const val K_LEVEL = "run_level"
-
-    private fun p(ctx: PlatformContext) = ctx.keyValueStore(PREFS)
-
-    fun save(ctx: PlatformContext, level: SetupLevel) {
-        p(ctx).edit { putString(K_LEVEL, level.name) }
-    }
-
-    /** The recorded level, or null when none is recorded or it contradicts [advanced]. */
-    fun read(ctx: PlatformContext, advanced: Boolean): SetupLevel? =
-        p(ctx).getString(K_LEVEL, null)
-            ?.let { n -> SetupLevel.entries.firstOrNull { it.name == n } }
-            ?.takeIf { (it == SetupLevel.Advanced) == advanced }
-}
-
-/** The Profile rows with an inline picker; at most one is open at a time. The
- *  entries after [Break] are reveal targets only (a hold banner's deep link): a
- *  PAR-Q+ answer inside the health questions, or a health switch row. */
-internal enum class ProfileRowId {
-    TrainingDays, Experience, RunExperience, PriorityMuscle, Meet, Equipment, WeeklySets,
-    GoalDistance, RaceDate, RecentRace, WeeklyDistance, LongestRun,
-    Sex, Age, Bodyweight, RestingHr, MaxHr, HealthQuestions,
-    Environment, EnvTemp, EnvAltitude, Break,
-    ParqSymptom, ParqInjury, ParqClearance, Ill, Pregnant, PregnancyWarning, Reds,
-    ;
-
-    /** The row whose picker a focus on this id opens: a PAR-Q+ answer opens the
-     *  health questions; a switch row has no picker. */
-    val pickerRow: ProfileRowId?
-        get() = when (this) {
-            ParqSymptom, ParqInjury, ParqClearance -> HealthQuestions
-            Ill, Pregnant, PregnancyWarning, Reds -> null
-            else -> this
-        }
-}
-
-/** The PAR-Q+ question a focus on [id] reveals inside the open health
- *  questions: the first symptom answered Yes, or the bone/joint answer. Null when
- *  [id] names no question or no such Yes is recorded (a legacy flag). */
-internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqQuestion? = when (id) {
-    ProfileRowId.ParqSymptom -> draftFacts(ProfileDraft(health = health)).first_symptom
-    ProfileRowId.ParqInjury ->
-        ParqQuestion.BoneOrJoint.takeIf { it in draftFacts(ProfileDraft(health = health)).parq_yes }
-    else -> null
-}
-
-/** The profile edit dated for dispatch: in force from [today] (the core's today,
- *  so settled past days keep the profile they had), stamped with the instant it
- *  is made (a run logged earlier that day stays on the profile it was logged
- *  under). An undated SetProfile replaces the whole profile history (tests only). */
-internal fun Event.SetProfile.effectiveFrom(today: Long): Event.SetProfile =
-    copy(effectiveFromEpochDay = today, editedAt = AppClock.nowSec())
-
-/** Rebuild a draft from the core-echoed profile (post log-replay hydration). */
-internal fun Event.SetProfile.Companion.from(p: Profile) = Event.SetProfile(
-    progressionCadence = p.progression_cadence,
-    liftGoal = p.lift_goal,
-    goalDistance = p.goal_distance,
-    concurrentGoal = p.concurrent_goal,
-    weeklySets = p.weekly_sets,
-    runningDaysPerWeek = p.running_days_per_week,
-    runningKmPerWeek = p.running_km_per_week,
-    runningKmPerWeekSet = p.running_km_per_week_set,
-    advanced = p.advanced,
-    female = p.female,
-    bodyweightKg = p.bodyweight_kg,
-    ageYears = p.age_years,
-    restingHrBpm = p.resting_hr_bpm,
-    measuredHrMax = p.measured_hr_max,
-    distanceUnit = p.distance_unit,
-    weightLb = p.weight_lb,
-    health = p.health,
-    resistanceModality = p.resistance_modality,
-    highLoadBlock = p.high_load_block,
-    environment = p.environment,
-    envTempC = p.env_temp_c,
-    envAltitudeM = p.env_altitude_m,
-    weeksOff = p.weeks_off,
-    liftDaysPerWeek = p.lift_days_per_week,
-    trainingWeekdays = p.training_weekdays?.takeIf { it and ALL_WEEKDAYS != 0 },
-    goalRaceEpochDay = p.goal_race_epoch_day,
-    recentRace = p.recent_race,
-    statedLongestRecentKm = p.stated_longest_recent_km,
-    layoffReturnedEpochDay = p.layoff_returned_epoch_day,
-    meetEpochDay = p.meet_epoch_day,
-    calisEquipment = p.calis_equipment,
-    specializationMuscle = p.specialization_muscle,
-    runnerStrength = p.runner_strength,
-    birthEpochDay = p.birth_epoch_day,
-)
-
-/**
- * Weekly running-volume SCALE in the user's distance unit (ProfileEditor
- * "Running km/wk" / "Running mi/wk"). The core stores canonical km; the scale's
- * options, highlight and row value are whole display units, and a pick converts
- * back to km for the wire (km exact, mi via [miToKmWire]). Range 1–150 km, i.e.
- * 1–93 mi. Pure.
- */
-const val WEEKLY_VOLUME_MAX_KM: Double = 150.0
-
-fun weeklyVolumeScaleOptions(unit: DistanceUnit): List<Int> =
-    if (unit == DistanceUnit.Mi) {
-        (1..kmToMi(WEEKLY_VOLUME_MAX_KM).roundOrZero().toInt()).toList()
-    } else {
-        (1..WEEKLY_VOLUME_MAX_KM.toInt()).toList()
-    }
-
-fun weeklyVolumeScaleValue(km: Double, unit: DistanceUnit): Int =
-    (if (unit == DistanceUnit.Mi) kmToMi(km) else km).roundOrZero().toInt()
-
-fun weeklyVolumeScaleToKm(value: Int, unit: DistanceUnit): Double =
-    if (unit == DistanceUnit.Mi) miToKmWire(value.toDouble()) else value.toDouble()
-
-/**
- * Fallback starting point for the full editor only (rehydration when no
- * profile is echoed). Never seeded on a fresh install: first run goes
- * through the guided setup, which writes user-asserted values rather than
- * these opinionated defaults.
- */
-internal val Event.SetProfile.Companion.SEED: Event.SetProfile get() = ProfileSeed
-
-private val ProfileSeed = Event.SetProfile(
-    progressionCadence = ProgressionCadence.WeekToWeek,
-    liftGoal = LiftGoal.MaxStrength,
-    goalDistance = GoalDistance.TenK,
-    concurrentGoal = ConcurrentGoal.Strength,
-    weeklySets = 14,
-    runningDaysPerWeek = 4,
-    runningKmPerWeek = 45.0,
-    advanced = false,
-)
-
-/** The kg|lb the profile shows weights in. */
-internal val Event.SetProfile.weightUnit: WeightUnit get() = if (weightLb) WeightUnit.Lb else WeightUnit.Kg
-
-// Human-readable labels for the profile pickers. Display-only, the wire value is
-// still each variant's `.name` (see Event.SetProfile), so these strings can change
-// freely. Exhaustive `when` (no `else`) so a new variant fails to compile until it
-// is given a label rather than silently showing a cryptic raw name.
-
-/** The one lifting-goal vocabulary: the Profile Training goal segments, the
- *  wizard's lift-goal cards and the review row all read these labels. */
-internal val LiftGoal.labelRes: StringResource
-    get() = when (this) {
-        LiftGoal.MaxStrength -> Res.string.setup_liftgoal_strength
-        LiftGoal.Power -> Res.string.setup_liftgoal_power
-        LiftGoal.Hypertrophy -> Res.string.setup_liftgoal_muscle
-    }
-
-internal val GoalDistance.labelRes: StringResource
-    get() = when (this) {
-        GoalDistance.General -> Res.string.setup_goaldist_general
-        GoalDistance.C25k -> Res.string.setup_goaldist_c25k
-        GoalDistance.FiveK -> Res.string.setup_goaldist_5k
-        GoalDistance.TenK -> Res.string.setup_goaldist_10k
-        GoalDistance.HalfMarathon -> Res.string.setup_goaldist_half
-        GoalDistance.Marathon -> Res.string.setup_goaldist_marathon
-    }
-
-/**
- * Change the lift goal and keep the hybrid "which leads" answer coherent: while
- * lifting leads (and always for a lift-only profile, where the row is hidden) the
- * concurrent goal follows the new lift goal; a run-led hybrid stays run-led.
- */
-internal fun Event.SetProfile.withLiftGoal(goal: LiftGoal): Event.SetProfile {
-    val runLeads = weeklySets > 0 && runningDaysPerWeek > 0 &&
-        concurrentGoal == ConcurrentGoal.EndurancePriority
-    return copy(
-        liftGoal = goal,
-        concurrentGoal = if (runLeads) ConcurrentGoal.EndurancePriority else goal.toConcurrent(),
-    )
-}
-
-/** The two-way "Which leads?" answer mapped onto the concurrent goal (same mapping
- *  the guided setup uses), with the day counts fitted to that lead's caps. */
-internal fun Event.SetProfile.withLead(lead: BothPriority): Event.SetProfile {
-    val liftDays = liftDaysPerWeek?.coerceIn(hybridLiftDayRange(lead))
-    val runMax = hybridRunDayOptions(liftDays ?: CoreConstants.HYBRID_DEFAULT_LIFT_DAYS, lead).last
-    return copy(
-        concurrentGoal = leadingConcurrentGoal(lead, liftGoal),
-        liftDaysPerWeek = liftDays,
-        runningDaysPerWeek = runningDaysPerWeek.coerceAtMost(runMax),
-    )
-}
-
-internal val Environment.labelRes: StringResource
-    get() = when (this) {
-        Environment.Heat -> Res.string.setup_env_heat
-        Environment.Altitude -> Res.string.setup_env_altitude
-        Environment.Cold -> Res.string.setup_env_cold
-        Environment.Neutral -> Res.string.setup_env_neutral
-    }
 
 /**
  * User-editable training profile. Every committed edit calls [onApply] with the
@@ -1158,36 +824,6 @@ internal fun focusSwitchCopy(from: Modality, to: Modality): FocusSwitchCopy = wh
     }
 }
 
-/** A Both profile with one side dropped ([keep] = the side that stays). The
- *  concurrent goal follows the guided setup's mapping: lift-only = the lift
- *  goal, run-only = endurance priority. */
-internal fun Event.SetProfile.withoutSide(keep: Modality): Event.SetProfile = when (keep) {
-    Modality.Lift -> copy(
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        runningKmPerWeekSet = true,
-        concurrentGoal = liftGoal.toConcurrent(),
-    )
-    Modality.Run -> copy(weeklySets = 0, concurrentGoal = ConcurrentGoal.EndurancePriority)
-    Modality.Both -> this
-}
-
-/** Lift days as the Training days row shows them: unanswered = what the engine
- *  schedules (the core's default for a hybrid or a lifting-only week). */
-internal fun Event.SetProfile.shownLiftDays(): Int =
-    liftDaysPerWeek ?: if (runningDaysPerWeek > 0) CoreConstants.HYBRID_DEFAULT_LIFT_DAYS else CoreConstants.LIFT_ONLY_DEFAULT_LIFT_DAYS
-
-/** The week's session days: lift days, run days, or both added up. */
-internal fun Event.SetProfile.trainingDayTotal(): Int {
-    val lift = weeklySets > 0
-    val run = runningDaysPerWeek > 0
-    return when {
-        lift && run -> shownLiftDays() + runningDaysPerWeek
-        run -> runningDaysPerWeek
-        else -> shownLiftDays()
-    }
-}
-
 /**
  * Edit a recent race: distance chips ("I don't know" clears it) and a finish
  * time typed on the keypad. Only a complete, plausible time applies, so the
@@ -1225,12 +861,6 @@ private fun RecentRaceEditor(race: RecentRace?, onChange: (RecentRace?) -> Unit)
         }
     }
 }
-
-/** Accepted keypad ranges for the person numbers (wizard, Profile and the morning
- *  check-in share them). Resting HR is the core's plausible band. */
-internal val AGE_RANGE = 14.0..100.0
-internal val RESTING_HR_RANGE = CoreConstants.RESTING_HR_MIN_BPM..CoreConstants.RESTING_HR_MAX_BPM
-internal val MAX_HR_RANGE = 120.0..230.0
 
 /** Weekly sets per muscle the Profile scale offers. Starts at 1, not 0: a
  *  modality's on/off is owned by the Focus row, which confirms the switch first. */
@@ -1413,101 +1043,5 @@ private fun ProfileRow(
             }
         }
         if (expanded) Box(Modifier.bringIntoViewRequester(contentRequester)) { content() }
-    }
-}
-
-/** [content] (one row inside a Profile card) scrolled into view once the layout
- *  settles while [request] holds, then [onRevealed]: a banner's deep link landing
- *  on the exact answer behind a hold, high in the list ([LocalRevealViewport]). */
-@Composable
-internal fun RevealTarget(request: Boolean, onRevealed: () -> Unit, content: @Composable () -> Unit) {
-    val requester = remember { BringIntoViewRequester() }
-    val top = remember { WindowTop() }
-    val landIn = LocalRevealViewport.current
-    LaunchedEffect(request) {
-        if (request) {
-            revealWhenSettled(top, requester, landIn = landIn)
-            onRevealed()
-        }
-    }
-    Box(
-        Modifier
-            .bringIntoViewRequester(requester)
-            .onGloballyPositioned { top.place(it) },
-    ) { content() }
-}
-
-/** Last laid-out window y and width of a reveal target; written only from layout
- *  callbacks, so a plain holder rather than snapshot state. */
-private class WindowTop {
-    var y = Float.NaN
-    var width = 0f
-
-    fun place(coords: LayoutCoordinates) {
-        y = coords.positionInWindow().y
-        width = coords.size.width.toFloat()
-    }
-}
-
-/** Height in px of the list a deep link reveals its row in (0 = unknown), written
- *  by that list's layout callback; a plain holder like [WindowTop]. */
-internal class RevealViewport {
-    var height = 0
-}
-
-/** The list a deep-link reveal lands in. Without one (0 height) the reveal only
- *  brings the row on screen. */
-internal val LocalRevealViewport = staticCompositionLocalOf { RevealViewport() }
-
-/** Where a deep link lands its row in a [RevealViewport]: a row below scrolls up
- *  until its top sits a third of the way down, a row above down to a quarter, so
- *  the answers around it stay in view instead of the row hugging an edge. */
-private const val LAND_FROM_BELOW = 1f / 3
-private const val LAND_FROM_ABOVE = 1f / 4
-
-/** Frames a reveal waits at most for the layout to stop moving. */
-private const val REVEAL_MAX_FRAMES = 12
-
-/**
- * Brings [requesters] into view (in order) once the surrounding layout settles. A
- * tab switch, or a hold banner appearing above the list, keeps moving the target
- * for a few frames, so a single frame's wait can scroll to a stale position: this
- * re-requests until [top] holds still across a frame. A competing scroll (the
- * list keeping a toggled row under the finger) cancels one request, not the reveal.
- * With [landIn] (a deep link) each request asks for the band around the row that
- * lands it high in the list ([LAND_FROM_BELOW]); a row already there stays put.
- */
-private suspend fun revealWhenSettled(
-    top: WindowTop,
-    vararg requesters: BringIntoViewRequester,
-    landIn: RevealViewport? = null,
-) {
-    var last = Float.NaN
-    repeat(REVEAL_MAX_FRAMES) {
-        withFrameNanos { }
-        val viewport = landIn?.height ?: 0
-        val band = if (viewport > 0) {
-            Rect(0f, -viewport * LAND_FROM_ABOVE, top.width, viewport * (1f - LAND_FROM_BELOW))
-        } else {
-            null
-        }
-        for (r in requesters) r.bringIntoViewUnlessPreempted(band)
-        withFrameNanos { }
-        if (top.y == last) return
-        last = top.y
-    }
-}
-
-/**
- * [BringIntoViewRequester.bringIntoView] that a competing scroll ends without ending
- * the caller: Compose cancels an in-flight request with a [CancellationException]
- * when another scroll takes over the container (the list keeping a toggled row under
- * the finger). The caller's own cancellation is rethrown.
- */
-private suspend fun BringIntoViewRequester.bringIntoViewUnlessPreempted(band: Rect?) {
-    try {
-        bringIntoView(band)
-    } catch (e: CancellationException) {
-        if (!currentCoroutineContext().isActive) throw e
     }
 }

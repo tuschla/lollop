@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,42 +39,15 @@ import app.milestone.resources.history_progress_days
 import app.milestone.resources.history_progress_overline
 import app.milestone.resources.history_progress_weeks
 import app.milestone.resources.history_records
-import app.milestone.resources.history_run_easy
-import app.milestone.resources.history_run_interval
-import app.milestone.resources.history_run_long
-import app.milestone.resources.history_run_recovery
-import app.milestone.resources.history_run_steady
-import app.milestone.resources.history_run_tempo
 import app.milestone.resources.history_run_weekday
 import app.milestone.resources.main_run
 import app.milestone.resources.main_set
-import app.milestone.resources.run_type_easy
-import app.milestone.resources.run_type_interval
-import app.milestone.resources.run_type_long
-import app.milestone.resources.run_type_recovery
-import app.milestone.resources.run_type_steady
-import app.milestone.resources.run_type_tempo
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.stringResource
-import org.jetbrains.compose.resources.StringResource
 
 // ── Run cards (History "Runs" stream) ───────────────────────────────────────
-
-/** A run type's words: [label] on the RUN TYPE chips and row ("Tempo"), [title]
- *  as a tagged run's card title ("Tempo run"). */
-internal class WorkoutTypeText(val label: StringResource, val title: StringResource)
-
-internal val WorkoutType.text: WorkoutTypeText
-    get() = when (this) {
-        WorkoutType.Steady -> WorkoutTypeText(Res.string.run_type_steady, Res.string.history_run_steady)
-        WorkoutType.Interval -> WorkoutTypeText(Res.string.run_type_interval, Res.string.history_run_interval)
-        WorkoutType.Tempo -> WorkoutTypeText(Res.string.run_type_tempo, Res.string.history_run_tempo)
-        WorkoutType.LongRun -> WorkoutTypeText(Res.string.run_type_long, Res.string.history_run_long)
-        WorkoutType.Recovery -> WorkoutTypeText(Res.string.run_type_recovery, Res.string.history_run_recovery)
-        WorkoutType.Easy -> WorkoutTypeText(Res.string.run_type_easy, Res.string.history_run_easy)
-    }
 
 /**
  * The run's title: the user's own run-type tag when set ("Tempo run"), so the title
@@ -83,7 +57,7 @@ internal val WorkoutType.text: WorkoutTypeText
  */
 @Composable
 internal fun runTitle(r: RunResultView): String {
-    r.workout_type?.let { return stringResource(it.text.title) }
+    r.workout_type?.let { return stringResource(it.labels.title) }
     if (r.started_at <= 0L) return stringResource(Res.string.main_run)
     val weekday = weekdayName(
         Instant.fromEpochSeconds(r.started_at).toLocalDateTime(TimeZone.currentSystemDefault()).dayOfWeek,
@@ -239,6 +213,7 @@ internal fun RunProgressSection(
     unit: DistanceUnit,
 ) {
     val weekly = progress.weekly
+    val kmByWeek = remember(weekly) { weekly.associate { it.week_start_epoch_day to it.km } }
     var window by rememberSaveable { mutableStateOf(RunProgressWindow.Weeks) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         SectionOverline(stringResource(Res.string.history_progress_overline))
@@ -252,7 +227,7 @@ internal fun RunProgressSection(
                 ) { window = RunProgressWindow.entries[it] }
             }
             when (window) {
-                RunProgressWindow.Weeks -> WeeklyDistanceChart(weekly, progress.planned_weekly_km, unit, chartHeight = PROGRESS_CHART_HEIGHT)
+                RunProgressWindow.Weeks -> WeeklyDistanceChart(kmByWeek, progress.planned_weekly_km, unit, chartHeight = PROGRESS_CHART_HEIGHT)
                 RunProgressWindow.Days -> RunDistanceBars(
                     kmByDay, todayLocalDay, unit = unit, days = PROGRESS_DAYS, chartHeight = PROGRESS_CHART_HEIGHT,
                 )

@@ -9,8 +9,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -20,7 +18,7 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Active decorative palette, provided at the theme root by [MilestoneTheme]. */
+/** Active decorative palette, provided at the theme root by [LollopTheme]. */
 val LocalPalette = staticCompositionLocalOf { AppTheme.Default.light }
 
 // Bare token accessors for the many call sites that read them directly. Each
@@ -252,20 +250,21 @@ val StatusRingWidth = 1.5.dp
 val SelectedBarWidth = Space.Sm.dp
 
 /**
- * App theme. The selected [AppTheme] supplies the whole decorative palette (ground,
- * surface, text tones, accent). On Android 12+ with "system accent" enabled, only
- * the accent role follows the user's Material You wallpaper color; the rest of the
- * palette is still the chosen theme's. Semantic status colors stay fixed across all
- * themes so safety and evidence signaling remain unambiguous; only the on-ground
- * done mark lightens on the dark grounds ([DarkStatusColors]).
+ * App theme. [appTheme] supplies the whole decorative palette (ground, surface,
+ * text tones, accent); [darkMode] picks its light or dark ground. On Android 12+
+ * with [dynamicColor] (the system accent), only the accent role follows the
+ * user's Material You wallpaper color; the rest of the palette is still the
+ * chosen theme's. Semantic status colors stay fixed across all themes so safety
+ * and evidence signaling remain unambiguous; only the on-ground done mark
+ * lightens on the dark grounds ([DarkStatusColors]).
  */
 @Composable
-fun MilestoneTheme(
+fun LollopTheme(
+    appTheme: AppTheme,
+    darkMode: DarkMode,
+    dynamicColor: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val dynamicColor by AppSettings.dynamicAccent.collectAsState()
-    val appTheme by AppSettings.theme.collectAsState()
-    val darkMode by AppSettings.darkMode.collectAsState()
     // Light/dark source: respect the OS by default, or honor a forced override
     // (the "respect system dark mode" toggle). Each theme supplies both grounds;
     // only the decorative palette (and the done mark) flips, never the fills.

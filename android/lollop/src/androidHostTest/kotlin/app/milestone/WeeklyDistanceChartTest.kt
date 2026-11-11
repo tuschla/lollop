@@ -12,7 +12,6 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import app.milestone.DistanceUnit
 import app.milestone.MilestoneTheme
-import app.milestone.RunWeekView
 import app.milestone.WeeklyDistanceChart
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -21,7 +20,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * [WeeklyDistanceChart] keeps the tapped week in `remember(weeks)`, so its tap
+ * [WeeklyDistanceChart] keeps the tapped week in `remember(kmByWeek)`, so its tap
  * handler is keyed on the weeks too: when the weekly series changes with the same
  * week count (a run edited or deleted from History's sheet while the chart stays
  * composed), a tap still shows the "Week of …" readout.
@@ -33,9 +32,7 @@ class WeeklyDistanceChartTest {
     val rule = createComposeRule()
 
     /** 16 Monday-start weeks (epoch day 20_004 is a Monday), each [kmAt] km. */
-    private fun weeks(kmAt: (Int) -> Double) = (0 until 16).map { i ->
-        RunWeekView(week_start_epoch_day = 20_004L + i * 7L, km = kmAt(i), runs = 1)
-    }
+    private fun weeks(kmAt: (Int) -> Double) = (0 until 16).associate { i -> 20_004L + i * 7L to kmAt(i) }
 
     /** Taps the middle week's bar (its per-week node sits over the bar). */
     private fun tapMiddle() {
@@ -51,7 +48,7 @@ class WeeklyDistanceChartTest {
      *  [second]. Then taps the middle bar and returns how many "Week of …" readouts
      *  are on screen (as text, not the per-week TalkBack nodes, which are content
      *  descriptions). */
-    private fun tapReadouts(first: List<RunWeekView>, second: List<RunWeekView>?): Int {
+    private fun tapReadouts(first: Map<Long, Double>, second: Map<Long, Double>?): Int {
         java.util.Locale.setDefault(java.util.Locale.US)
         val shown = mutableStateOf(first)
         rule.setContent {
@@ -67,7 +64,7 @@ class WeeklyDistanceChartTest {
             assertEquals("the first tap shows the readout", 1, readouts())
             rule.runOnIdle { shown.value = second }
             rule.waitForIdle()
-            // remember(weeks) reset the selection: no readout until the next tap.
+            // remember(kmByWeek) reset the selection: no readout until the next tap.
             assertEquals("the swap clears the selection", 0, readouts())
         }
         tapMiddle()

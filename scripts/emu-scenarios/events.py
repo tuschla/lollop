@@ -3,13 +3,13 @@
   count LOG KIND        number of events whose variant is KIND
   lastset LOG           "<exercise>|<weight_kg>|<reps>|<rpe>" of the last LogSet
   track LOG             JSON facts of the last LogRunTrack: points, first/last
-                        observed_at, moving_s / moving_m (legs >= 0.5 m/s, segment
-                        starts skipped), max_gap_s, observed_at
+                        observed_at, max_gap_s, observed_at, segment_starts,
+                        utc_offset_sec (moving figures: the core's, via
+                        shared/tests/track_figures_of_record.rs)
   canon LOG             every event re-serialized with sorted keys, one per line,
                         in log order (SetToday — the shell clock — dropped)
 """
 import json
-import math
 import sys
 
 
@@ -28,27 +28,6 @@ def kind(e):
     return e if isinstance(e, str) else next(iter(e), "")
 
 
-def hav(a, b):
-    la1, la2 = math.radians(a["lat"]), math.radians(b["lat"])
-    dla, dlo = la2 - la1, math.radians(b["lon"] - a["lon"])
-    h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
-    return 2 * 6371000.0 * math.asin(min(1.0, math.sqrt(h)))
-
-
-def moving(pts, seg):
-    """(seconds, metres) of the legs at >= 0.5 m/s, segment starts skipped."""
-    mov_s = mov_m = 0.0
-    for i in range(1, len(pts)):
-        dt = pts[i]["observed_at"] - pts[i - 1]["observed_at"]
-        if i in seg or dt <= 0:
-            continue
-        d = hav(pts[i - 1], pts[i])
-        if d / dt >= 0.5:
-            mov_s += dt
-            mov_m += d
-    return mov_s, mov_m
-
-
 def track_facts(path):
     t = [e["LogRunTrack"] for e in events(path) if kind(e) == "LogRunTrack"]
     if not t:
@@ -56,11 +35,9 @@ def track_facts(path):
     r = t[-1]
     pts = r.get("points", [])
     seg = set(r.get("segment_starts", []))
-    mov_s, mov_m = moving(pts, seg)
     gaps = [0] + [pts[i]["observed_at"] - pts[i - 1]["observed_at"] for i in range(1, len(pts))]
     return {"tracks": len(t), "points": len(pts), "first_at": pts[0]["observed_at"] if pts else None,
-            "last_at": pts[-1]["observed_at"] if pts else None, "moving_s": int(mov_s),
-            "moving_m": round(mov_m, 1), "max_gap_s": max(gaps), "observed_at": r.get("observed_at"),
+            "last_at": pts[-1]["observed_at"] if pts else None, "max_gap_s": max(gaps), "observed_at": r.get("observed_at"),
             "segment_starts": sorted(seg), "utc_offset_sec": r.get("utc_offset_sec")}
 
 

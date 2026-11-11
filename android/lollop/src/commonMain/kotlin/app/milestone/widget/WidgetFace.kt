@@ -207,11 +207,9 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
             val firstLift = open.firstOrNull { it.kind == WidgetItemKind.Lift }
             val firstRun = open.firstOrNull { it.kind == WidgetItemKind.Run }
             // A run day's hero is the run's figure: its volume head ("8 km") over its
-            // pace, or a detail that is only a figure ("3.4 mi", "45 min", "6 × 800 m");
-            // a full summary ("8 km easy") stays a line.
-            val heroRun = firstRun?.takeIf {
-                current.kind == WidgetDayKind.Run && it.detail.isNotBlank() && (it.pace.isNotBlank() || isFigure(it.detail))
-            }
+            // pace, or a detail that is only the head ("45 min"); a full summary
+            // ("8 km easy") stays a line.
+            val heroRun = firstRun?.takeIf { current.kind == WidgetDayKind.Run && it.figure && it.detail.isNotBlank() }
             base.copy(
                 title = current.title,
                 // The reminder's line: what the next tap logs or tracks.
@@ -243,11 +241,6 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
         }
     }
 }
-
-/** Whether [text] is only a figure and its units ("3.4 mi", "45 min", "6 × 800 m"):
- *  it leads with a digit and has no word longer than a unit. */
-internal fun isFigure(text: String): Boolean =
-    text.firstOrNull()?.isDigit() == true && text.split(' ', '\u00A0').none { t -> t.count(Char::isLetter) > 3 }
 
 private fun itemLine(item: WidgetItem, res: PlatformResources): String {
     val name = when (item.kind) {
@@ -295,3 +288,12 @@ private fun charEm(c: Char): Float = when {
 
 /** [text]'s estimated width in em of its font size ([charEm]). */
 internal fun textEm(text: String): Float = text.sumOf { charEm(it).toDouble() }.toFloat()
+
+/** The line under the tile's label for [today]'s snapshot: the widget's title
+ *  (the session, "Rest day", "Training paused"), "Session done" once today's
+ *  session is; nothing without a snapshot for today. */
+internal fun tileSubtitle(today: WidgetSnapshot?, res: PlatformResources): String? {
+    val snapshot = today ?: return null
+    val face = widgetFace(snapshot, snapshot.epochDay, res)
+    return (if (snapshot.sessionDone) face.status else face.title)?.takeIf { it.isNotBlank() }
+}

@@ -81,6 +81,7 @@ import androidx.compose.ui.semantics.collapse
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextMeasurer
@@ -1199,3 +1200,20 @@ internal fun SearchWell(
         )
     }
 }
+
+/**
+ * Marks a node as a traversal group: TalkBack reads its children together, sorted
+ * by the group's own layout direction. Every window's top container (the
+ * activity's content, a sheet, a dialog) needs it: a Compose window's root node is
+ * always left to right (`AndroidComposeView` never sets its direction), so without
+ * it an RTL locale hears a row outside a lazy list (the bottom nav, a dialog's
+ * buttons) end to start.
+ */
+internal fun Modifier.traversalGroup(): Modifier = semantics { isTraversalGroup = true }
+
+/** Visual size of the "?" disc (it grows into a pill at a large font scale). */
+internal val DisclosureDiscSize = 24.dp
+
+/** A [DisclosureButton]'s 48dp target is wider than its disc: a trailing "?"
+ *  shifts by this so the disc (not the target) ends at the content edge. */
+internal val DisclosureEdgeInset = (ActionMinHeight - DisclosureDiscSize) / 2

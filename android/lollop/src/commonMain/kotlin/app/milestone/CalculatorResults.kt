@@ -571,3 +571,13 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
         }
     }
 }
+
+/** Where the masters bracket begins, as the protein copy states it ("65"):
+ *  [CoreConstants.MASTERS_AGE_YEARS], [trimDecimal]-trimmed. */
+internal fun mastersAgeLabel(): String = trimDecimal(CoreConstants.MASTERS_AGE_YEARS)
+
+/** Display label for a planner wire muscle ("side delts" → "Side delts"); an
+ *  unknown name (the core then explains it isn't one) shows as sent. */
+@Composable
+internal fun hypertrophyMuscleLabel(wire: String): String =
+    HypertrophyMuscle.of(wire)?.let { stringResource(it.labelRes) } ?: wire

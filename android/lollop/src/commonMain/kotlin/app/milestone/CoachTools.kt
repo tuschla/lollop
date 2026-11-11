@@ -58,17 +58,6 @@ import app.milestone.resources.log_field_recent_sec
 import app.milestone.resources.log_field_resting_hr
 import app.milestone.resources.log_field_weekly_volume
 import app.milestone.resources.log_field_weeks_since_race
-import app.milestone.resources.log_muscle_abs
-import app.milestone.resources.log_muscle_back
-import app.milestone.resources.log_muscle_biceps
-import app.milestone.resources.log_muscle_calves
-import app.milestone.resources.log_muscle_chest
-import app.milestone.resources.log_muscle_glutes
-import app.milestone.resources.log_muscle_hamstrings
-import app.milestone.resources.log_muscle_quads
-import app.milestone.resources.log_muscle_rear_delts
-import app.milestone.resources.log_muscle_side_delts
-import app.milestone.resources.log_muscle_triceps
 import app.milestone.resources.log_prefill_profile
 import app.milestone.resources.log_protein_deficit_only
 import app.milestone.resources.log_protein_no_context
@@ -772,37 +761,6 @@ private fun RacePresetField(label: String, current: RaceDistance, labels: Map<Ra
     }
 }
 
-/**
- * Muscle picker for the hypertrophy volume planner. [wire] is the exact string the
- * core's `hypertrophy::landmarks_for` looks up (case-insensitive, but sent verbatim);
- * [labelRes] is display-only. The set MUST match the LANDMARKS table in
- * `hypertrophy.rs`: an unknown muscle yields a single explanatory row instead of a plan.
- */
-internal enum class HypertrophyMuscle(val wire: String, val labelRes: StringResource) {
-    Chest("chest", Res.string.log_muscle_chest),
-    Back("back", Res.string.log_muscle_back),
-    Quads("quads", Res.string.log_muscle_quads),
-    Hamstrings("hamstrings", Res.string.log_muscle_hamstrings),
-    Glutes("glutes", Res.string.log_muscle_glutes),
-    SideDelts("side delts", Res.string.log_muscle_side_delts),
-    RearDelts("rear delts", Res.string.log_muscle_rear_delts),
-    Biceps("biceps", Res.string.log_muscle_biceps),
-    Triceps("triceps", Res.string.log_muscle_triceps),
-    Calves("calves", Res.string.log_muscle_calves),
-    Abs("abs", Res.string.log_muscle_abs);
-
-    companion object {
-        /** The muscle for a wire name, matched case-insensitively as the core does; null if none. */
-        fun of(wire: String?): HypertrophyMuscle? = entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }
-    }
-}
-
-/** Display label for a planner wire muscle ("side delts" → "Side delts"); an
- *  unknown name (the core then explains it isn't one) shows as sent. */
-@Composable
-internal fun hypertrophyMuscleLabel(wire: String): String =
-    HypertrophyMuscle.of(wire)?.let { stringResource(it.labelRes) } ?: wire
-
 /** The accumulation-block lengths the planner offers, weeks, and its opening pick. */
 private val AccumulationWeeks = 2..8
 private const val AccumulationWeeksSeed = 4
@@ -868,10 +826,6 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHy
         )
     }
 }
-
-/** Where the masters bracket begins, as the protein copy states it ("65"):
- *  [CoreConstants.MASTERS_AGE_YEARS], [trimDecimal]-trimmed. */
-internal fun mastersAgeLabel(): String = trimDecimal(CoreConstants.MASTERS_AGE_YEARS)
 
 /**
  * Absolute daily protein target tool. Picks a bodyweight and one or both graded

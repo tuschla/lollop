@@ -15,7 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.ActiveRunStore
 import app.milestone.AppClock
 import app.milestone.AppFileNames
-import app.milestone.AppRuntime
+import app.milestone.AppProcess
 import app.milestone.AppSettings
 import app.milestone.Core
 import app.milestone.CoreFault
@@ -215,7 +215,7 @@ class BootResilienceTest {
         // Off the test (main) thread's stack: the export's exclusive turn runs on the
         // main-dispatched consumer, so blocking main on it would deadlock.
         var exported: Boolean? = null
-        AppRuntime.scope.launch { exported = exportDataTo(ctx, Uri.fromFile(out)) }
+        AppProcess.scope.launch { exported = exportDataTo(ctx, Uri.fromFile(out)) }
         rule.waitForState(30_000) { exported != null }
         assertEquals("export works without the core", true, exported)
         assertEquals(seeded.map { it.toJson().toString() }, out.readLines().filter { it.isNotBlank() })
@@ -270,7 +270,7 @@ class BootResilienceTest {
         rule.waitForIdle()
         // The re-run's exclusive turn is queued by now; one queued after it settles last.
         var settled = false
-        AppRuntime.scope.launch {
+        AppProcess.scope.launch {
             EventDispatcher.exclusive { null }
             settled = true
         }

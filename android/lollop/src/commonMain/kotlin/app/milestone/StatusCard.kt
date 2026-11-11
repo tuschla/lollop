@@ -51,7 +51,7 @@ enum class StatusTone { Info, Adjusted, Danger }
 internal class StatusToneColors(val ring: Color, val tileFill: Color, val glyph: Color, val text: Color)
 
 @Composable
-internal fun StatusTone.colors(): StatusToneColors {
+internal fun StatusTone.toneColors(): StatusToneColors {
     val status = LocalStatusColors.current
     return when (this) {
         StatusTone.Info -> StatusToneColors(ring = Accent, tileFill = AccentTint, glyph = Accent, text = Accent)
@@ -99,7 +99,7 @@ internal fun StatusCard(
 ) {
     val status = LocalStatusColors.current
     val shape = RoundedCornerShape(Space.Card.dp)
-    val colors = tone.colors()
+    val colors = tone.toneColors()
     val icon = glyph ?: painterResource(
         when {
             safety -> Res.drawable.ic_safety_shield

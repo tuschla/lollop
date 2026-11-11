@@ -366,3 +366,7 @@ internal fun KeyValueRow(label: String, value: String, emphasis: Boolean = false
         )
     }
 }
+
+/** The core's citation verbatim; "-" when blank. */
+internal fun citationLabel(citation: String): String =
+    citation.ifBlank { "-" }

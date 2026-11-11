@@ -24,7 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -55,28 +54,6 @@ import app.milestone.resources.track_cd_pace_mi
 import kotlin.math.abs
 import org.jetbrains.compose.resources.stringResource
 
-/** A display-unit length to two decimals ("0.18"), the one figure format every
- *  run distance and split length uses, so a sheet never mixes decimal marks. */
-internal fun displayFigure(displayValue: Double): String = formatFixed(displayValue, 2)
-
-/** A distance figure without its unit ("3.21"), in the user's unit. */
-internal fun distanceFigure(km: Double, unit: DistanceUnit): String = displayFigure(metersToDisplay(km * 1000.0, unit))
-
-/** A pace figure without its unit ("5:30"), in the user's unit; the placeholder
- *  while there is no pace yet. */
-internal fun paceFigure(minPerKm: Double, unit: DistanceUnit): String =
-    if (minPerKm.isFinite()) formatPaceMinutes(paceInUnit(minPerKm, unit)) else EmptyValuePlaceholder
-
-/** Distance in the display unit, e.g. "8.05 km" / "5.00 mi". */
-internal fun runDistLabel(distanceKm: Double, unit: DistanceUnit): String = "${distanceFigure(distanceKm, unit)} ${unit.distanceLabel}"
-
-/** Pace in the display unit, e.g. "5:34 /km" / "8:57 /mi". Recomputed from the
- *  run's distance+duration (not the core's always-/km `pace` string) so every run
- *  readout honours the chosen unit. [EmptyValuePlaceholder] for a degenerate run. */
-internal fun runPaceLabel(distanceKm: Double, durationMin: Double, unit: DistanceUnit): String {
-    if (distanceKm <= 0.0 || durationMin <= 0.0) return EmptyValuePlaceholder
-    return formatPaceMinutes(paceInUnit(durationMin / distanceKm, unit)) + " " + unit.paceSuffix
-}
 
 /** The distance unit of the published model ([distanceUnit]), collected reactively. */
 @Composable

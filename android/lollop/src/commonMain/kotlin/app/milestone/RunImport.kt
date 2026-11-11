@@ -86,7 +86,7 @@ internal fun parseRunFile(bytes: ByteArray, parse: (ByteArray) -> ImportVerdict?
  */
 internal fun importedRunEvent(run: ImportedRun, measuredHrMax: Double?): Event.LogRunTrack = Event.LogRunTrack(
     points = run.points,
-    hrPctMax = AppRuntime.engine.importedHrPct(ImportedHr(run.avg_hr_bpm, measuredHrMax)) ?: 0.0,
+    hrPctMax = AppCore.engine.importedHrPct(ImportedHr(run.avg_hr_bpm, measuredHrMax)) ?: 0.0,
     entryId = EntryIds.next(),
     observedAt = run.observed_at,
     workoutType = null,
@@ -255,12 +255,12 @@ internal interface RunImportFile {
  */
 internal fun launchRunImport(files: List<RunImportFile>, resources: () -> PlatformResources) {
     if (files.isEmpty()) return
-    AppRuntime.scope.launch {
+    AppProcess.scope.launch {
         val parsed = withContext(Dispatchers.IO) {
             files.map { file ->
                 ParsedRunFile(
                     name = file.displayName(),
-                    runs = runCatching { parseRunFile(file.readBytes(), AppRuntime.engine::parseRunFile) }
+                    runs = runCatching { parseRunFile(file.readBytes(), AppCore.engine::parseRunFile) }
                         .onFailure { e ->
                             // A non-import exception is a shell bug or an IO error, not a
                             // bad file; leave a diagnostic trail while the batch carries on.
@@ -282,7 +282,7 @@ internal fun launchRunImport(files: List<RunImportFile>, resources: () -> Platfo
         if (plan.runs.isNotEmpty()) {
             val vm = runCatching {
                 EventDispatcher.exclusive {
-                    withContext(CoreDispatcher) { AppRuntime.engine.sendAll(plan.runs.map { it.event }).view }
+                    withContext(CoreDispatcher) { AppCore.engine.sendAll(plan.runs.map { it.event }).view }
                 }
             }.onFailure {
                 if (it is CancellationException) throw it

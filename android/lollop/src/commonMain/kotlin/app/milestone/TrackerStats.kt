@@ -32,17 +32,10 @@ import app.milestone.resources.Res
 import app.milestone.resources.ic_safety_warning_triangle
 import app.milestone.resources.ic_ui_check
 import app.milestone.resources.run_stat_distance
-import app.milestone.resources.track_cd_distance_km
-import app.milestone.resources.track_cd_distance_mi
-import app.milestone.resources.track_cd_hours
-import app.milestone.resources.track_cd_minutes
 import app.milestone.resources.track_cd_not_available
-import app.milestone.resources.track_cd_pace_km
-import app.milestone.resources.track_cd_pace_mi
 import app.milestone.resources.track_cd_pace_status_ease_off
 import app.milestone.resources.track_cd_pace_status_on_target
 import app.milestone.resources.track_cd_pace_status_speed_up
-import app.milestone.resources.track_cd_seconds
 import app.milestone.resources.track_cd_stats
 import app.milestone.resources.track_pace_status_ease_off
 import app.milestone.resources.track_pace_status_on_target
@@ -289,37 +282,4 @@ private fun PaceStatusLine(cue: PaceCue) {
             modifier = Modifier.weight(1f, fill = false),
         )
     }
-}
-
-/** A duration read aloud with words, e.g. "1 hour 2 minutes 3 seconds"; zero
- *  leading parts are dropped ("12 minutes 3 seconds"). */
-internal fun spokenDuration(res: PlatformResources, totalSec: Long): String {
-    val s = totalSec.coerceAtLeast(0L)
-    val h = (s / 3600).toInt()
-    val m = ((s % 3600) / 60).toInt()
-    val sec = (s % 60).toInt()
-    val parts = ArrayList<String>(3)
-    if (h > 0) parts += res.getQuantityString(Res.plurals.track_cd_hours, h, h)
-    if (h > 0 || m > 0) parts += res.getQuantityString(Res.plurals.track_cd_minutes, m, m)
-    parts += res.getQuantityString(Res.plurals.track_cd_seconds, sec, sec)
-    return parts.joinToString(" ")
-}
-
-/** A distance figure read aloud with its unit, e.g. "3.18 miles". */
-internal fun spokenDistance(res: PlatformResources, figure: String, unit: DistanceUnit): String =
-    res.getString(if (unit == DistanceUnit.Mi) Res.string.track_cd_distance_mi else Res.string.track_cd_distance_km, figure)
-
-/** A run distance (km) read aloud in the user's unit, e.g. "3.18 miles". */
-internal fun spokenRunDistance(res: PlatformResources, km: Double, unit: DistanceUnit): String =
-    spokenDistance(res, distanceFigure(km, unit), unit)
-
-/** A canonical pace (min/km) read aloud in the user's unit, e.g. "5 minutes 15
- *  seconds per kilometer", or "not available yet" when unknown. */
-internal fun spokenPace(res: PlatformResources, minPerKm: Double, unit: DistanceUnit): String {
-    if (!minPerKm.isFinite() || minPerKm <= 0.0) return res.getString(Res.string.track_cd_not_available)
-    val secPerUnit = (paceInUnit(minPerKm, unit) * 60.0).roundOrZero()
-    return res.getString(
-        if (unit == DistanceUnit.Mi) Res.string.track_cd_pace_mi else Res.string.track_cd_pace_km,
-        spokenDuration(res, secPerUnit),
-    )
 }

@@ -84,3 +84,39 @@ internal fun isReturnCheckItem(item: PrescriptionView, sessionType: SessionType)
  *  item with no exercise; never the return check. */
 internal fun isRunItem(item: PrescriptionView, sessionType: SessionType): Boolean =
     !isReturnCheckItem(item, sessionType) && (sessionType.discipline == SessionDiscipline.Run || item.exercise.isEmpty())
+
+/** Today's epoch-day for every plan gate: the core's clock echoed on the view
+ *  (SetToday) rather than the wall clock, so a session that crosses midnight
+ *  while foregrounded rolls over in lockstep with the core instead of stranding
+ *  its Log buttons. Falls back to the device clock on an old core. */
+internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
+
+/** Today's session still to train: the hero dated today, with items, not blocked. */
+internal fun ViewModel.todaysPlan(): SessionPlanView? =
+    next_session?.takeIf { it.epoch_day == today() && it.items.isNotEmpty() && it.actionable }
+
+/** Today's lift session once something of it is logged. After Finish the core moves
+ *  next_session off today, so this is how the day is resumed. */
+internal fun ViewModel.resumableLiftDay(): SessionPlanView? = week_plan.firstOrNull {
+    it.epoch_day == today() && it.items.isNotEmpty() && it.session_type.discipline == SessionDiscipline.Lift &&
+        it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
+}
+
+/** The lift item a set logs against today, with its session: today's plan lift
+ *  session's first open item (else its first), or once something is logged and
+ *  the core moved next_session on, today's started lift session's first open item
+ *  (else its last, for an extra set). */
+internal fun ViewModel.openLiftTarget(): Pair<SessionPlanView, PrescriptionView>? {
+    val plan = todaysPlan()
+    if (plan != null && plan.session_type.discipline == SessionDiscipline.Lift) {
+        return plan to (firstOpenItem(plan.items) ?: plan.items.first())
+    }
+    val started = resumableLiftDay() ?: return null
+    return started to (firstOpenItem(started.items) ?: started.items.last())
+}
+
+/** The first not-done item of a session — the "Today's plan" prefill target and
+ *  the hero's next-open item. Null when every item is done (next_session keeps
+ *  done items, so the shell picks the open one). */
+internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =
+    items.firstOrNull { !it.done }

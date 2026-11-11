@@ -46,8 +46,6 @@ import androidx.compose.ui.text.font.FontWeight
 import app.milestone.resources.Res
 import app.milestone.resources.ic_action_log_plus
 import app.milestone.resources.main_log
-import app.milestone.resources.main_log_run_title
-import app.milestone.resources.main_plan_item_track
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -111,23 +109,24 @@ private fun CoachScaffoldBody(session: CoachSession) {
         sheetMode = mode
         sheetOpen = true
     }
-    // The tracker where the platform records runs; elsewhere a run is logged by hand
-    // (the run editor), so no entry leads to a tracker that isn't there.
+    // The tracker where the platform records runs; elsewhere (null) a run is logged
+    // by hand (the run editor), so no entry leads to a tracker that isn't there.
     val canTrack = session.tracker != null
-    val trackRun: () -> Unit = if (canTrack) ({ session.showTracker = true }) else ({ openSheet(LogMode.Run) })
+    val trackRun: (() -> Unit)? = if (canTrack) ({ session.showTracker = true }) else null
 
     // Crash-recovery consent, ahead of the full-screen returns below so neither
     // the setup nor a tracker restored after process death can hide it.
     ResumeRunDialog(session)
 
     // An open intent (widget, Quick Settings tile, Live Update tap) asks for a
-    // destination: apply it once and clear it. The guided setup, while it shows,
-    // stays; [routeOpen] keeps unsaved input and a tracker that holds a service.
+    // destination: apply it once and clear it. While the guided setup shows, the
+    // setup stays and the request waits for it to be completed or skipped;
+    // [routeOpen] keeps unsaved input and a tracker that holds a service.
     val openDest by session.openRequest.collectAsState()
-    LaunchedEffect(openDest) {
+    LaunchedEffect(openDest, session.showSetup) {
         val dest = openDest ?: return@LaunchedEffect
-        session.openRequest.value = null
         if (session.showSetup) return@LaunchedEffect
+        session.openRequest.value = null
         val nav = OpenNav(session.showTracker, selected, sheetOpen, sheetMode, sheetPlanExercise, sheetPlanDay)
         val next = routeOpen(
             dest,
@@ -165,15 +164,15 @@ private fun CoachScaffoldBody(session: CoachSession) {
                 calisLadders = session.model.calisthenics_ladders,
                 onComplete = { draft, rungs ->
                     val today = session.model.today()
-                    session.dispatch(draft.effectiveFrom(today))
+                    EventDispatcher.send(draft.effectiveFrom(today))
                     // Calisthenics self-placement: each answered ladder starts at
                     // its rung (after the profile, before the plan is generated).
-                    rungs.forEach { session.dispatch(it) }
+                    rungs.forEach(EventDispatcher::send)
                     // Zero-tap after setup: now that a profile exists, generate the
                     // plan immediately so the user lands on Today's prescription in
                     // THIS session (not only after a relaunch). The core preserves
                     // this anchor on later boots.
-                    session.dispatch(Event.GeneratePlan(today))
+                    EventDispatcher.send(Event.GeneratePlan(today))
                     if (firstRun) session.markOnboardingDone()
                     session.showSetup = false
                     session.setupInitial = null
@@ -197,8 +196,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
         // banner's undo/Add-details paths live during a run.
         RunTrackingScreen(
             model = session.model,
-            onEvent = { session.dispatch(it) },
-            lastPain = session.lastPain,
+            onEvent = EventDispatcher::send,
             onFinish = {
                 // The run save routes its Core.send through EventDispatcher.exclusive,
                 // so the consumer already published the saved model in queue order and
@@ -297,11 +295,10 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     banner = {
                         SafetyBannerHost(
                             session.model,
-                            onEvent = { session.dispatch(it) },
+                            onEvent = EventDispatcher::send,
                             modifier = Modifier
                                 .padding(horizontal = Space.Screen.dp)
                                 .padding(top = Space.Md.dp),
-                            lastPain = session.lastPain,
                             onAddDetails = { openSheet(LogMode.Readiness) },
                             onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
                         )
@@ -369,7 +366,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     // one view decode and one published model, never a run of partial
                     // models. The logged ClearPlan keeps the plan removed on the next
                     // boot.
-                    session.dispatchAll(
+                    EventDispatcher.sendAll(
                         listOf(
                             Event.ClearSets, Event.ClearRuns, Event.ClearReadiness,
                             Event.ClearCheckins, Event.ClearReview, Event.ClearWeeklyCheckin, Event.ClearRacePrediction,
@@ -390,35 +387,35 @@ private fun CoachScaffoldBody(session: CoachSession) {
                             TodayDestination(
                                 model = session.model,
                                 listState = todayListState,
-                                onEvent = { session.dispatch(it) },
-                                lastPain = session.lastPain,
-                                onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
-                                onStartSetup = {
-                                    // First-run entry point (no seed): keep the onboarding
-                                    // pref semantics at the call site above.
-                                    session.setupInitial = null
-                                    session.showSetup = true
-                                },
-                                onRerunSetup = { rerunSetup(null) },
-                                onLogPlanItem = { openSheet(LogMode.Set, exercise = it.exercise) },
-                                onLogPastItem = { item, day -> openSheet(LogMode.Set, exercise = item.exercise, day = day) },
-                                onLogPastRun = { day -> openSheet(LogMode.Run, day = day) },
-                                onTrackRun = trackRun,
-                                runActionLabel = if (canTrack) Res.string.main_plan_item_track else Res.string.main_log_run_title,
-                                onOpenSheet = { mode -> openSheet(mode) },
+                                actions = TodayActions(
+                                    onEvent = EventDispatcher::send,
+                                    onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
+                                    onStartSetup = {
+                                        // First-run entry point (no seed): keep the onboarding
+                                        // pref semantics at the call site above.
+                                        session.setupInitial = null
+                                        session.showSetup = true
+                                    },
+                                    onRerunSetup = { rerunSetup(null) },
+                                    onLogPlanItem = { openSheet(LogMode.Set, exercise = it.exercise) },
+                                    onLogPastItem = { item, day -> openSheet(LogMode.Set, exercise = item.exercise, day = day) },
+                                    onLogPastRun = { day -> openSheet(LogMode.Run, day = day) },
+                                    onTrackRun = trackRun,
+                                    onOpenSheet = { mode -> openSheet(mode) },
+                                ),
                             )
                         }
                         Dest.History -> HistoryDestination(
                             model = session.model,
-                            onEvent = { session.dispatch(it) },
-                            onTrackRun = if (canTrack) ({ session.showTracker = true }) else null,
+                            onEvent = EventDispatcher::send,
+                            onTrackRun = trackRun,
                             onLogSet = { openSheet(LogMode.Set) },
                             onLogRun = { openSheet(LogMode.Run) },
                         )
                         Dest.Profile -> ProfileDestination(
                             ctx = ctx,
                             model = session.model,
-                            onEvent = { session.dispatch(it) },
+                            onEvent = EventDispatcher::send,
                             onClearAll = { confirmClearAll = true },
                             onRerunSetup = rerunSetup,
                             focusRow = profileFocus,
@@ -455,9 +452,9 @@ private fun CoachScaffoldBody(session: CoachSession) {
                                 if (it == LogMode.Chooser) resetSheet()
                                 sheetMode = it
                             },
-                            onEvent = { session.dispatch(it) },
+                            onEvent = EventDispatcher::send,
                             // No tracker: the chooser leaves its "Track run" row out.
-                            onTrackRun = if (canTrack) ({ session.showTracker = true }) else null,
+                            onTrackRun = trackRun,
                             onDismiss = dismissSheet,
                             planPrefill = planPrefill,
                             onPlanPrefill = { sheetPlanExercise = it },

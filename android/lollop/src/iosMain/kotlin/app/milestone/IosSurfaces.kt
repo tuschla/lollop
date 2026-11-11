@@ -2,7 +2,6 @@ package app.milestone
 
 import app.milestone.widget.IosRestLive
 import app.milestone.widget.IosRunLive
-import app.milestone.widget.IosWidgetSurface
 import app.milestone.widget.iosSurfaceJson
 import app.milestone.widget.restLiveOf
 import app.milestone.widget.runLiveOf
@@ -36,6 +35,14 @@ public interface IosSurfaceHost {
 public object IosSurfaces {
     private var host: IosSurfaceHost? = null
 
+    // The last widget payload handed over, so an unchanged one is not sent again
+    // and a new host gets it at once.
+    private class State {
+        var widget: String? = null
+    }
+
+    private val state by ProcessLocal { State() }
+
     /**
      * Hand the surfaces to [host]: the current widget payload, and the running
      * run's and rest's activities, at once; every change after.
@@ -43,11 +50,14 @@ public object IosSurfaces {
     public fun install(host: IosSurfaceHost) {
         this.host = host
         RunActivity.sink = HostRunSink
-        IosWidgetSurface.republish()
-        RestAlarm.resendActivity()
+        state.widget?.let(host::publishWidget)
+        RestAlarm.showCountdownAgain(PlatformContext.INSTANCE)
     }
 
+    /** Hand the widget payload [json] over unless it is the last one. */
     internal fun publishWidget(json: String) {
+        if (json == state.widget) return
+        state.widget = json
         host?.publishWidget(json)
     }
 

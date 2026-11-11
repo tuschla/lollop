@@ -43,7 +43,8 @@
 # Exit status 0 when no check FAILed. The emulator is stopped at the end unless
 # --keep-emulator (or it was already running when the script started).
 # Needs: Android SDK (emulator, adb, build-tools d8), JDK (javac; gradle once for
-# the 5-year seed, cached in ~/.cache/emu-scenarios/seed/), python3 + Pillow;
+# the 5-year seed, cached in ~/.cache/emu-scenarios/seed/), cargo (the core's
+# figures of the time scenario's saved run), python3 + Pillow;
 # tesseract with a Latin-script language for the ar bidi check (else INFO/skip).
 # One full run takes ~40 min.
 set -uo pipefail
@@ -261,8 +262,14 @@ sc_time() {
     pull_log "$OUT/logs/time-run.ndjson"
     facts="$(EV track "$OUT/logs/time-run.ndjson")"
     wall="$(python3 -c "import json,sys;f=json.loads(sys.argv[1]);print(f['last_at']-f['first_at'])" "$facts")"
-    expect $S "saved run: one track, moving seconds from fixes ≈ recorded" "$facts" \
-      python3 -c "import json,sys;f=json.loads(sys.argv[1]);sys.exit(0 if f['tracks']==1 and abs(f['moving_s']-$rec)<=30 else 1)" "$facts"
+    # The core's of-record moving time of the saved run (on cargo failure the
+    # check FAILs with logs/time-run-core-cargo.log).
+    core="$OUT/logs/time-run-core.json"
+    (cd "$REPO_ROOT" && TRACK_FIGURES_LOG="$OUT/logs/time-run.ndjson" TRACK_FIGURES_OUT="$core" \
+      cargo test -q -p shared --test track_figures_of_record) >"$OUT/logs/time-run-core-cargo.log" 2>&1 || rm -f "$core"
+    core_s="$( [[ -f "$core" ]] && jfield moving_s <"$core")"
+    expect $S "saved run: one track, the core's moving seconds from its fixes ≈ recorded" "$facts; core moving_s ${core_s:-n/a (logs/time-run-core-cargo.log)}" \
+      python3 -c "import json,sys;f=json.loads(sys.argv[1]);sys.exit(0 if f['tracks']==1 and sys.argv[2] and abs(float(sys.argv[2])-$rec)<=30 else 1)" "$facts" "$core_s"
     check INFO $S "saved run first→last fix span (includes the +1 h wall-clock jump)" "${wall}s; process $pid0 → $(app_pid)"
     tap_nav "${STR[main_dest_history]}"; scroll_to re '^[0-9.]+ (mi|km) · ' 6; evidence time-08-history
     x="$(node_label re '^[0-9.]+ (mi|km) · ')"

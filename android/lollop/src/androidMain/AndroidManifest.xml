@@ -114,15 +114,17 @@
             </intent-filter>
         </receiver>
 
-        <!-- Clock and time zone changes (exempt from the implicit broadcast limits),
-             handed to every feature (TimeChangeReceiver: the reminder's alarm, the
-             widget's and the tile's day). -->
+        <!-- Clock, time zone and language changes (exempt from the implicit broadcast
+             limits; SystemChangeReceiver): clock and zone changes go to every feature
+             (the reminder's alarm, the widget's and the tile's day), the language to
+             the widget and the tile. -->
         <receiver
-            android:name=".TimeChangeReceiver"
+            android:name=".SystemChangeReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -144,16 +146,13 @@
         </service>
 
         <!-- Home screen widget (widget/TodayWidget.kt). Exported for the widget host's
-             broadcasts; the locale change re-renders. -->
+             broadcasts. -->
         <receiver
             android:name=".widget.TodayWidgetReceiver"
             android:exported="true"
             android:label="@string/widget_overline_today">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

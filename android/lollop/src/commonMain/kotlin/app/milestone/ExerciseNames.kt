@@ -4,7 +4,7 @@ package app.milestone
  *  (two spellings of one exercise, "İncline bench press" and "incline bench
  *  press", share a key), asked of the core in one call. */
 internal fun nameKeys(names: List<String>): List<String> =
-    if (names.isEmpty()) emptyList() else checkNotNull(AppRuntime.engine.exerciseKeys(names)) { "the core answered no exercise keys" }
+    if (names.isEmpty()) emptyList() else checkNotNull(AppCore.engine.exerciseKeys(names)) { "the core answered no exercise keys" }
 
 /** One exercise name as a match key ([nameKeys]). */
 internal fun nameKey(name: String): String = nameKeys(listOf(name)).single()

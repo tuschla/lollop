@@ -45,6 +45,9 @@ internal const val CATEGORY_REMINDER_RUN = "session_reminder_run"
 internal const val CATEGORY_REMINDER_FIRST_SET = "session_reminder_first_set"
 internal const val CATEGORY_REMINDER_NEXT_SET = "session_reminder_next_set"
 
+/** The rest-done alert's identifier ([RestAlarmPlatform]): one at a time, replaced by a new rest. */
+internal const val REST_DONE_ID = "rest_done"
+
 internal val notificationCenter: UNUserNotificationCenter
     get() = UNUserNotificationCenter.currentNotificationCenter()
 
@@ -83,7 +86,7 @@ private class NotificationDelegate : NSObject(), UNUserNotificationCenterDelegat
         willPresentNotification: UNNotification,
         withCompletionHandler: (UNNotificationPresentationOptions) -> Unit,
     ) {
-        val restDone = willPresentNotification.request.identifier == RestAlarmPlatform.REST_DONE_ID
+        val restDone = willPresentNotification.request.identifier == REST_DONE_ID
         if (restDone && RestAlarm.inAppVisible) {
             withCompletionHandler(0uL)
         } else {

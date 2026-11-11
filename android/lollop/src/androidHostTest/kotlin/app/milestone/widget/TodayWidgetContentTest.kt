@@ -216,7 +216,7 @@ class TodayWidgetContentTest {
             listOf(WidgetItem(WidgetItemKind.Lift, "Back squat", "4×5 @\u00A0112.5\u00A0kg"), WidgetItem(WidgetItemKind.Lift, "Deadlift", "4×5 @\u00A057.5\u00A0kg")),
         ),
     )
-    private val runItem = WidgetItem(WidgetItemKind.Run, detail = "3.4\u00A0mi", pace = "9:00–9:40\u00A0/mi")
+    private val runItem = WidgetItem(WidgetItemKind.Run, detail = "3.4\u00A0mi", pace = "9:00–9:40\u00A0/mi", figure = true)
 
     private fun runDay() = widgetFace(
         WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Run, title = "Easy run", items = listOf(runItem), trackable = true, weekDone = 1, weekPlanned = 4, week = week),

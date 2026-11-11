@@ -25,7 +25,7 @@ import kotlinx.serialization.builtins.serializer
  * scripted bridges. State is guarded by this object's lock (the JVM monitor on
  * Android).
  */
-open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), CoreEngine {
+open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), CoreEngine, LogCompaction {
     /** Why the platform's core library failed to load, or null. Only Android can
      *  fail here (`System.loadLibrary`); the iOS core is linked into the app. */
     internal open val loadError: Throwable? get() = null
@@ -177,7 +177,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
 
     /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
      *  the core can't answer: the caller then keeps every line. */
-    internal fun compaction(lines: List<String>): Compaction? {
+    override fun compaction(lines: List<String>): Compaction? {
         val json = query { bridge.compactLog(lines.toTypedArray()) } ?: return null
         if (isCoreErrorEnvelope(json)) {
             PlatformLog.w("Core", "compaction failed, keeping every line: $json")
@@ -472,7 +472,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         // ignoreUnknownKeys that would decode into an all-default ViewModel -
         // train_blocked=false, safety_tier=null, silently blanking safety state.
         if (isCoreErrorEnvelope(text)) {
-            val detail = if (AppRuntime.debuggable) ": $text" else ""
+            val detail = if (AppProcess.debuggable) ": $text" else ""
             PlatformLog.e("Core", "core returned error envelope, keeping last good view$detail")
             return staleView()
         }
@@ -492,7 +492,3 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         return lastGoodView ?: ViewModel()
     }
 }
-
-/** Whether [this] is the JVM's `LinkageError` (a native library or symbol that
- *  never loaded). Kotlin/Native links the core statically, so never on iOS. */
-internal expect fun Throwable.isLinkageError(): Boolean

@@ -114,7 +114,6 @@ import app.milestone.resources.profile_import_data_sub
 import app.milestone.resources.setup_export_first_done
 import app.milestone.resources.setup_export_first_done_cd
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -566,7 +565,7 @@ private fun LazyListScope.DataSection(ctx: PlatformContext, model: ViewModel) {
         // from it when the in-memory copy is gone.
         var pendingUri by rememberSaveable { mutableStateOf<String?>(null) }
         var pending by remember { mutableStateOf<PendingImport?>(null) }
-        val restoring by dataRestoreRunning.collectAsState()
+        val restoring by DataRestore.running.collectAsState()
         // "Export first" from inside the replace dialog: acknowledged in the dialog
         // itself (the notice lands behind it), per picked file.
         var exportedBeforeImport by remember(pendingUri) { mutableStateOf(false) }
@@ -587,7 +586,7 @@ private fun LazyListScope.DataSection(ctx: PlatformContext, model: ViewModel) {
                 }
                 ImportCheck.Invalid -> {
                     pendingUri = null
-                    showNotice(ctx, res.getString(Res.string.main_import_invalid), long = true)
+                    UiMessages.post(UiMessage(res.getString(Res.string.main_import_invalid), long = true))
                 }
             }
         }
@@ -644,35 +643,16 @@ private fun LazyListScope.DataSection(ctx: PlatformContext, model: ViewModel) {
 /** A validated import file: its lines and what they hold. */
 private class PendingImport(val uri: String, val lines: List<String>, val summary: ImportSummary)
 
-/** True while a confirmed import swaps the log and boots into it. Process-scoped
- *  like the swap itself, so a rotation can't strand it. */
-private val dataRestoreRunning = MutableStateFlow(false)
-
-/** Replace the log with [lines] and boot into it, or say why not. [entries] is
- *  what that boot confirms ("Restored N entries"). */
+/** Restore [lines] ([DataRestore.restore]), or say why not. [entries] is what the
+ *  boot into them confirms ("Restored N entries"). */
 private fun restoreData(ctx: PlatformContext, res: PlatformResources, lines: List<String>, entries: Int) {
-    if (RunSession.runActive) {
-        showNotice(ctx, res.getString(Res.string.main_import_refused_run), long = true)
-        return
-    }
-    dataRestoreRunning.value = true
-    AppRuntime.scope.launch {
-        when (replaceEventLog(ctx, lines)) {
-            DataImportResult.Replaced -> {
-                ctx.setupStore().edit(commit = true) { putInt(KEY_RESTORED_ENTRIES, entries) }
-                // The boot screen takes over until the imported log is replayed.
-                AppRuntime.requestReboot()
-                dataRestoreRunning.value = false
-            }
-            DataImportResult.RunInProgress -> {
-                dataRestoreRunning.value = false
-                showNotice(ctx, res.getString(Res.string.main_import_refused_run), long = true)
-            }
-            DataImportResult.Failed -> {
-                dataRestoreRunning.value = false
-                showNotice(ctx, res.getString(Res.string.main_import_failed_generic), long = true)
-            }
+    AppProcess.scope.launch {
+        val refusal = when (DataRestore.restore(ctx, lines, entries)) {
+            DataImportResult.Replaced -> return@launch
+            DataImportResult.RunInProgress -> Res.string.main_import_refused_run
+            DataImportResult.Failed -> Res.string.main_import_failed_generic
         }
+        UiMessages.post(UiMessage(res.getString(refusal), long = true))
     }
 }
 

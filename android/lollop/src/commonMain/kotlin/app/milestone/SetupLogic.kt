@@ -213,7 +213,7 @@ internal fun seedWeightUnit(initial: Event.SetProfile?, locale: PlatformLocale =
  *  can't answer (setup is unreachable then: boot shows the core unavailable)
  *  leaves the draft's answers as they are and reads no gate. */
 internal fun draftFacts(draft: ProfileDraft): DraftFacts =
-    AppRuntime.engine.draftFacts(draft) ?: DraftFacts(health = draft.health, age_years = draft.ageYears)
+    AppCore.engine.draftFacts(draft) ?: DraftFacts(health = draft.health, age_years = draft.ageYears)
 
 /** A birthday's completed years on [today] (local epoch days), as the core counts
  *  them. */
@@ -1072,3 +1072,16 @@ internal class SetupValues(
         )
     }
 }
+
+/** Running answers kept while running is off ([km]/[goal]/[raceEpochDay] null =
+ *  never given; [weekdays] null = "Any days"). */
+internal data class StashedRun(val days: Int, val km: Double?, val goal: GoalDistance?, val raceEpochDay: Long?, val weekdays: Int?)
+
+/** Lifting answers kept while lifting is off ([days] null = never answered). */
+internal data class StashedLift(val days: Int?, val goal: LiftGoal, val weeklySets: Int, val weekdays: Int?)
+
+/** Accepted keypad ranges for the person numbers (wizard, Profile and the morning
+ *  check-in share them). Resting HR is the core's plausible band. */
+internal val AGE_RANGE = 14.0..100.0
+internal val RESTING_HR_RANGE = CoreConstants.RESTING_HR_MIN_BPM..CoreConstants.RESTING_HR_MAX_BPM
+internal val MAX_HR_RANGE = 120.0..230.0

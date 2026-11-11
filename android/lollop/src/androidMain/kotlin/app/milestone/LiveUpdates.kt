@@ -1,13 +1,16 @@
 package app.milestone
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.content.ContextCompat
 
 // Android 16 (API 36) Live Updates: an ongoing notification that requests promotion
 // (`NotificationCompat.Builder.setRequestPromotedOngoing`) is shown at the top of the
@@ -34,6 +37,13 @@ internal fun ensureLiveChannel(ctx: Context, id: String, name: String, retired: 
         },
     )
 }
+
+/** True when the app may post notifications: below API 33 there is no runtime
+ *  gate; from 33 on, the POST_NOTIFICATIONS grant decides. */
+internal fun canPostNotifications(ctx: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+        PackageManager.PERMISSION_GRANTED
 
 /**
  * The colour every lollop notification carries ([NotificationCompat.Builder.setColor]:

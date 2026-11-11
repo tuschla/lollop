@@ -84,7 +84,7 @@ internal data class RunRoute(
 /** Fetches a run's route fixes for [rememberRunRoute] (off the main thread). A var
  *  only so a JVM test can hold the fetch and see what the sheets do while it loads. */
 internal var runTrackFetch: (entryId: Long, observedAt: Long) -> List<List<GpsPoint>> =
-    { id, at -> AppRuntime.engine.runTrack(id, at) }
+    { id, at -> AppCore.engine.runTrack(id, at) }
 
 /**
  * The run's route fixes ([DurableCore.runTrack]), fetched ON DEMAND (off the main
@@ -262,7 +262,7 @@ private fun RunLogSection(
             HorizontalDivider(color = Hairline)
             LogRow(
                 label = stringResource(Res.string.history_workout_type),
-                value = stringResource(type?.text?.label ?: Res.string.run_type_unset),
+                value = stringResource(type?.labels?.label ?: Res.string.run_type_unset),
                 prompt = type == null,
                 tag = "run-log-type",
                 onClick = onRate,
@@ -336,11 +336,11 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                     testTag = "run-export",
                     onClick = {
                         scope.launch {
-                            val g = withContext(Dispatchers.IO) { AppRuntime.engine.runGpx(run.entry_id, run.observed_at) }
+                            val g = withContext(Dispatchers.IO) { AppCore.engine.runGpx(run.entry_id, run.observed_at) }
                             if (!g.isNullOrBlank()) {
                                 shareGpx(ctx, g, run.started_at)
                             } else {
-                                showNotice(ctx, exportFailed, long = true)
+                                UiMessages.post(UiMessage(exportFailed, long = true))
                             }
                         }
                     },

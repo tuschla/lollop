@@ -584,28 +584,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisCeiling(col
 }
 
 /**
- * Weekly running distance: one accent bar per Monday-start local week of the
- * core's series ([weeks], oldest left, this week right), every figure in the
- * user's distance [unit]. When the plan prescribes running this week ([plannedKm],
- * canonical km, 0 = none) a dashed mark over this week's bar shows it. Tapping a
- * bar reads out its week and distance ("Week of Sep 21 · 16 mi"); tapping it again
- * clears it. TalkBack reads a summary (total, busiest week, this week, plan), then
- * each week's figure from a node over its bar, so no week needs the tap readout.
+ * Weekly running distance: one accent bar per Monday-start local week of
+ * [kmByWeek] (km keyed by the week's Monday epoch day; oldest left, this week
+ * right), every figure in the user's distance [unit]. When the plan prescribes
+ * running this week ([plannedKm], canonical km, 0 = none) a dashed mark over this
+ * week's bar shows it. Tapping a bar reads out its week and distance ("Week of
+ * Sep 21 · 16 mi"); tapping it again clears it. TalkBack reads a summary (total,
+ * busiest week, this week, plan), then each week's figure from a node over its
+ * bar, so no week needs the tap readout.
  */
 @Composable
 fun WeeklyDistanceChart(
-    weeks: List<RunWeekView>,
+    kmByWeek: Map<Long, Double>,
     plannedKm: Double,
     unit: DistanceUnit,
     chartHeight: Dp,
 ) {
-    if (weeks.isEmpty()) return
-    val vals = weeks.map { metersToDisplay(it.km * 1000.0, unit) }
-    val n = weeks.size
+    if (kmByWeek.isEmpty()) return
+    val weekStarts = remember(kmByWeek) { kmByWeek.keys.sorted() }
+    val vals = weekStarts.map { metersToDisplay(kmByWeek.getValue(it) * 1000.0, unit) }
+    val n = weekStarts.size
     val planned = if (plannedKm > 0.0) metersToDisplay(plannedKm * 1000.0, unit) else 0.0
     val yMax = niceAxisCeiling(maxOf(vals.max(), planned))
     val total = vals.sum()
-    var selected by remember(weeks) { mutableStateOf<Int?>(null) }
+    var selected by remember(kmByWeek) { mutableStateOf<Int?>(null) }
 
     val accent = Accent
     val accentDimmed = Accent.copy(alpha = 0.45f)
@@ -620,7 +622,7 @@ fun WeeklyDistanceChart(
     val chartDesc = if (total > 0.0) {
         stringResource(
             Res.string.history_weekly_desc,
-            n, spoken(total), spoken(vals[busiest]), weekLabel(weeks[busiest].week_start_epoch_day), spoken(vals.last()),
+            n, spoken(total), spoken(vals[busiest]), weekLabel(weekStarts[busiest]), spoken(vals.last()),
         ) + planDesc
     } else {
         stringResource(Res.string.history_weekly_desc_empty, n) + planDesc
@@ -659,15 +661,15 @@ fun WeeklyDistanceChart(
             }
         }
         val bars = rememberBarColors()
-        val weekDescs = weeks.mapIndexed { i, w ->
-            stringResource(Res.string.history_weekly_bar_value, weekLabel(w.week_start_epoch_day), spoken(vals[i]))
+        val weekDescs = weekStarts.mapIndexed { i, day ->
+            stringResource(Res.string.history_weekly_bar_value, weekLabel(day), spoken(vals[i]))
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(chartHeight)
                 .traversalGroup()
-                .pointerInput(weeks) {
+                .pointerInput(kmByWeek) {
                     detectTapGestures { tap ->
                         val i = (tap.x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1)
                         selected = if (selected == i) null else i
@@ -704,12 +706,12 @@ fun WeeklyDistanceChart(
                 }
             }
         }
-        AxisTicks(weekLabel(weeks.first().week_start_epoch_day), stringResource(Res.string.history_weekly_this_week))
+        AxisTicks(weekLabel(weekStarts.first()), stringResource(Res.string.history_weekly_this_week))
         selected?.let { i ->
             Text(
                 stringResource(
                     Res.string.history_weekly_bar_value,
-                    weekLabel(weeks[i].week_start_epoch_day), "${trimDecimal(vals[i])} ${unit.distanceLabel}",
+                    weekLabel(weekStarts[i]), "${trimDecimal(vals[i])} ${unit.distanceLabel}",
                 ),
                 color = OnBgBody,
                 style = Type.Caption.merge(TabularFigures),

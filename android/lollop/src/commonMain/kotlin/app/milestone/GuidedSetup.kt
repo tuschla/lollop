@@ -399,7 +399,7 @@ internal fun GuidedSetup(
             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            StepProgress(
+            SetupProgressBar(
                 stepNumber = stepIndex + 1,
                 stepCount = steps.size,
                 fraction = setupProgress(steps, stepIndex, a.modality),

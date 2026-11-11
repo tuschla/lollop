@@ -9,22 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-/** Where the event queue's units go: the core engine on its thread
- *  ([EngineSink]), or a test's own ([AppRuntime.resetForTest]). */
-internal interface EventSink {
-    suspend fun send(e: Event): SendResult
-
-    suspend fun sendAll(events: List<Event>): SendResult
-}
-
-/** [AppRuntime.engine] on [CoreDispatcher]. */
-internal object EngineSink : EventSink {
-    override suspend fun send(e: Event): SendResult = withContext(CoreDispatcher) { AppRuntime.engine.send(e) }
-
-    override suspend fun sendAll(events: List<Event>): SendResult = withContext(CoreDispatcher) { AppRuntime.engine.sendAll(events) }
-}
 
 // Process-scoped serial event dispatcher: the queue and its one consumer outlive
 // composition, so a rotation never drops a queued event. Exactly one unit (an
@@ -78,17 +62,17 @@ internal object EventDispatcher {
     // One serial consumer per process on the app scope; it drains the queue
     // strictly in order.
     private fun startConsumer(q: Queue) {
-        AppRuntime.scope.launch {
+        AppProcess.scope.launch {
             for (m in q.channel) when (m) {
                 // A malformed view (or any send throw) must drop THIS unit, never
                 // kill the process-lifetime consumer loop.
                 is Ev -> {
-                    val r = runCatching { AppRuntime.sink.send(m.e) }
+                    val r = runCatching { AppCore.sink.send(m.e) }
                     if (!isActive) break
                     r.onSuccess { publish(q, it) }.onFailure { PlatformLog.e("EventDispatcher", "event dropped", it) }
                 }
                 is Batch -> {
-                    val r = runCatching { AppRuntime.sink.sendAll(m.events) }
+                    val r = runCatching { AppCore.sink.sendAll(m.events) }
                     if (!isActive) break
                     r.onSuccess { publish(q, it) }.onFailure { PlatformLog.e("EventDispatcher", "event batch dropped", it) }
                 }

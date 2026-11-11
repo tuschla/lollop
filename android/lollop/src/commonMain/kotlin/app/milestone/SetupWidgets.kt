@@ -782,10 +782,10 @@ internal fun Modifier.fullBleed(inset: Dp): Modifier = layout { measurable, cons
     layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
 }
 
-/** Height of the [StepProgress] bar. */
+/** Height of the [SetupProgressBar]. */
 private val StepProgressHeight = 4.dp
 
-/** Opacity of the [StepProgress] track behind the accent fill (OnBgBody). */
+/** Opacity of the [SetupProgressBar] track behind the accent fill (OnBgBody). */
 private const val StepProgressTrackAlpha = 0.08f
 
 /** A thin full-width, fully rounded progress bar: the accent fill eases along the
@@ -793,7 +793,7 @@ private const val StepProgressTrackAlpha = 0.08f
  *  adds a screen never moves it backwards, and step 1 already shows its share.
  *  TalkBack reads "Step N of [stepCount]" and re-announces it when the step changes. */
 @Composable
-internal fun StepProgress(stepNumber: Int, stepCount: Int, fraction: Float, modifier: Modifier = Modifier) {
+internal fun SetupProgressBar(stepNumber: Int, stepCount: Int, fraction: Float, modifier: Modifier = Modifier) {
     val progress = stringResource(Res.string.setup_step_progress, stepNumber, stepCount)
     val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), label = "setup-progress")
     ProgressPill(

@@ -372,6 +372,8 @@ constants! {
     crate::autoreg::DECOUPLING_MIN_EFFORT_MIN as Float;
     /// Age, years, where the masters bracket begins (MASTERS-001).
     crate::individualization::MASTERS_AGE_YEARS as Float;
+    /// Co-occurring overtraining signs that raise the recovery concern (feedback-036).
+    crate::feedback::OVERTRAINING_MIN_SIGNS as Int;
     /// Weeks the overtraining signs must last for the recovery concern (feedback-036).
     crate::feedback::OVERTRAINING_MIN_WEEKS as Float;
     /// Weeks of unexplained performance decline at which the overtraining

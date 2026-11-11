@@ -1,11 +1,23 @@
 package app.milestone
 
+import app.milestone.resources.Res
+import app.milestone.resources.ic_nav_history_selected
+import app.milestone.resources.ic_nav_history_unselected
+import app.milestone.resources.ic_nav_profile_selected
+import app.milestone.resources.ic_nav_profile_unselected
+import app.milestone.resources.ic_nav_today_selected
+import app.milestone.resources.ic_nav_today_unselected
+import app.milestone.resources.main_dest_history
+import app.milestone.resources.main_dest_profile
+import app.milestone.resources.main_dest_today
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.StringResource
 
 /**
  * The one explicit "open the app at X" contract shared by every system surface
  * (Live Update notifications, the home screen widget, the Quick Settings tile, a
- * reminder). On Android `MainActivity` reads the open intent (OpenIntents.android.kt)
+ * reminder). On Android `MainActivity` reads the open intent (MainActivity.kt)
  * on a cold start and in onNewIntent; on iOS a `lollop://open/<dest>` URL or a
  * reminder tap asks for it. Either way the host's [OpenRequests] carries it to
  * [LollopApp], whose scaffold applies the destination once boot has run.
@@ -52,6 +64,17 @@ internal fun openDestOfUrl(url: String): OpenDest? {
     val dest = rest.removePrefix("/").substringBefore('?').substringBefore('#').substringBefore('/')
     return OpenDest.fromWire(dest)
 }
+
+/** The three destinations, in nav order (chrome §1; Today owns both the day's
+ *  call and the plan). */
+enum class Dest(val labelRes: StringResource, val iconSelected: DrawableResource, val iconUnselected: DrawableResource) {
+    Today(Res.string.main_dest_today, Res.drawable.ic_nav_today_selected, Res.drawable.ic_nav_today_unselected),
+    History(Res.string.main_dest_history, Res.drawable.ic_nav_history_selected, Res.drawable.ic_nav_history_unselected),
+    Profile(Res.string.main_dest_profile, Res.drawable.ic_nav_profile_selected, Res.drawable.ic_nav_profile_unselected),
+}
+
+/** Which content the Log bottom sheet shows: the chooser, or one editor. */
+internal enum class LogMode { Chooser, Set, Run, Checkin, Readiness, Review, WeeklyCheckin, Pain, Activity }
 
 /** The scaffold navigation an open intent can change ([CoachScaffold]'s hoisted state). */
 internal data class OpenNav(

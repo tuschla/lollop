@@ -101,8 +101,6 @@ private const val DRAG_HANDLE_ALPHA = 0.22f
 fun RunTrackingScreen(
     model: ViewModel,
     onEvent: (Event) -> Unit,
-    // The pain report as last entered: the banner's pain line and its "Remove report" Undo.
-    lastPain: PainDetail?,
     onFinish: () -> Unit,
     onLogRunManually: () -> Unit,
 ) {
@@ -439,7 +437,7 @@ fun RunTrackingScreen(
                             // INTERVAL verdict on its own.
                             val event = RunSession.trackEventForCore(entryId, workoutType, sessionRpe)
                             runObservedAt = event.observedAt
-                            val result = AppRuntime.engine.send(event)
+                            val result = AppCore.engine.send(event)
                             // A rejected/panicked send, or one accepted in memory whose
                             // log append failed (disk full), must not silently drop the
                             // captured run: throw so the critical section's onFailure
@@ -473,7 +471,7 @@ fun RunTrackingScreen(
                     // RunSession.points, so `unsavedCapture` re-shows Save/Discard.
                     RunSession.releaseSaving()
                     exiting = false
-                    showNotice(ctx, saveFailedText)
+                    UiMessages.post(UiMessage(saveFailedText))
                 },
             )
         }
@@ -499,12 +497,12 @@ fun RunTrackingScreen(
                     // The engine may still be registered, so the track may be
                     // incomplete: keep the fixes, release the claim, save nothing.
                     RunSession.releaseSaving()
-                    showNotice(ctx, saveFailedText)
+                    UiMessages.post(UiMessage(saveFailedText))
                     return@launch
                 }
                 val captured = RunSession.points.value
                 if (captured.size < 2) {
-                    showNotice(ctx, notEnoughGpsText, long = true)
+                    UiMessages.post(UiMessage(notEnoughGpsText, long = true))
                     tracker.discardInterruptedRun()
                     RunSession.reset()
                     onFinish()
@@ -523,7 +521,7 @@ fun RunTrackingScreen(
                 // Stop/snapshot failed before logging: keep the fixes, so
                 // `unsavedCapture` shows Save/Discard rather than Start.
                 RunSession.releaseSaving()
-                showNotice(ctx, saveFailedText)
+                UiMessages.post(UiMessage(saveFailedText))
             }
         }
     }
@@ -611,7 +609,6 @@ fun RunTrackingScreen(
         SafetyBannerHost(
             model,
             onEvent = onEvent,
-            lastPain = lastPain,
             modifier = Modifier
                 .padding(horizontal = Space.Screen.dp)
                 .padding(top = Space.Md.dp, bottom = Space.Md.dp),
@@ -872,6 +869,9 @@ fun RunTrackingScreen(
                 statSheet((if (sheetFills) Modifier.weight(1f) else Modifier).fillMaxWidth(), Space.Sheet.dp)
             }
         }
+        // The tracker replaces the app scaffold and its snackbars: a save failure
+        // shows here, under the controls.
+        UiMessageHost(Modifier.fillMaxWidth())
     }
 
     if (showReadinessSheet) {

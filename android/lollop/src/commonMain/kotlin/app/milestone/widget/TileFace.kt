@@ -1,7 +1,6 @@
 package app.milestone.widget
 
 import app.milestone.OpenDest
-import app.milestone.PlatformResources
 import app.milestone.resources.Res
 import app.milestone.resources.tile_log
 import app.milestone.resources.tile_log_set
@@ -58,13 +57,4 @@ internal fun tileFace(today: WidgetSnapshot?, recording: Boolean = false): TileF
     today.kind == WidgetDayKind.Run && today.trackable -> TileFace.StartRun
     today.kind == WidgetDayKind.Lift && !today.sessionDone -> TileFace.LogSet
     else -> TileFace.Log
-}
-
-/** The line under the tile's label for [today]'s snapshot: the widget's title
- *  (the session, "Rest day", "Training paused"), "Session done" once today's
- *  session is; nothing without a snapshot for today. */
-internal fun tileSubtitle(today: WidgetSnapshot?, res: PlatformResources): String? {
-    val snapshot = today ?: return null
-    val face = widgetFace(snapshot, snapshot.epochDay, res)
-    return (if (snapshot.sessionDone) face.status else face.title)?.takeIf { it.isNotBlank() }
 }

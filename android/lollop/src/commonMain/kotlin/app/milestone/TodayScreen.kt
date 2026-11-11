@@ -77,6 +77,7 @@ import app.milestone.resources.main_pill_hrv
 import app.milestone.resources.main_pill_resting_hr
 import app.milestone.resources.main_pill_strength
 import app.milestone.resources.main_pill_wellness
+import app.milestone.resources.main_log_run_title
 import app.milestone.resources.main_plan_item_track
 import app.milestone.resources.main_plan_prompt_body
 import app.milestone.resources.main_plan_prompt_cta
@@ -127,6 +128,24 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
+/** Where Today's actions lead outside the screen. */
+internal class TodayActions(
+    val onEvent: (Event) -> Unit,
+    val onStartSetup: () -> Unit,
+    // Re-runs guided setup seeded from the profile (a profile with nothing to plan).
+    val onRerunSetup: () -> Unit,
+    // Opens Profile at a row (the way to fix a plan that can't be built).
+    val onOpenProfile: (ProfileRowId) -> Unit,
+    // Opens the Log sheet on one editor (today's check-in, the session review).
+    val onOpenSheet: (LogMode) -> Unit,
+    val onLogPlanItem: (PrescriptionView) -> Unit,
+    val onLogPastItem: (PrescriptionView, Long) -> Unit,
+    val onLogPastRun: (Long) -> Unit,
+    // Null where the platform has no tracker: a planned run's action then opens
+    // the run editor.
+    val onTrackRun: (() -> Unit)?,
+)
+
 /**
  * Today: the status cards, the readiness strip, the hero (the next session, else
  * the plan or setup prompt), this week, then the e1RM trend. While training is
@@ -138,24 +157,9 @@ import org.jetbrains.compose.resources.stringResource
 internal fun TodayDestination(
     model: ViewModel,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    onEvent: (Event) -> Unit,
-    onStartSetup: () -> Unit,
-    onLogPlanItem: (PrescriptionView) -> Unit,
-    onLogPastItem: (PrescriptionView, Long) -> Unit,
-    onLogPastRun: (Long) -> Unit,
-    onTrackRun: () -> Unit,
-    // The label of a planned run's action: "Track run" where [onTrackRun] opens the
-    // tracker; where the platform has none it opens the run editor instead.
-    runActionLabel: StringResource = Res.string.main_plan_item_track,
-    // Opens the Log sheet on one editor (today's check-in, the session review).
-    onOpenSheet: (LogMode) -> Unit,
-    // The pain report as last entered (its area, and the Undo after removing it).
-    lastPain: PainDetail?,
-    // Opens Profile at a row (the way to fix a plan that can't be built).
-    onOpenProfile: (ProfileRowId) -> Unit,
-    // Re-runs guided setup seeded from the profile (a profile with nothing to plan).
-    onRerunSetup: () -> Unit,
+    actions: TodayActions,
 ) {
+    val onEvent = actions.onEvent
     // Removing the generated plan is confirm-gated.
     var confirmRemovePlan by rememberSaveable { mutableStateOf(false) }
     // The day open under the week strip, hoisted so a move opens its target day.
@@ -168,7 +172,7 @@ internal fun TodayDestination(
             UiMessage(
                 res.getString(Res.string.main_moved_to, planDateLabel(to)),
                 actionLabel = res.getString(Res.string.log_undo),
-                onAction = { EventDispatcher.send(Event.MoveSession(to, from)) },
+                onAction = { onEvent(Event.MoveSession(to, from)) },
             ),
         )
     }
@@ -209,7 +213,7 @@ internal fun TodayDestination(
             // Under 18 the pause is no pinned DO-NOT-TRAIN banner but this calm
             // card, the list's first item, so it scrolls with the page.
             if (youthPause) {
-                item { YouthHoldCard(model, onOpenProfile) }
+                item { YouthHoldCard(model, actions.onOpenProfile) }
             }
             // A hold the banner (or the youth card) states in full gets nothing
             // here. Any other (a medical referral, a review deferral) keeps the
@@ -244,7 +248,7 @@ internal fun TodayDestination(
             model.youth_activity?.let { activity ->
                 item { SectionOverline(stringResource(Res.string.activity_overline)) }
                 item {
-                    YouthActivityCard(activity, onLog = { onOpenSheet(LogMode.Activity) }, onEvent = onEvent)
+                    YouthActivityCard(activity, onLog = { actions.onOpenSheet(LogMode.Activity) }, onEvent = onEvent)
                 }
             }
         } else {
@@ -255,19 +259,11 @@ internal fun TodayDestination(
                 TodayHeroCard(
                     model = model,
                     hasSignal = hasAnything,
-                    onEvent = onEvent,
-                    onStartSetup = onStartSetup,
-                    onLogItem = onLogPlanItem,
-                    onTrackRun = onTrackRun,
-                    runActionLabel = runActionLabel,
-                    onOpenSheet = onOpenSheet,
+                    actions = actions,
                     onMove = moveSession,
-                    lastPain = lastPain,
                     painArea = painArea,
-                    onOpenProfile = onOpenProfile,
-                    onRerunSetup = onRerunSetup,
                     readinessStrip = if (hasReadinessPills) {
-                        { ReadinessStrip(model, onEvent, onCheckin = { onOpenSheet(LogMode.Checkin) }) }
+                        { ReadinessStrip(model, onEvent, onCheckin = { actions.onOpenSheet(LogMode.Checkin) }) }
                     } else {
                         null
                     },
@@ -296,8 +292,8 @@ internal fun TodayDestination(
                         null
                     } else {
                         WeekActions(
-                            onLogItem = onLogPastItem,
-                            onLogRun = onLogPastRun,
+                            onLogItem = actions.onLogPastItem,
+                            onLogRun = actions.onLogPastRun,
                             onEndExercise = { item, day -> endExerciseWithUndo(res, item, day, onEvent) },
                             onReopen = { item, day -> reopenExercise(item, day, onEvent) },
                             onMove = moveSession,
@@ -567,23 +563,15 @@ internal fun todayCards(model: ViewModel, hasSignal: Boolean): TodayCards {
 private fun TodayHeroCard(
     model: ViewModel,
     hasSignal: Boolean,
-    onEvent: (Event) -> Unit,
-    onStartSetup: () -> Unit,
-    onLogItem: (PrescriptionView) -> Unit,
-    onTrackRun: () -> Unit,
-    runActionLabel: StringResource,
-    onOpenSheet: (LogMode) -> Unit,
+    actions: TodayActions,
     // Moves a session (posts "Moved to … · Undo").
     onMove: (from: Long, to: Long) -> Unit,
-    // The pain report as last entered here, for "Report removed · Undo".
-    lastPain: PainDetail?,
-    // The area that report names ("Stopped · <area>").
+    // The area the active pain report names ("Stopped · <area>").
     painArea: String?,
-    onOpenProfile: (ProfileRowId) -> Unit,
-    onRerunSetup: () -> Unit,
     // The readiness strip, placed between the status cards and the hero.
     readinessStrip: (@Composable () -> Unit)?,
 ) {
+    val onEvent = actions.onEvent
     val headline = model.today_headline
     val fb = model.feedback
     val today = model.today()
@@ -800,10 +788,10 @@ private fun TodayHeroCard(
                 onResume = ended.firstOrNull()?.let { first ->
                     {
                         ended.forEach { reopenExercise(it, today, onEvent) }
-                        onLogItem(first)
+                        actions.onLogPlanItem(first)
                     }
                 },
-                onReview = { onOpenSheet(LogMode.Review) },
+                onReview = { actions.onOpenSheet(LogMode.Review) },
             )
         }
         // The plan-state card, always: the next session, else the way to a plan.
@@ -819,9 +807,9 @@ private fun TodayHeroCard(
                 weightUnit = model.weightUnit(),
                 ladders = model.calisthenics_ladders,
                 showGuide = model.today_surface.show_guide,
-                onLogItem = onLogItem,
-                onTrackRun = onTrackRun,
-                runActionLabel = runActionLabel,
+                onLogItem = actions.onLogPlanItem,
+                onTrackRun = actions.onTrackRun ?: { actions.onOpenSheet(LogMode.Run) },
+                runActionLabel = if (actions.onTrackRun != null) Res.string.main_plan_item_track else Res.string.main_log_run_title,
                 onEndExercise = { endExerciseWithUndo(res, it, today, onEvent) },
                 onReopen = { reopenExercise(it, today, onEvent) },
                 onSetRung = { ladder, rung -> onEvent(Event.SetCalisthenicsRung(ladder, rung, AppClock.nowSec())) },
@@ -839,13 +827,13 @@ private fun TodayHeroCard(
                     stringResource(Res.string.main_plan_withheld_health_title),
                     stringResource(Res.string.main_plan_withheld_health_body),
                     stringResource(Res.string.main_hold_review_health),
-                ) { onOpenProfile(holdProfileRow(model.hold_reason, model.profile.health)) }
+                ) { actions.onOpenProfile(holdProfileRow(model.hold_reason, model.profile.health)) }
                 // Nothing to plan: guided setup re-runs from the profile's answers.
                 PlanWithheld.NothingToPlan -> PromptCard(
                     stringResource(Res.string.main_plan_withheld_empty_title),
                     stringResource(Res.string.main_plan_withheld_empty_body),
                     stringResource(Res.string.main_plan_withheld_empty_cta),
-                    onRerunSetup,
+                    actions.onRerunSetup,
                 )
             }
             // No profile yet: the plan is built from it, so this is the one setup entry point.
@@ -853,7 +841,7 @@ private fun TodayHeroCard(
                 stringResource(Res.string.main_setup_prompt_title),
                 stringResource(Res.string.main_setup_prompt_body),
                 stringResource(Res.string.main_setup_prompt_cta),
-                onStartSetup,
+                actions.onStartSetup,
             )
         }
     }
@@ -868,7 +856,6 @@ private fun TodayHeroCard(
         onDismiss = { removePain = false },
         onEvent = onEvent,
         model = model,
-        lastPain = lastPain,
     )
 }
 

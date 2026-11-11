@@ -3,9 +3,11 @@ package app.milestone
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
 import app.milestone.qa.lastScenario
@@ -167,13 +169,18 @@ class DeepLinkTest {
     }
 
     @Test
-    fun beforeSetupTheGuidedSetupStays() {
+    fun beforeSetupTheGuidedSetupStaysAndTheRequestWaitsForIt() {
         launchAt("log_set")
         rule.waitForNode(hasText(str(R.string.setup_step_train_q)), 30_000)
         rule.waitForBoot()
         assertEquals(0, rule.countOf(setHeader))
         assertEquals(0, rule.countOf(hasTestTag("exercise-search")))
         assertTrue(rule.countOf(hasText(str(R.string.setup_step_train_q))) > 0)
+        // Held, not dropped: once the setup is skipped the request opens the (blank) set editor.
+        assertEquals(OpenDest.LogSet, readOpenRequest())
+        rule.onNode(hasText(str(R.string.setup_skip)) and hasClickAction()).performClick()
+        rule.waitForNode(hasTestTag("exercise-search"), 30_000)
+        assertNull(readOpenRequest())
     }
 
     @Test

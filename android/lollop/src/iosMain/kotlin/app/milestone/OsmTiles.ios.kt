@@ -38,6 +38,7 @@ import platform.Foundation.NSUserDomainMask
 import platform.Foundation.dataTaskWithURL
 import platform.Foundation.timeIntervalSince1970
 import platform.MapKit.MKMapRect
+import platform.MapKit.MKMapSizeWorld
 import platform.MapKit.MKOverlayRenderer
 import platform.MapKit.MKTileOverlay
 import platform.MapKit.MKZoomScale
@@ -55,6 +56,10 @@ private const val DECODED_TILE_LIMIT = 256L
 private const val TILE_RETRY_SEC = 60.0
 /** Edge of one OSM tile, in pixels and in the points MapKit draws it at. */
 private const val TILE_SIZE = 256.0
+
+/** Width (and height) of the MapKit world square, in map points: the span of zoom 0's one tile. */
+@OptIn(ExperimentalForeignApi::class)
+internal val MapWorldPoints: Double = MKMapSizeWorld.width
 
 /**
  * The one HTTP session every OSM tile request goes through, per the tile usage

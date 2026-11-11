@@ -6,7 +6,7 @@ import androidx.annotation.RequiresApi
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
 import app.milestone.AndroidReminder
-import app.milestone.AppRuntime
+import app.milestone.AppProcess
 import app.milestone.PlatformLog
 import app.milestone.keyValueStore
 import app.milestone.requestTileRefresh
@@ -63,7 +63,7 @@ internal object AndroidWidgets : WidgetSurfacePort {
     override fun onTimeChanged(ctx: Context, zoneChanged: Boolean) {
         val app = ctx.applicationContext
         dayChanged(app, force = zoneChanged)
-        AppRuntime.scope.launch { redraw(app) }
+        AppProcess.scope.launch { redraw(app) }
     }
 
     /**
@@ -78,22 +78,22 @@ internal object AndroidWidgets : WidgetSurfacePort {
         return true
     }
 
-    /** The local-midnight tick ([MidnightTick]): a shown reminder for the day that
-     *  ended goes ([AndroidReminder.onDayChanged]), then [dayChanged]. */
-    fun onMidnight(ctx: Context, today: Long = todayEpochDay()) {
-        AndroidReminder.onDayChanged(ctx, today)
-        dayChanged(ctx, force = false, today)
+    /** The language changed: the tile's face and the widget's text follow it. */
+    suspend fun onLocaleChanged(ctx: Context) {
+        requestTileRefresh(ctx)
+        MidnightTick.update(ctx)
+        redraw(ctx)
     }
 
     /**
-     * The local day may have changed under the stored snapshot (the midnight tick,
-     * a clock change) or, when [force], the time zone did: the snapshot is marked
+     * The local day may have changed under the stored snapshot (local midnight, a
+     * clock change) or, when [force], the time zone did: the snapshot is marked
      * stale ([WidgetSnapshotStore.markStale]) and reads "Open lollop to update" until
      * the app publishes a model for the new day. The tile, whose face depends on the
      * day, is redrawn, and the midnight tick set for the next local midnight.
      */
-    fun dayChanged(ctx: Context, force: Boolean, today: Long = todayEpochDay()) {
-        WidgetSnapshotStore.markStale(ctx, force, today)
+    fun dayChanged(ctx: Context, force: Boolean) {
+        WidgetSnapshotStore.markStale(ctx, force, todayEpochDay())
         requestTileRefresh(ctx)
         MidnightTick.update(ctx)
     }
@@ -116,7 +116,7 @@ internal object AndroidWidgets : WidgetSurfacePort {
      */
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private fun launchPreviewSync(ctx: Context) =
-        AppRuntime.scope.launch {
+        AppProcess.scope.launch {
             // The library module has no BuildConfig: the installed package's version.
             val version = ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
             surfaceLooks()

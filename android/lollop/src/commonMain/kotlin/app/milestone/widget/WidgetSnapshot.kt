@@ -52,7 +52,9 @@ internal enum class WidgetItemKind { Lift, Run, Check }
 /** One item of today's session. [name] is the exercise for a lift (a run or the
  *  return check is named at render time, from resources); [detail] is the face
  *  line the Today card shows (sets × reps @ weight, a run's distance); [pace] is a
- *  run's target pace range in the display unit when [detail] is its volume head. */
+ *  run's target pace range in the display unit when [detail] is its volume head;
+ *  [figure] is set when [detail] is only a run's volume head ("8 km", "45 min",
+ *  "6 × 800 m"), with or without [pace]. */
 @Serializable
 internal data class WidgetItem(
     val kind: WidgetItemKind,
@@ -60,6 +62,7 @@ internal data class WidgetItem(
     val detail: String = "",
     val done: Boolean = false,
     val pace: String = "",
+    val figure: Boolean = false,
 )
 
 /** A planned session day after the snapshot's day ([WidgetSnapshot.ahead]):
@@ -218,5 +221,6 @@ private fun widgetItemOf(item: PrescriptionView, sessionType: SessionType, unit:
         done = item.done,
         // Only beside a volume head: a run's full summary already states its pace.
         pace = item.run_target?.takeIf { runHead != null }?.pace_label.orEmpty(),
+        figure = runHead != null || (run && item.run_head.isNotBlank() && item.face_lead == item.run_head),
     )
 }

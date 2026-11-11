@@ -566,6 +566,3 @@ internal fun FormCard(content: @Composable () -> Unit) {
         ) { content() }
     }
 }
-
-/** Which content the Log bottom sheet shows: the chooser, or one editor. */
-internal enum class LogMode { Chooser, Set, Run, Checkin, Readiness, Review, WeeklyCheckin, Pain, Activity }

@@ -71,7 +71,7 @@ internal object IosReminder : SessionReminderPort {
         installNotificationDelegate()
         checkCanNotify(ctx) {}
         // Off the main thread: the text is read from the resources, blocking.
-        AppRuntime.scope.launch(Dispatchers.Default) {
+        AppProcess.scope.launch(Dispatchers.Default) {
             widgetInputs()
                 .distinctUntilChanged { a, b -> a.model == b.model && a.unit == b.unit && a.recording == b.recording && a.ticks == b.ticks }
                 .conflate()
@@ -80,7 +80,7 @@ internal object IosReminder : SessionReminderPort {
     }
 
     override fun reschedule(ctx: PlatformContext) {
-        AppRuntime.scope.launch(Dispatchers.Default) { sync(ctx) }
+        AppProcess.scope.launch(Dispatchers.Default) { sync(ctx) }
     }
 
     // The rescheduling sync takes down what was delivered once the setting is off.

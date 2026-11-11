@@ -186,7 +186,6 @@ internal fun SafetyBannerHost(
     model: ViewModel,
     onEvent: (Event) -> Unit,
     modifier: Modifier = Modifier,
-    lastPain: PainDetail?,
     onAddDetails: () -> Unit,
     onOpenProfile: ((ProfileRowId) -> Unit)? = null,
 ) {
@@ -220,7 +219,7 @@ internal fun SafetyBannerHost(
         onDismiss = { confirmReadiness = false },
         onClear = { onEvent(Event.ClearReadiness) },
     )
-    RemoveReportDialog(signal = removeReport, onDismiss = { removeReport = null }, onEvent = onEvent, model = model, lastPain = lastPain)
+    RemoveReportDialog(signal = removeReport, onDismiss = { removeReport = null }, onEvent = onEvent, model = model)
     HoldResolveDialog(
         resolution = resolveHoldSignal?.let { sig -> model.hold_resolutions.firstOrNull { it.signal == sig } },
         model = model,
@@ -240,10 +239,9 @@ internal fun RemoveReportDialog(
     signal: ReadinessSignal?,
     onDismiss: () -> Unit,
     onEvent: (Event) -> Unit,
-    // Words the dialog (does the report hold training) and rebuilds the report
-    // for "Report removed · Undo", with [lastPain] as entered in triage.
+    // Words the dialog (does the report hold training) and holds the report
+    // "Report removed · Undo" restores ([ViewModel.active_pain]).
     model: ViewModel,
-    lastPain: PainDetail?,
 ) {
     if (signal == null) return
     val illness = signal == ReadinessSignal.Illness
@@ -260,13 +258,13 @@ internal fun RemoveReportDialog(
             val row = model.readiness_summary.firstOrNull { it.signal == signal }
             val restore: Event? = when {
                 illness && row != null -> Event.SubmitReadiness(signal, row.value, AppClock.nowSec())
-                !illness && lastPain != null -> Event.SubmitReadiness(signal, 1.0, AppClock.nowSec(), pain = lastPain)
+                !illness -> model.active_pain?.let { Event.SubmitReadiness(signal, 1.0, AppClock.nowSec(), pain = it.report) }
                 else -> null
             }
             onEvent(Event.RemoveReadiness(signal, observedAt = 0L))
             UiMessages.post(
                 if (restore != null) {
-                    UiMessage(removed, actionLabel = undo, onAction = { EventDispatcher.send(restore) })
+                    UiMessage(removed, actionLabel = undo, onAction = { onEvent(restore) })
                 } else {
                     UiMessage(removed)
                 },

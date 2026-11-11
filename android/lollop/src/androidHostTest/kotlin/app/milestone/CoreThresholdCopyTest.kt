@@ -8,9 +8,12 @@ import app.milestone.resources.log_decoupling_hint
 import app.milestone.resources.log_protein_deficit_only
 import app.milestone.resources.log_switch_masters
 import app.milestone.resources.log_weekly_signs_1to2
+import app.milestone.resources.log_weekly_signs_ctx
 import app.milestone.resources.log_weekly_signs_gt2
+import app.milestone.resources.log_weekly_signs_lt1
 import app.milestone.resources.main_calc_protein_masters
 import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -89,7 +92,22 @@ class CoreThresholdCopyTest {
         // The values the weekly check-in has always sent, one inside each band.
         assertEquals(listOf(0.5, 1.5, 3.0), OvertrainingWeeks)
         val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
+        assertEquals("Less than a week", getPluralString(Res.plurals.log_weekly_signs_lt1, OvertrainingWeeksMinQuantity, minWeeks))
         assertEquals("1–2 weeks", getString(Res.string.log_weekly_signs_1to2, minWeeks, nforWeeks))
         assertEquals("More than 2 weeks", getString(Res.string.log_weekly_signs_gt2, nforWeeks))
+    }
+
+    @Test
+    fun overtrainingContextStatesTheCoreSignCountAndWeeks() = runBlocking {
+        assertEquals(
+            "2 or more lasting a week or longer can mean you need more recovery.",
+            getPluralString(
+                Res.plurals.log_weekly_signs_ctx,
+                OvertrainingWeeksMinQuantity,
+                CoreConstants.OVERTRAINING_MIN_SIGNS,
+                overtrainingWeekEdgeLabels().first,
+            ),
+        )
+        assertEquals("Less than 1.5 weeks", getPluralString(Res.plurals.log_weekly_signs_lt1, 2, "1.5"))
     }
 }

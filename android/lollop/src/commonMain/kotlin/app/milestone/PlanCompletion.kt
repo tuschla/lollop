@@ -5,17 +5,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -484,27 +484,6 @@ internal fun PlanItemCompletion(
                 )
             }
         }
-    }
-}
-
-/** The face head of a run item in the display [unit]: the core's volume head
- *  ("6 × 800 m"), whose target and structure move into dedicated, unit-aware face
- *  lines. Null when the item carries no run target or its summary leads with no
- *  volume (then the full summary stays and no face lines are added, so nothing
- *  renders twice). */
-internal fun runFaceHead(item: PrescriptionView, unit: DistanceUnit): String? =
-    if (item.run_target != null && item.run_head.isNotBlank()) runHeadText(item, unit) else null
-
-/** A run item's volume head in the display [unit], so the head and the pace line
- *  under it never mix km with /mi: a distance head ("8 km") is restated from its
- *  km figure; reps ("6 × 800 m"), minutes and bouts stay as the core wrote them. */
-internal fun runHeadText(item: PrescriptionView, unit: DistanceUnit): String {
-    val km = item.run_head_km
-    return if (km == null || unit == DistanceUnit.Km) {
-        item.run_head
-    } else {
-        // A figure and its unit never wrap apart, as in the core's own head.
-        "${trimDecimal(metersToDisplay(km * 1000.0, unit))}\u00A0${unit.distanceLabel}"
     }
 }
 

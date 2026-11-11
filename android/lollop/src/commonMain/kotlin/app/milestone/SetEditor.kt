@@ -651,17 +651,16 @@ fun LogSetEditor(
             // is in the background. Either action ends it for good.
             val askExactAlarms by RestAlarm.exactAlarmPrompt.collectAsState()
             if (askExactAlarms) {
-                InlineNotice(
-                    stringResource(Res.string.log_exact_alarm_caption),
-                    modifier = Modifier.testTag("exact-alarm-notice"),
-                    actionLabel = stringResource(Res.string.log_exact_alarm_allow),
-                    onAction = {
-                        RestAlarm.dismissExactAlarmPrompt(ctx)
-                        RestAlarm.openExactAlarmSettings(ctx)
-                    },
-                    dismissLabel = stringResource(Res.string.log_exact_alarm_dismiss),
-                    onDismiss = { RestAlarm.dismissExactAlarmPrompt(ctx) },
-                )
+                Column(Modifier.fillMaxWidth().testTag("exact-alarm-notice")) {
+                    InlineNotice(stringResource(Res.string.log_exact_alarm_caption))
+                    Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                        TextAction(stringResource(Res.string.log_exact_alarm_dismiss), onClick = { RestAlarm.dismissExactAlarmPrompt(ctx) })
+                        TextAction(stringResource(Res.string.log_exact_alarm_allow), onClick = {
+                            RestAlarm.dismissExactAlarmPrompt(ctx)
+                            RestAlarm.openExactAlarmSettings(ctx)
+                        })
+                    }
+                }
             }
             if (confirmDone) {
                 AppDialog(

@@ -1,6 +1,7 @@
 package app.milestone.widget
 
 import app.milestone.AppFeature
+import app.milestone.AppProcess
 import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.AppTheme
@@ -66,7 +67,7 @@ internal fun widgetInputs(): Flow<WidgetInputs> =
 internal object WidgetSurfaces : AppFeature {
     override fun start(ctx: PlatformContext) {
         widgetSurfacePort.start(ctx)
-        AppRuntime.scope.launch {
+        AppProcess.scope.launch {
             var shown: WidgetInputs? = null
             widgetInputs().conflate().collect { inputs ->
                 widgetSurfacePort.show(ctx, inputs, shown)

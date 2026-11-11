@@ -391,7 +391,7 @@ fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
         ) {
             RunTypeOrder.forEach { wt ->
-                val label = stringResource(wt.text.label)
+                val label = stringResource(wt.labels.label)
                 ChoiceChip(
                     label = label,
                     selected = wt == selected,

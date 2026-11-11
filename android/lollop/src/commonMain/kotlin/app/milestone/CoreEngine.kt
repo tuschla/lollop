@@ -26,8 +26,3 @@ interface CoreEngine {
     /** Apply [events] as one unit and read the view once. */
     fun sendAll(events: List<Event>): SendResult
 }
-
-/** The platform's core engine, which [AppRuntime.engine] runs on: Android's JNI
- *  [Core], iOS's engine over the C ABI. Read on [CoreDispatcher] (the Android
- *  engine loads its library on first touch). */
-internal expect fun platformCoreEngine(): DurableCore

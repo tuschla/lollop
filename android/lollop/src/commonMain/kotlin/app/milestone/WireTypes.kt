@@ -113,6 +113,8 @@ object CoreConstants {
     const val DECOUPLING_MIN_EFFORT_MIN: Double = 20.0
     /** Age, years, where the masters bracket begins (MASTERS-001). */
     const val MASTERS_AGE_YEARS: Double = 65.0
+    /** Co-occurring overtraining signs that raise the recovery concern (feedback-036). */
+    const val OVERTRAINING_MIN_SIGNS: Int = 2
     /** Weeks the overtraining signs must last for the recovery concern (feedback-036). */
     const val OVERTRAINING_MIN_WEEKS: Double = 1.0
     /**

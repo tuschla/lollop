@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppProcess
 import app.milestone.AppRuntime
 import app.milestone.Event
 import app.milestone.EventDispatcher
@@ -524,7 +525,7 @@ class ReviewShellComponentTest {
             }
             EventDispatcher.send(Event.SetToday(1L, 0))
             var settled = false
-            val awaiter = AppRuntime.scope.launch {
+            val awaiter = AppProcess.scope.launch {
                 runCatching { EventDispatcher.exclusive { null } }
                 settled = true
             }
@@ -533,7 +534,7 @@ class ReviewShellComponentTest {
             gate.complete(Unit) // the in-flight unit finishes after the reset
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
             var notice: app.milestone.CoreNotice? = null
-            val noticeJob = AppRuntime.scope.launch { EventDispatcher.notices.collect { notice = it } }
+            val noticeJob = AppProcess.scope.launch { EventDispatcher.notices.collect { notice = it } }
             shadowOf(Looper.getMainLooper()).idle()
             noticeJob.cancel()
             assertTrue("the queued exclusive() awaiter settled after resetForTest (still active: ${awaiter.isActive})", settled)
@@ -612,7 +613,7 @@ class ReviewShellComponentTest {
                     SendResult(second, accepted = true)
                 }
             }
-            val watcher = AppRuntime.scope.launch { EventDispatcher.model.collect { if (it === second) published = it } }
+            val watcher = AppProcess.scope.launch { EventDispatcher.model.collect { if (it === second) published = it } }
             EventDispatcher.send(Event.SetToday(1L, 0))
             EventDispatcher.send(Event.SetToday(2L, 0))
             shadowOf(Looper.getMainLooper()).idle()
@@ -644,7 +645,7 @@ class ReviewShellComponentTest {
         TestSink.batchSender = fakeBatch
         QaHarness.freshProcess()
         var leaked: app.milestone.CoreNotice? = null
-        val job = AppRuntime.scope.launch { EventDispatcher.notices.collect { leaked = it } }
+        val job = AppProcess.scope.launch { EventDispatcher.notices.collect { leaked = it } }
         shadowOf(Looper.getMainLooper()).idle()
         job.cancel()
         assertTrue("a fresh process has no pending notice, got $leaked", leaked == null)

@@ -694,13 +694,6 @@ internal fun hasFineLocation(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
 
-/** True when the app may post notifications: below API 33 there is no runtime
- *  gate; from 33 on, the POST_NOTIFICATIONS grant decides. */
-internal fun canPostNotifications(ctx: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-        PackageManager.PERMISSION_GRANTED
-
 /** A high-accuracy fix stream (~1–2 s cadence screen-on, ~3–4 s screen-off).
  *  [start] delivers each fix on the main thread and invokes [onError] on an ASYNC
  *  start failure the caller's try/catch can't observe (the fused Task failing);

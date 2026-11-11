@@ -27,7 +27,7 @@ internal object WidgetFixtures {
         val zone = "Europe/Berlin"
         val base = WidgetSnapshot(epochDay = DAY, kind = WidgetDayKind.Lift, weekDone = 1, weekPlanned = 4, zone = zone, week = week)
         val liftItems = listOf(lift("Back Squat", "5×3 @\u00A0117.5\u00A0kg"), lift("Deadlift", "3×5"), lift("Bench press", "3×5"), lift("Cable row", "3×5"))
-        val runItems = listOf(WidgetItem(WidgetItemKind.Run, detail = "3.4\u00A0mi", pace = "9:00–9:40\u00A0/mi"))
+        val runItems = listOf(WidgetItem(WidgetItemKind.Run, detail = "3.4\u00A0mi", pace = "9:00–9:40\u00A0/mi", figure = true))
         val next = WidgetNext(DAY + 2, "Heavy volume day")
         val ahead = listOf(
             WidgetAheadDay(

@@ -3,13 +3,6 @@ package app.milestone
 import app.milestone.resources.Res
 import app.milestone.resources.activity_effort_moderate_short
 import app.milestone.resources.activity_effort_vigorous_short
-import app.milestone.resources.activity_kind_cycling
-import app.milestone.resources.activity_kind_dance
-import app.milestone.resources.activity_kind_other
-import app.milestone.resources.activity_kind_sport
-import app.milestone.resources.activity_kind_strength
-import app.milestone.resources.activity_kind_swimming
-import app.milestone.resources.activity_kind_walking
 import app.milestone.resources.coach_export_active_minutes
 import app.milestone.resources.coach_export_active_minutes_other
 import app.milestone.resources.coach_export_active_minutes_runs
@@ -26,7 +19,6 @@ import app.milestone.resources.coach_export_week_empty
 import app.milestone.resources.coach_export_weeks_empty
 import app.milestone.resources.ui_label_value
 import kotlinx.datetime.TimeZone
-import org.jetbrains.compose.resources.StringResource
 
 /** How many local Mon–Sun weeks the coach summary covers, the current one included. */
 internal const val CoachSummaryWeeks = 4
@@ -148,18 +140,6 @@ private fun activityLine(res: PlatformResources, a: ActivityResultView): String 
     val line = res.getString(Res.string.coach_export_activity, res.getString(a.kind.labelRes), a.minutes.roundOrZero().toInt(), effort)
     return if (a.strengthening) "$line · ${res.getString(Res.string.coach_export_strengthening)}" else line
 }
-
-/** Display label of an [ActivityKind]. */
-internal val ActivityKind.labelRes: StringResource
-    get() = when (this) {
-        ActivityKind.Sport -> Res.string.activity_kind_sport
-        ActivityKind.Cycling -> Res.string.activity_kind_cycling
-        ActivityKind.Swimming -> Res.string.activity_kind_swimming
-        ActivityKind.Walking -> Res.string.activity_kind_walking
-        ActivityKind.Dance -> Res.string.activity_kind_dance
-        ActivityKind.Strength -> Res.string.activity_kind_strength
-        ActivityKind.Other -> Res.string.activity_kind_other
-    }
 
 /** [model]'s coach summary in the profile's weight unit and the chosen distance
  *  unit, for the share sheet. */

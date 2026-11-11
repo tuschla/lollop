@@ -12,6 +12,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.core.JniCore
 import app.milestone.qa.QaHarness
 import app.milestone.widget.AndroidWidgets
+import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetAheadDay
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
@@ -86,7 +87,7 @@ class SessionReminderTest {
         WidgetItem(WidgetItemKind.Lift, "Row", "3 × 10 @ 50 kg"),
     )
     private val liftItemsFirstDone = liftItems.mapIndexed { i, it -> if (i == 0) it.copy(done = true) else it }
-    private val runItems = listOf(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km"))
+    private val runItems = listOf(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km", figure = true))
 
     private fun liftDay(day: Long = today, items: List<WidgetItem> = liftItems, done: Boolean = false) =
         WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Lift, title = "Upper body", items = items, sessionDone = done, zone = zone)
@@ -176,7 +177,7 @@ class SessionReminderTest {
         SessionReminder.setEnabled(app, true)
         val berlin = alarms().single().triggerAtTime
         TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
-        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+        SystemChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         val ny = alarms().single().triggerAtTime
         assertNotEquals(berlin, ny)
         val at = Instant.ofEpochMilli(ny).atZone(ZoneId.of("America/New_York"))
@@ -368,7 +369,7 @@ class SessionReminderTest {
         assertEquals("Europe/Berlin", s.zone)
         assertEquals(listOf(day + 2, day + 3), s.ahead.map { it.epochDay })
         assertEquals(WidgetDayKind.Run, s.ahead[0].kind)
-        assertEquals(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km"), s.ahead[0].items.single())
+        assertEquals(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km", figure = true), s.ahead[0].items.single())
         assertEquals(WidgetDayKind.Lift, s.ahead[1].kind)
         // Paused: nothing ahead.
         val held = widgetSnapshotOf(model.copy(hold_reason = HoldReason.Pain, today_surface = TodaySurfaceView(state = TodayState.Paused)), DistanceUnit.Km, zone = "Europe/Berlin")
@@ -455,12 +456,12 @@ class SessionReminderTest {
         store(liftDay())
         fire()
         val n = posted()!!
-        AndroidReminder.onOpenIntent(app, shadowOf(n.contentIntent).savedIntent)
-        AndroidReminder.onOpenIntent(app, openIntent(app, OpenDest.LogSet))
+        cancelTappedNotification(app, shadowOf(n.contentIntent).savedIntent)
+        cancelTappedNotification(app, openIntent(app, OpenDest.LogSet))
         assertNotNull("the content intent and other surfaces leave it up", posted())
         val action = shadowOf(n.actions.single().actionIntent).savedIntent
         assertEquals(OpenDest.LogSet, openDestOf(action))
-        AndroidReminder.onOpenIntent(app, action)
+        cancelTappedNotification(app, action)
         assertNull("the action tap takes it down", posted())
     }
 
@@ -479,7 +480,7 @@ class SessionReminderTest {
         nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
 
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"))
-        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+        SystemChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         // The app is open: the snapshot is rewritten in the new zone, same day.
         store(liftDay())
         assertEquals(day, today)
@@ -503,7 +504,7 @@ class SessionReminderTest {
             nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
         }
         TestClock.offsetMillis = millis("2026-10-29T06:00:00", "Europe/Berlin") - System.currentTimeMillis()
-        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIME_CHANGED))
+        SystemChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIME_CHANGED))
         store(liftDay())
         val next = alarms().single().triggerAtTime
         assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), next)
@@ -531,7 +532,7 @@ class SessionReminderTest {
         val crossing = millis("2026-10-29T23:30:00", "America/Chicago")
         TestClock.offsetMillis = crossing - System.currentTimeMillis()
         TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
-        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+        SystemChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         assertEquals("it is Friday in New York", LocalDate.parse("2026-10-30").toEpochDay(), today)
         assertTrue("the system timeout has not run out yet", n.timeoutAfter > crossing - postedAt)
         assertNull("yesterday's reminder still shows", posted())
@@ -549,10 +550,10 @@ class SessionReminderTest {
         fire()
         assertNotNull(posted())
         TestClock.offsetMillis = millis("2026-10-29T23:59:00", "Europe/Berlin") - System.currentTimeMillis()
-        AndroidWidgets.onMidnight(app, today = todayEpochDay())
+        TodayWidgetReceiver().onReceive(app, Intent(TodayWidgetReceiver.ACTION_MIDNIGHT))
         assertNotNull("still the same day", posted())
         TestClock.offsetMillis = millis("2026-10-30T00:00:05", "Europe/Berlin") - System.currentTimeMillis()
-        AndroidWidgets.onMidnight(app, today = todayEpochDay())
+        TodayWidgetReceiver().onReceive(app, Intent(TodayWidgetReceiver.ACTION_MIDNIGHT))
         assertNull("Thursday's reminder on Friday", posted())
     }
 
@@ -573,7 +574,7 @@ class SessionReminderTest {
         fun crossInto(at: String, zone: String) {
             TestClock.offsetMillis = millis(at, "America/Chicago") - System.currentTimeMillis()
             TimeZone.setDefault(TimeZone.getTimeZone(zone))
-            TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+            SystemChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         }
         crossInto("2026-10-29T21:00:00", "America/Denver")
         assertTrue("the snapshot is stale", WidgetSnapshotStore.read(app)!!.stale)

@@ -104,7 +104,7 @@ internal fun inSessionCue(
  *  STR-WARMUP-001). Empty for a lift off the straight barbell, at or below the
  *  first step, or when the core can't answer. */
 internal fun warmUpSteps(workKg: Double, unit: WeightUnit, exercise: String): List<WarmUpStep> =
-    AppRuntime.engine.warmUpRamp(WarmUpQuery(exercise, workKg, unit == WeightUnit.Lb)).orEmpty()
+    AppCore.engine.warmUpRamp(WarmUpQuery(exercise, workKg, unit == WeightUnit.Lb)).orEmpty()
 
 /** [kg] in lb rounded to the nearest half pound, without trailing zeros. */
 private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill((kgToLb(kg) * 2.0).roundOrZero() / 2.0)
@@ -404,12 +404,6 @@ internal fun plannedSetCount(item: PrescriptionView): Int = maxOf(item.sets, 1)
  *  fully-logged item reads "N of N", never "N+1 of N". */
 internal fun nextSetNumber(item: PrescriptionView): Int =
     (item.sets_done + 1).coerceIn(1, plannedSetCount(item))
-
-/** The first not-done item of a session — the "Today's plan" prefill target and
- *  the hero's next-open item. Null when every item is done (next_session keeps
- *  done items, so the shell picks the open one). */
-internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =
-    items.firstOrNull { !it.done }
 
 /** The next open lift item to move to once [exercise] completes: the first
  *  not-done named item that is not [exercise] itself (a run item has no name and

@@ -49,9 +49,6 @@ internal object AndroidReminder : SessionReminderPort {
     private const val EXTRA_DAY = "app.milestone.reminder.epoch_day"
     private const val EXTRA_KIND = "app.milestone.reminder.kind"
 
-    /** On the action's open intent: the tap takes the reminder down ([onOpenIntent]). */
-    private const val EXTRA_FROM_REMINDER = "app.milestone.reminder.action"
-
     // A force stop clears the alarm; the next process sets it again.
     override fun start(ctx: Context) = reschedule(ctx)
 
@@ -164,12 +161,6 @@ internal object AndroidReminder : SessionReminderPort {
         if (shown(nm)?.extras?.getString(EXTRA_KIND) == WidgetDayKind.Run.name) nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
     }
 
-    /** MainActivity got [intent]: the reminder's action was tapped, so the reminder goes
-     *  (a tap on an action does not auto-cancel the notification). */
-    internal fun onOpenIntent(ctx: Context, intent: Intent?) {
-        if (intent?.getBooleanExtra(EXTRA_FROM_REMINDER, false) == true) takeDown(ctx)
-    }
-
     private fun nm(ctx: Context): NotificationManager? =
         ctx.applicationContext.getSystemService(NotificationManager::class.java)
 
@@ -212,13 +203,13 @@ internal object AndroidReminder : SessionReminderPort {
         nm(app)?.notify(AndroidIds.REMINDER_NOTIFICATION, b.build())
     }
 
-    /** The action's open intent to [dest], marked so that MainActivity takes the
-     *  reminder down ([onOpenIntent]). Its own request code: PendingIntents match
-     *  without extras, so the shared [openPendingIntent] would lose the mark. */
+    /** The action's open intent to [dest], which takes the reminder down when MainActivity
+     *  opens. Its own request code: PendingIntents match without extras, so the shared
+     *  [openPendingIntent] would lose the mark. */
     private fun actionPendingIntent(app: Context, dest: OpenDest): PendingIntent = PendingIntent.getActivity(
         app,
         AndroidIds.REMINDER_ACTION_REQUEST,
-        openIntent(app, dest).putExtra(EXTRA_FROM_REMINDER, true),
+        openIntent(app, dest, cancels = AndroidIds.REMINDER_NOTIFICATION),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -240,7 +231,7 @@ internal actual val sessionReminderPort: SessionReminderPort get() = AndroidRemi
  * which the alarm must be set again: boot and an app update (alarms do not survive
  * either), which may also have changed the local day, taking down a reminder
  * posted for another day ([AndroidReminder.onDayChanged]). Time zone and clock
- * changes reach the reminder through [AppRuntime.onTimeChanged].
+ * changes and local midnight reach the reminder through [AppRuntime.onTimeChanged].
  */
 class SessionReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

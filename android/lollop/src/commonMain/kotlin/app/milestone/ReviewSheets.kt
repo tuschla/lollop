@@ -207,6 +207,11 @@ internal val OvertrainingWeeks = listOf(
 internal fun overtrainingWeekEdgeLabels(): Pair<String, String> =
     trimDecimal(OvertrainingWeeksMin) to trimDecimal(OvertrainingWeeksNfor)
 
+/** The plural quantity of the copy stating [OvertrainingWeeksMin]: the whole
+ *  weeks, or 2 for a fraction of a week, which English reads plural ("1.5 weeks"). */
+internal val OvertrainingWeeksMinQuantity: Int =
+    OvertrainingWeeksMin.toInt().takeIf { it.toDouble() == OvertrainingWeeksMin } ?: 2
+
 /** The explicit "Nothing to report this week" check-in: every count stated as
  *  0, no sign ticked, every clinical screen answered no. Only ever sent by that
  *  button, never by Save on an untouched form. Pure. */
@@ -277,7 +282,7 @@ fun WeeklyCheckinSheet(
     )
     // Anything the user has said this week. A typed-then-emptied bar speed or an
     // unticked sign says nothing, and nothing is what an all-"no" Save would invent.
-    val answered = signs.any || failedKeySessions != null || rpeLoadGapSessions != null ||
+    val answered = signs.anyTicked || failedKeySessions != null || rpeLoadGapSessions != null ||
         velocityText.isNotEmpty() || compulsive != null || bonePain != null || reds != null
     val dirty = answered || dateEdited
     val savedMessage = stringResource(Res.string.log_weekly_saved)
@@ -301,7 +306,7 @@ fun WeeklyCheckinSheet(
                     compulsiveFlag = compulsive == true,
                     redsSignalReported = reds == true,
                     overtrainingSigns = signs,
-                    overtrainingSignalWeeks = if (signs.any) signWeeks else null,
+                    overtrainingSignalWeeks = if (signs.anyTicked) signWeeks else null,
                     // Whole-week deload triggers (autoreg-023/026/036); an
                     // unanswered count is omitted, never sent as 0.
                     failedKeySessions = failedKeySessions,
@@ -378,15 +383,21 @@ fun WeeklyCheckinSheet(
         // The four listed signs, then how long, instead of a bare count.
         FormCard {
             FieldLabel(stringResource(Res.string.log_weekly_signs_q))
-            Text(stringResource(Res.string.log_weekly_signs_ctx), color = OnBgMuted, style = Type.Caption)
+            val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
+            Text(
+                pluralStringResource(
+                    Res.plurals.log_weekly_signs_ctx, OvertrainingWeeksMinQuantity, CoreConstants.OVERTRAINING_MIN_SIGNS, minWeeks,
+                ),
+                color = OnBgMuted,
+                style = Type.Caption,
+            )
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_performance), worsePerformance) { worsePerformance = it }
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_mood), lowMood) { lowMood = it }
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it }
             LabeledSwitchRow(stringResource(Res.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it }
-            if (signs.any) {
-                val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
+            if (signs.anyTicked) {
                 val weekLabels = listOf(
-                    stringResource(Res.string.log_weekly_signs_lt1),
+                    pluralStringResource(Res.plurals.log_weekly_signs_lt1, OvertrainingWeeksMinQuantity, minWeeks),
                     stringResource(Res.string.log_weekly_signs_1to2, minWeeks, nforWeeks),
                     stringResource(Res.string.log_weekly_signs_gt2, nforWeeks),
                 )

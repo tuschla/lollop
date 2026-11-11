@@ -6,10 +6,6 @@ import platform.Foundation.NSURL
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationOpenSettingsURLString
 
-/** iOS has no toast: the notice goes to the snackbar of the app's [UiMessageHost]. */
-internal actual fun showNotice(ctx: PlatformContext, text: String, long: Boolean) =
-    UiMessages.post(UiMessage(text, long = long))
-
 // Composables that hold the screen on; the idle timer comes back when the last
 // one leaves. Composition runs on the main thread, so a plain counter is enough.
 private var screenOnHolds = 0

@@ -739,18 +739,6 @@ internal class RollingPace {
         else (spanMs / 60_000.0) / (meters / 1000.0)
 }
 
-/** The distance (km) a leg of [km] over [dtSec] adds to a run, or null when it is not
- *  a moving leg (no elapsed time, or slower than [CoreConstants.MIN_MOVING_SPEED_MPS]:
- *  standing still, so GPS wander at a red light accrues nothing). A moving leg keeps
- *  all its time; its distance is capped at [CoreConstants.MAX_PLAUSIBLE_SPEED_MPS]·dt
- *  (GPS jitter), so the live figures match the saved run's. Shared by the live
- *  figures, the pace slices, crash recovery and the trim preview, which test it
- *  against null for the moving rule. */
-internal fun movingLegKm(km: Double, dtSec: Double): Double? {
-    if (dtSec <= 0.0 || km * 1000.0 / dtSec < CoreConstants.MIN_MOVING_SPEED_MPS) return null
-    return minOf(km, CoreConstants.MAX_PLAUSIBLE_SPEED_MPS * dtSec / 1000.0)
-}
-
 // ── GPS fix-quality & freshness gates ────────────────────────────────────────
 // Single-sourced here so the foreground service (live map + distance), the UI lock
 // pill, and [isFreshLock] can never drift apart. A live fix counts only within the
@@ -920,7 +908,7 @@ internal fun pillState(
  * A core that can't answer thins nothing: every fix, the starts as recorded.
  */
 internal fun thinTrack(pts: List<GpsPoint>, maxPoints: Int, starts: Collection<Int>): Pair<List<GpsPoint>, List<Int>> {
-    val thin = AppRuntime.engine.thinTrack(TrackThinning(pts.size, maxPoints, starts.toList()))
+    val thin = AppCore.engine.thinTrack(TrackThinning(pts.size, maxPoints, starts.toList()))
         ?: return pts to starts.sorted()
     val kept = thin.kept
     return (if (kept.size == pts.size) pts else kept.map(pts::get)) to thin.segment_starts
@@ -930,17 +918,3 @@ internal fun thinTrack(pts: List<GpsPoint>, maxPoints: Int, starts: Collection<I
  *  store). ~4 min at 1 Hz; it doubles on overflow (amortised O(1) append), so the
  *  starting size only trades a little idle memory against the first few reallocs. */
 private const val INITIAL_TRACK_CAP = 256
-
-/**
- * Elapsed run time: `m:ss` under an hour, `h:mm:ss` at or beyond one, so a long
- * run (half/marathon, both goal distances the app supports) reads "1:12:05"
- * rather than a confusing "72:05". Negative spans clamp to zero.
- */
-fun formatElapsed(seconds: Long): String {
-    val s = seconds.coerceAtLeast(0L)
-    return if (s >= 3600) {
-        "${s / 3600}:${zeroPad((s % 3600) / 60)}:${zeroPad(s % 60)}"
-    } else {
-        "${s / 60}:${zeroPad(s % 60)}"
-    }
-}

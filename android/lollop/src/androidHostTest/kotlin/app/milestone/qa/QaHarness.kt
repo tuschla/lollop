@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Looper
 import app.milestone.AppClock
 import app.milestone.AppFileNames
+import app.milestone.AppProcess
+import app.milestone.AppCore
 import app.milestone.AppRuntime
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
@@ -59,8 +61,8 @@ object QaHarness {
      *  boot SetToday. */
     fun reboot(ctx: Context): SendResult {
         killProcess()
-        AppRuntime.engine.restore(ctx)
-        return AppRuntime.engine.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
+        AppCore.engine.restore(ctx)
+        return AppCore.engine.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
     }
 
     /**
@@ -178,7 +180,7 @@ object QaHarness {
      *  resume there, so a plain runBlocking on this thread would deadlock. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
-        val job = AppRuntime.scope.async { block() }
+        val job = AppProcess.scope.async { block() }
         pumpMainUntil("app-scope work", timeoutMs) { job.isCompleted }
         return job.getCompleted()
     }

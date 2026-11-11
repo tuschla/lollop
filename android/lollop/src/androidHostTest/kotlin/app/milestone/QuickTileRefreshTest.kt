@@ -118,8 +118,8 @@ class QuickTileRefreshTest {
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_LOCALE_CHANGED,
         )) {
-            // Clock and zone changes reach the widget through the app's time-change receiver.
-            val receiver = if (action == Intent.ACTION_TIME_CHANGED || action == Intent.ACTION_TIMEZONE_CHANGED) TimeChangeReceiver::class.java else TodayWidgetReceiver::class.java
+            // Only the midnight tick is the widget receiver's; the system's changes reach the app's system-change receiver.
+            val receiver = if (action == TodayWidgetReceiver.ACTION_MIDNIGHT) TodayWidgetReceiver::class.java else SystemChangeReceiver::class.java
             ctx.sendBroadcast(Intent(action).setClass(ctx, receiver))
             val got = awaitRequests()
             assertTrue("$action: $got", got.isNotEmpty() && got.all { it == tile })

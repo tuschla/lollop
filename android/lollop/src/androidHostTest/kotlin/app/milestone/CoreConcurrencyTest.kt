@@ -73,7 +73,7 @@ class CoreConcurrencyTest {
     }
 
     private fun sendOk(e: Event, who: String): SendResult {
-        val r = AppRuntime.engine.send(e)
+        val r = AppCore.engine.send(e)
         check(r.accepted && r.persisted && !r.stale) {
             "$who: ${e::class.simpleName} accepted=${r.accepted} persisted=${r.persisted} stale=${r.stale}"
         }
@@ -94,7 +94,7 @@ class CoreConcurrencyTest {
     /** The view a brand-new thread reads. */
     private fun coldView(): ViewModel {
         val out = AtomicReference<Any?>(null)
-        thread(name = "cold-view") { out.set(runCatching { AppRuntime.engine.currentView() }.getOrElse { it }) }
+        thread(name = "cold-view") { out.set(runCatching { AppCore.engine.currentView() }.getOrElse { it }) }
             .join(STALL_SEC * 1000)
         return when (val v = out.get()) {
             is ViewModel -> v
@@ -383,7 +383,7 @@ class CoreConcurrencyTest {
                 if (t == 0 && i % 5 == 4) {
                     // Entries accepted before this send are in the durable log the reset replays.
                     val before = HashSet(accepted)
-                    val r = AppRuntime.engine.send(Event.LogSet(POISON, 50.0, 5, 8.0, observedAt = stamp))
+                    val r = AppCore.engine.send(Event.LogSet(POISON, 50.0, 5, 8.0, observedAt = stamp))
                     assertFalse("t0: the poisoned event was reported saved", r.accepted)
                     val shown = r.view.lifts.map { it.entry_id }.toSet()
                     assertTrue("t0: the view after the reset lost ${before - shown}", shown.containsAll(before))
@@ -397,7 +397,7 @@ class CoreConcurrencyTest {
         }
         poisoning = false
         assertEquals("injected resets", 5, resets.get())
-        val live = AppRuntime.engine.currentView()
+        val live = AppCore.engine.currentView()
         val ids = live.lifts.groupingBy { it.entry_id }.eachCount()
         assertEquals("every accepted set once, nothing else", accepted.associateWith { 1 }, ids)
         assertTrue("the poisoned event reached the log", QaHarness.logLines(ctx).none { POISON in it })

@@ -12,7 +12,6 @@ import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.DistanceUnit
 import app.milestone.MilestoneTheme
-import app.milestone.RunWeekView
 import app.milestone.WeeklyDistanceChart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,7 +44,7 @@ class WeeklyDistanceChartA11yTest {
 
     @Test
     fun weeklyChart_summaryIsReadBeforeTheWeeks() {
-        val weeks = (0 until 4).map { RunWeekView(week_start_epoch_day = 20_000L + 7L * it, km = 10.0 + it) }
+        val weeks = (0 until 4).associate { 20_000L + 7L * it to 10.0 + it }
         rule.setContent { MilestoneTheme { WeeklyDistanceChart(weeks, 0.0, DistanceUnit.Km, 120.dp) } }
         rule.waitForIdle()
         val root = composeRoots().single()

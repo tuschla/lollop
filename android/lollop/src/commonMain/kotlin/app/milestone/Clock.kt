@@ -10,13 +10,6 @@ import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
-/** The device's wall clock, milliseconds since the epoch (System.currentTimeMillis). */
-internal expect fun wallClockMillis(): Long
-
-/** Milliseconds on a clock that never jumps and keeps counting in deep sleep
- *  (Android `SystemClock.elapsedRealtime`): for durations, never for dates. */
-internal expect fun deviceMonotonicMillis(): Long
-
 /** The local epoch-day (days since 1970-01-01) of the instant [epochMillis] in [zone]. */
 internal fun localEpochDayAtMillis(epochMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
     Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(zone).date.toEpochDays()
@@ -43,36 +36,6 @@ internal fun nextLocalMidnightMillis(nowMillis: Long, zone: TimeZone = TimeZone.
  *  cases and lands the entry squarely on that calendar day. */
 internal fun planDayObservedAt(epochDay: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
     LocalDate.fromEpochDays(epochDay).atTime(12, 0).toInstant(zone).epochSeconds
-
-/** Today's epoch-day for every plan gate: the core's clock echoed on the view
- *  (SetToday) rather than the wall clock, so a session that crosses midnight
- *  while foregrounded rolls over in lockstep with the core instead of stranding
- *  its Log buttons. Falls back to the device clock on an old core. */
-internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
-
-/** Today's session still to train: the hero dated today, with items, not blocked. */
-internal fun ViewModel.todaysPlan(): SessionPlanView? =
-    next_session?.takeIf { it.epoch_day == today() && it.items.isNotEmpty() && it.actionable }
-
-/** Today's lift session once something of it is logged. After Finish the core moves
- *  next_session off today, so this is how the day is resumed. */
-internal fun ViewModel.resumableLiftDay(): SessionPlanView? = week_plan.firstOrNull {
-    it.epoch_day == today() && it.items.isNotEmpty() && it.session_type.discipline == SessionDiscipline.Lift &&
-        it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
-}
-
-/** The lift item a set logs against today, with its session: today's plan lift
- *  session's first open item (else its first), or once something is logged and
- *  the core moved next_session on, today's started lift session's first open item
- *  (else its last, for an extra set). */
-internal fun ViewModel.openLiftTarget(): Pair<SessionPlanView, PrescriptionView>? {
-    val plan = todaysPlan()
-    if (plan != null && plan.session_type.discipline == SessionDiscipline.Lift) {
-        return plan to (firstOpenItem(plan.items) ?: plan.items.first())
-    }
-    val started = resumableLiftDay() ?: return null
-    return started to (firstOpenItem(started.items) ?: started.items.last())
-}
 
 /** The device's current UTC offset in SECONDS east of UTC, so the core can
  *  bucket a logged session's UTC `observed_at` into the correct local day. Uses

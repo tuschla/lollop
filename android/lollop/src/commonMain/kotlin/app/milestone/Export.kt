@@ -5,6 +5,8 @@ import kotlin.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -84,7 +86,7 @@ internal suspend fun readDataExport(ctx: PlatformContext): List<String>? = runCa
     var read = emptyList<String>()
     EventDispatcher.exclusive {
         read = withContext(Dispatchers.IO) {
-            EventLog.read(ctx.eventLogPath(), AppRuntime.engine).lines
+            EventLog.read(ctx.eventLogPath(), AppCore.engine).lines
         }
         null
     }
@@ -182,7 +184,7 @@ internal fun summarizeImport(lines: List<String>, zone: TimeZone): ImportSummary
     var entries = 0
     var first: Long? = null
     var last: Long? = null
-    for (line in EventLog.compact(lines, AppRuntime.engine)) {
+    for (line in EventLog.compact(lines, AppCore.engine)) {
         val variant = EventLog.variantOf(line) ?: continue
         if (variant !in importEntryVariants) continue
         entries++
@@ -208,15 +210,15 @@ enum class DataImportResult { Replaced, RunInProgress, Failed }
  * in-memory model over the new file. A failed write (an OutOfMemoryError
  * included: see [isFatalToVm]) re-attaches the original log and reports
  * [DataImportResult.Failed]. Refused while a run is recording or armed: the
- * reboot that must follow replaces the model the run would be saved into. On
- * [DataImportResult.Replaced] the caller reboots with [AppRuntime.requestReboot].
+ * reboot that must follow replaces the model the run would be saved into
+ * ([DataRestore.restore] does both).
  */
 internal suspend fun replaceEventLog(ctx: PlatformContext, lines: List<String>): DataImportResult {
     if (RunSession.runActive) return DataImportResult.RunInProgress
     return try {
         EventDispatcher.exclusive {
             withContext(CoreDispatcher + NonCancellable) {
-                val engine = AppRuntime.engine
+                val engine = AppCore.engine
                 val previous = engine.detachLog()
                 try {
                     swapLogFile(ctx.eventLogPath(), lines)
@@ -235,12 +237,33 @@ internal suspend fun replaceEventLog(ctx: PlatformContext, lines: List<String>):
     }
 }
 
-/** A throwable after which the runtime itself can't be trusted to go on, so it
- *  must not be reported as a failed import. Android: a VirtualMachineError other
- *  than an OutOfMemoryError (one allocation the heap couldn't serve) or a
- *  StackOverflowError, whose throwing frames unwind and free what they held, so
- *  the user keeps their old log. Kotlin/Native has no such error (it aborts). */
-internal expect fun Throwable.isFatalToVm(): Boolean
+/**
+ * The data import once the user confirmed it: [running] while it swaps the log
+ * and boots into it; [restore] replaces the log ([replaceEventLog]), records how
+ * many entries the boot is to confirm ([markRestoredEntries]) and reboots
+ * ([AppRuntime.requestReboot]).
+ */
+internal object DataRestore {
+    private val state by ProcessLocal { MutableStateFlow(false) }
+
+    val running: StateFlow<Boolean> get() = state
+
+    /** Restore [lines], [entries] of them entries. Main thread; on
+     *  [DataImportResult.Replaced] the reboot is under way. */
+    suspend fun restore(ctx: PlatformContext, lines: List<String>, entries: Int): DataImportResult {
+        state.value = true
+        try {
+            val result = replaceEventLog(ctx, lines)
+            if (result == DataImportResult.Replaced) {
+                markRestoredEntries(ctx.setupStore(), entries)
+                AppRuntime.requestReboot()
+            }
+            return result
+        } finally {
+            state.value = false
+        }
+    }
+}
 
 /** Atomically replace the event log [log] with [lines] (tmp + fsync + rename), so a
  *  crash mid-write can never leave a half-written log. The lines are STREAMED to

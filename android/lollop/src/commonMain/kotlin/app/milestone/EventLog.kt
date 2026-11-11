@@ -14,10 +14,15 @@ data class RestoredLog(
     val maxEntryId: Long = 0L,
 )
 
+/** The core's compaction of a log's [lines] ([DurableCore]), null when it can't answer. */
+fun interface LogCompaction {
+    fun compaction(lines: List<String>): Compaction?
+}
+
 /**
  * Reads, repairs and compacts the persisted event log (one event's serde wire JSON
  * per line). The compaction rules live in the core (`shared/src/log.rs`, reached
- * through [DurableCore.compaction] of the `core` argument). Without a working core the log is read as it
+ * through the `core` argument). Without a working core the log is read as it
  * is, minus torn lines, so the raw-log export still works. File access goes
  * through [AppFiles].
  */
@@ -25,7 +30,7 @@ object EventLog {
 
     /** [lines] minus those [core]'s compaction drops (replay-equivalent, order
      *  kept); unchanged when the core can't answer. A line that is not JSON is kept. */
-    fun compact(lines: List<String>, core: DurableCore): List<String> {
+    fun compact(lines: List<String>, core: LogCompaction): List<String> {
         val dropped = core.compaction(lines)?.dropped?.toHashSet() ?: return lines
         return lines.filterIndexed { i, _ -> i !in dropped }
     }
@@ -43,7 +48,7 @@ object EventLog {
      * Mutates the log directory, so it runs only at boot, before anything appends.
      * Anything reading the log while the core may be appending uses [read].
      */
-    fun load(file: AppPath, core: DurableCore): RestoredLog {
+    fun load(file: AppPath, core: LogCompaction): RestoredLog {
         // A crash between the two renames of an import swap can leave the live log
         // set aside as .bak with the destination missing: put it back (a copy when
         // the rename fails) before deciding the install is fresh, and delete .bak
@@ -88,7 +93,7 @@ object EventLog {
      * half-written tail line is torn and left out of the result). The data export
      * and the mid-session panic-reset replay read through this.
      */
-    fun read(file: AppPath, core: DurableCore): RestoredLog {
+    fun read(file: AppPath, core: LogCompaction): RestoredLog {
         if (!AppFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
         return parse(file, core).restored
     }
@@ -97,7 +102,7 @@ object EventLog {
      *  non-blank lines on disk and whether any of them was torn. */
     private class Parsed(val restored: RestoredLog, val total: Int, val unparseable: Boolean)
 
-    private fun parse(file: AppPath, core: DurableCore): Parsed {
+    private fun parse(file: AppPath, core: LogCompaction): Parsed {
         val lines = ArrayList<String>()
         AppFiles.forEachLine(file) { if (it.isNotBlank()) lines += it }
         val verdict = core.compaction(lines)

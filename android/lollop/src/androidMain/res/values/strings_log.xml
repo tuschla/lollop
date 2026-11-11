@@ -187,13 +187,22 @@
     <string name="log_weekly_velocity_drop">Bar-speed drop this week</string>
     <!-- FEEDBACK-14: listed overtraining signs + how long -->
     <string name="log_weekly_signs_q">Noticed any of these lately?</string>
-    <string name="log_weekly_signs_ctx">Two or more lasting a week or longer can mean you need more recovery.</string>
+    <!-- %1$d = OVERTRAINING_MIN_SIGNS, %2$s = OVERTRAINING_MIN_WEEKS (CoreConstants), filled in
+         ReviewSheets.kt; the quantity is OVERTRAINING_MIN_WEEKS. -->
+    <plurals name="log_weekly_signs_ctx">
+        <item quantity="one">%1$d or more lasting a week or longer can mean you need more recovery.</item>
+        <item quantity="other">%1$d or more lasting %2$s weeks or longer can mean you need more recovery.</item>
+    </plurals>
     <string name="log_weekly_sign_performance">Sessions feel harder or performance has dropped</string>
     <string name="log_weekly_sign_mood">Low mood or less motivation</string>
     <string name="log_weekly_sign_rhr">Resting heart rate higher than usual</string>
     <string name="log_weekly_sign_sleep">Sleeping worse</string>
     <string name="log_weekly_signs_how_long">For how long?</string>
-    <string name="log_weekly_signs_lt1">Less than a week</string>
+    <!-- %1$s = OVERTRAINING_MIN_WEEKS (CoreConstants), also the quantity; filled in ReviewSheets.kt. -->
+    <plurals name="log_weekly_signs_lt1">
+        <item quantity="one">Less than a week</item>
+        <item quantity="other">Less than %1$s weeks</item>
+    </plurals>
     <!-- %1$s = OVERTRAINING_MIN_WEEKS, %2$s = NFOR_DECLINE_WEEKS (CoreConstants), filled in ReviewSheets.kt. -->
     <string name="log_weekly_signs_1to2">%1$s–%2$s weeks</string>
     <!-- %1$s = NFOR_DECLINE_WEEKS (CoreConstants). -->

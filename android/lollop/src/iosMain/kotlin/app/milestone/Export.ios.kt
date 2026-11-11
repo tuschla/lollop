@@ -33,7 +33,7 @@ import platform.posix.read
 internal actual suspend fun shareGpx(ctx: PlatformContext, gpx: String, runStartEpochSec: Long) {
     val file = withContext(Dispatchers.IO) { writeTempFile(gpxFileName(runStartEpochSec), gpx.encodeToByteArray()) }
     if (file == null) {
-        showNotice(ctx, ctx.appResources().getString(Res.string.main_export_gpx_failed), long = true)
+        UiMessages.post(UiMessage(ctx.appResources().getString(Res.string.main_export_gpx_failed), long = true))
         return
     }
     presentShareSheet(listOf(file))
@@ -47,19 +47,19 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     val exported by rememberUpdatedState(onExported)
     return remember {
         {
-            AppRuntime.scope.launch {
+            AppProcess.scope.launch {
                 val ctx = PlatformContext.INSTANCE
                 val res = ctx.appResources()
                 val file = readDataExport(ctx)?.let { lines -> withContext(Dispatchers.IO) { writeBackupFile(lines) } }
                 if (file == null) {
-                    showNotice(ctx, res.getString(Res.string.main_export_failed), long = true)
+                    UiMessages.post(UiMessage(res.getString(Res.string.main_export_failed), long = true))
                     return@launch
                 }
                 presentShareSheet(listOf(file)) { completed ->
                     NSFileManager.defaultManager.removeItemAtURL(file, error = null)
                     if (completed) {
                         exported()
-                        showNotice(ctx, res.getString(Res.string.main_export_ok), long = true)
+                        UiMessages.post(UiMessage(res.getString(Res.string.main_export_ok), long = true))
                     }
                 }
             }
@@ -113,6 +113,3 @@ private fun readChunk(fd: Int, buf: ByteArray): Int {
         if (errno != EINTR) error("reading the backup failed (errno $errno)")
     }
 }
-
-/** Kotlin/Native has no recoverable VM errors: an out-of-memory aborts the process. */
-internal actual fun Throwable.isFatalToVm(): Boolean = false

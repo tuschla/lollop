@@ -8,7 +8,6 @@ import platform.CoreGraphics.CGRectMake
 import platform.MapKit.MKAnnotationProtocol
 import platform.MapKit.MKAnnotationView
 import platform.MapKit.MKMapRect
-import platform.MapKit.MKMapSizeWorld
 import platform.MapKit.MKMapView
 import platform.MapKit.MKMapViewDelegateProtocol
 import platform.MapKit.MKOverlayLevelAboveRoads
@@ -17,10 +16,6 @@ import platform.MapKit.MKOverlayRenderer
 import platform.MapKit.insertOverlay
 import platform.MapKit.removeOverlay
 import platform.darwin.NSObject
-
-/** Width (and height) of the MapKit world square, in map points. */
-@OptIn(ExperimentalForeignApi::class)
-internal val MapWorldPoints: Double = MKMapSizeWorld.width
 
 /**
  * The MKMapView every map in the app uses: no rotation, pitch, compass or scale, so

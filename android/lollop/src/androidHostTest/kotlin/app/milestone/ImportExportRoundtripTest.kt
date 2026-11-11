@@ -25,6 +25,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -512,16 +513,15 @@ class ImportExportRoundtripTest {
             .filter { it.get(a) != it.get(b) }
             .map { "${it.name}:\n  before ${it.get(a)}\n  after  ${it.get(b)}" }
 
-    /** Import [file] as the Profile › Your data flow does, rebooting into it in
-     *  process ([AppRuntime.requestReboot]) until the boot confirmed the restore. */
+    /** Import [file] as the Profile › Your data flow does ([DataRestore.restore]),
+     *  rebooting into it in process until the boot confirmed the restore. */
     private fun importBackupAndReboot(file: File): ImportSummary {
         val check = onAppScope { readImportCandidate(ctx, Uri.fromFile(file)) }
         assertTrue("the backup validates", check is ImportCheck.Valid)
         val lines = (check as ImportCheck.Valid).lines
         val summary = summarizeImport(lines, kotlinx.datetime.TimeZone.currentSystemDefault())
-        assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
-        ctx.setupPrefs().edit().putInt(KEY_RESTORED_ENTRIES, summary.entries).commit()
-        AppRuntime.requestReboot()
+        assertEquals(DataImportResult.Replaced, onAppScope { DataRestore.restore(ctx, lines, summary.entries) })
+        assertFalse(DataRestore.running.value)
         // The reboot is the session's boot effect re-keyed on the new generation: it
         // runs on a recomposition, so wait on the compose clock, not the looper alone.
         rule.waitForState { AppRuntime.bootHandled && !ctx.setupPrefs().contains(KEY_RESTORED_ENTRIES) }

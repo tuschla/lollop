@@ -21,9 +21,17 @@ import os
 import random
 import sys
 
-from events import events, hav, kind, moving
+from events import events, kind
 from feeder import ALT, A, B, KNOTS, LAT0, LON0, M_LAT, M_LON
 from parse import distance, duration
+
+
+def hav(a, b):
+    """Great-circle metres between two fixes: the script's measure of the fed route."""
+    la1, la2 = math.radians(a["lat"]), math.radians(b["lat"])
+    dla, dlo = la2 - la1, math.radians(b["lon"] - a["lon"])
+    h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
+    return 2 * 6371000.0 * math.asin(min(1.0, math.sqrt(h)))
 
 
 def route(rec, seed, out):
@@ -100,12 +108,13 @@ def route(rec, seed, out):
         x, y = at(s)
         p = {"lat": LAT0 + (y + nn) / M_LAT, "lon": LON0 + (x + en) / M_LON}
         alt = ALT + 4 * math.sin(2 * math.pi * s / lap)
-        if prev is not None and start < t <= stop:
+        # The fed route's own moving legs, measured by the script (the seconds the
+        # runner runs): the expectation the core's of-record figures are held to.
+        if prev is not None and start < t <= stop and st == "run":
             d = hav(prev, p)
-            if d >= 0.5:          # the core's moving floor (< 0.5 m/s = stopped)
-                fed_m += d
-                moving_s += 1
-                cm += d
+            fed_m += d
+            moving_s += 1
+            cm += d
         prev = p
         rows.append(f"{t}\t{p['lon']:.7f}\t{p['lat']:.7f}\t{alt:.1f}\t{v * KNOTS:.2f}\t{st}\t{cm:.1f}")
 
@@ -128,7 +137,6 @@ def analyze(logp, expp, t0, feedp, corep, finish, history, outp):
     if runs:
         r = runs[-1]
         p = r["points"]
-        mov, dist = moving(p, set(r.get("segment_starts", [])))
         gaps = [(p[i]["observed_at"] - p[i - 1]["observed_at"], p[i - 1]["observed_at"]) for i in range(1, len(p))]
         sch = exp["schedule"]
 
@@ -143,7 +151,6 @@ def analyze(logp, expp, t0, feedp, corep, finish, history, outp):
             segment_starts=r.get("segment_starts", []), observed_at=r.get("observed_at"),
             entry_id=r.get("entry_id"), workout_type=r.get("workout_type"), session_rpe=r.get("session_rpe"),
             first_fix_t=round(p[0]["observed_at"] - t0, 1), last_fix_t=round(p[-1]["observed_at"] - t0, 1),
-            log_moving_m=round(dist, 1), log_moving_s=int(mov),
             max_gap_s=max(gaps)[0] if gaps else None,
             max_gap_at_t=round(max(gaps)[1] - t0, 1) if gaps else None,
             windows={"screen_off": window("SCREEN_FROM", "SCREEN_TO"),
@@ -171,7 +178,7 @@ def checks(resp, checksp):
         c = g["core"]
         fed, recm = e["fed_moving_m"], c["distance_m"]
         chk(abs(recm - fed) <= 0.03 * fed, "saved distance vs fed route",
-            f"of-record {recm/1000:.3f} km vs fed {fed/1000:.3f} km ({(recm/fed-1)*100:+.1f}%; raw moving legs {g['log_moving_m']/1000:.3f} km)")
+            f"of-record {recm/1000:.3f} km vs fed {fed/1000:.3f} km ({(recm/fed-1)*100:+.1f}%)")
         chk(abs(c["moving_s"] - e["moving_s"]) <= max(45, 0.03 * e["moving_s"]), "saved moving time vs fed route",
             f"of-record {c['moving_s']:.0f} s vs fed {e['moving_s']} s")
         chk(abs(c["split_clock_s"] - c["moving_s"]) <= 2, "splits clock equals headline moving time",
@@ -233,11 +240,11 @@ def sections(out):
         g = json.load(open(gp))
         e, ui, c = g["expected"], g["ui"], g.get("core") or {}
         L = ["## Tracked run vs fed route\n",
-             "| quantity | fed route | saved track, raw moving legs | saved track, of-record (core) | finish sheet | History row |",
-             "|---|---|---|---|---|---|",
+             "| quantity | fed route | saved track, of-record (core) | finish sheet | History row |",
+             "|---|---|---|---|---|",
              f"| moving distance (km) | {e['fed_moving_m']/1000:.3f} (path {e['true_moving_m']/1000:.3f}) | "
-             f"{g.get('log_moving_m', 0)/1000:.3f} | {c.get('distance_m', 0)/1000:.3f} | {ui['finish_km']} | {ui['history_km']} |",
-             f"| moving time (s) | {e['moving_s']} | {g.get('log_moving_s')} | {c.get('moving_s')} (km splits clock {c.get('split_clock_s')}) | "
+             f"{c.get('distance_m', 0)/1000:.3f} | {ui['finish_km']} | {ui['history_km']} |",
+             f"| moving time (s) | {e['moving_s']} | {c.get('moving_s')} (km splits clock {c.get('split_clock_s')}) | "
              f"{ui['finish_moving_s']} | {ui['history_s']} |",
              f"\nFinish sheet: `{ui['finish']}` · History row: `{ui['history']}`",
              f"\npoints saved: {g.get('points')} (usable {g.get('usable_points')}), segment_starts: {g.get('segment_starts')}, "

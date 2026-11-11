@@ -32,7 +32,7 @@ class EventDispatcherTest {
 
     @Before
     fun setUp() {
-        // The consumer runs on AppRuntime.scope (Dispatchers.Main.immediate).
+        // The consumer runs on AppProcess.scope (Dispatchers.Main.immediate).
         // Install the test Main BEFORE the process starts so its scope dispatches
         // through it; runTest then shares this scheduler.
         Dispatchers.setMain(StandardTestDispatcher())

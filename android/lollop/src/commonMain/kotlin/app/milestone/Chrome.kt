@@ -50,7 +50,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -60,36 +59,17 @@ import app.milestone.resources.app_name
 import app.milestone.resources.ic_action_log_plus
 import app.milestone.resources.ic_brand_mark
 import app.milestone.resources.ic_content_run
-import app.milestone.resources.ic_nav_history_selected
-import app.milestone.resources.ic_nav_history_unselected
-import app.milestone.resources.ic_nav_profile_selected
-import app.milestone.resources.ic_nav_profile_unselected
-import app.milestone.resources.ic_nav_today_selected
-import app.milestone.resources.ic_nav_today_unselected
 import app.milestone.resources.ic_ui_close
 import app.milestone.resources.main_close
-import app.milestone.resources.main_dest_history
-import app.milestone.resources.main_dest_profile
-import app.milestone.resources.main_dest_today
 import app.milestone.resources.main_log
 import app.milestone.resources.main_return
 import app.milestone.resources.main_run_in_progress
-import org.jetbrains.compose.resources.DrawableResource
-import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 // Shared shell chrome (design/screens/00-chrome.md): brand top bar, three-slot
 // bottom nav with pill selection and the run-in-progress chip. Pure
 // presentation, every value here is a token or an exact dp from the chrome spec.
-
-/** The three destinations, in nav order (chrome §1; Today owns both the day's
- *  call and the plan). */
-enum class Dest(val labelRes: StringResource, val iconSelected: DrawableResource, val iconUnselected: DrawableResource) {
-    Today(Res.string.main_dest_today, Res.drawable.ic_nav_today_selected, Res.drawable.ic_nav_today_unselected),
-    History(Res.string.main_dest_history, Res.drawable.ic_nav_history_selected, Res.drawable.ic_nav_history_unselected),
-    Profile(Res.string.main_dest_profile, Res.drawable.ic_nav_profile_selected, Res.drawable.ic_nav_profile_unselected),
-}
 
 /** Bar height of [BrandTopBar] (chrome §2). */
 private val BrandTopBarHeight = 44.dp
@@ -405,16 +385,6 @@ internal fun DetailSheet(
         }
     }
 }
-
-/**
- * Marks a node as a traversal group: TalkBack reads its children together, sorted
- * by the group's own layout direction. Every window's top container (the
- * activity's content, a sheet, a dialog) needs it: a Compose window's root node is
- * always left to right (`AndroidComposeView` never sets its direction), so without
- * it an RTL locale hears a row outside a lazy list (the bottom nav, a dialog's
- * buttons) end to start.
- */
-internal fun Modifier.traversalGroup(): Modifier = semantics { isTraversalGroup = true }
 
 /** A sheet's scrolling body: full width, scrolled by [scroll], clear of the
  *  navigation bar, with the sheet's [sheetPadding] at [gutter]. */

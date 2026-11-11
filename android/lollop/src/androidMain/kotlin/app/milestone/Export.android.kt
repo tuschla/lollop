@@ -63,10 +63,10 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-ndjson"),
     ) { uri ->
-        if (uri != null) AppRuntime.scope.launch {
+        if (uri != null) AppProcess.scope.launch {
             val ok = exportDataTo(app, uri)
             if (ok) exported()
-            showNotice(app, app.appResources().getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed), long = true)
+            UiMessages.post(UiMessage(app.appResources().getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed), long = true))
         }
     }
     return { launcher.launch(dataExportFilename()) }
@@ -123,6 +123,3 @@ suspend fun readImportCandidate(ctx: Context, uri: Uri): ImportCheck = withConte
 /** [streamValidateImport] over an [InputStream]. */
 internal fun streamValidateImport(input: InputStream, max: Long, maxLine: Long = MAX_IMPORT_LINE_BYTES): ImportCheck =
     streamValidateImport({ input.read(it) }, max, maxLine)
-
-internal actual fun Throwable.isFatalToVm(): Boolean =
-    this is VirtualMachineError && this !is OutOfMemoryError && this !is StackOverflowError

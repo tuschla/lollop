@@ -20,9 +20,6 @@ import platform.UserNotifications.UNTimeIntervalNotificationTrigger
  * has no exact-alarm permission: the notice never shows.
  */
 internal actual object RestAlarmPlatform {
-    /** The rest-done notification's identifier: one at a time, replaced by a new rest. */
-    internal const val REST_DONE_ID = "rest_done"
-
     actual val countdown = RestCountdown.WholeRest
 
     actual val exactAlarms: ExactAlarms? = null
@@ -70,6 +67,3 @@ internal actual object RestAlarmPlatform {
         }
     }
 }
-
-/** Show the running rest's Live Activity again ([IosSurfaces] after its host attached). */
-internal fun RestAlarm.resendActivity() = showCountdownAgain(PlatformContext.INSTANCE)

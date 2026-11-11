@@ -136,18 +136,6 @@ internal fun KeyValueStore.dropLegacyDistanceUnit() = edit { remove(LEGACY_DISTA
 internal fun showSetupOnBoot(fresh: Boolean, view: ViewModel, store: KeyValueStore): Boolean =
     fresh && !store.getBoolean(KEY_ONBOARDING_DONE, false) && view.profile == null
 
-/** How many entries a data import just restored, read once: the key is removed, so
- *  the confirmation shows on the first boot after the import only. Null when none. */
-internal fun takeRestoredEntries(store: KeyValueStore): Int? {
-    val n = store.getInt(KEY_RESTORED_ENTRIES, -1)
-    if (n < 0) return null
-    store.edit { remove(KEY_RESTORED_ENTRIES) }
-    return n
-}
-
-/** An import restart is still replaying the restored log (the key goes once boot ran). */
-internal fun restoringImport(store: KeyValueStore): Boolean = store.getInt(KEY_RESTORED_ENTRIES, -1) >= 0
-
 /** How old a crash-recovery sidecar's newest fix may be and still be offered for
  *  resume. Beyond this the app was gone long enough that the run is almost certainly
  *  dead (a stale resume would let one Stop&save write a garbage multi-hour run). */

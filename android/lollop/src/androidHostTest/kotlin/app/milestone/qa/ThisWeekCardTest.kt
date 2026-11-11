@@ -40,6 +40,7 @@ import app.milestone.SessionPlanView
 import app.milestone.SessionStatus
 import app.milestone.SessionType
 import app.milestone.ThisWeekCard
+import app.milestone.TodayActions
 import app.milestone.TodayDestination
 import app.milestone.ViewModel
 import app.milestone.WeekActions
@@ -186,9 +187,11 @@ class ThisWeekCardTest {
         rule.setContent {
             MilestoneTheme {
                 TodayDestination(
-                    model, rememberLazyListState(), onEvent = {}, onStartSetup = {}, onLogPlanItem = {},
-                    onLogPastItem = { _, _ -> }, onLogPastRun = {}, onTrackRun = {}, onOpenSheet = {},
-                    lastPain = null, onOpenProfile = {}, onRerunSetup = {},
+                    model, rememberLazyListState(),
+                    TodayActions(
+                        onEvent = {}, onStartSetup = {}, onRerunSetup = {}, onOpenProfile = {}, onOpenSheet = {},
+                        onLogPlanItem = {}, onLogPastItem = { _, _ -> }, onLogPastRun = {}, onTrackRun = {},
+                    ),
                 )
             }
         }

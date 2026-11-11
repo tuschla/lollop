@@ -200,6 +200,18 @@ internal val PaperDarkPalette = Palette(
     dangerText = DangerTextOnDark,
 )
 
+/** Light/dark selection: follow the OS, or force one. */
+enum class DarkMode {
+    System, Light, Dark;
+
+    /** Dark under this selection, where the OS is dark when [systemDark]. */
+    fun isDark(systemDark: Boolean): Boolean = when (this) {
+        System -> systemDark
+        Light -> false
+        Dark -> true
+    }
+}
+
 /**
  * User-selectable visual themes (visual-design-system.md §1, §9). Each carries a
  * [dark] and [light] palette; the theme root picks between them by system setting.
