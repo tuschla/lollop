@@ -7,7 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Pure rules of the run detail redesign (ui-sweep §0.2, §2.5, §2.7). */
+/** Rules of the run detail redesign (ui-sweep §0.2, §2.5, §2.7). */
 class RunDetailLogicTest {
 
     private fun split(i: Int, sec: Int, pace: String, partial: Boolean = false, km: Double = i.toDouble()) =
@@ -63,7 +63,6 @@ class RunDetailLogicTest {
 
     @Test
     fun gpxFileName_usesTheRunsLocalStart() {
-        // 2026-10-14 07:42 in Berlin (UTC+2).
         val start = java.time.ZonedDateTime.of(2026, 10, 14, 7, 42, 30, 0, ZoneId.of("Europe/Berlin")).toEpochSecond()
         assertEquals("run-2026-10-14-0742.gpx", gpxFileName(start, TimeZone.of("Europe/Berlin")))
     }

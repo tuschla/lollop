@@ -26,9 +26,6 @@ import app.milestone.resources.run_stat_distance
 import app.milestone.resources.run_stat_time
 import org.jetbrains.compose.resources.stringResource
 
-// A run's headline stats (distance, time, pace): the run detail sheet and the
-// full-screen route map show them.
-
 /** One headline stat column: overline [label], tabular [value], its [unit] (may be
  *  blank) and the merged [spoken] form ("Distance, 3.18 miles"). */
 internal data class RunStat(val label: String, val value: String, val unit: String, val spoken: String)
@@ -62,13 +59,12 @@ internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
 /** Smallest a headline stat value auto-sizes to before it would wrap (spec §2.2). */
 private val StatValueMinSize = 24.sp
 
-/** Step a headline stat value shrinks by while auto-sizing toward [StatValueMinSize]. */
 private const val StatValueStepSp = 1f
 
 /**
  * The 3-up headline stats (spec §2.2, the tracker's stat typography a step
  * smaller): equal columns of a [TileOverline] label over a `Type.Display` value
- * (auto-sized down to 24sp before it would wrap) with its unit in `Type.Caption` on
+ * (auto-sized down to [StatValueMinSize] before it would wrap) with its unit in `Type.Caption` on
  * the value's baseline. [compact] (the full-screen map's stat sheet) sets the
  * values in `Type.Title` and reads the whole row once. When a value at its
  * smallest size (or a label word) can't fit its column (a large font on a narrow
@@ -93,8 +89,6 @@ internal fun RunStatColumns(stats: List<RunStat>, compact: Boolean) {
         val columnPx = ((width - gapPx * (n - 1)) / n).coerceAtLeast(0)
         fun lineWidth(text: String, style: TextStyle) =
             measurer.measure(text, style, maxLines = 1, softWrap = false).size.width
-        // The largest value size (Display stepped down to the floor; compact: Title
-        // only) that fits [roomPx] beside its unit, or null when none does.
         fun fittingStyle(stat: RunStat, roomPx: Int): TextStyle? {
             val unitPx = if (stat.unit.isEmpty()) 0 else unitGapPx + lineWidth(stat.unit, Type.Caption)
             val sizes = if (compact) {
@@ -121,7 +115,6 @@ internal fun RunStatColumns(stats: List<RunStat>, compact: Boolean) {
     }
 }
 
-/** One headline stat: its overline label over the value at [valueStyle] and its unit. */
 @Composable
 private fun RunStatColumn(stat: RunStat, valueStyle: TextStyle, modifier: Modifier) {
     Column(

@@ -55,13 +55,12 @@ class YouthJourneysTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    /** 15 Mar 2011: 15 on the pinned Monday. */
+    /** 15 on the pinned Monday. */
     private val youthBirthday = LocalDate.of(2011, 3, 15).toEpochDay()
 
     private fun youthProfile(): Event =
         QaHarness.strengthProfile().copy(birthEpochDay = youthBirthday, ageYears = 15.0)
 
-    /** Scroll Today's list to [matcher]. */
     private fun scrollTodayTo(matcher: SemanticsMatcher) {
         rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(matcher)
         rule.waitForIdle()
@@ -89,7 +88,6 @@ class YouthJourneysTest {
         scrollTodayTo(hasText(str(R.string.activity_week_minutes, 0, target)))
         rule.waitUntilDisplayed(hasText(str(R.string.activity_week_minutes, 0, target)))
 
-        // Log activity from the card: 45 min of sport, vigorous.
         scrollTodayTo(hasText(str(R.string.activity_log_action)) and hasClickAction())
         rule.onNode(hasText(str(R.string.activity_log_action)) and hasClickAction()).performClick()
         // The editor is open (its title shares the card action's label).

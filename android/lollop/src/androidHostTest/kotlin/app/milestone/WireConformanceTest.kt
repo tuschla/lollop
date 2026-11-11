@@ -16,7 +16,7 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * The generated Kotlin types (WireTypes.kt) against the core's own fixtures
- * (`shared/tests/fixtures`, on the test classpath):
+ * (`shared/tests/fixtures`):
  *  - every view snapshot decodes with no key left unread and re-encodes to the
  *    same JSON;
  *  - every line the old hand-written encoder persisted
@@ -36,8 +36,7 @@ class WireConformanceTest {
     private val shellFilled = setOf("entry_id", "observed_at")
 
     private fun fixtures(dir: String, suffix: String): List<File> {
-        val url = checkNotNull(javaClass.classLoader!!.getResource(dir)) { "fixtures $dir not on the test classpath" }
-        val files = File(url.toURI()).listFiles { f -> f.name.endsWith(suffix) }.orEmpty().sortedBy { it.name }
+        val files = File(REPO_ROOT, "shared/tests/fixtures/$dir").listFiles { f -> f.name.endsWith(suffix) }.orEmpty().sortedBy { it.name }
         assertTrue("no $dir/*$suffix fixtures", files.isNotEmpty())
         return files
     }
@@ -93,7 +92,6 @@ class WireConformanceTest {
     private fun payloadKeys(event: JsonElement): Set<String> =
         ((event as? JsonObject)?.values?.singleOrNull() as? JsonObject)?.keys.orEmpty()
 
-    /** The view JSON a fresh core shows after [lines]. */
     private fun replayedView(lines: List<String>): String {
         JniCore.reset()
         try {

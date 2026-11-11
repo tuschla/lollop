@@ -1,15 +1,14 @@
 //! Compaction golden corpus. Each `<case>.in.ndjson` is a raw event log in
 //! serde wire form; the matching `<case>.expected.ndjson` is the
-//! replay-equivalent survivor set. Both entry points are graded: the decoded
-//! [`compact_event_log`] and the raw-line [`compact_lines`] the Android shell
-//! calls over JNI.
+//! replay-equivalent survivor set of [`compact_lines`], the compaction the
+//! shells run over the bridge.
 
 use std::fs;
 use std::path::Path;
 
 use crux_core::App;
 use shared::log::{LineFacts, compact_lines};
-use shared::{Engine, Event, compact_event_log};
+use shared::{Engine, Event};
 
 mod common;
 
@@ -57,13 +56,6 @@ fn compaction_golden_fixtures() {
         let expected_path = dir.join(format!("{case}.expected.ndjson"));
         let input = common::events(&in_path);
         let expected = common::events(&expected_path);
-        assert_eq!(
-            compact_event_log(input.clone()),
-            expected,
-            "compacting {} diverged from {}",
-            in_path.display(),
-            expected_path.display(),
-        );
         let raw = fs::read_to_string(&in_path).expect("fixture reads");
         let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
         let verdict = compact_lines(
@@ -82,7 +74,6 @@ fn compaction_golden_fixtures() {
             "raw-line compaction of {} diverged",
             in_path.display()
         );
-        // The survivor set must render exactly what the full log renders.
         assert!(
             replayed_view(&input) == replayed_view(&expected),
             "{} does not replay to the same view as {}",

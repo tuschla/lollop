@@ -13,10 +13,7 @@ import kotlinx.datetime.LocalDateTime
 /** A locale: `java.util.Locale` on Android, `NSLocale` on iOS. */
 expect class PlatformLocale
 
-/**
- * The app's language with Latin digits ([appLocaleOf]'s rule over the device's
- * locales). File names and exported data keep their fixed ISO patterns.
- */
+/** The app's language with Latin digits ([appLocaleOf]'s rule over the device's locales). */
 internal expect fun appLocale(): PlatformLocale
 
 /**
@@ -67,11 +64,9 @@ internal enum class WeekdayWidth {
     Narrow,
 }
 
-/** [day]'s name in [locale] at [width]. */
 internal expect fun weekdayName(day: DayOfWeek, width: WeekdayWidth, locale: PlatformLocale = appLocale()): String
 
-/** [day]'s short name ("Thu") in the app's language: the setup weekday chips and
- *  lists, the widget's next-session day. */
+/** [day]'s short name ("Thu") in the app's language. */
 internal fun weekdayShort(day: DayOfWeek, locale: PlatformLocale = appLocale()): String =
     weekdayName(day, WeekdayWidth.Short, locale)
 
@@ -102,7 +97,6 @@ internal expect fun formatMediumDate(date: LocalDate, locale: PlatformLocale = a
  */
 internal expect fun relativeDayLabel(dayDelta: Long, locale: PlatformLocale = appLocale()): String
 
-/** Whether the device shows the time of day on a 24-hour clock. */
 internal expect fun is24HourClock(ctx: PlatformContext): Boolean
 
 /**

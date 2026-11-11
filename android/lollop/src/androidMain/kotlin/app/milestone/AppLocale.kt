@@ -9,7 +9,7 @@ import android.os.LocaleList
 import java.util.Locale
 
 // The app writes every number in ASCII digits, so a screen or export never mixes
-// digit scripts (RunCards.kt [displayFigure], DEVIATIONS #45). Figures pin
+// digit scripts (RunText.kt [displayFigure], DEVIATIONS #45). Figures pin
 // Locale.US. Counts and times go through string resources, which use the
 // locale's digits: on a phone set to Arabic, Persian or Devanagari digits
 // "3 × 5 @ 102.5 kg" would read "٣ × ٥ @ 102.5 kg". So the app formats in the

@@ -2,37 +2,32 @@
 //! model/event-log involvement. Extracts GPS+HR fixes from a byte blob for the
 //! run import ([`crate::import`]). Nothing here
 //! is recommendation-bearing, so no `Recommended`/`ClaimId` is attached.
-//!
-//! Pure function: no clocks, no IO beyond the given byte slice.
 
 use fitparser::{FitDataRecord, Value, profile::MesgNum};
 
 use crate::gps;
 
 /// One GPS+HR fix extracted from a FIT `record` message.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FitFix {
     pub lat: f64,
     pub lon: f64,
     pub time_sec: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub hr_bpm: Option<u16>,
     /// Horizontal position accuracy in metres from the FIT `record.gps_accuracy`
     /// field (field 31, `UInt8`, scale 1). `None` when the file has no such
     /// field; the import then gives the fix the unknown-accuracy sentinel.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub accuracy_m: Option<f32>,
 }
 
 /// A parsed FIT activity: fixes grouped into segments by the recorder's
 /// timer stop_all/start events (see [`parse_fit`] for the exact split rule).
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FitTrack {
     pub segments: Vec<Vec<FitFix>>,
 }
 
-/// Why a FIT file can't be imported as a run. Each variant maps to one stable
-/// [`FitError::kind`] the shell keys its per-file import reason on.
+/// Why a FIT file can't be imported as a run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FitError {
     /// The bytes are not a FIT file (bad/oversized header, missing `.FIT` tag).
@@ -48,16 +43,6 @@ pub enum FitError {
     /// The file records a non-running activity. Carries the FIT sport name in
     /// plain lowercase words (e.g. `"cycling"`, `"cross country skiing"`).
     NotARun(String),
-}
-
-impl FitError {
-    /// Detail for the kind: the sport for [`FitError::NotARun`], else empty.
-    pub fn context(&self) -> &str {
-        match self {
-            FitError::NotARun(sport) => sport.as_str(),
-            FitError::NotFit | FitError::Damaged | FitError::NoTrack | FitError::TooShort => "",
-        }
-    }
 }
 
 /// deg = semicircles × 180 / 2^31 (FIT profile scale 1, so fitparser returns raw
@@ -115,8 +100,6 @@ impl TrackScan {
                     self.current.push(fix);
                 }
             }
-            // A "start" after a stop_all needs no bookkeeping here: the next
-            // Record simply accumulates into the fresh `current`.
             MesgNum::Event if is_timer_event(record, "stop_all") && !self.current.is_empty() => {
                 self.segments.push(std::mem::take(&mut self.current));
             }
@@ -127,17 +110,12 @@ impl TrackScan {
         }
     }
 
-    /// The track, or why there is none. `truncated` picks the honest message
-    /// when too few fixes survive.
     fn into_track(mut self, truncated: bool) -> Result<FitTrack, FitError> {
         if !self.current.is_empty() {
             self.segments.push(self.current);
         }
         let total_fixes: usize = self.segments.iter().map(Vec::len).sum();
         if total_fixes < 2 {
-            // Fewer than two positioned records survived, so there is no track worth
-            // logging. A stream/decode error or a rejected chained header means the
-            // file is damaged/incomplete; an otherwise-clean file simply has no GPS.
             return Err(if truncated {
                 FitError::Damaged
             } else {
@@ -248,8 +226,6 @@ fn scan_fit(bytes: &[u8]) -> (TrackScan, bool) {
     let mut own_crc_check = false;
     while !buffer.is_empty() {
         if expect_header {
-            // Reject a structurally impossible (or non-FIT) chained header before
-            // fitparser slices on its header_size byte; keep what decoded first.
             if validate_fit_header(buffer).is_err() {
                 truncated = true;
                 break;
@@ -259,7 +235,6 @@ fn scan_fit(bytes: &[u8]) -> (TrackScan, bool) {
         let rewritten = if consumed < end_of_messages {
             match opaque_developer_fields(buffer) {
                 Ok(def) => def,
-                // Too many fields to renumber: stop, keeping what decoded.
                 Err(TooManyFields) => {
                     truncated = true;
                     break;

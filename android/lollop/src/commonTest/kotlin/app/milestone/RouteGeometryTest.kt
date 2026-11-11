@@ -7,15 +7,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/**
- * The route geometry every route map shares on both platforms ([RouteTrack],
- * [MercatorFit], [RouteLayout]): distances, framing, the kept window, the
- * progression chunks, marker thinning and label placement, in canvas pixels.
- */
 class RouteGeometryTest {
     private val metresPerDegLat = 111_195.0
 
-    /** A straight north-bound leg of [n] fixes [stepM] apart from (lat, lon), one per [stepSec]. */
     private fun north(lat: Double, lon: Double, n: Int, stepM: Double, t0: Long = 0L, stepSec: Long = 10L) =
         (0 until n).map { GpsPoint(lat + it * stepM / metresPerDegLat, lon, t0 + it * stepSec, 5.0) }
 
@@ -150,7 +144,7 @@ class RouteGeometryTest {
         assertEquals(listOf(-1, 0, 1, 2, 3), labels)
         assertEquals(l.ys[0].last(), l.fy, 0f)
         assertEquals(l.ys[0].first(), l.sy, 0f)
-        // No two placed centres closer than the 28dp spacing.
+        // No two placed centres closer than the marker spacing.
         for (i in 0 until l.placed) for (j in i + 1 until l.placed) {
             assertTrue(hypot(l.marks[i * 3] - l.marks[j * 3], l.marks[i * 3 + 1] - l.marks[j * 3 + 1]) >= 28f)
         }

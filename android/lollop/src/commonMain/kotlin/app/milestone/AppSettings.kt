@@ -3,7 +3,7 @@ package app.milestone
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** Default live-tracking pace bucket, in minutes (AppSettings and RunSession). */
+/** Default live-tracking pace bucket. */
 internal const val DEFAULT_PACE_BUCKET_MINUTES = 4
 
 /**
@@ -39,7 +39,6 @@ object AppSettings {
         { k, v -> putString(k, v.name) },
     )
 
-    // The defaults table.
     private val DYNAMIC = bool("dynamic_accent", true)
     private val THEME = Pref("app_theme", AppTheme.Default, { k, _ -> AppTheme.from(getString(k, null)) }, { k, v -> putString(k, v.name) })
     private val DARK_MODE = enum("dark_mode", DarkMode.System) { n -> DarkMode.entries.firstOrNull { it.name == n } }
@@ -97,13 +96,12 @@ object AppSettings {
 
     private fun <T> KeyValueStore.read(pref: Pref<T>): T = pref.read(this, pref.key, pref.default)
 
-    /** The settings version [migrate] brings a store to. */
     private const val VERSION_KEY = "settings_version"
     private const val VERSION = 2
 
     /**
      * Bring the stored settings up to [VERSION], once per install, before the
-     * first [load]. A fresh install reads the defaults table. For an install
+     * first [load]. A fresh install reads the defaults. For an install
      * already in use (an event log):
      * - version 1: from before Paper became the default (no saved theme), it keeps
      *   what it rendered, Rose with its saved (or the old default-off) accent;
@@ -128,7 +126,6 @@ object AppSettings {
         }
     }
 
-    /** Publish [value] on [flow] and persist it as [pref]. */
     private fun <T> set(ctx: PlatformContext, pref: Pref<T>, flow: MutableStateFlow<T>, value: T) {
         flow.value = value
         prefs(ctx).edit { pref.write(this, pref.key, value) }

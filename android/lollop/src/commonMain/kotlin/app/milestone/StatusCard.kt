@@ -74,10 +74,8 @@ internal fun StatusTone.toneColors(): StatusToneColors {
     }
 }
 
-/** Size of a [StatusCard]'s solid mark tile. */
 private val StatusMarkSize = 40.dp
 
-/** Size of the glyph inside a [StatusCard]'s mark tile. */
 private val StatusGlyphSize = 22.dp
 
 /**
@@ -163,8 +161,8 @@ private const val DangerTileAlpha = 0.12f
 
 /**
  * A [StatusCard]'s action footer (ui-sweep §5): a hairline, then the secondary
- * verb as a [TextAction] at the start (offset by `-TextActionInset`) and the main
- * verb as a content-sized [SecondaryButton] at the end. When the two do not fit
+ * verb as a [TextAction] at the start and the main verb as a content-sized
+ * [SecondaryButton] at the end. When the two do not fit
  * on one line (font scale) they stack: the button full width first, the text
  * action below it.
  */
@@ -226,9 +224,8 @@ private fun FooterLayout(secondary: @Composable () -> Unit, primary: @Composable
 }
 
 /**
- * The hero's status chip (ui-sweep §5 dedupe rule): "Adjusted" in Bold
- * [Type.Chip] white on a [StatusColors.warn] pill, 24dp visual, [ChoiceCellShape].
- * The adjustment prose lives in the [StatusCard] above; this only points at it.
+ * The hero's status chip (ui-sweep §5 dedupe rule). The adjustment prose lives in
+ * the [StatusCard] above; this only points at it.
  */
 @Composable
 internal fun AdjustedChip() {

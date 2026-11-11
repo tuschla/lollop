@@ -184,7 +184,6 @@ fn a_do_not_train_hold_blocks_the_prescription() {
     assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
 }
 
-// ── A wrapped next session keeps a clean prescription ──────────────────────
 #[test]
 fn low_wrapped_next_session_is_not_folded_with_todays_adjustment() {
     // Strength week lifts on days 0/2/4 (Mon/Wed/Fri). With today at day 5

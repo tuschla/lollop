@@ -84,14 +84,11 @@ class HistoryProgressTest {
         rule.waitForIdle()
         val cells = rule.onAllNodesWithTag("history-record").fetchSemanticsNodes().map { it.boundsInRoot }
         assertEquals("longest run + 1K/5K/10K", 4, cells.size)
-        // Two columns: cells pair up side by side, the second row below the first.
         assertEquals(cells[0].top, cells[1].top, 0.5f)
         assertTrue("column 2 sits right of column 1", cells[1].left >= cells[0].right - 0.5f)
         assertEquals(cells[0].left, cells[2].left, 0.5f)
         assertTrue("row 2 sits below row 1", cells[2].top >= cells[0].bottom - 0.5f)
-        // Both columns are equally wide.
         assertEquals(cells[0].width, cells[1].width, 1.5f)
-        // Every cell is a tappable target of at least 48dp.
         cells.forEach { assertTrue("record cell ≥48dp", it.height >= with(rule.density) { 48.dp.toPx() } - 0.5f) }
 
         // The run card carries only its most significant record as a chip.
@@ -118,7 +115,6 @@ class HistoryProgressTest {
         rule.onNodeWithTag("run-log-effort").performScrollTo().assert(hasText(str(R.string.run_rate_title), substring = true))
         rule.onNodeWithTag("run-log-effort").performClick()
         rule.waitForIdle()
-        // The Rate run sheet: one effort scale, the run type chips and Save.
         rule.pickRating("effort-scale", 7)
         rule.onNodeWithTag("run-rate-save").performScrollTo().performClick()
         rule.waitForIdle()
@@ -155,7 +151,6 @@ class HistoryProgressTest {
         rule.onNodeWithTag("run-delete").performScrollTo()
         val sheet = violations()
         assertTrue("UX invariant(s) violated on the run sheet:\n" + sheet.joinToString("\n"), sheet.isEmpty())
-        // The Rate run sheet at 130%: the effort scale and the type chips.
         rule.onNodeWithTag("run-log-effort").performScrollTo().performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("run-rate-save").performScrollTo()

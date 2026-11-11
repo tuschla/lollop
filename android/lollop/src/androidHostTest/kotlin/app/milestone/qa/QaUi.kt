@@ -36,8 +36,6 @@ import kotlin.concurrent.schedule
 import org.jetbrains.compose.resources.PluralStringResource
 import org.jetbrains.compose.resources.StringResource
 
-/** Shared UI drivers for the offline scenario suite. */
-
 /** The app's own copy for [id], so an assertion follows the string resource
  *  rather than pinning its English wording. Without [args] the resource is
  *  read verbatim (no format pass, so a literal `%` stays as is). */
@@ -56,7 +54,6 @@ fun strPrefix(@StringRes id: Int, vararg args: Any): String {
     return head.format(*args).trimEnd()
 }
 
-/** [str] for a plurals resource. */
 fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
     ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(id, count, *args)
 
@@ -65,7 +62,6 @@ fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
 fun str(resource: StringResource, vararg args: Any): String =
     ApplicationProvider.getApplicationContext<Context>().resources.getString(resource, *args)
 
-/** [plural] for the common handle (`Res.plurals.x`). */
 fun plural(resource: PluralStringResource, count: Int, vararg args: Any): String =
     ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(resource, count, *args)
 
@@ -76,7 +72,7 @@ fun plural(resource: PluralStringResource, count: Int, vararg args: Any): String
 internal var lastScenario: ActivityScenario<MainActivity>? = null
 
 /** How long a launch may hold the splash before the watchdog gives up on boot:
- *  far past the long-history boot budget (45 s), so only a stuck boot reaches it. */
+ *  far past [LongHistoryUiTest]'s boot budget, so only a stuck boot reaches it. */
 private const val SPLASH_WATCHDOG_MS = 120_000L
 
 /**
@@ -106,7 +102,6 @@ internal fun <T> launchWithSplashWatchdog(launch: () -> T): T {
     return launched
 }
 
-/** Start [MainActivity] (with [intent], e.g. an open intent) under [launchWithSplashWatchdog]. */
 internal fun launchMain(intent: Intent? = null): ActivityScenario<MainActivity> = launchWithSplashWatchdog {
     if (intent == null) ActivityScenario.launch(MainActivity::class.java) else ActivityScenario.launch(intent)
 }
@@ -145,16 +140,13 @@ fun ComposeTestRule.assertCountEventually(matcher: SemanticsMatcher, count: Int,
     try {
         waitUntil(timeoutMs) { onAllNodes(matcher).fetchSemanticsNodes().size == count }
     } catch (_: ComposeTimeoutException) {
-        // Fall through: the assertion below names the matcher and actual count.
     }
     onAllNodes(matcher).assertCountEquals(count)
 }
 
-/** [assertCountEventually] for an exact visible text. */
 fun ComposeTestRule.assertTextCountEventually(text: String, count: Int) =
     assertCountEventually(hasText(text), count)
 
-/** Switch the bottom-nav destination by its visible label. */
 fun ComposeTestRule.selectTab(label: String) {
     onNodeWithText(label).performClick()
     waitForIdle()
@@ -209,10 +201,8 @@ fun ComposeTestRule.openLoopFor(exercise: String, set: Int = 1) {
     }
 }
 
-/** The set loop's "Set k of N" header. */
 fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
 
-/** Select a History sub-filter ("Lifts" / "Runs"). */
 fun ComposeTestRule.selectHistoryFilter(label: String) {
     onNodeWithText(label).performClick()
     waitForIdle()
@@ -251,13 +241,10 @@ fun ComposeTestRule.scrollToText(text: String) {
     waitForIdle()
 }
 
-/** A capture name's light/dark suffix. */
 val DarkMode.suffix: String get() = if (this == DarkMode.Dark) "dark" else "light"
 
-/** Force light or dark for the next launch. */
 fun useDarkMode(mode: DarkMode) = AppSettings.setDarkMode(ApplicationProvider.getApplicationContext(), mode)
 
-/** Capture the screen to the golden `src/test/screenshots/[name].png`. */
 @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
 fun ComposeTestRule.shot(name: String) =
     captureWithoutRipples { withWindowsInAddOrder { captureScreenRoboImage("src/test/screenshots/$name.png") } }

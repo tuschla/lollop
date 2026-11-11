@@ -57,7 +57,6 @@ internal fun halfUpFixed(value: Double, decimals: Int): String {
     }
     val out = StringBuilder()
     if (negative) out.append('-')
-    // Integer part: digits[0 until point], zero-padded past the end; "0" when empty.
     val intDigits = StringBuilder()
     for (i in 0 until point) intDigits.append(if (i < digits.length) digits[i] else '0')
     val firstNonZero = intDigits.indexOfFirst { it != '0' }
@@ -137,5 +136,4 @@ internal fun zeroPad(n: Long, width: Int = 2): String {
     return n.toString().padStart(width, '0')
 }
 
-/** [zeroPad] for an Int. */
 internal fun zeroPad(n: Int, width: Int = 2): String = zeroPad(n.toLong(), width)

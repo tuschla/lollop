@@ -96,7 +96,6 @@ class LiveRestNotificationTest {
         RestAlarm.setInAppVisible(app, true)
         RestAlarm.schedule(app, 90, "Back squat")
         assertNull(posted())
-        // Closing the loop moves the countdown into the notification, and back.
         RestAlarm.setInAppVisible(app, false)
         assertTrue(NotificationCompat.isRequestPromotedOngoing(posted()!!))
         RestAlarm.setInAppVisible(app, true)
@@ -116,11 +115,9 @@ class LiveRestNotificationTest {
         RestAlarm.setInAppVisible(app, true)
         RestAlarm.setInAppVisible(app, false)
         assertNull("not reposted", posted())
-        // The rest-done alert still comes.
         fireRestEnd(app)
         assertEquals(res.getString(R.string.log_rest_notif_done_title), posted()!!.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
 
-        // The next rest posts its countdown again.
         RestAlarm.schedule(app, 60, "Back squat")
         assertTrue(NotificationCompat.isRequestPromotedOngoing(posted()!!))
     }
@@ -151,8 +148,6 @@ class LiveRestNotificationTest {
         fireRestEnd(app)
         assertNull(posted())
     }
-
-    // ── The next-set line, from the set loop's own data ──
 
     @Test
     fun nextSetNamesTheLoopsSetNumberAndFields() {
@@ -190,7 +185,6 @@ class LiveRestNotificationTest {
         )
         assertNull(restNextSet(res, LoopPrimary.FinishSession, "Curl", null, null, 2, null))
         assertNull(countdownText(res, "Curl", null))
-        // A bodyweight rung names its reps, a hold its seconds; nothing while unentered.
         assertEquals("12 reps", restNextLoad(res, null, 0.0, 12, bodyweight = true, weightUnit = WeightUnit.Kg))
         assertEquals("30\u00A0s hold", restNextLoad(res, 30, 0.0, null, bodyweight = true, weightUnit = WeightUnit.Kg))
         assertNull(restNextLoad(res, null, null, 5, bodyweight = false, weightUnit = WeightUnit.Kg))

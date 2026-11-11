@@ -35,7 +35,6 @@ internal actual fun platformRunTracker(): RunTracker? = IosRunTracker
 
 /** Receives the run's frames while the tracker's location stream is up. Main thread. */
 internal interface RunActivitySink {
-    /** The run changed what it shows. */
     fun update(state: RunSurfaceState)
 
     /** The stream is down: take the surface away. */
@@ -81,7 +80,6 @@ internal object IosRunTracker : RunTracker {
     private fun recording(): IosRunRecording =
         recording ?: IosRunRecording(CoreLocationStream()).also { recording = it }
 
-    /** Pause or resume the recording run; a no-op unless one records. */
     fun setPaused(paused: Boolean) {
         recording?.recorder?.setPaused(paused)
     }
@@ -207,10 +205,8 @@ private class AuthorizationDelegate(private val onChange: () -> Unit) : NSObject
 /** The location stream [IosRunRecording] drives: CoreLocation in the app, a fake in
  *  the simulator tests (which feed the delegate themselves). */
 internal interface LocationStream {
-    /** Precise When-In-Use location is granted right now. */
     fun preciseGranted(): Boolean
 
-    /** Start delivering fixes to [delegate]. */
     fun start(delegate: CLLocationManagerDelegateProtocol)
 
     /** Stop delivering; a safe no-op when stopped. */
@@ -398,7 +394,7 @@ internal class IosRunRecording(private val stream: LocationStream) {
 /** Gap between vibration pulses: one system buzz lasts about 0.4 s. */
 private const val PULSE_GAP_MS = 600L
 
-/** The system's short beep (SystemSoundID 1052), Android's step-change tone. */
+/** The system's short beep, Android's step-change tone. */
 private const val STEP_BEEP_SOUND = 1052u
 
 private fun afterMs(delayMs: Long, action: () -> Unit) {

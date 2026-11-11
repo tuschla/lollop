@@ -8,9 +8,7 @@
 /// What an op takes from the shell, named as the shell's parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Param {
-    /// Nothing.
     None,
-    /// One byte buffer.
     Bytes(&'static str),
     /// A text's lines, each read as UTF-8 on its own (the event log, which
     /// would not fit in memory twice as one buffer).
@@ -32,7 +30,6 @@ macro_rules! ops {
             /// Every op, in code order.
             pub const ALL: &'static [Op] = &[$(Op::$op),+];
 
-            /// The variant's name.
             pub const fn name(self) -> &'static str {
                 match self {
                     $(Op::$op => stringify!($op),)+
@@ -45,7 +42,6 @@ macro_rules! ops {
                 }
             }
 
-            /// The op's documentation, one line per doc line.
             pub const fn doc(self) -> &'static str {
                 match self {
                     $(Op::$op => concat!($($doc, "\n"),+),)+
@@ -114,7 +110,6 @@ impl Op {
         self as u32
     }
 
-    /// The op with code `code`.
     pub fn from_code(code: u32) -> Option<Op> {
         Self::ALL.get(usize::try_from(code).ok()?).copied()
     }

@@ -106,7 +106,7 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** The four on-demand Coach calculators, launched from the Profile calculator rows. */
+/** The on-demand Coach calculators, launched from the Profile calculator rows. */
 internal enum class CoachTool(val titleRes: StringResource) {
     Race(Res.string.main_tool_race_title),
     Volume(Res.string.main_tool_volume_title),
@@ -216,11 +216,10 @@ private fun CoachToolList(rows: @Composable ColumnScope.() -> Unit) {
 
 /**
  * One calculator row: the tool name, then its computed value once there is one
- * ("45:37 · 10K", "12→20 sets", "147–220 g/day", "HRmax 184": single-line
- * `Type.Body` `OnBgMuted` tnum, end-aligned), else what a tap does ("Set a recent
- * race"), and an accent chevron: the whole ≥48dp row opens the tool's sheet. At
- * a font scale of 1.3 or more the value drops below the name, start-aligned,
- * rather than wrapping in a narrow column.
+ * ("45:37 · 10K", "12→20 sets", "147–220 g/day", "HRmax 184"), else what a tap
+ * does ("Set a recent race"), and an accent chevron: the whole row opens the
+ * tool's sheet. At a large font scale the value drops below the name, rather
+ * than wrapping in a narrow column.
  */
 @Composable
 private fun ColumnScope.CoachToolRow(
@@ -253,7 +252,6 @@ private fun ColumnScope.CoachToolRow(
     }
 }
 
-/** Font scale from which a calculator row's value moves under its name. */
 private const val StackedValueFontScale = 1.3f
 
 /** How much of a result card (overline + headline + caption) must show when a
@@ -274,7 +272,6 @@ internal fun CoachToolSheet(
     onEvent: (Event) -> Unit,
 ) {
     val title = stringResource(tool.titleRes)
-    // Weight-unit choice for the bodyweight keypad form below.
     val weightUnit = model.weightUnit()
     val scroll = rememberScrollState()
     var keypadOpen by rememberSaveable(tool) { mutableStateOf(false) }
@@ -317,11 +314,9 @@ internal fun CoachToolSheet(
     }
     Column(
         modifier = Modifier
-            // A tap on the bare sheet (not on a control) folds the keypad.
             .pointerInput(keypadOpen) {
                 if (keypadOpen) detectTapGestures { keypadOpen = false }
             }
-            // The form + result can exceed the sheet's max height.
             .sheetBody(scroll, Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
@@ -365,7 +360,6 @@ internal fun CoachToolSheet(
                 profileRestingHrBpm = model.profile?.resting_hr_bpm,
             ) { age, rhr -> compute(Event.ComputeHrZones(age, rhr)) }
         }
-        // The tool's RESULT: one card for the answer and its evidence.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -387,22 +381,20 @@ internal fun CoachToolSheet(
 private fun trainingLoadCount(model: ViewModel): Int =
     model.weekly_report.size + (if (model.training_load != null) 1 else 0) + (if (model.srpe_load != null) 1 else 0)
 
-/** How many cards the Reference library holds (guidance groups + reference defaults). */
 internal fun referenceLibraryCount(model: ViewModel): Int =
     model.guidance.size + model.reference.size + trainingLoadCount(model)
 
-/** One Reference library group: its row's [title] and [count], and the [cards] it opens to. */
 private class ReferenceGroupEntry(val title: String, val count: Int, val cards: @Composable () -> Unit)
 
 /**
  * The Reference library, a Profile-opened sheet: every
  * evidence-graded programming-guidance group (Strength/Hypertrophy/Running/…),
- * the Training load group (the core-owned running-volume rows + the CTL/ATL/TSB
- * card) and the Reference source list, as one carded list of 56dp group rows
- * (name, count pill, turning chevron). An opened group's cards render below its
- * row inside the same card, between hairlines, each with its own "?" (grade chips
- * stay behind it). Every summary here is regular weight except a SAFETY card. No
- * coaching logic; it only lays out core-emitted cards.
+ * the Training load group (the core-owned weekly report rows and the heart-rate
+ * and session-effort load cards) and the Reference source list, as one carded
+ * list of group rows. An opened group's cards render below its row inside the
+ * same card, between hairlines, each with its own "?" (grade chips stay behind
+ * it). Every summary here is regular weight except a SAFETY card. No coaching
+ * logic; it only lays out core-emitted cards.
  */
 @Composable
 internal fun ReferenceLibrarySheet(model: ViewModel) {
@@ -484,12 +476,6 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
     }
 }
 
-/**
- * One group row of the Reference library (default collapsed): the group name in
- * Bold sentence case, its count in a pill, and a chevron that turns when open.
- * The whole ≥56dp row toggles it; TalkBack hears the state. The group's cards
- * mount below it only while open.
- */
 @Composable
 private fun ReferenceGroup(title: String, count: Int, cards: @Composable () -> Unit) {
     var open by rememberSaveable(title) { mutableStateOf(false) }
@@ -530,7 +516,6 @@ private fun ReferenceGroup(title: String, count: Int, cards: @Composable () -> U
     if (open) cards()
 }
 
-/** One item of an open group: a hairline, then the item itself. */
 @Composable
 private fun ReferenceItem(content: @Composable () -> Unit) {
     RowHairline()
@@ -570,12 +555,9 @@ private val RacePresets = RaceDistance.entries - RaceDistance.Mile
 private val RaceDistance.presetLabelRes: StringResource
     get() = if (this == RaceDistance.Half) Res.string.log_race_half else labelRes
 
-/** Which numeric field the race form's shared keypad currently edits. */
 private enum class RaceField { Minutes, Seconds, Volume }
 
-/** The race form's starter values while no query is echoed: a 22:00 recent
- *  race, a weekly volume in the display unit, and the weeks-since-race scale's
- *  opening pick. */
+/** The race form's starter values while no query is echoed. */
 private const val RaceMinutesSeed = "22"
 private const val WeeklyVolumeSeedKm = "40"
 private const val WeeklyVolumeSeedMi = "25"
@@ -652,13 +634,13 @@ fun RacePredictorForm(
     var raceStale by rememberSaveable { mutableStateOf((initial?.weeks_since_race ?: 0) > 0) }
     var weeksSinceRace by rememberSaveable { mutableStateOf(initial?.weeks_since_race ?: WeeksSinceRaceSeed) }
 
-    val minParsed = parseKeypadNumber(minText)
-    val secParsed = parseKeypadNumber(secText)
-    val kmParsed = parseKeypadNumber(kmText)
+    val minParsed = minText.toDoubleOrNull()
+    val secParsed = secText.toDoubleOrNull()
+    val kmParsed = kmText.toDoubleOrNull()
     val minValid = minParsed != null && minParsed in RaceMinutesRange
     val secValid = secParsed != null && secParsed in 0.0..59.0
-    // Bound in the displayed unit: the mi ceiling is the EXACT converted km limit
-    // (155.34 mi) so a wire-valid high-mileage volume stays editable in mi.
+    // Bound in the displayed unit: the mi ceiling is the EXACT converted km limit,
+    // so a wire-valid high-mileage volume stays editable in mi.
     val kmMax = if (unit == DistanceUnit.Mi) kmToMi(WeeklyVolumeMaxKm) else WeeklyVolumeMaxKm
     val presetLabels = RacePresets.associateWith { stringResource(it.presetLabelRes) }
     val kmValid = kmParsed != null && kmParsed in 0.0..kmMax
@@ -738,7 +720,6 @@ fun RacePredictorForm(
                             recentDistanceM = recent.km * 1000.0,
                             recentTimeSec = minParsed * 60.0 + secParsed,
                             goalDistanceM = goal.km * 1000.0,
-                            // Canonical km on the wire: a mi entry converts at save.
                             weeklyKm = if (unit == DistanceUnit.Mi) miToKmWire(kmParsed) else kmParsed,
                             weeksSinceRace = if (raceStale) weeksSinceRace else null,
                         )
@@ -761,7 +742,6 @@ private fun RacePresetField(label: String, current: RaceDistance, labels: Map<Ra
     }
 }
 
-/** The accumulation-block lengths the planner offers, weeks, and its opening pick. */
 private val AccumulationWeeks = 2..8
 private const val AccumulationWeeksSeed = 4
 
@@ -791,7 +771,6 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHy
     val muscleLabels = HypertrophyMuscle.entries.associateWith { stringResource(it.labelRes) }
 
     FormCard {
-        // Every muscle visible, one tap picks it.
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             FieldLabel(stringResource(Res.string.log_field_muscle))
             FlowRow(
@@ -804,8 +783,7 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHy
                 }
             }
         }
-        // Whole scale visible, one tap picks, never a −/+ stepper: the 2–8
-        // week range fits a single ChoiceScaleRow.
+        // Whole scale visible, one tap picks, never a −/+ stepper.
         FieldLabel(stringResource(Res.string.log_field_accumulation_weeks), "$weeks")
         ChoiceScaleRow(AccumulationWeeks.toList(), weeks, { "$it" }, label = stringResource(Res.string.log_field_accumulation_weeks)) { weeks = it }
         LabeledSwitchRow(stringResource(Res.string.log_switch_not_growing), notGrowing) { notGrowing = it }
@@ -872,13 +850,13 @@ fun ProteinForm(
     var deficit by rememberSaveable { mutableStateOf(initial?.deficit ?: false) }
     val mastersOn = mastersAvailable && masters
 
-    // Bounds/chips in the displayed unit; ±2.5/5 kg plate jumps → natural ±5/10 lb
-    // steps. The bounds are the app-wide bodyweight keypad range (Profile and setup
-    // use the same), so a weight accepted there is accepted here.
+    // Bounds/chips in the displayed unit. The bounds are the app-wide bodyweight
+    // keypad range (Profile and setup use the same), so a weight accepted there is
+    // accepted here.
     // An untouched prefill is wire-valid by construction (`bwComputeKg` emits `seedKg`
     // verbatim), so display rounding must not red it out — gate validity on that path.
     val bwBounds = bodyweightBounds(weightUnit)
-    val bwParsed = parseKeypadNumber(bwText)
+    val bwParsed = bwText.toDoubleOrNull()
     val bwValid = (untouchedSinceOpen && seedKg != null) ||
         (bwParsed != null && bwParsed in bwBounds)
     // The kg fed to the core: an untouched prefill emits the original kg verbatim
@@ -972,7 +950,7 @@ fun HrZonesForm(
     var useRhr by rememberSaveable { mutableStateOf(seedRhr != null) }
     var rhr by rememberSaveable { mutableStateOf(seedRhr?.roundToInt() ?: HrZonesRhrSeedBpm) }
 
-    val ageParsed = parseKeypadNumber(ageText)
+    val ageParsed = ageText.toDoubleOrNull()
     val ageValid = ageParsed != null && ageParsed in CoreConstants.TANAKA_AGE_MIN_YEARS..CoreConstants.TANAKA_AGE_MAX_YEARS
 
     FormCard {

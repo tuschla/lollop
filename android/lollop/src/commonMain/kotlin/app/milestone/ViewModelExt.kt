@@ -57,9 +57,6 @@ internal val SessionStatus.mark: DayMark get() = when (this) {
 internal fun List<AdjustmentView>.byAdjustmentPriority(): List<AdjustmentView> =
     sortedWith(evidencePriority({ it.safety_critical }, { it.grade }, { it.confidence }))
 
-/** The single highest-priority safety-critical adjustment, or null. Shared by the
- *  Today safety card and the global SafetyBanner so the lookup is defined once
- *  (wrap in `remember(model.adjustments)` at each call site). */
 internal fun dominantSafetyAdjustment(model: ViewModel): AdjustmentView? =
     model.adjustments.byAdjustmentPriority().firstOrNull { it.safety_critical }
 

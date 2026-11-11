@@ -1,7 +1,7 @@
 """OCR the on-screen rendering of one UI node (what the user SEES, after bidi
 reordering), to compare it with the node's logical text from the UI tree.
 
-argv: screenshot.png ui.xml mode text
+argv: screenshot.png ui.xml mode text [tmp_dir]
 Finds the first node whose text equals / starts with / regex-matches TEXT (mode
 eq|pre|re), crops its bounds from the screenshot (3x upscaled, grayscale) and
 prints "<logical text>\t<ocr text>" (OCR whitespace-collapsed). Exit 1 when the

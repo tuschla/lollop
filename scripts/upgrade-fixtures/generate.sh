@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-#   scripts/upgrade-fixtures/generate.sh
+#   scripts/upgrade-fixtures/generate.sh [SHA ...]
 # Regenerate shared/tests/fixtures/upgrade/ (read by shared/tests/upgrade_logs.rs
-# and android/.../UpgradeFixturesTest.kt) from the OLD builds themselves:
+# and android/.../UpgradeFixturesTest.kt) from the OLD builds themselves, one per
+# SHA (default: every <sha>.log.ndjson the directory holds):
 #   1. a detached worktree per old commit in ~/.cache/upg-<sha>;
 #   2. the old build's generator runs in that worktree's JVM tests:
 #      UpgradeFixtureGen-203ab56.kt, else UpgradeFixtureGen.kt with the lines
@@ -32,10 +33,16 @@ generator() {
   fi
 }
 
-for sha in 203ab56 4728546 901d239; do
+shas=("$@")
+if [[ ${#shas[@]} -eq 0 ]]; then
+  for f in "$DEST"/*.log.ndjson; do
+    f="$(basename "$f" .log.ndjson)"
+    [[ $f == *-* ]] || shas+=("$f")
+  done
+fi
+for sha in "${shas[@]}"; do
   wt="$HOME/.cache/upg-$sha"
   [[ -d "$wt" ]] || git worktree add --detach "$wt" "$sha"
-  # The SDK can also come from $ANDROID_HOME.
   if [[ -f "$REPO_ROOT/android/local.properties" ]]; then cp "$REPO_ROOT/android/local.properties" "$wt/android/"; fi
   generator "$sha" >"$wt/android/app/src/test/java/app/milestone/UpgradeFixtureGen.kt"
   cp "$HERE/upg_expected.rs" "$wt/shared/tests/"

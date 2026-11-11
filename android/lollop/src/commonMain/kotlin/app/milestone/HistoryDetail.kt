@@ -79,7 +79,6 @@ internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
 @Composable
 internal fun EntryActionSheets(
     selected: HistoryEntry?,
-    // The model's exercise lists, as every set editor host passes them.
     editorInputs: SetEditorInputs,
     weightUnit: WeightUnit,
     // Whether the core converts a run's average bpm ([ViewModel.hr_max_known]).
@@ -99,7 +98,6 @@ internal fun EntryActionSheets(
     // selected entry, so picking a different entry resets these).
     var editing by rememberSaveable(selected) { mutableStateOf(false) }
     var trimming by rememberSaveable(selected) { mutableStateOf(false) }
-    // The run's route, loaded once for both its detail and its trim sheet.
     val route = (selected as? HistoryEntry.Run)?.let { rememberRunRoute(it.v) }
     val isRun = selected is HistoryEntry.Run
     val deletedText = stringResource(if (isRun) Res.string.history_run_deleted else Res.string.history_set_deleted)
@@ -110,7 +108,6 @@ internal fun EntryActionSheets(
         postUndoable(updatedText, undoLabel, listOfNotNull(undoEditFor(selected, ev)))
     }
 
-    // Keyed on `selected` so switching entries starts a fresh guard.
     val editGuard = remember(selected) { EditorGuard() }
 
     if (editing) {
@@ -199,13 +196,6 @@ internal fun EntryActionSheets(
     }
 }
 
-/**
- * Detail-sheet body for one logged set: an "EXERCISE · DATE" overline (with "New
- * best" end-aligned), the set as the sheet's largest figure with its reps left below,
- * a key/value card (e1RM, load as a share of it), the e1RM cross-check, then the
- * [ActionRows] footer: Edit set, and Delete set behind a confirm. [onDelete] gets the
- * event that would re-log the set ([restoreEventFor]), for the Undo after it.
- */
 @Composable
 private fun EntryDetailContent(
     entry: HistoryEntry.Lift,

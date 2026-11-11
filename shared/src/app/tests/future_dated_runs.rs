@@ -83,12 +83,10 @@ fn a_future_dated_tracked_run_is_excluded_from_the_split_fallback() {
     );
 }
 
-// ── A future-dated run must not hijack weekly report or CTL/ATL ──
 #[test]
 fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load() {
     let app = Engine;
     let mut model = Model::default();
-    // Real recent history: a 10 km HR run.
     app.update(log_run(10.0, 60.0, 75.0, 0.0, 100 * DAY_SEC, 1), &mut model)
         .expect_only_render();
     // A mis-imported 2030-dated GPX (far future).

@@ -9,8 +9,6 @@ use crate::app::view_types::{
     ViewModel,
 };
 
-// ── Glossary terms ───────────────────────────────────────────────────────────
-
 /// How a term is spotted in text: its spellings (longest first), whether case
 /// is ignored, and which ends must sit on a word boundary.
 struct Pattern {
@@ -146,8 +144,6 @@ fn utf16_len(s: &str) -> u32 {
     u32::try_from(s.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
-// ── Spoken subject ───────────────────────────────────────────────────────────
-
 /// Longest spoken subject, UTF-16 code units.
 const SUBJECT_MAX_UNITS: usize = 60;
 
@@ -166,8 +162,6 @@ pub(crate) fn spoken_subject(summary: &str) -> String {
         .collect()
 }
 
-// ── Prose ────────────────────────────────────────────────────────────────────
-
 /// Longest card summary that still reads as a short claim, UTF-16 code units.
 const CLAIM_MAX_UNITS: u32 = 90;
 
@@ -177,8 +171,6 @@ const CLAIM_MAX_UNITS: u32 = 90;
 pub(crate) fn is_prose(summary: &str) -> bool {
     utf16_len(summary) > CLAIM_MAX_UNITS
 }
-
-// ── Figures and units ────────────────────────────────────────────────────────
 
 /// The units a figure keeps on its line.
 const GLUED_UNITS: [&str; 8] = ["/km", "/mi", "min", "kg", "lb", "km", "mi", "s"];
@@ -228,8 +220,6 @@ pub(crate) mod units_kept {
         crate::wire::Shape::Str
     }
 }
-
-// ── Marking the view ─────────────────────────────────────────────────────────
 
 /// A row whose text gets its parts once the view is built.
 trait Marked {

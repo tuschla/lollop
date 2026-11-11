@@ -22,7 +22,6 @@ pub(crate) enum Family {
     Protein,
     HrZones,
     Checkins,
-    /// The plan request and its session moves.
     Plan,
     /// The shell's clock (`SetToday`); never cleared.
     Today,

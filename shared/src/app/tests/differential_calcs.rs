@@ -14,8 +14,6 @@
 use super::*;
 use crate::app::run_targets::{HrAnchor, TargetBand, band_for, resolve_target};
 
-// ─── Independent oracles (KB-cited) ─────────────────────────────────────────
-
 mod oracle {
     /// KB extracted/07-data-harvesting.md:158 — Tanaka 2001: `208 − 0.7·age`.
     /// (04-running.md:65 restates it.)
@@ -248,8 +246,6 @@ fn hr_query(age: f64, rhr: Option<f64>) -> HrZoneInputView {
     }
 }
 
-// ─── HRmax (Tanaka) + %HRmax / Karvonen zone table ─────────────────────────
-
 #[test]
 fn hr_zone_table_matches_tanaka_and_daniels_table_over_age_and_rhr_grid() {
     // Ages 5–100 in quarter years (the app's stated Tanaka window), resting
@@ -460,8 +456,6 @@ fn hr_zone_prose_states_the_same_bpm_as_the_structured_figures() {
         &mismatches[..mismatches.len().min(6)]
     );
 }
-
-// ─── Race prediction: Riegel + Daniels VDOT, running-039 equivalency ───────
 
 const GOALS_M: [f64; 6] = [1500.0, 1609.344, 5000.0, 10_000.0, 21_097.5, 42_195.0];
 const WEEKLY_KM: [f64; 11] = [
@@ -711,8 +705,6 @@ fn slow_recent_race_long_goal_band_still_brackets_the_daniels_time() {
     );
 }
 
-// ─── Training paces from VDOT ──────────────────────────────────────────────
-
 #[test]
 fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
     // VDOT 20–85: the %VO2max bands (04:465-467) invert VO2(v) (07:172); Easy
@@ -899,8 +891,6 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
         }
     }
 }
-
-// ─── e1RM, %1RM, RPE↔RIR (logged-set metrics) ─────────────────────────────
 
 fn set(w: f64, reps: u32, rpe: f64) -> LoggedSet {
     LoggedSet {
@@ -1136,8 +1126,6 @@ fn prescribed_pct_1rm_for_reps_in_reserve_inverts_epley() {
     }
 }
 
-// ─── Plate grid and unit conversions ──────────────────────────────────────
-
 #[test]
 fn load_grid_floors_onto_the_display_unit_and_is_idempotent() {
     // 03:361 smallest increment ~2.5 kg / 5 lb; the app floors (never rounds
@@ -1168,7 +1156,7 @@ fn load_grid_floors_onto_the_display_unit_and_is_idempotent() {
 
 #[test]
 fn pound_display_of_shell_entered_loads_round_trips() {
-    // The shell stores a pound entry as `lb / LB_PER_KG` (Units.kt:107); the
+    // The shell stores a pound entry as `lb / LB_PER_KG` (Units.kt `lbToKg`); the
     // core shows it back on the 0.5 lb display grid as the same pounds.
     for half in 1..=2000 {
         let lb = 0.5 * f64::from(half);
@@ -1187,7 +1175,7 @@ fn pound_display_of_shell_entered_loads_round_trips() {
 
 #[test]
 fn pound_loads_already_on_the_plate_grid_stay_put() {
-    // format.rs `round_load_grid`: round DOWN onto the display-unit plate grid
+    // plates.rs `round_load_grid`: round DOWN onto the display-unit plate grid
     // so the load never exceeds the prescribed %1RM. A load that IS on the grid
     // (a shell-entered 215 lb, or an e1RM × %1RM product that is exactly a
     // plate load) must stay; floor() of `lb/step` computed as 42.99999… would
@@ -1208,7 +1196,7 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
             }
         }
     }
-    // flatten_lift.rs:158's expression, `round_load_grid(e * p / 100 * frac)`,
+    // flatten_lift.rs's expression, `round_load_grid(e * p / 100 * frac)`,
     // for a pound e1RM (a logged single) and a whole %1RM whose exact product
     // is a 5 lb plate load.
     for e_lb in (100..=600).step_by(5) {
@@ -1323,8 +1311,6 @@ fn distance_line_in_miles_converts_the_km_actually_shown() {
     );
 }
 
-// ─── Time formatting ───────────────────────────────────────────────────────
-
 #[test]
 fn clock_and_pace_formatting_match_the_oracle_including_half_second_carries() {
     for tenth in 0..=200_000 {
@@ -1350,8 +1336,6 @@ fn clock_and_pace_formatting_match_the_oracle_including_half_second_carries() {
         assert_eq!(fmt_clock(s), want, "{s}");
     }
 }
-
-// ─── Protein g/kg ───────────────────────────────────────────────────────────
 
 #[test]
 fn protein_figures_match_kb_g_per_kg_over_bodyweight_grid() {
@@ -1447,8 +1431,6 @@ fn protein_reaches_the_view_with_the_pound_bodyweight_echo() {
         assert!((shown - lb).abs() <= 0.5 + 1e-9, "{row}");
     }
 }
-
-// ─── Hypertrophy volume landmarks and ramps ─────────────────────────────────
 
 /// 03-hypertrophy.md:520-530 Table 1 (MV, MEV, MAV lo–hi, MRV "N+").
 const TABLE1: [(&str, u8, u8, u8, u8, u8); 11] = [
@@ -1585,8 +1567,6 @@ fn hypertrophy_profile_ramp_never_drops_within_the_accumulation_block() {
     );
 }
 
-// ─── Training load: Lucia TRIMP → CTL / ATL / TSB ───────────────────────────
-
 /// A seeded history: `days` days ending on `last_day`, a run on ~60% of days.
 fn seeded_runs(seed: u64, last_day: i64, days: i64) -> Vec<(i64, f64, f64)> {
     let mut rng = Rng(seed);
@@ -1694,7 +1674,7 @@ fn training_load_decays_through_rest_days_up_to_today() {
     );
 }
 
-// ─── ACWR stays hard-blocked (LOAD-ACWR-001, MarketingMyth) ─────────────────
+// ACWR stays hard-blocked (LOAD-ACWR-001, MarketingMyth).
 
 #[test]
 fn acwr_never_surfaces_in_a_loaded_view() {

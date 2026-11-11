@@ -43,7 +43,6 @@ fn signature(op: Op) -> (String, String) {
     }
 }
 
-/// `doc` as a KDoc block at `indent`.
 fn kdoc(out: &mut String, indent: &str, doc: &str) {
     let _ = writeln!(out, "{indent}/**");
     for line in doc.lines() {

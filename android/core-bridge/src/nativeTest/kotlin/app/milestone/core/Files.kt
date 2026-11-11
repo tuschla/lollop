@@ -19,7 +19,6 @@ import platform.posix.ftell
 import platform.posix.opendir
 import platform.posix.readdir
 
-/** A file under the repo root, whole. */
 internal fun readRepoFile(path: String): ByteArray {
     val full = "$REPO_ROOT/$path"
     val file = fopen(full, "rb") ?: error("cannot open $full")
@@ -38,11 +37,9 @@ internal fun readRepoFile(path: String): ByteArray {
     }
 }
 
-/** The non-blank lines of an NDJSON event log under the repo root. */
 internal fun readLogLines(path: String): List<String> =
     readRepoFile(path).decodeToString().lines().filter { it.isNotBlank() }
 
-/** The file names in a repo directory, sorted. */
 internal fun listRepoDir(path: String): List<String> {
     val full = "$REPO_ROOT/$path"
     val dir = opendir(full) ?: error("cannot open $full")

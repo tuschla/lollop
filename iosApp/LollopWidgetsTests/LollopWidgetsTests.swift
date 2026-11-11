@@ -9,8 +9,6 @@ import XCTest
 /// (LOLLOP_WIDGET_PAYLOAD). Renders every family, state and activity
 /// (LOLLOP_RENDER_DIR, the CI artifact `widget-renders`).
 final class LollopWidgetsTests: XCTestCase {
-    // MARK: Fixtures
-
     private struct Fixture: Decodable {
         var widgets: [String: WidgetPayload]
         var runs: [String: RunLive]
@@ -39,8 +37,6 @@ final class LollopWidgetsTests: XCTestCase {
         p.current = CurrentDay(zone: zone, startMs: Int64((now.timeIntervalSince1970 - 3600) * 1000), endMs: Int64((now.timeIntervalSince1970 + 3600) * 1000))
         return p
     }
-
-    // MARK: What the app writes
 
     /// Every payload the Kotlin side builds decodes here, in the version this
     /// extension reads.
@@ -95,8 +91,6 @@ final class LollopWidgetsTests: XCTestCase {
         }
     }
 
-    // MARK: Day rule
-
     func testTheTimelineRollsOverToTheStaleFaceWhenTheDayEnds() throws {
         let now = Date()
         let lift = current(try widget("lift"), around: now)
@@ -124,8 +118,6 @@ final class LollopWidgetsTests: XCTestCase {
         XCTAssertEqual(lift.controlFace(at: now).screen, .logSet)
         XCTAssertEqual(lift.controlFace(at: now.addingTimeInterval(7200)), lift.staleControl)
     }
-
-    // MARK: Lines and layouts
 
     /// A card takes the lines the Kotlin side cut for its slot count.
     func testACardShowsTheLinesCutForItsSlots() throws {
@@ -168,8 +160,6 @@ final class LollopWidgetsTests: XCTestCase {
         XCTAssertTrue(CardLayout.candidates(for: hold, wide: true).allSatisfy { $0.hero == .hidden && $0.week == .hidden })
     }
 
-    // MARK: App Group
-
     func testTheProvisionedGroupIsReadFromTheProfile() {
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -189,8 +179,6 @@ final class LollopWidgetsTests: XCTestCase {
         XCTAssertEqual(LollopScreen(wire: "nonsense"), .today)
     }
 
-    // MARK: Activities
-
     /// A frame that differs only in its clock is the same frame.
     func testARunFrameWithoutItsClock() throws {
         let run = try XCTUnwrap(Self.fixture.runs["recording"])
@@ -205,8 +193,6 @@ final class LollopWidgetsTests: XCTestCase {
         let rest = Self.fixture.rest
         XCTAssertEqual(rest.end.timeIntervalSince(rest.start), 90)
     }
-
-    // MARK: Renders
 
     @MainActor
     func testEveryStateRendersInEveryFamily() {
@@ -255,8 +241,6 @@ final class LollopWidgetsTests: XCTestCase {
             width: 120, scheme: .dark
         )
     }
-
-    // MARK: Rendering helpers
 
     /// Widget sizes on a 6.1" iPhone (points).
     private static let families: [(String, CGSize)] = [

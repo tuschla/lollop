@@ -9,7 +9,6 @@ actual typealias PlatformContext = Context
 internal actual fun Context.keyValueStore(name: String): KeyValueStore =
     SharedPreferencesStore(getSharedPreferences(name, Context.MODE_PRIVATE))
 
-/** [KeyValueStore] over [prefs]; [edit] is SharedPreferences' apply() (commit() when asked). */
 internal class SharedPreferencesStore(private val prefs: SharedPreferences) : KeyValueStore {
     override fun contains(key: String): Boolean = prefs.contains(key)
 
@@ -21,7 +20,6 @@ internal class SharedPreferencesStore(private val prefs: SharedPreferences) : Ke
 
     override fun getString(key: String, default: String?): String? = prefs.getString(key, default)
 
-    // androidx `edit`: one Editor, then commit() when asked, else apply().
     override fun edit(commit: Boolean, block: KeyValueStore.Editor.() -> Unit) = prefs.edit(commit) {
         val editor = this
         object : KeyValueStore.Editor {

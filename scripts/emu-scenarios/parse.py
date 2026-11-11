@@ -3,8 +3,6 @@
   duration TEXT      seconds of the first duration in TEXT, clock form ("1:02:03",
                      "0:59") or spoken ("1 minute 5 seconds", what the UI tree
                      carries for a duration); -1 when there is none
-  distance TEXT      km of the first "<n> km|mi|kilometers|miles" in TEXT; -1 when
-                     there is none
   meminfo FIELD...   the FIELDs (KB) of a `dumpsys meminfo <app>` on stdin, space
                      separated: pss, java, native, graphics (App Summary) and
                      dalvik_alloc, native_alloc (Heap Alloc column); exit 1 when
@@ -46,8 +44,6 @@ if __name__ == "__main__":
     cmd = sys.argv[1]
     if cmd == "duration":
         print(duration(sys.argv[2]))
-    elif cmd == "distance":
-        print(distance(sys.argv[2]))
     elif cmd == "meminfo":
         text = sys.stdin.read()
         vals = [re.search(MEMINFO[f], text, re.M) for f in sys.argv[2:]]

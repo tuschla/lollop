@@ -1157,7 +1157,6 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
     );
 }
 
-// ── A 0 kg set never anchors the plan (no "@ 0 kg") ──
 #[test]
 fn zero_weight_set_does_not_anchor_a_load() {
     let app = Engine;

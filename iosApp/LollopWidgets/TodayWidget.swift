@@ -1,7 +1,6 @@
 import SwiftUI
 import WidgetKit
 
-/// One timeline entry: the payload the app last wrote, as of [date].
 struct TodayEntry: TimelineEntry {
     let date: Date
     let payload: WidgetPayload?

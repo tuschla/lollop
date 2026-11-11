@@ -83,7 +83,6 @@ private class BootCore(
     }
 }
 
-/** [KeyValueStore] in memory. */
 private class MemoryStore : KeyValueStore {
     val values = mutableMapOf<String, Any?>()
 
@@ -124,13 +123,8 @@ private class Ledger : BootLedger {
     }
 }
 
-/**
- * The boot sequence both platforms run ([bootTurn] and the once-per-process
- * decisions) on a stand-in core and a real event log: a fresh install, a returning
- * user, the auto plan, a removed plan and the legacy plan-removed pref, the
- * rotation re-run, an unusable core, the import confirmation and the
- * interrupted-run offer.
- */
+/** The boot sequence both platforms run ([bootTurn] and the once-per-process
+ *  decisions) on a stand-in core and a real event log. */
 class AppBootTest {
     private val dir = newTempDir()
     private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")

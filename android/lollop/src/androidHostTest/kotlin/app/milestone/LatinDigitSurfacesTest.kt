@@ -86,7 +86,6 @@ class LatinDigitSurfacesTest {
     private fun nativeDigits(text: CharSequence): String =
         text.filter { it in '\u0660'..'\u0669' || it in '\u06F0'..'\u06F9' }.toString()
 
-    /** [text] has a count in it, and every digit is ASCII. */
     private fun assertLatinDigits(surface: String, text: String) {
         assertTrue("$surface shows a count: '$text'", text.any { it in '0'..'9' })
         assertEquals("$surface: Arabic-Indic digits in '$text'", "", nativeDigits(text))
@@ -98,8 +97,6 @@ class LatinDigitSurfacesTest {
         assertEquals("ar", app.resources.configuration.locales[0].language)
         assertTrue(app.resources.getQuantityString(R.plurals.widget_more_items, 3, 3).contains('\u0663'))
     }
-
-    // ── Session reminder ─────────────────────────────────────────────────────
 
     @Test
     fun sessionReminderLineAndActionUseLatinDigits() {
@@ -116,8 +113,6 @@ class LatinDigitSurfacesTest {
         assertLatinDigits("reminder line", text)
         for (a in n.actions) assertEquals("action '${a.title}'", "", nativeDigits(a.title))
     }
-
-    // ── Run import ───────────────────────────────────────────────────────────
 
     /** A 20-minute GPX run at 6:00 /km ending [daysAgo] days before today. */
     private fun gpxRun(name: String, daysAgo: Int): android.net.Uri {
@@ -156,8 +151,6 @@ class LatinDigitSurfacesTest {
         assertLatinDigits("import result", text)
     }
 
-    // ── Coach export ─────────────────────────────────────────────────────────
-
     @Test
     fun coachExportTextUsesLatinDigits() {
         val today = todayEpochDay()
@@ -179,8 +172,6 @@ class LatinDigitSurfacesTest {
         // Dates and weekdays in the app's language, not the device's.
         assertTrue(text, text.none { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.ARABIC || it == '\u200F' })
     }
-
-    // ── Widget ───────────────────────────────────────────────────────────────
 
     private fun texts(v: View): List<String> = when (v) {
         is TextView -> listOf(v.text.toString())
@@ -204,8 +195,6 @@ class LatinDigitSurfacesTest {
         assertLatinDigits("widget week line", week)
         assertLatinDigits("widget more-items line", more)
     }
-
-    // ── Run tracker notification ─────────────────────────────────────────────
 
     @Test
     fun trackerStepLineUsesLatinDigits() {

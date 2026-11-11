@@ -101,7 +101,6 @@ import org.jetbrains.compose.resources.stringResource
  *  validity floor, so an untouched reading counts. */
 private const val DecouplingDefaultMin = 30.0
 
-/** The decoupling run-length scale: 0–180 min in 5-minute steps. */
 private const val DecouplingRunMaxMin = 180
 private const val DecouplingRunStepMin = 5
 
@@ -128,8 +127,8 @@ fun ReadinessEditor(
     var value by rememberSaveable { mutableStateOf(defaultReadinessValue(ReadinessSignal.WellnessZ)) }
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     // Effort minutes for the duration-gated AerobicDecoupling signal (valid only
-    // >20 min, File 06). Defaults to a validating 30 min; sent only for that
-    // signal so the core can validate the reading instead of silently discarding it.
+    // >20 min, File 06), sent only for that signal so the core can validate the
+    // reading instead of silently discarding it.
     var effortMin by rememberSaveable { mutableStateOf(DecouplingDefaultMin) }
     var dirty by rememberSaveable { mutableStateOf(false) }
     // First red-flag signal in wire order, so the fence lands before the first
@@ -172,8 +171,6 @@ fun ReadinessEditor(
                 ordered,
                 signal,
                 display = { signalLabels.getValue(it) },
-                // Fence the medical red-flag block off from the routine metrics
-                // above it, where the core's signal_groups says it starts.
                 divideBefore = { it == firstRedFlag },
             ) {
                 signal = it
@@ -256,7 +253,7 @@ private val ScaleHighBad = (5 downTo 1).toList()
 
 /** Whether a check-in echo stamped [echoObservedAt] is today's own answer
  *  (rehydrated for editing) rather than an earlier day's (shown only as a
- *  "Last time" hint), in the device's local calendar. Pure. */
+ *  "Last time" hint), in the device's local calendar. */
 internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: TimeZone): Boolean =
     localEpochDay(echoObservedAt, zone) == localEpochDay(nowSec, zone)
 
@@ -316,8 +313,8 @@ fun MorningCheckinSheet(
     // field (or switching its toggle on), and folds when another item is answered.
     var keypadOpen by rememberSaveable { mutableStateOf(false) }
 
-    val rhrParsed = parseKeypadNumber(rhrText)
-    val hrvParsed = parseKeypadNumber(hrvText)
+    val rhrParsed = rhrText.toDoubleOrNull()
+    val hrvParsed = hrvText.toDoubleOrNull()
     val rhrValid = !hasRhr || rhrText.isEmpty() || (rhrParsed != null && rhrParsed in RESTING_HR_RANGE)
     val hrvValid = !hasHrv || hrvText.isEmpty() || (hrvParsed != null && hrvParsed in HrvMsRange)
     val savedMessage = stringResource(Res.string.log_checkin_saved)
@@ -731,8 +728,7 @@ private val ReadinessSignal.ui: SignalUi get() = SignalUis.getValue(this)
 internal val ReadinessSignal.valueHint: Pair<StringResource, List<String>>?
     get() = ui.spec?.let { it.hint to it.hintArgs }
 
-/** The shortest steady effort whose decoupling counts, in minutes ("20"):
- *  [CoreConstants.DECOUPLING_MIN_EFFORT_MIN], [trimDecimal]-trimmed. */
+/** The shortest steady effort whose decoupling counts, in minutes. */
 internal fun decouplingMinEffortLabel(): String = trimDecimal(CoreConstants.DECOUPLING_MIN_EFFORT_MIN)
 
 /**

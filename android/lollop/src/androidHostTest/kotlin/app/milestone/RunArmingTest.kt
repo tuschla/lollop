@@ -6,19 +6,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * JVM unit tests (no device) for the armed-start pure logic: [isFreshLock],
- * [ArmTrigger] (the gate state machine, clocks passed in), and [pillState] (the
- * map-pill priority ladder). All three are pure so the behaviour is pinned here
- * without a Compose/Android harness.
- */
 class RunArmingTest {
 
     // ~1 m of longitude at the equator, for building legs of a known ground speed.
     private val degPerM = 1.0 / 111_320.0
     private fun sec(t: Long) = t * 1_000_000_000L // monotonic nanos for a whole second
-
-    // ── isFreshLock ────────────────────────────────────────────────────────────
 
     @Test
     fun aLockIsAnAccurateRecentFix() {
@@ -43,8 +35,6 @@ class RunArmingTest {
         assertFalse(isFreshLock(accuracyM = 10.0, fixElapsedMs = 0L, nowElapsedMs = 5_000L))
     }
 
-    // ── ArmTrigger ──────────────────────────────────────────────────────────────
-
     @Test
     fun noGatesSeedsOnTheFirstFix() {
         val t = ArmTrigger(requirePrecise = false, requireMoving = false)
@@ -55,7 +45,7 @@ class RunArmingTest {
     @Test
     fun preciseGateWaitsForAPreciseFix() {
         val t = ArmTrigger(requirePrecise = true, requireMoving = false)
-        // 40 m accuracy > GPS_PRECISE_ACCURACY_M (20 m): keep waiting.
+        // 40 m accuracy > GPS_PRECISE_ACCURACY_M: keep waiting.
         assertNull(t.offer(GpsPoint(0.0, 0.0, 0, 40.0), sec(0)))
         val precise = GpsPoint(0.0, 0.0, 1, 15.0)
         assertEquals(listOf(precise), t.offer(precise, sec(1))?.map { it.first })
@@ -126,7 +116,7 @@ class RunArmingTest {
     @Test
     fun bothGatesRequirePreciseAndSustainedMovement() {
         val t = ArmTrigger(requirePrecise = true, requireMoving = true)
-        // A coarse fix (40 m > 20 m) neither seeds nor enters the moving window.
+        // A coarse fix neither seeds nor enters the moving window.
         assertNull(t.offer(GpsPoint(0.0, 0.0, 0, 40.0), sec(0)))
         // Precise + moving legs then fire, seeding the whole precise run-up.
         val a = GpsPoint(0.0, 0.0, 1, 10.0)
@@ -153,8 +143,6 @@ class RunArmingTest {
         assertNull(t.offer(pts[1], sec(1)))
         assertTrue("fires on the third moving fix", t.offer(pts[2], sec(2)) != null)
     }
-
-    // ── pillState ─────────────────────────────────────────────────────────────
 
     @Test
     fun pillPriorityLadder() {
@@ -216,12 +204,10 @@ class RunArmingTest {
         )
     }
 
-    // ── markStopped: a dead-service stop resets the WHOLE state machine ──────
     // A stop that can't reach the service ([RunRecorder.stopUndelivered]) and every
     // recorder teardown call RunSession.markStopped(): clearing only `tracking` would
     // leave `locating` / `armed` latched and the tracker stuck on "Acquiring GPS" with
     // no engine.
-
     @Test
     fun markStoppedClearsLocatingAndArmedNotJustTracking() {
         RunSession.streamStarted(recording = true)
@@ -244,11 +230,8 @@ class RunArmingTest {
         RunSession.reset()
     }
 
-    // ── armedFixPassesAgeGate (batched screen-off delivery) ─────────────────────
-
     @Test
     fun ageGateExemptsMultiFixBatchesButRejectsLoneStaleFixes() {
-        // A fresh lone fix always passes.
         assertTrue(armedFixPassesAgeGate(ageMs = 3_000, batchSize = 1))
         // A lone stale fix (the fused provider's cached first callback) is rejected -
         // the hazard this gate exists for.
@@ -266,8 +249,8 @@ class RunArmingTest {
         // admit only the newest, the ArmTrigger moving window (needs 3 fixes) could
         // never fill, and 'Start on move' would silently never fire.
         val nowMs = 20_000L
-        // Three fixes 4 s apart (internal span 8 s ≤ the 10 s moving window), 3 m/s
-        // legs; ages 20/16/12 s are all past the 10 s staleness gate.
+        // Three fixes 4 s apart (span within the moving window), 3 m/s legs; every
+        // age is past the staleness gate.
         data class Fix(val p: GpsPoint, val nanos: Long, val ageMs: Long)
         val batch = listOf(
             Fix(GpsPoint(0.0, 0.0, 0, 5.0), sec(0), nowMs - 0L),
@@ -298,8 +281,6 @@ class RunArmingTest {
         }
         assertFalse("a lone stale cached fix stays rejected", loneFired)
     }
-
-    // ── locationPrompt ────────────────────────────────────────────────────────
 
     @Test
     fun locationPanelSaysWhatTheUserActuallyAllowed() {

@@ -184,18 +184,14 @@ class RunStepMachineTest {
         // A continuous planned run (no guide) is judged throughout.
         assertTrue(paceTargetApplies(null))
         val m = machine(RunStructureView(reps = 2, rep_m = 800, recovery_m = 400, warmup_min = 10))
-        // Warm-up: the rep pace doesn't apply.
         assertEquals(RunStepKind.WarmUp, m.progress().step?.kind)
         assertFalse(paceTargetApplies(m.progress()))
-        // Rep: it does.
         assertTrue(m.advance(600_000L, 2_000.0, paused = false))
         assertEquals(RunStepKind.Rep, m.progress().step?.kind)
         assertTrue(paceTargetApplies(m.progress()))
-        // Recovery jog: not judged against the rep pace.
         assertTrue(m.advance(601_000L, 2_800.0, paused = false))
         assertEquals(RunStepKind.Recovery, m.progress().step?.kind)
         assertFalse(paceTargetApplies(m.progress()))
-        // All steps done: nothing left to judge.
         m.skip(602_000L, 2_800.0, paused = false)
         m.skip(603_000L, 2_800.0, paused = false)
         assertNull(m.progress().step)

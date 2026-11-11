@@ -68,7 +68,6 @@ internal fun postedRest(ctx: Context): Notification? {
 internal fun restEndBroadcast(ctx: Context): Intent =
     Intent(shadowOf(shadowOf(ctx.getSystemService(AlarmManager::class.java)).scheduledAlarms.single().operation).savedIntent)
 
-/** The system delivers the rest-end alarm to [RestEndReceiver]. */
 internal fun fireRestEnd(ctx: Context) = RestEndReceiver().onReceive(ctx, restEndBroadcast(ctx))
 
 /** A fresh process on the [TestClock] ([AppRuntime.resetForTest]) with no rest

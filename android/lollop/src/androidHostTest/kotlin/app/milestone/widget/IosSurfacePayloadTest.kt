@@ -66,7 +66,6 @@ class IosSurfacePayloadTest {
         assertEquals(WidgetInk.Body, p.face.titleInk)
         assertEquals(listOf("log_set", "log"), p.face.actions.map { it.dest })
         assertEquals(listOf(SurfaceIcon.LogSet, SurfaceIcon.Log), p.face.actions.map { it.icon })
-        // The week block: the count, the gauge and the strip, each day's mark drawn.
         val week = checkNotNull(p.face.week)
         assertEquals(face.week, week.text)
         assertEquals(1 to 4, week.done to week.planned)
@@ -178,7 +177,6 @@ class IosSurfacePayloadTest {
         assertTrue(recording.canPause)
         assertFalse(recording.paused)
         assertEquals(AppTheme.Iris.dark.accent.hex(), recording.accentDark)
-        // No pace yet: the figures without one.
         assertNull(live(RunSurfacePhase.Recording, pace = Double.NaN).pace)
         // Before the track has two fixes: Android's hint line instead of the figures.
         val first = live(RunSurfacePhase.Recording, hasTrack = false)
@@ -191,7 +189,6 @@ class IosSurfacePayloadTest {
         assertEquals("4.12 km", paused.distance)
         assertNull(paused.pace)
         assertTrue(paused.chip != paused.time)
-        // Signal lost: the warning line, no figures.
         val lost = live(RunSurfacePhase.SignalLost)
         assertNull(lost.distance)
         assertNotNull(lost.text)

@@ -37,19 +37,17 @@ internal fun gpxFileName(runStartEpochSec: Long, zone: TimeZone = TimeZone.curre
 
 private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
-// ---------------------------------------------------------------------------
 // Full-data export / import: the whole event log is the source of truth, so a
 // backup is just the compacted NDJSON, and a restore replaces the log wholesale
 // and lets the core replay it ([AppRuntime.requestReboot]). Kept out of the OS auto-backup
 // (see res/xml/backup_rules.xml) so the user moves it deliberately.
-// ---------------------------------------------------------------------------
 
 /** Cap on a whole import candidate, from what the app really writes. A backup is
  *  the compacted log, and every GPS run is one LogRunTrack line of up to
  *  [CoreConstants.TRACK_DECIMATION_CAP] fixes: one year of a hybrid athlete recording at the
  *  tracker's screen-off cadence (1 fix / 4 s) exports to about 11.7 MiB (146 GPS
  *  runs, PersistenceTortureTest.aOneYearBackupWithGpsRunsIsImportable), five years
- *  to about 50 MiB. 256 MiB is two decades of that, so any backup the app produced
+ *  to about 50 MiB. The cap is two decades of that, so any backup the app produced
  *  re-imports, while a pick past it is not one of ours. The reader STREAMS within
  *  this bound, and a non-log file fails on its first line ([MAX_IMPORT_LINE_BYTES]
  *  bounds a newline-less one), so this is a sanity limit; the valid lines are then
@@ -59,7 +57,7 @@ internal const val MAX_IMPORT_BYTES = 256L * 1024 * 1024
 /** Cap on one import line. The longest line the app writes is a LogRunTrack: at
  *  most [CoreConstants.TRACK_DECIMATION_CAP] fixes (plus kept pause boundaries) of at most ~140
  *  wire bytes each (four full-precision numbers and their keys), so under 1 MiB.
- *  16 MiB leaves room for an undecimated track from an older build; a longer
+ *  The cap leaves room for an undecimated track from an older build; a longer
  *  "line" (a newline-less binary pick) is refused before it can fill the line
  *  buffer. */
 internal const val MAX_IMPORT_LINE_BYTES = 16L * 1024 * 1024
@@ -278,7 +276,6 @@ internal fun swapLogFile(log: AppPath, lines: List<String>) {
         AppFiles.writeLinesSynced(tmp, lines)
         if (!AppFiles.rename(tmp, log) && !renameOverViaBackup(tmp, log)) error("couldn't replace the event log")
     } finally {
-        // A no-op once renamed into place; otherwise no partial temporary survives.
         AppFiles.delete(tmp)
     }
 }

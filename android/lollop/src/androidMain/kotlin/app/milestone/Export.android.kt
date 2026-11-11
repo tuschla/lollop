@@ -21,13 +21,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Cap on retained GPX share-temp files in the cache; older ones are pruned. */
 private const val MAX_KEPT_EXPORTS = 20
 
 internal actual suspend fun shareGpx(ctx: Context, gpx: String, runStartEpochSec: Long) {
-    // The cache prune + file write are disk IO: do them off the main thread
-    // (mirrors the already-IO import path); only the share-sheet launch returns
-    // to the caller's (main) dispatcher.
     val uri = withContext(Dispatchers.IO) { writeGpxToCache(ctx, gpx, runStartEpochSec) }
     val send = Intent(Intent.ACTION_SEND).apply {
         type = RunFileType.Gpx.mimeTypes.first()
@@ -39,7 +35,6 @@ internal actual suspend fun shareGpx(ctx: Context, gpx: String, runStartEpochSec
     })
 }
 
-/** Persist the GPX to app cache and return a shareable FileProvider URI. Disk IO. */
 private fun writeGpxToCache(ctx: Context, gpx: String, runStartEpochSec: Long): Uri {
     val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
     // These are share-temp files the OS only evicts under cache pressure, so a
@@ -120,6 +115,5 @@ suspend fun readImportCandidate(ctx: Context, uri: Uri): ImportCheck = withConte
     }.onFailure { PlatformLog.w("Export", "picked backup unreadable", it) }.getOrDefault(ImportCheck.Invalid)
 }
 
-/** [streamValidateImport] over an [InputStream]. */
 internal fun streamValidateImport(input: InputStream, max: Long, maxLine: Long = MAX_IMPORT_LINE_BYTES): ImportCheck =
     streamValidateImport({ input.read(it) }, max, maxLine)

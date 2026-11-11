@@ -23,8 +23,7 @@ fun interface LogCompaction {
  * Reads, repairs and compacts the persisted event log (one event's serde wire JSON
  * per line). The compaction rules live in the core (`shared/src/log.rs`, reached
  * through the `core` argument). Without a working core the log is read as it
- * is, minus torn lines, so the raw-log export still works. File access goes
- * through [AppFiles].
+ * is, minus torn lines, so the raw-log export still works.
  */
 object EventLog {
 
@@ -62,8 +61,6 @@ object EventLog {
         if (!AppFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
         val parsed = parse(file, core)
         val kept = parsed.restored.lines
-        // A launch that shaves a line or two replays the result in memory and leaves
-        // the disk alone; a torn tail always forces the rewrite.
         val torn = parsed.unparseable || !AppFiles.endsWithNewline(file)
         if (torn || compactionWorthRewriting(parsed.total - kept.size, parsed.total)) {
             val tmp = AppFiles.sibling(file, AppFileNames.TMP_SUFFIX)
@@ -75,14 +72,9 @@ object EventLog {
         return parsed.restored
     }
 
-    /** A compaction drop at least this many lines long is always worth a rewrite. */
     internal const val REWRITE_MIN_DROPPED_LINES = 32
-
-    /** …as is one of at least 1/[REWRITE_MIN_DROPPED_SHARE_INVERSE] (5%) of the log. */
     internal const val REWRITE_MIN_DROPPED_SHARE_INVERSE = 20
 
-    /** Whether dropping [dropped] of [total] lines justifies rewriting (and fsyncing)
-     *  the durable log: a large absolute drop, or a large share of it. */
     internal fun compactionWorthRewriting(dropped: Int, total: Int): Boolean =
         dropped > 0 &&
             (dropped >= REWRITE_MIN_DROPPED_LINES || dropped * REWRITE_MIN_DROPPED_SHARE_INVERSE >= total)

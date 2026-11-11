@@ -5,7 +5,6 @@ import app.milestone.resources.Res
 import app.milestone.resources.coach_export_chooser
 import app.milestone.resources.coach_export_subject
 
-/** Android's share chooser, with the summary built from [appResources]. */
 internal actual fun shareCoachSummary(ctx: PlatformContext, model: ViewModel) {
     val res = ctx.appResources()
     val text = coachSummaryText(res, model)

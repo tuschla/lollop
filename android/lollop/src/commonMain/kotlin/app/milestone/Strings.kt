@@ -33,14 +33,12 @@ internal expect fun PlatformContext.appResources(): PlatformResources
 /** [resource]'s text; with [formatArgs], formatted (`%1$s`, `%1$d`). */
 internal expect fun PlatformResources.getString(resource: StringResource, vararg formatArgs: Any): String
 
-/** [resource]'s text for [quantity]; with [formatArgs], formatted. */
 internal expect fun PlatformResources.getQuantityString(
     resource: PluralStringResource,
     quantity: Int,
     vararg formatArgs: Any,
 ): String
 
-/** [resource]'s items. */
 internal expect fun PlatformResources.getStringArray(resource: StringArrayResource): List<String>
 
 /** The resources the current composition reads (Android: `LocalResources`). */

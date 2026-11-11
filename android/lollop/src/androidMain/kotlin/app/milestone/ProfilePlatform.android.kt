@@ -27,7 +27,7 @@ internal object AndroidLiveUpdates : LiveUpdatesSwitch {
 }
 
 /** The system screen that turns Live Updates on or off for this app (API 36+), else
- *  the app's notification settings (its details page before API 26). */
+ *  the app's notification settings. */
 internal fun promotedNotificationSettingsIntent(ctx: Context): Intent = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA ->
         Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)

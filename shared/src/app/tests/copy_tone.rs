@@ -11,7 +11,7 @@
 //! A real exception goes in `ALLOW` with its reason; an entry nothing matches
 //! any more fails `tone_allowlist_is_reasoned_and_live`.
 
-use super::copy_invariants::{all_hits, assert_family, has_word, is_word_at};
+use super::copy_invariants::{ALL_HITS, assert_family, has_word, is_word_at};
 
 /// A sanctioned exception: `rule` (a `tone:` rule prefix) on a string at
 /// `path` (`""`: any path) containing `text`.
@@ -241,8 +241,6 @@ pub(super) fn tone_hits(path: &str, s: &str) -> Vec<String> {
         .collect()
 }
 
-// ── Self-check: each rule fires on a sample and passes clean copy ───────────
-
 #[test]
 fn the_tone_lint_flags_each_rule_and_passes_clean_copy() {
     for clean in [
@@ -303,20 +301,17 @@ fn the_tone_lint_flags_each_rule_and_passes_clean_copy() {
 
 #[test]
 fn tone_allowlist_is_reasoned_and_live() {
-    let hits = all_hits();
     for (i, a) in ALLOW.iter().enumerate() {
         assert!(a.rule.starts_with("tone: ") && !a.reason.trim().is_empty() && !a.text.is_empty());
         let key = format!("tone-allowed: {i}");
         assert!(
-            hits.keys().any(|(_, r)| *r == key),
+            ALL_HITS.keys().any(|(_, r)| *r == key),
             "allowlist entry {i} ({} on `{}`) matches nothing any more; remove it",
             a.rule,
             a.text
         );
     }
 }
-
-// ── Over every swept view ───────────────────────────────────────────────────
 
 #[test]
 fn copy_reads_neutral() {

@@ -322,7 +322,6 @@ fn calisthenics_muscle_up_gate_blocks_then_opens() {
 fn calisthenics_hold_set_round_trips_renders_and_yields_no_e1rm() {
     let app = Engine;
     let mut model = Model::default();
-    // Wire JSON WITH the hold_sec field.
     let with_hold: Event = serde_json::from_str(
             r#"{"LogSet":{"exercise":"Front plank","weight_kg":0.0,"reps":1,"rpe":7.0,"observed_at":100,"entry_id":1,"hold_sec":30}}"#,
         )
@@ -726,7 +725,6 @@ fn a_pain_clear_after_pain_re_enables_calisthenics_advance() {
         "active pain freezes advance"
     );
 
-    // A later value-0 clear is the latest Pain reading → the gate re-opens.
     let cleared = vec![
         pain_row(1.0, None, 200 * DAY_SEC),
         pain_row(0.0, None, 201 * DAY_SEC),

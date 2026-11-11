@@ -49,7 +49,6 @@ struct RunLockScreen: View {
     }
 }
 
-/// The moving time: a timer from [anchor] while recording, else the frame's figure.
 struct RunTime: View {
     let run: RunLive
     let anchor: Date?
@@ -184,13 +183,11 @@ struct LollopActivityState {
     var rest: RestLive?
     var stale: Bool
 
-    /// The theme's accent in the light and the dark appearance, from the frame.
     var accentLight: Color? { (run?.accentLight ?? rest?.accentLight).map(Color.init(argb:)) }
     var accentDark: Color? { (run?.accentDark ?? rest?.accentDark).map(Color.init(argb:)) }
     var openURL: URL { run != nil ? RunLive.openURL : RestLive.openURL }
 }
 
-/// The lock screen presentation of either activity.
 struct ActivityLockScreen: View {
     let state: LollopActivityState
 

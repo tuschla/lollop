@@ -31,7 +31,6 @@ internal object TestSink : EventSink {
 
     override suspend fun sendAll(events: List<Event>): SendResult = batchSender(events)
 
-    /** Back to the real engine. */
     fun reset() {
         sender = EngineSink::send
         batchSender = EngineSink::sendAll

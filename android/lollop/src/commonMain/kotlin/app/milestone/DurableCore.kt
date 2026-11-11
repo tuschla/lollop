@@ -136,8 +136,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
             bridge.importedHrPct(coreJson.encodeToString(ImportedHr.serializer(), hr).encodeToByteArray())
         }
 
-    /** A [query] answer decoded with [serializer]; null, logged as [what], for an
-     *  error envelope or an answer that doesn't decode. */
     private inline fun <T> decodeQuery(what: String, serializer: KSerializer<T>, call: () -> ByteArray?): T? {
         val json = query(call) ?: return null
         if (isCoreErrorEnvelope(json)) {
@@ -211,8 +209,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
 
     // The native core holds all state in memory for the whole process lifetime,
     // so replaying the log more than once (e.g. on Activity recreation across a
-    // config change) would double every logged lift/run. Guard so replay happens
-    // exactly once per process.
+    // config change) would double every logged lift/run.
     private var restored = false
 
     /**
@@ -230,8 +227,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
      * [SendResult.stale] on every later send.
      */
     fun restore(ctx: PlatformContext): Boolean = synchronized(this) {
-        // An unavailable core never gets the log: nothing is replayed into it and no
-        // event it might accept can be appended (the boot shows the error state).
         if (unavailable) return false
         restoreFrom(ctx.eventLogPath())
     }
@@ -337,7 +332,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     // Stays set for the process: those events are absent until the next boot.
     private var logDegraded = false
 
-    /** How [apply] ended for one event. */
     private enum class Applied { Rejected, Saved, NotPersisted }
 
     /** Apply one event: dispatch it to the core, persist it when the core accepted it
@@ -345,7 +339,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
      *  per batch). Called only under this object's lock, so the log order equals the
      *  apply order and a replay rebuilds the same model. */
     private fun apply(event: Event): Applied {
-        // A core found unusable at boot refuses everything: nothing reaches the log.
         if (unavailable) return Applied.Rejected
         val wire = event.toJson().toString()
         val response = bridge.update(wire.encodeToByteArray())
@@ -367,13 +360,10 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
             PlatformLog.e("Core", "event rejected: ${event::class.simpleName}")
             return Applied.Rejected
         }
-        // Cache the shell's clock so a later panic_reset can re-establish it.
         if (event is Event.SetToday) lastSetToday = event
         val file = log
         if (!event.persist || file == null) return Applied.Saved
         return try {
-            // Lead with a newline when a prior append tore off mid-write, so
-            // this event can never glue onto a newline-less partial line.
             val prefix = if (appendTornGuard) "\n" else ""
             AppFiles.append(file, prefix + wire + "\n")
             appendTornGuard = false
@@ -381,8 +371,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         } catch (e: Exception) {
             // Disk full / IO error: the in-memory core already applied the event, so
             // the UI shows it, but it is gone after the next restart; the caller
-            // tells the user. Arm the torn-line guard so the next append can't
-            // concatenate onto this partial write.
+            // tells the user.
             appendTornGuard = true
             PlatformLog.w("Core", "failed to persist event to log", e)
             Applied.NotPersisted
@@ -418,9 +407,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         lastSetToday?.let { bridge.update(it.toJson().toString().encodeToByteArray()) }
     }
 
-    /** Dispatch one event via [apply], then return the fresh view model plus how
-     *  the event fared, as a [SendResult] the caller surfaces. Applies the event
-     *  BEFORE reading the view so the returned model reflects it. */
     override fun send(event: Event): SendResult = synchronized(this) {
         val applied = apply(event)
         val view = currentView()

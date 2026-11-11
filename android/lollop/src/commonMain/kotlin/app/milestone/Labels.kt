@@ -62,11 +62,8 @@ import app.milestone.resources.setup_liftgoal_strength
 import org.jetbrains.compose.resources.StringResource
 
 // The labels of the core's enums. Display-only, the wire value is still each
-// variant's name, so these strings can change freely. Exhaustive `when` (no
-// `else`) so a new variant fails to compile until it is given a label rather than
-// silently showing a cryptic raw name.
+// variant's name, so these strings can change freely.
 
-/** Display label of an [ActivityKind]. */
 internal val ActivityKind.labelRes: StringResource
     get() = when (this) {
         ActivityKind.Sport -> Res.string.activity_kind_sport

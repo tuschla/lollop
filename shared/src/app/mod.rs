@@ -118,8 +118,6 @@ impl App for Engine {
     }
 
     fn view(&self, model: &Self::Model) -> Self::ViewModel {
-        // Everything several builders read (run facts, session-day attribution,
-        // today's anchors) is derived once here.
         let cx = ViewCtx::new(model);
         // Display unit for every weight string the shell renders verbatim (the
         // numeric view fields stay kg regardless; see `Profile::weight_lb`).
@@ -181,8 +179,6 @@ impl App for Engine {
             derived_wellness_streak,
             weight_lb,
         );
-        // One hold for Today, the plan calculators and the prescriptive
-        // guidance: today's training hold, else a RED-S signal.
         let calc_hold = calculator_hold(v.safety.hold.as_ref(), reds_present);
         let CalcSection {
             protein_targets,
@@ -396,7 +392,7 @@ fn review_pipeline(model: &Model, recommended: Vec<AdjustmentCall>) -> ReviewPip
 /// Whether training is blocked today, and how far up the safety ladder.
 struct SafetyState {
     /// Stage-0 onboarding gates (File 08 onboard-050): profile health-screen
-    /// deferrals. Rendered as Safety guidance rows (build_guidance) AND
+    /// deferrals. Rendered as Safety guidance rows (build_guidance_measured) AND
     /// reflected in `safety_tier` and the hold so no shell can miss them.
     gates: Vec<AdjustmentCall>,
     /// Today's training hold: the first blocking call (Stop / RestDay /
@@ -579,7 +575,6 @@ fn working_plan_section(
     {
         render_basis(it, weight_lb);
     }
-    // Say what changed on each lift since last time, and why.
     if let Some(hero) = plan.hero_day.and_then(|d| plan.row_mut(d)) {
         annotate_last_time(hero, model, &cx.set_index, cx.lift_anchors_now(), weight_lb);
     }
@@ -814,8 +809,6 @@ struct HistorySection {
 fn history_section(cx: &ViewCtx, planned_run_km: f64, weight_lb: bool) -> HistorySection {
     let model = cx.model;
     let mut runs = run_views(&model.runs, &cx.runs, model.distance_unit());
-    // Run progress and the cross-run best-effort records are layered on the
-    // memoized per-run views.
     let progress = build_run_progress(model, &cx.runs, planned_run_km);
     annotate_run_views(&mut runs, progress.as_ref().map(|p| &p.view));
     crate::memo::retain_runs(&cx.runs.keys);

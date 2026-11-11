@@ -8,7 +8,6 @@ use crate::running::{self, PACE_CORRECTION_ALTITUDE_M, PACE_CORRECTION_HEAT_C};
 use crate::schema::{MesoPhase, Recommended};
 use crate::strength::LiftGoal;
 
-/// Running rows for a profile that runs.
 pub(super) fn build_running_guidance(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
     let p = pp.profile();
     push_goal_week_row(p, rows);

@@ -311,7 +311,6 @@ fn lighter_next(cx: &ViewCtx, lift: Option<&LiftEval>) -> bool {
     })
 }
 
-/// The card message.
 fn card_message(ctx: &MessageCtx, held: bool, female_user: bool) -> String {
     let mut message = if held {
         "Session logged. Today's plan is eased: no extra weight for now.".to_string()
@@ -510,12 +509,10 @@ pub(in crate::app) struct MessageCtx<'a> {
 }
 
 impl<'a> MessageCtx<'a> {
-    /// The judged lift's logged outcome.
     fn detail(&self) -> Option<&'a LiftOutcome> {
         self.lift.and_then(|l| l.detail.as_ref())
     }
 
-    /// The judged lift's name.
     fn lift_name(&self) -> Option<&'a str> {
         self.detail().map(|o| o.exercise.as_str())
     }
@@ -588,7 +585,6 @@ pub(super) fn with_reserve_from_rpe(rpe: f64) -> String {
     }
 }
 
-/// "estimated max" (plain) or "e1RM" (advanced).
 fn max_term(plain: bool) -> &'static str {
     if plain { "estimated max" } else { "e1RM" }
 }
@@ -969,7 +965,7 @@ mod tests {
 
     #[test]
     fn came_up_short_says_today_and_compares_the_loads_as_shown() {
-        // final-today F6: 124.7 kg and 124.74 kg both render "275 lb", so the
+        // 124.7 kg and 124.74 kg both render "275 lb", so the
         // only shortfall is the set count: no "(5 reps at 275 lb instead of 5
         // at 275 lb)", and a lift from today says "today".
         let m = short_msg(124.7, 100);

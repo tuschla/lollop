@@ -73,7 +73,6 @@ fn loading_bands_match_file02() {
         (h.pct_1rm, h.reps, h.rest_sec, h.rir),
         ((65, 85), (6, 12), (30, 120), Some((0, 3)))
     );
-    // Strength intensity floor sits above hypertrophy's.
     assert!(
         loading_rx(LiftGoal::MaxStrength).value.pct_1rm.0
             > loading_rx(LiftGoal::Hypertrophy).value.pct_1rm.0
@@ -145,7 +144,6 @@ fn rpe_to_rir_anchor() {
     assert_eq!(rpe_to_rir(10.0), 0.0);
     // Clamp: overshoot stays at 0 RIR.
     assert_eq!(rpe_to_rir(11.0), 0.0);
-    // Round trip.
     assert_eq!(rir_to_rpe(2.0), 8.0);
     assert_eq!(rir_to_rpe(0.0), 10.0);
     // Clamp: a RIR beyond the anchor floors RPE at 0.
@@ -162,7 +160,6 @@ fn est_pct_from_reps_clamps_domain_edges_and_estimates() {
     assert_eq!(est_pct_1rm(0, 0.0), 0.0);
     // The Epley inverse governs ≥2 reps: 100 / (1 + 2/30) = 93.75 %.
     assert!((est_pct_1rm(2, 0.0) - 93.75).abs() < 1e-2);
-    // Monotonic decrease with more reps (above the r=1 clamp).
     assert!(est_pct_1rm(10, 0.0) < est_pct_1rm(3, 0.0));
 }
 
@@ -174,7 +171,6 @@ fn prilepin_for_70pct_returns_correct_row() {
     assert_eq!(row.reps_per_set, (3, 6));
     assert_eq!(row.optimal_total, 18);
     assert_eq!(row.total_range, (12, 24));
-    // Boundaries and out-of-range.
     assert_eq!(prilepin_for(95.0).unwrap().optimal_total, 7);
     assert_eq!(prilepin_for(50.0).unwrap().optimal_total, 24);
     assert!(prilepin_for(-1.0).is_none());
@@ -208,17 +204,13 @@ fn prilepin_volume_pass_and_fail() {
 fn prilepin_table_nonempty_and_sorted() {
     assert!(!PRILEPIN.is_empty());
     assert_eq!(PRILEPIN.len(), 4);
-    // Ascending, non-overlapping, gap-free bands.
     for w in PRILEPIN.windows(2) {
         assert!(w[0].pct_max < w[1].pct_min);
         assert_eq!(w[0].pct_max + 1, w[1].pct_min);
     }
-    // Full 0-100 coverage.
     assert_eq!(PRILEPIN.first().unwrap().pct_min, 0);
     assert_eq!(PRILEPIN.last().unwrap().pct_max, 100);
 }
-
-// -- File 02 rules --
 
 #[test]
 fn e1rm_reliability_gate_and_cross_check() {
@@ -234,7 +226,6 @@ fn e1rm_reliability_gate_and_cross_check() {
     assert!(c.formulas_used >= 2);
     assert!(c.low_kg <= e1rm_epley(100.0, 5) && e1rm_epley(100.0, 5) <= c.high_kg);
     assert!(c.low_kg <= c.high_kg);
-    // Unreliability gate returns None instead of a number.
     assert!(e1rm_cross_check(100.0, 11, 0.0, false).value.is_none());
     assert!(e1rm_cross_check(100.0, 5, 0.0, true).value.is_none());
     assert!(e1rm_cross_check(0.0, 5, 0.0, false).value.is_none());

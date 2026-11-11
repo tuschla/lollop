@@ -119,7 +119,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.stroke(dp: Float): 
 /** One local day's logged activity on the heatmap: whether any set was lifted that
  *  day, and how many runs were logged. */
 internal data class DayActivity(val lifted: Boolean, val runs: Int) {
-    /** Sessions that day: a lifting day is one, each run is one. */
     val sessions: Int get() = (if (lifted) 1 else 0) + runs
 }
 
@@ -165,13 +164,10 @@ internal fun ContributionHeatmap(
         pluralStringResource(Res.plurals.history_sessions, busiestWeek, busiestWeek),
     )
 
-    // Axis labels: localized narrow weekday initials down the left gutter (Mon top),
-    // month ticks along the bottom at each column where the month first changes.
     val locale = currentAppLocale()
     val weekdayInitials = remember(locale) { (0..6).map { weekdayName(DayOfWeek(it + 1), WeekdayWidth.Narrow, locale) } }
     val monthFmt = remember(locale) { localizedDayFormatter("MMM", locale) }
     val cellDateFmt = remember(locale) { localizedDayFormatter("EEEEMMMMd", locale) }
-    // First column of each distinct month → its label (blank elsewhere).
     val rawTicks = (0 until weeks).map { col ->
         val colMonth = monthFmt.formatEpochDay(firstWeekStart + col * 7L)
         val prevMonth = if (col == 0) "" else monthFmt.formatEpochDay(firstWeekStart + (col - 1) * 7L)
@@ -297,7 +293,6 @@ internal fun ContributionHeatmap(
                     }
                 }
             }
-            // Month ticks aligned under their column.
             Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                 Box(Modifier.width(gutter))
                 for (col in 0 until weeks) {
@@ -317,8 +312,7 @@ internal fun ContributionHeatmap(
                     }
                 }
             }
-            // Tint legend: lift, run, both. Decorative for TalkBack (cells speak
-            // their own activity).
+            // Decorative for TalkBack: cells speak their own activity.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
@@ -337,7 +331,7 @@ internal fun ContributionHeatmap(
 /** Month tick labels with every collision resolved: a label (width [widthsPx]) that
  *  would run into the next kept label, [minGapPx] apart at a column [pitchPx], is
  *  dropped, so the later label (a month's first full week) wins over a leading partial
- *  month. Blank entries are columns without a tick. Pure. */
+ *  month. Blank entries are columns without a tick. */
 internal fun spacedMonthTicks(ticks: List<String>, widthsPx: List<Int>, pitchPx: Int, minGapPx: Int): List<String> {
     val out = ticks.toMutableList()
     var nextCol = -1
@@ -448,7 +442,6 @@ fun RunDistanceBars(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        // Header: y-max at the start, the window total at the end.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -473,7 +466,6 @@ fun RunDistanceBars(
     }
 }
 
-/** Opacity of the accent underline under today's / this week's bar. */
 private const val CurrentPeriodTickAlpha = 0.55f
 
 /** A round y-axis ceiling at or above [peak] (e.g. 8 / 10 / 15), 0 for none, so a
@@ -485,7 +477,6 @@ private fun niceAxisCeiling(peak: Double): Double = when {
     else -> kotlin.math.ceil(peak / 5.0) * 5.0
 }
 
-/** The y-max label over a bar chart ("10 km"), the empty placeholder at 0. */
 @Composable
 private fun AxisMaxLabel(yMax: Double, unit: DistanceUnit, modifier: Modifier = Modifier) {
     Text(
@@ -511,7 +502,6 @@ private fun AxisTicks(start: String, end: String) {
     }
 }
 
-/** Theme colours of the bar charts' fixed parts. */
 private class BarColors(val baseline: Color, val currentTick: Color, val gridline: Color)
 
 @Composable
@@ -523,9 +513,7 @@ private fun rememberBarColors(): BarColors {
 }
 
 /**
- * One bar per value across the full width ([barFrac] of each slot), scaled to
- * [yMax] under its dashed ceiling: a [colorAt] bar above 0, a faint baseline stub
- * at 0, the accent underline under [currentIndex]. Returns the plot height (the
+ * One bar per value, [barFrac] of each slot wide. Returns the plot height (the
  * bars' bottom edge).
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDistanceBars(
@@ -539,7 +527,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDistanceBars(
     val slot = size.width / vals.size
     val barW = slot * barFrac
     val corner = CornerRadius(stroke(2f), stroke(2f))
-    // Reserve a hair at the bottom for the baseline + current-period underline.
     val underline = stroke(2.5f)
     val usableH = (size.height - underline - stroke(2f)).coerceAtLeast(1f)
     if (yMax > 0.0) drawAxisCeiling(colors.gridline)
@@ -569,7 +556,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDistanceBars(
     return usableH
 }
 
-/** The y-max gridline of a bar chart: a 1dp dashed hairline across the top of the
+/** The y-max gridline of a bar chart: a dashed hairline across the top of the
  *  plot (where a full-scale bar ends), so the y-max label reads as the scale
  *  ceiling, not a value. Drawn before the bars so they sit over it. */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisCeiling(color: Color) {
@@ -632,8 +619,7 @@ fun WeeklyDistanceChart(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        // Header: y-max at the start, the plan legend (dashed swatch) at the end.
-        // It speaks the chart's summary, so TalkBack reads it before the per-week
+        // The header speaks the chart's summary, so TalkBack reads it before the per-week
         // nodes below (a node under those full-size nodes would count as covered).
         Row(
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = chartDesc },

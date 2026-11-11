@@ -75,7 +75,6 @@ class OwnerRegressionJourneyTest {
      *  snackbar's Undo) from Today's same-worded action named for TalkBack. */
     private val noDescription = SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription)
 
-    // ── Delete a bpm run in History → Undo brings it back WITH its bpm ───────
     @Test
     fun deletingABpmRunThenUndo_restoresTheRunWithItsBpm() {
         val at = QaHarness.daysAgoAtMidday(1)
@@ -123,7 +122,6 @@ class OwnerRegressionJourneyTest {
         assertEquals(restore, 152.0, payload["avg_hr_bpm"]?.jsonPrimitive?.double ?: 0.0, 0.0)
         assertEquals(restore, 0.0, payload["hr_pct_max"]!!.jsonPrimitive.double, 0.0)
 
-        // What the user sees: the restored run reopens in its editor on 152 bpm.
         rule.scrollToText(title)
         rule.onNodeWithText(title).performClick()
         rule.waitForIdle()
@@ -135,12 +133,10 @@ class OwnerRegressionJourneyTest {
         )
     }
 
-    // ── Delete a GPS run in History → Undo brings the run and its route back ──
     @Test
     fun deletingAGpsRunThenUndo_restoresTheRunAndItsRoute() {
         val at = QaHarness.daysAgoAtMidday(1)
         val entryId = at * 1000
-        // A 2 km loop-free track heading north, one clean fix every 3 s, 10 m apart.
         val metresPerDegLat = 111_195.0
         val points = (0 until 201).map { i ->
             app.milestone.GpsPoint(lat = 47.0 + i * 10.0 / metresPerDegLat, lon = 8.0, observedAt = at + i * 3L, accuracyM = 5.0)
@@ -174,7 +170,6 @@ class OwnerRegressionJourneyTest {
         assertEquals("same distance", before.distance_km, restored.distance_km, 0.01)
     }
 
-    // ── The loop's primary walks a whole session to "Finish session" ─────────
     @Test
     fun theLoopPrimaryWalksEverySetThenNextThenFinishSession() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -199,17 +194,15 @@ class OwnerRegressionJourneyTest {
             )
             assertEquals(n, todaysItems().first { it.exercise == item.exercise }.sets_done)
             logSet()
-            // The lifter walks to the next bar (a tap within the 800 ms repeat guard
+            // The lifter walks to the next bar (a tap within the loop's repeat guard
             // would be dropped as a double tap).
             rest()
         }
-        // Finish session closes the loop onto Today's session-done card.
         rule.assertCountEventually(hasTestTag("editor-primary"), 0)
         rule.assertCountEventually(hasTestTag("session-done"), 1)
         assertTrue(todaysItems().all { it.done })
     }
 
-    // ── "End exercise" from inside the loop → Undo reopens it ────────────────
     @Test
     fun endExerciseFromTheLoopCue_undoReopensTheExercise() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -246,11 +239,9 @@ class OwnerRegressionJourneyTest {
         rule.assertTextCountEventually(setHeader(done + 1, n), 1)
         assertEquals(done, todaysItems().first { it.exercise == squat }.sets_done)
 
-        // Durable: an ended=true marker, then the Undo's ended=false for the same day.
         val ends = journeyLog().filter { it.variant == "SetExerciseEnded" }.map { it.payload }
             .filter { it["exercise"]!!.jsonPrimitive.content == squat && it["epoch_day"]!!.jsonPrimitive.long == epochDay }
         assertEquals("$ends", listOf(true, false), ends.map { it["ended"]!!.jsonPrimitive.boolean })
-        // Still loggable from the loop's primary.
         rule.onNodeWithTag("editor-primary").assert(hasText(str(R.string.log_primary_set_n_of_n, done + 1, n)))
     }
 }

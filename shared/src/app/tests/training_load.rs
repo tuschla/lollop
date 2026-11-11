@@ -333,7 +333,6 @@ fn backdated_run_weekly_report_matches_in_order_logging() {
     assert_eq!(b.runs[1].observed_at, cur_week_at);
 }
 
-// ── The weekly report groups a whole Mon–Sun local week ──
 #[test]
 fn weekly_report_groups_a_full_mon_sun_week() {
     // MON (epoch day 4) is a Monday and MON+6 its Sunday: one Mon–Sun week.

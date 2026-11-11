@@ -206,7 +206,7 @@ pub struct Profile {
     /// When the edit was made, unix seconds (the shell's clock). On its
     /// effective day the edit is in force only from this instant, so an
     /// evening edit leaves a run logged that morning on the profile it was
-    /// logged under (`app::profile_at`); it also orders same-day edits in the
+    /// logged under (`app::model::profile_at`); it also orders same-day edits in the
     /// history. `None` = from the start of that day.
     /// Ignored on an undated edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -402,17 +402,14 @@ impl<'a> PlanProfile<'a> {
         pp
     }
 
-    /// The raw profile answers.
     pub fn profile(&self) -> &'a Profile {
         self.profile
     }
 
-    /// The profile plans lifting sessions.
     pub fn lifts(&self) -> bool {
         self.lifts
     }
 
-    /// The profile plans running days.
     pub fn runs(&self) -> bool {
         self.runs
     }
@@ -451,7 +448,6 @@ impl<'a> PlanProfile<'a> {
         self.weekdays
     }
 
-    /// The fitted lift/run day counts of a week.
     pub fn shape(&self) -> WeekShape {
         self.shape
     }
@@ -482,7 +478,7 @@ impl<'a> PlanProfile<'a> {
         }
     }
 
-    /// The lift-day count when the athlete chose none: 3 pure, 2 hybrid.
+    /// The lift-day count when the athlete chose none.
     pub fn default_lift_days(&self) -> usize {
         usize::from(if self.runs {
             HYBRID_DEFAULT_LIFT_DAYS

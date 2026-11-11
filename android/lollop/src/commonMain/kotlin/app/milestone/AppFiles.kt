@@ -51,7 +51,6 @@ internal expect object AppFiles {
  *  ([AppFiles.openRead], [AppFiles.openTruncatable]). Closing a truncatable file
  *  reports a failed write. */
 internal interface RawFile : AutoCloseable {
-    /** The file's size in bytes. */
     fun length(): Long
 
     /** Read up to [count] bytes from the current position into [buf]'s start;
@@ -61,7 +60,6 @@ internal interface RawFile : AutoCloseable {
     /** Read exactly [count] bytes at [at] into [buf]'s start; a short file fails. */
     fun readFully(at: Long, buf: ByteArray, count: Int)
 
-    /** Cut the file to [len] bytes. */
     fun truncate(len: Long)
 }
 

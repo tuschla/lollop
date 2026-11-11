@@ -241,7 +241,6 @@ fn is_option(ty: &Type) -> bool {
         && p.path.segments.last().is_some_and(|s| s.ident == "Option"))
 }
 
-/// The `///` lines, joined.
 fn docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
     for attr in attrs.iter().filter(|a| a.path().is_ident("doc")) {

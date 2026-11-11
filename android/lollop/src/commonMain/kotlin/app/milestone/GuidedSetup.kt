@@ -167,7 +167,6 @@ private val KeyField.next: KeyField?
         else -> null
     }
 
-/** The keypad buffer [field] edits. */
 private fun SetupAnswers.buffer(field: KeyField): String = when (field) {
     KeyField.Bodyweight -> bwText
     KeyField.RestingHr -> rhrText
@@ -268,7 +267,6 @@ internal fun GuidedSetup(
     // The pinned keypad shows only while a number field has focus; tapping a
     // non-number answer or blank space puts it away so nothing sits half-hidden.
     var keypadOpen by rememberSaveable { mutableStateOf(true) }
-    // Confirm-before-discard flag for a step-0 back-out with unsaved answers.
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
 
     fun valuesOf(a: SetupAnswers) = SetupValues(a, seed, initial, seedWeeklyKm, a.distanceChoice ?: systemDistanceUnit, today)
@@ -310,7 +308,6 @@ internal fun GuidedSetup(
     val backToReview = reviewReturn != null && current != SetupStep.Review && pendingStep == null
     val blockedHint = if (canAdvance) null else stepBlockedHint(current, v)
 
-    // Keypad plumbing: one keypad edits whichever field is active.
     fun setBuffer(f: KeyField, text: String) {
         answers = answers.withBuffer(f, text)
         fresh = false
@@ -390,10 +387,9 @@ internal fun GuidedSetup(
     val sideBySide = LocalWindowLayout.current.sideControls
     val headerDock = remember { SlotDock() }
     val headerRow: @Composable () -> Unit = {
-        // Header: step progress + Skip. The step question below is the
-        // screen's one title. The review has only Back and Finish to choose
-        // from, so Skip is gone there; the row keeps its height so the page
-        // never jumps.
+        // The step question below is the screen's one title. The review has only
+        // Back and Finish to choose from, so Skip is gone there; the row keeps its
+        // height so the page never jumps.
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = ActionMinHeight),
             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
@@ -571,9 +567,6 @@ internal fun GuidedSetup(
                     onClick = {
                         when {
                             current != SetupStep.Review && reviewReturn != null -> {
-                                // An edit from the review: on to the next screen it
-                                // invalidated, else straight back to the review, at
-                                // the row the edit started from.
                                 val next = pendingStep
                                 if (next != null) {
                                     step = next
@@ -651,7 +644,6 @@ internal fun GuidedSetup(
             }
         }
 
-        // "Leave setup?": confirms dropping answers that were never sent.
         if (confirmLeave) {
             ConfirmDialog(
                 title = stringResource(Res.string.setup_leave_title),
@@ -685,7 +677,6 @@ private fun stepBlockedHint(step: SetupStep, v: SetupValues): String? = when (st
     SetupStep.Placement, SetupStep.Health, SetupStep.Review -> null
 }
 
-/** The lifting goal, the test/meet date it may carry, and how the user lifts. */
 @Composable
 private fun LiftGoalStep(a: SetupAnswers, today: Long, update: UpdateAnswers) {
     StepHeader(stringResource(Res.string.setup_step_lift_q))
@@ -708,8 +699,7 @@ private fun LiftGoalStep(a: SetupAnswers, today: Long, update: UpdateAnswers) {
     }
 }
 
-/** "Where are you now?": the equipment on hand, then one placement per ladder.
- *  On a [kept] ladder (a re-run's, already holding a rung) no answer keeps that rung. */
+/** On a [kept] ladder (a re-run's, already holding a rung) no answer keeps that rung. */
 @Composable
 private fun PlacementStep(a: SetupAnswers, kept: Set<LadderId>, update: UpdateAnswers) {
     StepHeader(stringResource(Res.string.setup_step_place_q), stringResource(Res.string.setup_step_place_sub))
@@ -753,7 +743,6 @@ private fun PlacementStep(a: SetupAnswers, kept: Set<LadderId>, update: UpdateAn
     }
 }
 
-/** Race details: the race date and a recent result (its finish time on the keypad). */
 @Composable
 private fun RaceStep(a: SetupAnswers, v: SetupValues, today: Long, keypad: SetupKeypad, update: UpdateAnswers) {
     StepHeader(stringResource(Res.string.setup_step_race_q), stringResource(Res.string.setup_step_race_sub))
@@ -775,7 +764,6 @@ private fun RaceStep(a: SetupAnswers, v: SetupValues, today: Long, keypad: Setup
     }
 }
 
-/** How many days, the Both lift/run split, and which weekdays suit. */
 @Composable
 private fun DaysStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     val q = when (a.modality) {
@@ -807,7 +795,6 @@ private fun DaysStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     WeekdayChips(a.weekdays) { mask -> update { it.copy(weekdays = mask) } }
 }
 
-/** Roughly how experienced: one level, or lifting and running apart for Both. */
 @Composable
 private fun LevelStep(a: SetupAnswers, update: UpdateAnswers) {
     StepHeader(stringResource(Res.string.setup_step_level_q))
@@ -827,7 +814,6 @@ private fun LevelStep(a: SetupAnswers, update: UpdateAnswers) {
     }
 }
 
-/** One keypad number field: [field]'s buffer, outlined while the keypad types into it. */
 @Composable
 private fun SetupKeypad.NumberField(
     field: KeyField,
@@ -850,8 +836,6 @@ private fun SetupKeypad.NumberField(
     )
 }
 
-/** Running right now: weekly distance (with its "I don't run yet" answer) and the
- *  longest recent run, in the user's distance unit. */
 @Composable
 private fun RunNowFields(a: SetupAnswers, v: SetupValues, distanceUnit: DistanceUnit, keypad: SetupKeypad) {
     val unit = distanceUnit.distanceLabel
@@ -878,8 +862,6 @@ private fun RunNowFields(a: SetupAnswers, v: SetupValues, distanceUnit: Distance
     }
 }
 
-/** About you: birthday (a date or "Prefer not to say"), sex, the units row when
- *  this is the path's first number screen, bodyweight and resting heart rate. */
 @Composable
 private fun AboutStep(
     a: SetupAnswers,
@@ -912,9 +894,6 @@ private fun AboutStep(
         onSkip = onSkipBirthday,
         onChange = onBirthday,
     )
-    // Keypad fields below (the keypad is pinned under this scroll area while one
-    // has focus); an empty optional field submits nothing. Picking a sex puts the
-    // keypad away.
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         FieldLabel(stringResource(Res.string.setup_sex_label))
         // Unset until tapped (nothing highlighted); "Prefer not to say" is a real
@@ -957,8 +936,6 @@ private fun UnitsRow(weightUnit: WeightUnit, distanceUnit: DistanceUnit, onSelec
     }
 }
 
-/** The health screen: the PAR-Q+ and the current-state rows in one card of
- *  hairline-divided switch rows (Profile's health card), and the hold they raise. */
 @Composable
 private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     StepHeader(
@@ -1031,8 +1008,6 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
             )
         }
         if (m != Modality.Lift) {
-            // The race date and recent result ride under the goal they belong to,
-            // only when given.
             val raceLines = if (draft.goalDistance.isRace) {
                 listOfNotNull(
                     draft.goalRaceEpochDay?.let { stringResource(Res.string.setup_review_race_date, epochDayLabel(it)) },
@@ -1052,8 +1027,6 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
         if (m == Modality.Both) {
             add(ReviewEntry(stringResource(Res.string.setup_review_lead), stringResource(draft.concurrentGoal.lead().labelRes), SetupStep.Lead))
         }
-        // Days: "5 days · 2 lift · 3 run" (the Profile row's wording), the
-        // weekdays under it.
         val d = a.days ?: 0
         val count = pluralStringResource(Res.plurals.setup_days_count, d, d)
         val daysHead = if (m == Modality.Both) {
@@ -1070,8 +1043,6 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
         }
         val daysLines = listOf(daysHead, weekdaysLine(draft.trainingWeekdays, d))
         add(ReviewEntry(stringResource(Res.string.setup_review_days), daysLines.joinToString("\n"), SetupStep.Days))
-        // Experience on one line: the shared level when both sides match, else
-        // "Lifting: X · Running: Y".
         val lvl = a.level
         if (lvl != null) {
             val rl = a.runLevel
@@ -1083,8 +1054,6 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
             }
             add(ReviewEntry(stringResource(Res.string.setup_review_level), levelText, SetupStep.Level))
         }
-        // Starting volume: sets and weekly distance on one line, the stated
-        // longest run under it when given.
         val runKm = weeklyVolumeScaleValue(draft.runningKmPerWeek, distanceUnit)
         val runs = draft.runningDaysPerWeek > 0
         val liftVolume = draft.weeklySets.takeIf { it > 0 }?.let { stringResource(Res.string.setup_review_lift_volume, it) }
@@ -1123,8 +1092,7 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
             if (facts.youth) stringResource(Res.string.setup_review_about_hold) else null,
         )
         add(ReviewEntry(stringResource(Res.string.setup_review_about), aboutLines.joinToString("\n"), SetupStep.About))
-        // Health: how many answers apply, and the hold whenever one defers (the
-        // safety call stays on the face).
+        // The hold whenever one defers: the safety call stays on the face.
         val healthLines = listOfNotNull(
             healthSummary(facts),
             if (facts.health_defers) stringResource(Res.string.setup_review_health_hold) else null,
@@ -1136,11 +1104,10 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
 /** The pinned keypad band: one keypad for the screen's numbers, below the fields so
  *  it never scrolls away while typing (no IME popup), on its own full-bleed raised
  *  band with a hairline seam, so the scroll area visibly ends above it instead of
- *  slicing content mid-glyph. Its Next moves to [nextField]; Done (last field)
- *  closes the keypad (there is no IME to dismiss). [beside] (the answers beside
- *  the question, a landscape window): Next/Done is the keypad's tall fourth-column
- *  key instead of a row above it ([LocalKeypadBeside]), so the fields keep their
- *  height on a phone's landscape screen. */
+ *  slicing content mid-glyph. [beside] (the answers beside the question, a
+ *  landscape window): Next/Done is the keypad's tall fourth-column key instead of
+ *  a row above it ([LocalKeypadBeside]), so the fields keep their height on a
+ *  phone's landscape screen. */
 @Composable
 private fun KeypadBand(
     nextField: KeyField?,

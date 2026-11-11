@@ -98,7 +98,6 @@ internal object AndroidWidgets : WidgetSurfacePort {
         MidnightTick.update(ctx)
     }
 
-    /** Redraw every placed widget. */
     suspend fun redraw(ctx: Context) {
         try {
             if (MidnightTick.widgetPlaced(ctx)) TodayWidget().updateAll(ctx)

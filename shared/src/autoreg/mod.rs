@@ -39,8 +39,8 @@ pub use prescriptions::{
     AutoregSource, SetVolumeAction, VbtReadiness, autoreg_source, deload_from_failed_sessions,
     deload_from_rpe_creep_and_wellness, deload_from_rpe_load_gap, deload_from_velocity_drop,
     hrv_single_day_downgrade, hrv_suppressed_recovery_day, interval_pace_autoreg, mrv_signs_deload,
-    nfor_cluster_defer, rpe_stop_reached, set_volume_action, slow_easy_pace_if_over_cap,
-    suspend_hrv_gating, threshold_retest_due, unexplained_decline_rest_defer, vbt_daily_readiness,
+    nfor_cluster_defer, set_volume_action, slow_easy_pace_if_over_cap, suspend_hrv_gating,
+    threshold_retest_due, unexplained_decline_rest_defer, vbt_daily_readiness,
     wellness_rhr_multiday_easy,
 };
 pub(crate) use prescriptions::{

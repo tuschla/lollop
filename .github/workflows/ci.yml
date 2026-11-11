@@ -87,10 +87,6 @@ jobs:
 
   release-r8:
     name: Release APK + R8 keep check
-    # Builds the release APK (the core for its ABIs through cargo-ndk) and checks
-    # its R8 output: classes created by name at run time (JNI Core, manifest
-    # components, startup initializers, Room/WorkManager reflection) must survive
-    # minification; a miss only crashes the release APK.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -108,7 +104,6 @@ jobs:
 
   android-lint:
     name: Android lint
-    # Lint reads sources and resources only; no Rust steps. Errors fail the job.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -121,7 +116,6 @@ jobs:
 
   emulator-smoke:
     name: Android on-device smoke (emulator)
-    # Expensive: only weekly + on manual dispatch, never on push/PR.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -138,7 +132,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: On-device smoke (assemble, install, monkey)
+      - name: On-device smoke (seed, set flow, monkey)
         uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:
           api-level: 34
@@ -151,5 +145,5 @@ jobs:
           # is self-contained (no `cd`, no multi-line constructs).
           working-directory: android
           script: |
-            ./gradlew --no-daemon installDebug
-            ../scripts/monkey-gate.sh
+            ./gradlew --no-daemon :app:assembleDebug
+            QA_SKIP_BUILD=1 ../scripts/qa-emulator.sh --port 5554

@@ -27,7 +27,6 @@ pub(super) fn activity_views(acts: &[LoggedActivity]) -> Vec<ActivityResultView>
     ordered.into_iter().map(to_activity_view).collect()
 }
 
-/// Log order for activities: `observed_at`, then `entry_id`.
 fn chrono_cmp(a: &LoggedActivity, b: &LoggedActivity) -> std::cmp::Ordering {
     a.observed_at
         .cmp(&b.observed_at)

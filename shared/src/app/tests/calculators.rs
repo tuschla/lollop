@@ -10,7 +10,6 @@ fn predict_race_produces_graded_two_method_estimate() {
     let mut model = Model::default();
     assert!(app.view(&model).race_prediction.is_none());
 
-    // 5 km in 20:00, predict a 10 km at ~40 km/wk.
     app.update(
         Event::PredictRace {
             recent_distance_m: 5000.0,
@@ -45,7 +44,6 @@ fn predict_race_produces_graded_two_method_estimate() {
         pred.predicted
     );
 
-    // Clearing drops the section.
     app.update(Event::ClearRacePrediction, &mut model)
         .expect_only_render();
     assert!(app.view(&model).race_prediction.is_none());
@@ -94,7 +92,6 @@ fn plan_hypertrophy_meso_produces_graded_rows() {
     let mut model = Model::default();
     assert!(app.view(&model).hypertrophy_plan.is_empty());
 
-    // A known muscle + 4 accumulation weeks yields several graded rows.
     app.update(
         Event::PlanHypertrophyMeso {
             muscle: "chest".into(),
@@ -159,7 +156,6 @@ fn plan_hypertrophy_meso_produces_graded_rows() {
     }
     assert_eq!(fig.face_rows.len(), 7);
 
-    // Clearing empties the section.
     app.update(Event::ClearHypertrophyPlan, &mut model)
         .expect_only_render();
     assert!(app.view(&model).hypertrophy_plan.is_empty());
@@ -252,7 +248,6 @@ fn compute_protein_scales_graded_targets_by_bodyweight() {
     .expect_only_render();
     assert!(app.view(&model).protein_targets.is_empty());
 
-    // Clearing empties the section.
     app.update(
         Event::ComputeProtein {
             bodyweight_kg: 80.0,
@@ -324,7 +319,6 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
     .expect_only_render();
 
     let zones = app.view(&model).hr_zones;
-    // HRmax header + 5 Daniels bands + the MAF base-phase option row.
     assert_eq!(zones.len(), 7, "one HRmax row + five band rows + MAF cap");
     assert!(
         zones.last().unwrap().summary.contains("easy-run cap (MAF)"),
@@ -378,7 +372,6 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
         assert_ne!(z.evidence.grade, Some(EvidenceGrade::MarketingMyth));
     }
 
-    // Clear empties the section.
     app.update(Event::ClearHrZones, &mut model)
         .expect_only_render();
     assert!(app.view(&model).hr_zones.is_empty());
@@ -420,7 +413,6 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
         }
     }
 
-    // Hypertrophy plan: unknown muscle + zero/huge week counts.
     for muscle in ["", "chest", "not-a-muscle"] {
         for &weeks in &[0u8, 1, 12, 255] {
             cited_non_myth(
@@ -597,7 +589,6 @@ fn hypertrophy_plan_decides_the_next_meso_and_states_effort_rules() {
     assert!(has("Tempo: controlled"), "tempo row");
 }
 
-/// The marathon-optimism caveat on a race prediction.
 const MARATHON_OPTIMISM: &str = "marathon predictions come out too fast";
 
 #[test]
@@ -698,8 +689,6 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
         supported.low_sec,
         supported.high_sec
     );
-    // The caveat note is retained on the derated prediction, absent on the
-    // well-supported one.
     assert!(
         under
             .notes
@@ -870,7 +859,6 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
     assert!(hy.not_growing && !hy.recovering_easily);
 }
 
-// ── Wire contract: HR zones consume the profile's measured HRmax ──
 #[test]
 fn an_implausible_measured_hr_max_falls_back_to_tanaka() {
     let q = HrZoneInputView {

@@ -79,12 +79,10 @@ pub(crate) enum MovementPattern {
 }
 
 impl MovementPattern {
-    /// Squat and hinge train the lower body.
     pub(crate) fn is_lower(self) -> bool {
         matches!(self, MovementPattern::Squat | MovementPattern::Hinge)
     }
 
-    /// Push and pull train the upper body.
     pub(crate) fn is_upper(self) -> bool {
         matches!(self, MovementPattern::Push | MovementPattern::Pull)
     }
@@ -166,7 +164,6 @@ fn movement_pattern_of(has: &dyn Fn(&str) -> bool) -> Option<MovementPattern> {
     {
         return Some(MovementPattern::Pull);
     }
-    // Horizontal + vertical presses and their bodyweight analogues.
     if has("bench")
         || has("press")
         || has("push up")
@@ -374,7 +371,6 @@ pub(crate) struct CompetitionLift {
     pub(crate) squat_or_bench: bool,
 }
 
-/// Classify `name` for the meet taper ([`CompetitionLift`]).
 pub(crate) fn competition_lift(name: &str) -> CompetitionLift {
     let (deadlift, bench) = with_name_tokens(name, |t| {
         let prefixed = |p: &str| t.iter().any(|w| w.starts_with(p));
@@ -388,10 +384,6 @@ pub(crate) fn competition_lift(name: &str) -> CompetitionLift {
         squat_or_bench: movement_pattern(name) == Some(MovementPattern::Squat) || bench,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Exercise catalog (File 03 Table 4) and any-name class (Table 2)
-// ---------------------------------------------------------------------------
 
 /// Exercise class driving the rep/load window (File 03 Table 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -604,7 +596,6 @@ pub(crate) fn catalog_entry(name: &str) -> Option<&'static ExerciseEntry> {
     })
 }
 
-/// Each [`EXERCISES`] row's movement key, aligned by index, computed once.
 static CATALOG_MOVEMENT_KEYS: std::sync::LazyLock<Vec<Vec<String>>> =
     std::sync::LazyLock::new(|| {
         EXERCISES

@@ -23,7 +23,6 @@ import org.jetbrains.compose.resources.StringResource
  * [LollopApp], whose scaffold applies the destination once boot has run.
  */
 internal enum class OpenDest(val wire: String) {
-    /** The Today tab. */
     Today("today"),
 
     /** The Log chooser sheet over Today. */
@@ -49,7 +48,6 @@ internal enum class OpenDest(val wire: String) {
  */
 internal typealias OpenRequests = MutableStateFlow<OpenDest?>
 
-/** The URL scheme of [openDestOfUrl]. */
 internal const val OPEN_URL_SCHEME = "lollop"
 
 /**
@@ -65,8 +63,8 @@ internal fun openDestOfUrl(url: String): OpenDest? {
     return OpenDest.fromWire(dest)
 }
 
-/** The three destinations, in nav order (chrome §1; Today owns both the day's
- *  call and the plan). */
+/** The bottom-nav destinations, in nav order (chrome §1; Today owns both the
+ *  day's call and the plan). */
 enum class Dest(val labelRes: StringResource, val iconSelected: DrawableResource, val iconUnselected: DrawableResource) {
     Today(Res.string.main_dest_today, Res.drawable.ic_nav_today_selected, Res.drawable.ic_nav_today_unselected),
     History(Res.string.main_dest_history, Res.drawable.ic_nav_history_selected, Res.drawable.ic_nav_history_unselected),

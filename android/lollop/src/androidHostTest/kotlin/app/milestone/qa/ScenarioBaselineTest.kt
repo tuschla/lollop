@@ -40,7 +40,6 @@ class ScenarioBaselineTest {
         // No seeded log = genuine fresh install → the guided setup replaces the
         // scaffold (the whole first-run onboarding entry point).
         rule.launchAppExpectingSetup()
-        // The first step's question is the screen's one title.
         rule.onAllNodesWithText(str(R.string.setup_step_train_q)).assertCountEquals(1)
         // Step 1 says where it is in the path, and its bar is already partly filled
         // (GuidedSetupDraftTest); there is no Back to show yet, not even a hidden one

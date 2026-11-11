@@ -189,8 +189,6 @@ fn time_substitution_and_environment() {
     assert!(environment_modifier(Environment::Heat).safety_critical());
 }
 
-// --- Stage-0 onboarding gates (File 08 onboard-050) ---
-
 #[test]
 fn clear_health_screen_yields_no_gates() {
     assert!(onboarding_gates(&HealthScreen::default()).is_empty());

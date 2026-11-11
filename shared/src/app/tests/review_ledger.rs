@@ -5,7 +5,7 @@
 //! under.
 
 use super::*;
-use crate::compact_event_log;
+use crate::log::compact_event_log;
 
 const D0: i64 = 20_400;
 
@@ -62,8 +62,6 @@ fn profile(eff: Option<i64>, birth: Option<i64>, hr_max: Option<f64>, age: Optio
         ..base_profile()
     })
 }
-
-// ── Random ledger generator: runs/profiles/clock heavy ─────────────────────
 
 #[derive(Clone, Copy)]
 struct RunRef {
@@ -405,8 +403,6 @@ fn review_stored_run_figures_equal_their_pure_derivation() {
     );
 }
 
-// ── Targeted compaction cases ──────────────────────────────────────────────
-
 #[test]
 fn review_delete_across_another_run_is_replay_equivalent() {
     let at = D0 * DAY_SEC + 8 * 3600;
@@ -466,8 +462,6 @@ fn review_delete_across_another_run_is_replay_equivalent() {
         ],
     );
 }
-
-// ── Birthday / timezone / %HRmax re-derivation ─────────────────────────────
 
 /// The %HRmax a typed-bpm run shows, by entry id.
 fn hr_of(app: &Engine, model: &Model, id: u64) -> f64 {
@@ -694,8 +688,6 @@ fn review_undated_profile_rewrites_all_past_runs() {
     assert_compaction_equivalent("undated edit, then ClearProfile", full);
 }
 
-// ── Check-ins a later SetToday reads again ─────────────────────────────────
-
 /// A later SetToday can move today back into the window of a check-in, so a
 /// compacted log (the relaunch) keeps every check-in it may read again and
 /// renders like the full log.
@@ -719,8 +711,6 @@ fn review_rule4_root_cause_settoday_back_reads_old_checkins() {
     );
     assert!(a == b, "{}", json_diff(&a, &b));
 }
-
-// ── Undated races ──────────────────────────────────────────────────────────
 
 /// A race stated in a legacy UNDATED profile edit stays undated (its day is
 /// unknown), but a later dated re-save of the same race (the editor re-sends

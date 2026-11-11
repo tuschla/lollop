@@ -39,7 +39,6 @@ object NativeCore : CoreCalls() {
     }
 }
 
-/** Call [f] with a pointer to [bytes] (null for an empty array), pinned for the call. */
 internal inline fun <R> withBytes(bytes: ByteArray, f: (CPointer<UByteVar>?, ULong) -> R): R =
     if (bytes.isEmpty()) {
         f(null, 0u)
@@ -47,7 +46,6 @@ internal inline fun <R> withBytes(bytes: ByteArray, f: (CPointer<UByteVar>?, ULo
         bytes.usePinned { f(it.addressOf(0).reinterpret(), bytes.size.convert()) }
     }
 
-/** Copy a core-owned buffer into a [ByteArray] and free it. */
 fun CValue<LollopBytes>.take(): ByteArray {
     val out = useContents { data?.readBytes(len.convert()) ?: ByteArray(0) }
     lollop_bytes_free(this)

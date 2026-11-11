@@ -59,7 +59,6 @@ pub(in crate::app) fn program_name(focus: crate::plan::ProgramFocus) -> String {
         ProgramFocus::Running(GoalDistance::General | GoalDistance::C25k) => "Running base".into(),
         ProgramFocus::Running(GoalDistance::HalfMarathon) => "Half-marathon plan".into(),
         ProgramFocus::Running(goal) => format!("{} plan", goal.label()),
-        ProgramFocus::Unplanned => "Training plan".into(),
     }
 }
 

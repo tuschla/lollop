@@ -45,7 +45,6 @@ internal val OnAccent: Color @Composable get() = LocalPalette.current.onAccent
  *  leading icon tiles, [SecondaryButton] fill, selected [OptionList] row). */
 val AccentTint: Color @Composable get() = LocalPalette.current.accentTint()
 
-/** The active theme's [accentFaint]. */
 val AccentFaint: Color @Composable get() = LocalPalette.current.accentFaint()
 
 /**
@@ -105,7 +104,7 @@ data class StatusColors(
     // The warn fill clears it on the light grounds; [DarkStatusColors] swaps in
     // the lighter ochre of the dark grounds' [WarnText] (ThemeContrastTest).
     val warnMark: Color = Color(0xFFA16207),
-    // Three-zone lactate model (running.rs::ThreeZone). Fixed meaning: Z1 easy
+    // Three-zone lactate model (schema.rs ThreeZone). Fixed meaning: Z1 easy
     // aerobic, Z2 threshold, Z3 hard. Never follow the system accent.
     val hrZone1: Color = Color(0xFF0E7490),
     val hrZone2: Color = Color(0xFFB45309),
@@ -136,18 +135,18 @@ val TabularFigures = TextStyle(fontFeatureSettings = "tnum", textDirection = App
 /**
  * Type scale, shared by every theme (design spec §3, visual-design-system.md §3).
  * System font; the scale is what matters. Readable at the default font size:
- * running text is never below [Caption] (14sp), and no style is below 12sp.
+ * running text is never below [Caption], and no style is below 12sp.
  */
 object Type {
     val Display = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     val Title = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
 
-    /** Title of a history card or detail sheet (a run, a lift session): 17sp ExtraBold. */
+    /** Title of a history card or detail sheet (a run, a lift session). */
     val CardTitle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, textDirection = AppTextDirection)
 
     val Section = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, textDirection = AppTextDirection)
-    // 22sp leading for multi-line running text, trimmed above the first and below
-    // the last line so a single line keeps its font height and one-line rows don't grow.
+    // Leading for multi-line running text, trimmed above the first and below the
+    // last line so a single line keeps its font height and one-line rows don't grow.
     val Body = TextStyle(
         fontSize = 16.sp,
         lineHeight = 22.sp,
@@ -156,7 +155,7 @@ object Type {
     )
     /** [Body] in Bold: a row title, a figure or a text action. */
     val BodyBold = Body.copy(fontWeight = FontWeight.Bold)
-    // Secondary running text. Explicit 20sp line height, untrimmed: the extra
+    // Secondary running text. Explicit line height, untrimmed: the extra
     // leading is split above the first and below the last line, so a multi-line
     // caption's final-line descenders ("goes", "you're") never touch, and get cut
     // by, a clipped row edge.
@@ -167,15 +166,15 @@ object Type {
         textDirection = AppTextDirection,
     )
     /** Chip / control / short-label text (choice chips, segments, nav labels,
-     *  chart legends): 13sp Bold. */
+     *  chart legends). */
     val Chip = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
     /** [Chip] at Regular weight: an unselected nav label. */
     val ChipRegular = Chip.copy(fontWeight = FontWeight.Normal)
     /** [Chip] at Medium weight: an unselected segment or scale value. */
     val ChipMedium = Chip.copy(fontWeight = FontWeight.Medium)
 
-    /** Tile-scale overline (chrome §3): 12sp Bold, FieldLabel letter-spacing,
-     *  UPPERCASE at the call site, color `OnBgFaint`. Top-left of every tile. */
+    /** Tile-scale overline (chrome §3): FieldLabel letter-spacing, UPPERCASE at
+     *  the call site, color `OnBgFaint`. Top-left of every tile. */
     val Overline = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, textDirection = AppTextDirection)
 }
 
@@ -255,8 +254,8 @@ val SelectedBarWidth = Space.Sm.dp
  * with [dynamicColor] (the system accent), only the accent role follows the
  * user's Material You wallpaper color; the rest of the palette is still the
  * chosen theme's. Semantic status colors stay fixed across all themes so safety
- * and evidence signaling remain unambiguous; only the on-ground done mark
- * lightens on the dark grounds ([DarkStatusColors]).
+ * and evidence signaling remain unambiguous; only the on-ground done and warn
+ * marks lighten on the dark grounds ([DarkStatusColors]).
  */
 @Composable
 fun LollopTheme(
@@ -267,7 +266,7 @@ fun LollopTheme(
 ) {
     // Light/dark source: respect the OS by default, or honor a forced override
     // (the "respect system dark mode" toggle). Each theme supplies both grounds;
-    // only the decorative palette (and the done mark) flips, never the fills.
+    // only the decorative palette (and the on-ground marks) flips, never the fills.
     val dark = darkMode.isDark(isSystemInDarkTheme())
     val base = if (dark) appTheme.dark else appTheme.light
     // The other ground of the same palette: M3 draws snackbars on the inverse

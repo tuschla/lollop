@@ -16,8 +16,6 @@ fn bench(weight_kg: f64, reps: u32, observed_at: i64, entry_id: u64) -> Event {
     )
 }
 
-// ── an anchor stays alive while same-movement training continues ──
-
 #[test]
 fn anchor_survives_while_same_movement_training_continues() {
     // A 50-day-old heavy bench set (e1RM ≈ 116.7). WITH bridging, weekly 12-rep
@@ -80,8 +78,6 @@ fn anchor_survives_while_same_movement_training_continues() {
     );
 }
 
-// ── anchored novice hypertrophy reps stay inside the e1RM window ──
-
 #[test]
 fn novice_anchored_hypertrophy_reps_stay_in_the_reliable_window() {
     let profile = Profile {
@@ -123,8 +119,6 @@ fn novice_anchored_hypertrophy_reps_stay_in_the_reliable_window() {
         "reps stay inside the 6–12 hypertrophy band"
     );
 }
-
-// ── non-catalog isolation lifts don't anchor / lead the DUP week ──
 
 #[test]
 fn non_catalog_isolation_names_are_e1rm_unreliable() {
@@ -207,8 +201,6 @@ fn a_lone_isolation_log_does_not_lead_the_dup_week() {
     }
 }
 
-// ── loads round DOWN onto the display-unit plate grid ──
-
 #[test]
 fn round_load_grid_floors_on_the_display_unit_grid() {
     // kg users: 2.5 kg grid, rounded DOWN (34 → 32.5, never up to 35).
@@ -272,8 +264,6 @@ fn lb_user_gets_a_loadable_prescription() {
     );
 }
 
-// ── the power day surfaces its velocity intent ──
-
 #[test]
 fn power_day_prescriptions_carry_the_velocity_intent() {
     let profile = Profile {
@@ -317,8 +307,6 @@ fn power_day_prescriptions_carry_the_velocity_intent() {
         "a heavy day is not a velocity day"
     );
 }
-
-// ── calisthenics days are titled honestly ──
 
 #[test]
 fn calisthenics_days_are_titled_honestly() {
@@ -482,7 +470,6 @@ fn plan_leads_with_an_anchored_prescription() {
         "HARD RULE 2: evidence travels with it"
     );
 
-    // The headline leads with the prescription.
     assert_eq!(vm.today_headline.kind, HeadlineKind::Prescription);
     assert!(vm.today_headline.summary.is_empty());
 }
@@ -530,7 +517,6 @@ fn a_gate_profile_shows_no_plan() {
     assert!(vm.hold_reason.is_some(), "the deferral holds training");
 }
 
-// ── The program week cycles 1..=weeks_total as the block repeats ──
 #[test]
 fn program_week_cycles_with_the_periodized_block() {
     let (app, mut model) = planned_strength_model(true);

@@ -48,15 +48,10 @@ pub(super) fn effective_weekly_km(profile: &Profile, anchors: &Anchors) -> f64 {
         // Re-entry: measured mileage overrides a stale pre-layoff figure even
         // when it is LOWER (the profile stops being a floor after a break).
         Some(measured) if returning => measured,
-        // Normal: the profile is a floor; measured wins only when it is higher.
         Some(measured) if measured > stated => measured,
         _ => stated,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Distance resolution
-// ---------------------------------------------------------------------------
 
 /// Shortest run prescribed as a distance, km. Below it (a sub-1 km walk-jog
 /// baseline or share) no honest distance exists, so the run is prescribed in
@@ -101,18 +96,12 @@ pub(super) fn cap_km_to_spike(km: f64, longest_recent_km: Option<f64>) -> Option
     }
 }
 
-// ---------------------------------------------------------------------------
-// Quality-session sizing within the KB weekly caps
-// ---------------------------------------------------------------------------
-
-/// VO2max rep count bounds per session (RUN-INTERVAL-001): at least 3 reps,
-/// at most 8.
+/// VO2max rep count bounds per session (RUN-INTERVAL-001).
 const INTERVAL_REPS: (u8, u8) = (3, 8);
 
 /// VO2max rep distances, longest first (running-019: 800–1600 m, ≤5 min).
 const INTERVAL_REP_M: [u16; 2] = [1200, 800];
 
-/// The smallest VO2max set: the rep floor at the shortest rep distance.
 const SHORTEST_INTERVAL_SET: (u8, u16) = (INTERVAL_REPS.0, INTERVAL_REP_M[1]);
 
 /// Natural VO2max-interval rep count the weekly volume supports at a given rep
@@ -280,7 +269,6 @@ struct QualityRule {
     /// The smallest session: a taper never runs less (running-037/038: only
     /// volume drops), and a taper week over its cut runs exactly this.
     floor: fn(Option<f64>) -> QualitySet,
-    /// The rule the session cites.
     claim: ClaimId,
 }
 
@@ -352,10 +340,6 @@ fn repetition_set((reps, rep_m): (u8, u16)) -> QualitySet {
         recovery: RepRecovery::Metres(rep_m),
     }
 }
-
-// ---------------------------------------------------------------------------
-// The week: phase, recovery, volume, session kinds
-// ---------------------------------------------------------------------------
 
 /// What the scheduler asks of the run side for one week.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -743,10 +727,6 @@ fn recovery_week_cut() -> f64 {
     (lo.unwrap_or(0.0) + hi) / 2.0
 }
 
-// ---------------------------------------------------------------------------
-// The placed week: one prescription per run day
-// ---------------------------------------------------------------------------
-
 /// Everything a single day's prescription needs beyond its own kind.
 pub(super) struct DayCtx {
     pub(super) weekly_km: f64,
@@ -952,7 +932,6 @@ fn distance_sessions(
                 if strides_days.contains(&day) {
                     run.strides = Some(StridesAddOn {
                         reps: ((u16::from(st.reps.0) + u16::from(st.reps.1)) / 2) as u8,
-                        // Band midpoints rounded down to a whole 5 s.
                         rep_sec: (st.rep_sec.0 + st.rep_sec.1) / 2 / 5 * 5,
                         recovery_sec: (st.recovery_sec.0 + st.recovery_sec.1) / 2 / 5 * 5,
                     });
@@ -1032,19 +1011,6 @@ fn size_days(
         .collect()
 }
 
-/// Run km of `sessions` as the plan counts a week ([`run_km`] per run).
-pub(super) fn sessions_km(sessions: &[Session], easy_pace: f64) -> f64 {
-    sessions
-        .iter()
-        .filter(|s| matches!(s.session_type, SessionType::Run(_)))
-        .flat_map(|s| &s.prescriptions)
-        .filter_map(|rx| match &rx.value {
-            Prescription::Run(r) => Some(run_km(r, easy_pace)),
-            _ => None,
-        })
-        .sum()
-}
-
 /// Run km of one run as the plan counts a week: its main set (reps with their
 /// jog-distance recoveries, minutes at `easy_pace`) plus its warm-up and
 /// cool-down minutes at `easy_pace`.
@@ -1069,10 +1035,21 @@ fn run_km(r: &RunPrescription, easy_pace: f64) -> f64 {
     main + km_of_min(f64::from(wu))
 }
 
-/// Run km a week's prescriptions add up to ([`sessions_km`] at the
-/// athlete's accounting easy pace).
-pub(super) fn prescribed_km(sessions: &[Session], anchors: &Anchors) -> f64 {
-    sessions_km(sessions, accounting_easy_pace(anchors.run_vdot))
+/// The run km a synthesized week prescribes, as the plan sizes a week: each
+/// run's main set, its jog-distance recoveries and its warm-up and cool-down,
+/// minutes counted at the athlete's accounting easy pace (`anchors`, the
+/// anchors the week was synthesized with).
+pub fn prescribed_run_km(sessions: &[Session], anchors: &Anchors) -> f64 {
+    let easy_pace = accounting_easy_pace(anchors.run_vdot);
+    sessions
+        .iter()
+        .filter(|s| matches!(s.session_type, SessionType::Run(_)))
+        .flat_map(|s| &s.prescriptions)
+        .filter_map(|rx| match &rx.value {
+            Prescription::Run(r) => Some(run_km(r, easy_pace)),
+            _ => None,
+        })
+        .sum()
 }
 
 /// An easy day right after a hard day or the long run is a recovery run
@@ -1245,7 +1222,6 @@ fn soft_day_km(
     } else {
         0.0
     };
-    // No easy day longer than the long run.
     if let Some(l) = ctx.long_km() {
         easy_km = easy_km.min(l);
     }
@@ -1365,7 +1341,6 @@ fn long_run(ctx: &DayCtx) -> (RunPrescription, RxBasis, ClaimId) {
         Some((_, bind)) => bind,
         None => return (run, RxBasis::Workout, rx.claim_id()),
     };
-    // The capacity raise rests on `capacity`, the spike ceiling on `baseline`.
     let (stated, detrained) = match bind {
         LongRunBind::Demonstrated | LongRunBind::DailyAvgCap => {
             (ctx.capacity_stated, ctx.capacity_detrained)
@@ -1376,7 +1351,6 @@ fn long_run(ctx: &DayCtx) -> (RunPrescription, RxBasis, ClaimId) {
     let (basis, claim) = if detrained {
         (RxBasis::Detrained, claims::DETRAIN_001)
     } else if bind.cites_spike() && stated {
-        // The ceiling rests on the athlete's stated longest run.
         (RxBasis::StatedCeiling, claims::RUN_START_001)
     } else if bind.cites_spike() {
         (RxBasis::SpikeCeiling, claims::RUN_SPIKE_001)
@@ -1385,7 +1359,6 @@ fn long_run(ctx: &DayCtx) -> (RunPrescription, RxBasis, ClaimId) {
     } else if ctx.taper {
         (RxBasis::Taper, claims::RUN_TAPER_001)
     } else if bind == LongRunBind::AverageRun {
-        // The low-mileage guardrail set it, not the 25–30 % share.
         (RxBasis::AverageRun, claims::RUN_LONGRUN_001)
     } else {
         (RxBasis::Workout, rx.claim_id())

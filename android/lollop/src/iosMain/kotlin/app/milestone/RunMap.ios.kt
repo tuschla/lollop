@@ -39,7 +39,6 @@ internal actual fun FullScreenMapDialog(onDismissRequest: () -> Unit, content: @
     )
 }
 
-/** MapKit with OSM tiles under the Compose-drawn route, or the plain canvas. */
 @Composable
 internal actual fun RouteLayer(
     track: RouteTrack,
@@ -127,7 +126,6 @@ private fun MapKitRouteLayer(
     }
 }
 
-/** The passive MKMapView under a route and the world rectangle it last showed. */
 private class RouteMapKit {
     val view = LollopMapView().apply {
         userInteractionEnabled = false
@@ -143,7 +141,6 @@ private class RouteMapKit {
         view.onLayout = { if (!world[0].isNaN()) view.showWorld(world[0], world[1], world[2], world[3]) }
     }
 
-    /** Shows what [fit] puts on a [width]×[height] px canvas, if it changed. */
     fun frame(fit: MercatorFit, width: Float, height: Float) {
         val left = fit.worldXAt(0f)
         val top = fit.worldYAt(0f)

@@ -9,7 +9,6 @@ use super::bridge::{CoreBridge, Input, answer};
 use super::ops::Op;
 use crate::envelope::ErrorKind;
 
-/// Op `op`'s answer to `input`.
 fn call(core: &CoreBridge, op: Op, input: &[u8]) -> Vec<u8> {
     core.call(op.code(), Input::Bytes(Cow::Borrowed(input)))
 }
@@ -19,12 +18,10 @@ fn pure(op: Op, input: &[u8]) -> Value {
     serde_json::from_slice(&call(&CoreBridge::new(), op, input)).unwrap()
 }
 
-/// Send one event's wire JSON; the answer, parsed.
 fn send(core: &CoreBridge, event: &Value) -> Value {
     serde_json::from_slice(&call(core, Op::Update, event.to_string().as_bytes())).unwrap()
 }
 
-/// The current view, parsed.
 fn view(core: &CoreBridge) -> Value {
     serde_json::from_slice(&call(core, Op::View, b"")).unwrap()
 }
@@ -46,7 +43,6 @@ fn profile() -> Value {
 
 #[test]
 fn error_kinds_serialise_to_the_names_the_shell_reads() {
-    // `CoreWire.kt` matches `panic_reset`.
     let kinds = [
         (ErrorKind::PanicReset, "panic_reset"),
         (ErrorKind::Panic, "panic"),
@@ -62,7 +58,6 @@ fn error_kinds_serialise_to_the_names_the_shell_reads() {
 #[test]
 fn json_event_updates_json_view() {
     let core = CoreBridge::new();
-    // A profile event drives evidence-cited guidance into the view model.
     let requests = send(&core, &profile());
     assert!(
         requests.as_array().is_some(),
@@ -78,10 +73,9 @@ fn json_event_updates_json_view() {
 fn profile_enums_serialise_to_the_names_the_shell_parses() {
     let core = CoreBridge::new();
     // The view echoes each profile enum as a bare variant-name string
-    // (serde unit-variant), and Kotlin's `ProfileDraft.from` feeds those
-    // straight into `enumValueOf`. A `#[serde(rename)]` or a variant rename
-    // would make that call throw on log replay, a launch crash. Lock the
-    // exact wire strings so such a change fails here instead.
+    // (serde unit-variant), the same string the persisted log's events carry.
+    // A `#[serde(rename)]` or a variant rename would break replay of those
+    // logs. Lock the exact wire strings so such a change fails here instead.
     send(&core, &profile());
 
     let view = view(&core);
@@ -95,11 +89,11 @@ fn profile_enums_serialise_to_the_names_the_shell_parses() {
 #[test]
 fn android_shaped_review_with_omitted_option_fields_is_accepted() {
     let core = CoreBridge::new();
-    // Mirrors Core.kt SubmitReview.toJson: the optional distance-spike,
-    // decoupling, and pacing fields are omitted entirely when unset. serde
-    // maps a missing Option field to None, so this wire shape must round-trip
-    // rather than being dropped, a guard against a future required (non-Option)
-    // field silently breaking every shell-sent review.
+    // The shell omits the optional distance-spike, decoupling and pacing
+    // fields when unset. serde maps a missing Option field to None, so this
+    // wire shape must round-trip rather than being dropped, a guard against a
+    // future required (non-Option) field silently breaking every shell-sent
+    // review.
     let event = json!({
         "SubmitReview": {
             "bone_pain_red_flag": false,
@@ -125,7 +119,7 @@ fn android_shaped_review_with_omitted_option_fields_is_accepted() {
 #[test]
 fn android_shaped_run_review_context_reaches_the_bridge() {
     let core = CoreBridge::new();
-    // Mirrors Core.kt SubmitReview.toJson for a *run* review (no lift): the
+    // A *run* review as the shell sends it (no lift): the
     // decoupling object and the easy-run fraction are the fields the shell
     // added last, driving the decoupling / intensity-discipline feedback that
     // is otherwise unreachable from the device. Prove the exact wire shape
@@ -156,7 +150,7 @@ fn android_shaped_run_review_context_reaches_the_bridge() {
 #[test]
 fn android_shaped_week_fatigue_review_round_trips_the_bridge() {
     let core = CoreBridge::new();
-    // Mirrors Core.kt SubmitReview.toJson week-fatigue fields, guarding the
+    // The week-fatigue review fields as the shell sends them, guarding the
     // snake_case wire names against a rename silently dropping the trigger on
     // the boundary. The two-failed-session→Deload mapping is pinned in the
     // app tests; here the wire shape round-trips the Bridge (Render emitted,
@@ -188,7 +182,7 @@ fn android_shaped_week_fatigue_review_round_trips_the_bridge() {
 #[test]
 fn android_shaped_gps_track_round_trips_to_a_run_view() {
     let core = CoreBridge::new();
-    // Mirrors Core.kt LogRunTrack.toJson: a nested `points` array of
+    // The shell's LogRunTrack: a nested `points` array of
     // {lat, lon, observed_at, accuracy_m} objects. This is the most complex
     // shell-sent shape (nested array + f32 accuracy), so lock it against a
     // field rename silently dropping every GPS-tracked run on the boundary.
@@ -217,7 +211,7 @@ fn android_shaped_gps_track_round_trips_to_a_run_view() {
 fn android_shaped_graded_pain_readiness_round_trips_the_bridge() {
     let core = CoreBridge::new();
     // The additive graded-pain fields (streak + pain{kind,severity,trend,
-    // persists}) must survive the Bridge exactly as Core.kt emits them: a
+    // persists}) must survive the Bridge exactly as the shell emits them: a
     // field-name drift would make process_event silently drop the report
     // (deserialize error → empty answer), which for a pain signal is a safety
     // regression. The exact Table 4.1 adjustment mapping is pinned in the
@@ -279,7 +273,7 @@ fn remove_readiness_wire_shape_round_trips_the_bridge() {
 #[test]
 fn android_shaped_health_screen_profile_round_trips_the_bridge() {
     let core = CoreBridge::new();
-    // The additive Stage-0 health screen: a Core.kt profile with the nested
+    // The additive Stage-0 health screen: a shell profile with the nested
     // `health` object plus the `female`/`high_load_block` flags must survive
     // the Bridge: a field drift would make process_event silently drop the
     // profile, losing the safety gates on replay (a safety regression). The
@@ -380,10 +374,6 @@ fn a_view_path_panic_reports_panic_without_resetting_the_bridge() {
 #[test]
 fn run_view_json_carries_split_verdict_and_full_spike_evidence() {
     let core = CoreBridge::new();
-    // Pins the additive wire shape on RunResultView: the spike
-    // gate's full evidence tag (grade/confidence/safety_critical/contested,
-    // not just citation) and the core-owned split-verdict chip. Android's
-    // ignoreUnknownKeys tolerates the new keys until the shell consumes them.
     // Equatorial fixes ~1.1 km apart (two full km splits, the floor for a
     // pacing verdict): fast front half, back half ~2.5x slower → "fade".
     let event = json!({
@@ -407,7 +397,6 @@ fn run_view_json_carries_split_verdict_and_full_spike_evidence() {
     assert_eq!(runs.len(), 1);
     let run = &runs[0];
 
-    // Full spike-gate evidence tag (fields exist with real values).
     assert!(!run["grade"].as_str().unwrap().is_empty(), "grade: {run}");
     assert!(run["confidence"].as_f64().unwrap() > 0.0);
     assert!(run["safety_critical"].is_boolean());
@@ -434,7 +423,6 @@ fn run_view_json_carries_split_verdict_and_full_spike_evidence() {
 #[test]
 fn lift_view_json_carries_the_pr_marker() {
     let core = CoreBridge::new();
-    // Pins the per-lift PR marker on the wire.
     for (weight, reps) in [(100.0, 5), (102.5, 5)] {
         let event = json!({
             "LogSet": {
@@ -744,7 +732,7 @@ fn android_shaped_backdated_readiness_surfaces_in_the_summary() {
 fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
     let core = CoreBridge::new();
     // The morning check-in wire shape (raw human items + optional watch
-    // numbers) must survive the Bridge exactly as Core.kt emits it; a field
+    // numbers) must survive the Bridge exactly as the shell emits it; a field
     // drift would silently drop the check-in on replay. One check-in is far
     // below the baseline minimum, so the view must carry an honest
     // "collecting baseline" status, never a fabricated z.

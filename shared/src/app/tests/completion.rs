@@ -82,7 +82,6 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
     // its item carries a real load. Five 20 kg empty-bar warm-ups must NOT count.
     let (app, mut model) = planned_strength_model(true);
     let (ex, sets, reps, load) = mon_anchored_item(&app, &model);
-    // Log `sets` empty-bar warm-ups (20 kg, high reps).
     for _ in 0..sets {
         app.update(
             log_set(&ex, 20.0, reps.max(10), 8.0, MON * DAY_SEC),
@@ -304,7 +303,6 @@ fn a_cable_row_completes_the_equipment_qualified_row_fill() {
 #[test]
 fn sets_crossing_midnight_complete_the_day_they_started() {
     let (app, mut model) = planned_strength_model(false);
-    // Yesterday morning: today is the day AFTER Monday.
     set_today(&app, &mut model, MON + 1);
     let (ex, sets, reps, _load) = mon_first_item(&app, &model);
     assert!(sets >= 2, "need >=2 sets to split across midnight");
@@ -376,7 +374,6 @@ fn tendon_pain_today_leaves_todays_calisthenics_rung_and_done_unchanged() {
     }
     let rung = cal_item(&app.view(&model), Lad::HorizontalPush).expect("a push item");
     assert_eq!(rung.exercise, "Decline push-up", "advanced");
-    // Finish today's (advanced) rung.
     let reps = rung.reps_high.max(rung.reps_low) as u32;
     for _ in 0..rung.sets {
         app.update(
@@ -552,7 +549,6 @@ fn set_exercise_ended_ends_and_reopens_an_item_and_clear_sets_clears_it() {
         "ended with no work set reads skipped, not done"
     );
 
-    // Reopen.
     app.update(
         Event::SetExerciseEnded {
             exercise: ex.clone(),
@@ -1243,7 +1239,6 @@ fn week_plan_marks_a_fully_logged_day_done() {
     // only when all exercises' sets are logged.
     let (app, mut model) = planned_strength_model(false);
 
-    // The full prescribed set for today: each exercise with its set + rep count.
     let items: Vec<(String, u8, u32)> = day_row(&app, &model, MON)
         .items
         .iter()
@@ -1649,7 +1644,6 @@ fn week_plan_unlogged_today_stays_next() {
     assert_eq!(ns.epoch_day, MON, "the next session is dated today");
 }
 
-// ── Past-day completeness buckets by the shell's LOCAL day ──
 #[test]
 fn past_day_completeness_buckets_by_local_day() {
     // Completing Monday's prescribed work with sets timestamped 23:30 UTC on
@@ -1659,7 +1653,7 @@ fn past_day_completeness_buckets_by_local_day() {
     let app = Engine;
     let mut model = Model::default();
     let off = 2 * 3600;
-    let boundary = (MON - 1) * DAY_SEC + 23 * 3600 + 30 * 60; // 23:30 UTC, MON-1
+    let boundary = (MON - 1) * DAY_SEC + 23 * 3600 + 30 * 60;
     app.update(Event::SetProfile(strength_profile()), &mut model)
         .expect_only_render();
     app.update(
@@ -1678,7 +1672,6 @@ fn past_day_completeness_buckets_by_local_day() {
         &mut model,
     )
     .expect_only_render();
-    // Complete every prescribed Monday exercise at that boundary timestamp.
     let mut guard = 0;
     loop {
         let remaining: Vec<(String, u32)> = {
@@ -1710,8 +1703,6 @@ fn past_day_completeness_buckets_by_local_day() {
     );
 }
 
-// ── The program week advances by completed weeks, also from a mid-week
-//        start (BeforePlan days: `schedule::days_before_a_midweek_plan_start…`) ──
 #[test]
 fn a_midweek_plan_advances_its_program_week_with_completed_weeks() {
     let (app, mut model) = planned_on(strength_profile(), [], MON + 2);

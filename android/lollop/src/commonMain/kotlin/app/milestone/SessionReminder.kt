@@ -25,7 +25,7 @@ import kotlinx.datetime.toInstant
  * snapshot; iOS, dated notifications scheduled ahead from the published model.
  */
 internal object SessionReminder : AppFeature {
-    /** 07:30, the time a first switch-on uses. */
+    /** The time a first switch-on uses. */
     const val DEFAULT_MINUTE_OF_DAY = 7 * 60 + 30
 
     /** The oldest snapshot whose days ahead still stand in for today. */
@@ -122,7 +122,6 @@ internal data class SessionReminderSetting(val enabled: Boolean, val minuteOfDay
 /** Today's session as the reminder shows it: a [WidgetDayKind.Lift] or
  *  [WidgetDayKind.Run] day, its title and items. */
 internal data class Reminder(val kind: WidgetDayKind, val title: String, val items: List<WidgetItem>) {
-    /** Where Start leads: the tracker on a run day, the set editor on a lift day. */
     val dest: OpenDest get() = if (kind == WidgetDayKind.Run) OpenDest.Track else OpenDest.LogSet
 }
 
@@ -133,7 +132,7 @@ internal data class Reminder(val kind: WidgetDayKind, val title: String, val ite
  * trackable). A snapshot from an earlier day (at most [SessionReminder.AHEAD_MAX_DAYS]
  * back, written in time zone [zone], not paused, no plan or setup) answers with
  * its planned day ahead for [today]. A stale snapshot for today (a time zone
- * change), one from a later day, another zone or an unknown zone: null. Pure.
+ * change), one from a later day, another zone or an unknown zone: null.
  */
 internal fun reminderOf(stored: WidgetSnapshot?, today: Long, zone: String): Reminder? {
     if (stored == null) return null
@@ -163,7 +162,7 @@ internal fun reminderOf(stored: WidgetSnapshot?, today: Long, zone: String): Rem
  * exercise and its prescription ("Back squat · 3 × 5 @ 100 kg"), else the count
  * and the first open exercise ("4 exercises · Back squat first"), or, once
  * started, what is left ("1 of 4 done · Bench press next"). Null when there is
- * nothing to say. Pure.
+ * nothing to say.
  */
 internal fun reminderLine(res: PlatformResources, reminder: Reminder): String? {
     if (reminder.kind == WidgetDayKind.Run) {
@@ -181,7 +180,7 @@ internal fun reminderLine(res: PlatformResources, reminder: Reminder): String? {
 }
 
 /** The action's label, what one tap does: "Start run", "Log first set", or "Log
- *  next set" once a set of today's lift session is in. Pure. */
+ *  next set" once a set of today's lift session is in. */
 internal fun reminderActionLabel(res: PlatformResources, reminder: Reminder): String = res.getString(
     when {
         reminder.kind == WidgetDayKind.Run -> Res.string.reminder_action_start_run

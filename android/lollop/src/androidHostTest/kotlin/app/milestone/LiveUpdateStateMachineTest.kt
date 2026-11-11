@@ -72,8 +72,6 @@ class LiveUpdateStateMachineTest {
     private fun canNotify() =
         ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    // ── Rest ─────────────────────────────────────────────────────────────────
-
     private data class Rest(val start: Long, val end: Long, val exercise: String)
 
     @Test
@@ -189,7 +187,6 @@ class LiveUpdateStateMachineTest {
                 assertEquals(0, d.flags and Notification.FLAG_ONGOING_EVENT)
                 assertEquals(OpenDest.LogSet, openDestOf(shadowOf(d.contentIntent).savedIntent))
             }
-            // Exactly the running rest holds the rest-end alarm.
             val alarms = restAlarms()
             if (current != null) {
                 assertEquals("rest-end alarms", 1, alarms.size)
@@ -281,8 +278,6 @@ class LiveUpdateStateMachineTest {
         }
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
     }
-
-    // ── Run ──────────────────────────────────────────────────────────────────
 
     @Test
     fun runWalksKeepTheLiveUpdateInStepWithTheService() {
@@ -447,7 +442,6 @@ class LiveUpdateStateMachineTest {
                 w < 94 -> { svc?.destroy(); svc = null; idle(); stopModel(); "system stops the service" }
                 w < 100 -> { svc?.destroy(); svc = null; RunSession.reset(); idle(); stopModel(); paused = false; "process death" }
                 w < 118 -> {
-                    // A GPS fix a few seconds and ~10 m on.
                     val dt = rng.nextLong(1_000, 5_000)
                     shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(dt))
                     fixes++

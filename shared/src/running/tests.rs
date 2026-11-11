@@ -50,9 +50,7 @@ fn long_run_cap_pass_and_fail() {
 fn spike_true_just_above_10pct_false_at_or_below() {
     // 10 % over exactly: not a spike (rule is strictly >10 %).
     assert!(!single_session_spike(22.0, 20.0));
-    // Just above 10 %: spike.
     assert!(single_session_spike(22.01, 20.0));
-    // Below the longest run: never a spike.
     assert!(!single_session_spike(18.0, 20.0));
     // No history → any real session errs to spike.
     assert!(single_session_spike(5.0, 0.0));
@@ -183,9 +181,7 @@ fn distribution_models_keep_easy_at_80() {
 fn quality_plan_respects_caps() {
     // 3 sessions, 48h apart, no back-to-back Z3: ok.
     assert!(quality_plan_ok(3, 48, false).value);
-    // 4 sessions: too many.
     assert!(!quality_plan_ok(4, 48, false).value);
-    // Too tight spacing.
     assert!(!quality_plan_ok(2, 24, false).value);
     // Consecutive Z3 never allowed.
     assert!(!quality_plan_ok(2, 48, true).value);
@@ -206,7 +202,6 @@ fn weekly_increase_cap_scales_with_training_age() {
 fn two_week_spike_flags_above_30pct() {
     // +30% exactly: not flagged (rule is strictly >30%).
     assert!(!two_week_increase_flag(40.0, 52.0).value);
-    // Just above 30%: flagged.
     assert!(two_week_increase_flag(40.0, 52.1).value);
     // No history errs to flag.
     assert!(two_week_increase_flag(0.0, 10.0).value);

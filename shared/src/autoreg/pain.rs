@@ -472,7 +472,6 @@ pub(super) fn latest_pain_clear(inputs: &[ReadinessInput]) -> Option<&ReadinessI
         .max_by_key(|i| i.observed_at)
 }
 
-/// Resolve the pain verdict over the [`worst_active_pain`] report.
 pub(super) fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
     worst_active_pain(inputs).map_or(PainGate::None, grade_pain)
 }

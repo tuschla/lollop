@@ -1,0 +1,11 @@
+name: Generate the Xcode project
+description: >
+  Installs XcodeGen and generates iosApp/lollop.xcodeproj from iosApp/project.yml
+  (the project is generated, not committed).
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        brew install xcodegen
+        xcodegen generate --spec iosApp/project.yml

@@ -148,7 +148,6 @@ pub(super) struct Reader<'a> {
     pos: usize,
     /// The open elements' names, outermost first.
     stack: Vec<&'a str>,
-    /// The current tag's name.
     name: &'a str,
     /// The current start tag's attributes, as written and expanded.
     attrs: Vec<(&'a str, Cow<'a, str>)>,

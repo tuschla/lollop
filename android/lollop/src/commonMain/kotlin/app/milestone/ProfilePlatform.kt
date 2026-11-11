@@ -1,7 +1,5 @@
 package app.milestone
 
-// The platform facts Profile's rows depend on.
-
 /** Whether the platform has a wallpaper accent the app can follow ("Use system
  *  accent"): Android 12+ (Material You); iOS has none, so the row is hidden. */
 internal expect val platformHasDynamicAccent: Boolean

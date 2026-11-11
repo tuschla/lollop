@@ -53,7 +53,7 @@ class NoBirthdayJourneysTest {
     private val doNotTrain get() = str(R.string.main_do_not_train)
     private val ageLabel get() = str(R.string.setup_row_age)
 
-    /** 12 Mar 1991: 35 on the pinned Monday 2026-09-21. */
+    /** 35 on the pinned Monday. */
     private val adultBirthday = LocalDate.of(1991, 3, 12).toEpochDay()
     private val adultDigits = "03121991"
 
@@ -66,7 +66,6 @@ class NoBirthdayJourneysTest {
 
     private fun lastProfilePayload() = journeyLog().last { it.variant == "SetProfile" }.payload
 
-    // ── 1. Setup: "Prefer not to say" → a plan, no hold; Profile adds it later ──
     @Test
     fun setupPreferNotToSay_generatesAPlanWithNoHold_andProfileAddsTheBirthdayLater() {
         rule.launchAppExpectingSetup()
@@ -78,7 +77,6 @@ class NoBirthdayJourneysTest {
         rule.onNode(hasText(str(R.string.setup_btn_next)) and hasClickAction()).assertIsEnabled()
         rule.setupNext()
         rule.setupNext()
-        // The review says the age was not given.
         rule.assertCountEventually(hasText(str(R.string.setup_review_age_not_given), substring = true), 1)
         rule.finishSetup()
 
@@ -89,14 +87,12 @@ class NoBirthdayJourneysTest {
         assertFalse("no age on the wire", payload.containsKey("age_years"))
         assertFalse("no birthday on the wire", payload.containsKey("birth_epoch_day"))
 
-        // A plan, not a hold.
         rule.waitForState { EventDispatcher.model.value?.next_session != null }
         assertFalse(EventDispatcher.model.value!!.train_blocked)
         assertNull(EventDispatcher.model.value!!.hold_reason)
         rule.assertTextCountEventually(doNotTrain, 0)
         rule.assertCountEventually(sessionShown(), 1)
 
-        // Profile › Age: "Not given", the birthday one tap away.
         rule.openProfileAnswersAt(profileRow(ageLabel))
         rule.onNode(profileRow(ageLabel) and hasText(str(R.string.setup_age_not_given))).assertIsDisplayed()
         rule.onNode(profileRow(ageLabel)).performClick()
@@ -113,7 +109,6 @@ class NoBirthdayJourneysTest {
         assertFalse(EventDispatcher.model.value!!.train_blocked)
     }
 
-    // ── 2. Profile: a set birthday → "Prefer not to say" clears the age ──────
     @Test
     fun profilePreferNotToSay_clearsBirthdayAndAge_andThePlanStays() {
         QaHarness.seedLog(

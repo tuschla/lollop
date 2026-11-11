@@ -90,14 +90,12 @@ internal object AndroidReminder : SessionReminderPort {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    /** The alarm went off: set tomorrow's, then remind about today. */
     internal fun onAlarm(ctx: Context) {
         val app = ctx.applicationContext
         reschedule(app)
         post(app)
     }
 
-    /** The local days a reminder was posted for, near the day of the last post. */
     private fun remindedDays(app: Context): List<Long> =
         SessionReminder.store(app).getString(KEY_REMINDED_DAYS, null).orEmpty().split(',').mapNotNull { it.toLongOrNull() }
 
@@ -170,7 +168,6 @@ internal object AndroidReminder : SessionReminderPort {
     /** The local day the shown reminder was posted for; null when none is shown. */
     private fun shownDay(nm: NotificationManager): Long? = shown(nm)?.extras?.getLong(EXTRA_DAY, Long.MIN_VALUE)
 
-    /** [reminder] for local day [day]. */
     private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
         val res = app.appResources()

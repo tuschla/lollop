@@ -135,11 +135,9 @@ class RunEditorHrEffortTest {
         )
         var sent: Event? = null
         show(hrMaxKnown = true, initial = logged) { sent = it }
-        // Reopens on the entered bpm, not the derived 82.5 %.
         rule.onNode(
             hasContentDescription("${str(R.string.track_log_hr_avg)}, 152 ${str(R.string.track_log_hr_bpm)}"),
         ).performScrollTo()
-        // Change only the distance.
         rule.onNode(hasContentDescription("${str(R.string.log_field_distance)}, ", substring = true)).performScrollTo().performClick()
         key("6")
         rule.onNodeWithTag("editor-primary").performClick()

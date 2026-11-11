@@ -67,8 +67,6 @@ class ScreenshotSetupTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    // ── Scrolling ──────────────────────────────────────────────────────────
-
     private fun SemanticsNode.isVerticalScroller() =
         SemanticsActions.ScrollBy in config && SemanticsProperties.VerticalScrollAxisRange in config
 
@@ -99,8 +97,6 @@ class ScreenshotSetupTest {
             .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, dy) }
         rule.waitForIdle()
     }
-
-    // ── Guided setup (fresh install), Both + calisthenics + race ───────────
 
     /** Walk to [name], answer it as the walk does (so the captured screen shows its
      *  selected state and the follow-ups an answer reveals), then capture it: once
@@ -167,8 +163,6 @@ class ScreenshotSetupTest {
         GuidedSetupWalk.walk(rule, stopAt = "review")
         rule.shot("setup-step-review-fontscale130-light")
     }
-
-    // ── Profile: coaching-input rows ───────────────────────────────────────
 
     private val today get() = todayEpochDay()
 
@@ -251,17 +245,14 @@ class ScreenshotSetupTest {
         scrollToTop(hasText(str(R.string.main_overline_plan_answers).uppercase(Locale.US)))
     }
 
-    /** A Profile tap-row by its label. */
     private fun row(labelId: Int) = hasText(str(labelId)) and hasClickAction()
 
-    /** Bring a tap-row to the top and toggle its inline picker. */
     private fun toggleRow(labelId: Int) {
         scrollToTop(row(labelId))
         rule.onAllNodes(row(labelId)).onFirst().performClick()
         rule.waitForIdle()
     }
 
-    /** Open [labelId]'s picker at the top of the screen, capture, close it again. */
     private fun openRowShot(labelId: Int, name: String) {
         toggleRow(labelId)
         rule.shot(name)

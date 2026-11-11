@@ -1,113 +1,17 @@
-//! The of-record figures of a saved GPS run, from the core itself: distance,
-//! moving time and the time its km and mile splits account for (the splits of
-//! a profile set to each unit).
-//!
-//! `scripts/soak-emulator.sh` runs this on the event log it pulls from the
-//! device, to compare the Finish sheet and the History row with what the core
-//! derives from the saved fixes:
-//!
-//! ```sh
-//! TRACK_FIGURES_LOG=event-log.ndjson TRACK_FIGURES_OUT=core.json \
-//!   cargo test -p shared --test track_figures_of_record
-//! ```
-//!
-//! writes `{"entry_id", "distance_m", "moving_s", "split_clock_s",
-//! "split_clock_mi_s"}` of the newest run with a track. Without the variables
-//! it checks the figures of
+//! The of-record figures (`examples/track_figures/figures.rs`) of
 //! `fixtures/device_tracks/soak-e37-20min.events.ndjson`, a run the soak
 //! recorded on the API 37 emulator (fed route 2858.4 m, 946 s moving; screen
 //! off, backgrounded, a light, an in-app and a notification pause, Doze).
 
 use std::path::Path;
 
-use crux_core::App;
-use serde_json::{Value, json};
-use shared::profile::DistanceUnit;
-use shared::{Engine, Event};
-
 mod common;
-
-/// Seconds the split list accounts for: each split's seconds per unit times
-/// the share of a unit it covers (full splits 1, the partial one less).
-fn split_clock_s(splits: &[Value], unit_km: f64) -> f64 {
-    let mut prev_km = 0.0;
-    let mut sum = 0.0;
-    for s in splits {
-        let km = s["distance_km"].as_f64().unwrap();
-        sum += s["seconds_per_unit"].as_f64().unwrap() * (km - prev_km) / unit_km;
-        prev_km = km;
-    }
-    sum
-}
-
-/// The newest tracked run's view after replaying `events`.
-fn newest_tracked_run(events: Vec<Event>) -> Value {
-    let model = common::replay(events);
-    let vm = serde_json::to_value(Engine.view(&model)).unwrap();
-    vm["runs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|r| r["has_gpx"].as_bool() == Some(true))
-        .max_by_key(|r| r["observed_at"].as_i64())
-        .cloned()
-        .expect("no tracked run")
-}
-
-/// `events` with the profile set to `unit`: the log's last profile edit
-/// repeated with the unit changed, else a profile that sets only the unit.
-fn in_unit(mut events: Vec<Event>, unit: DistanceUnit) -> Vec<Event> {
-    let mut profile = events
-        .iter()
-        .rev()
-        .find_map(|e| match e {
-            Event::SetProfile(p) => Some(p.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| {
-            serde_json::from_value(json!({
-                "progression_cadence": "EverySession",
-                "lift_goal": "MaxStrength",
-                "goal_distance": "General",
-                "concurrent_goal": "Strength",
-                "weekly_sets": 0,
-                "running_days_per_week": 0,
-                "running_km_per_week": 0.0,
-                "advanced": false,
-                "high_load_block": false,
-            }))
-            .expect("a profile that sets only the unit")
-        });
-    profile.distance_unit = unit;
-    events.push(Event::SetProfile(profile));
-    events
-}
-
-/// The newest tracked run's figures after replaying the log at `path`.
-fn figures(path: &Path) -> Value {
-    let events = common::events(path);
-    let run = newest_tracked_run(events.clone());
-    let run_km = newest_tracked_run(in_unit(events.clone(), DistanceUnit::Km));
-    let run_mi = newest_tracked_run(in_unit(events, DistanceUnit::Mi));
-    json!({
-        "entry_id": run["entry_id"],
-        "distance_m": run["distance_km"].as_f64().unwrap() * 1000.0,
-        "moving_s": run["duration_min"].as_f64().unwrap() * 60.0,
-        "split_clock_s": split_clock_s(run_km["splits"].as_array().unwrap(), 1.0),
-        "split_clock_mi_s": split_clock_s(run_mi["splits"].as_array().unwrap(), 1.609_344),
-    })
-}
+#[path = "../examples/track_figures/figures.rs"]
+mod figures;
 
 #[test]
 fn of_record_figures_of_a_tracked_run() {
-    if let Some(log) = std::env::var_os("TRACK_FIGURES_LOG") {
-        let f = figures(Path::new(&log));
-        let out = std::env::var_os("TRACK_FIGURES_OUT")
-            .expect("TRACK_FIGURES_OUT with TRACK_FIGURES_LOG");
-        std::fs::write(&out, serde_json::to_string_pretty(&f).unwrap()).unwrap();
-        return;
-    }
-    let f = figures(
+    let f = figures::figures(
         &Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/device_tracks/soak-e37-20min.events.ndjson"),
     );

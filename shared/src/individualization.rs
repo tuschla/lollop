@@ -1,6 +1,6 @@
 //! Individualization & load-management core (knowledge-base File 08).
 //!
-//! Pure, deterministic rules for tailoring the program to training age and for
+//! Rules for tailoring the program to training age and for
 //! scaling load up/down or re-entering after a layoff. Safety deferrals from
 //! File 08 §5 live in the evidence registry + `schema::SafetyTier`; this module
 //! holds the *non-safety* individualization arithmetic.
@@ -14,10 +14,6 @@ use crate::evidence::{ClaimId, claims};
 use crate::schema::{
     Adjustment, AdjustmentCall, AdjustmentKind, HealthScreen, Recommended, ScreenGate,
 };
-
-// ---------------------------------------------------------------------------
-// 1. Training age (File 08 indiv-001; STR-TRAGE-001)
-// ---------------------------------------------------------------------------
 
 /// Training age classified by *progression history*, not self-label (indiv-001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,10 +87,6 @@ pub fn masters_age(age_years: Option<f64>) -> bool {
     age_years.is_some_and(|a| a >= MASTERS_AGE_YEARS)
 }
 
-// ---------------------------------------------------------------------------
-// 2. Strength defaults by training age (File 08 Table 1.1; STR-TRAGE-001)
-// ---------------------------------------------------------------------------
-
 /// Population-average strength starting points by training age (File 08
 /// indiv-002/003/004, Table 1.1). Autoregulate away from these defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,10 +148,6 @@ pub fn volume_sensitivity(age: TrainingAge) -> Recommended<VolumeSensitivity> {
     Recommended::new(s, claims::STR_TRAGE_001)
 }
 
-// ---------------------------------------------------------------------------
-// 3. Scaling hierarchy (File 08 scaling-028/029; SCALE-DOWN-001 / SCALE-UP-001)
-// ---------------------------------------------------------------------------
-
 /// A lever the engine manipulates when scaling training stress. Ordered from
 /// most-disposable to most-protected (File 08 §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,10 +203,6 @@ pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
 pub fn min_muscle_exposures_per_week() -> Recommended<u8> {
     Recommended::new(2, claims::SCALE_DOWN_001)
 }
-
-// ---------------------------------------------------------------------------
-// 4. Re-entry after a layoff (File 08 Table 3.4b; REENTRY-001)
-// ---------------------------------------------------------------------------
 
 /// Conservative re-entry prescription after a training gap (one Table 3.4b row).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -385,10 +369,6 @@ pub fn run_reentry(weeks_off: f64, days_since_return: i64) -> Recommended<RunReE
     )
 }
 
-// ---------------------------------------------------------------------------
-// 5. Progression & nutrition (File 08 load-031/indiv-008/013/020; DBLPROG/MASTERS/DEFICIT)
-// ---------------------------------------------------------------------------
-
 /// Novice linear load increment when all prescribed reps are completed
 /// (File 08 indiv-008, Table 1.1). Upper +2.5 kg, lower +5 kg. DBLPROG-001.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -518,10 +498,6 @@ pub fn novice_stall_action(
     Recommended::new(outcome, claims::DBLPROG_001)
 }
 
-// ---------------------------------------------------------------------------
-// 6. Time budget, substitution & environment (File 08 indiv-023/026, safety-024)
-// ---------------------------------------------------------------------------
-
 /// Weekly frequency a muscle can be *maintained* on under time pressure
 /// (File 08 indiv-026: ~1x/wk holds a muscle; protect frequency + intensity,
 /// cut accessory volume first). TIMECAP-001.
@@ -631,10 +607,6 @@ pub fn environment_modifier(env: Environment) -> Recommended<EnvironmentModifier
     };
     Recommended::new(m, claims::ENV_001)
 }
-
-// ---------------------------------------------------------------------------
-// 7. Stage-0 onboarding gates (File 08 onboard-050; safety-011/044/045/046/048)
-// ---------------------------------------------------------------------------
 
 /// Pregnancy avoid-list (File 08 safety-047; SAFE-PREG-AVOID-001, Strong,
 /// safety-critical). Every flag is a verbatim KB item; the altitude bound is

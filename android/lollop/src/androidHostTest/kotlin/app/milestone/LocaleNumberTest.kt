@@ -33,7 +33,7 @@ import org.robolectric.annotation.Config
 /**
  * Numbers across device locales and both unit systems. The app's figures are
  * pinned to ASCII digits and a '.' decimal point ([trimDecimal], [displayFigure],
- * the keypad), so a screen never mixes decimal marks (RunCards.kt [displayFigure],
+ * the keypad), so a screen never mixes decimal marks (RunText.kt [displayFigure],
  * DEVIATIONS #45). These tests drive keypad entry → saved value, the display
  * helpers, export file names, the event wire, GPX/TCX import and case folding
  * under every locale below, and check that resource-formatted counts and
@@ -61,35 +61,31 @@ class LocaleNumberTest {
 
     private fun resIn(locale: Locale): Resources = ctxIn(locale).resources
 
-    /** Runs [block] once per locale, with the JVM default set to it. */
     private fun eachLocale(block: (Locale) -> Unit) = Locales.forEach { l ->
         Locale.setDefault(l)
         block(l)
     }
 
-    // ── Keypad entry → saved value ────────────────────────────────────────────
-
     @Test
     fun keypadEntry_savesTheSameValueInEveryLocaleAndUnit() = eachLocale { l ->
         fun type(keys: String): String = keys.fold("") { buf, k -> editNumericBuffer(buf, k, replaceAll = false) }
         assertEquals("$l", "102.5", type("102.5"))
-        assertEquals("$l", 102.5, parseKeypadNumber(type("102.5"))!!, 0.0)
+        assertEquals("$l", 102.5, type("102.5").toDoubleOrNull()!!, 0.0)
         assertEquals("$l: a leading point", "0.5", type(".5"))
         assertEquals("$l: a second point is ignored", "1.25", type("1.2.5"))
         // The buffer never holds a locale mark, so a comma never parses.
-        assertNull("$l", parseKeypadNumber("102,5"))
+        assertNull("$l", "102,5".toDoubleOrNull())
         // A load typed in lb is saved as canonical kg on the wire grid, and shown back as typed.
-        val kg = lbToKgWire(parseKeypadNumber(type("225"))!!)
+        val kg = lbToKgWire(type("225").toDoubleOrNull()!!)
         assertEquals("$l", 102.06, kg, 1e-9)
         assertEquals("$l", "225", weightFigure(kg, WeightUnit.Lb))
         assertEquals("$l", "102.5", trimWeightText("102.50"))
         assertEquals("$l", "102.5", fmtLosslessPrefill(102.5))
         // Distance: a mile buffer round-trips through canonical km.
-        val km = displayToKm(parseKeypadNumber(type("3.1"))!!, DistanceUnit.Mi)
+        val km = displayToKm(type("3.1").toDoubleOrNull()!!, DistanceUnit.Mi)
         assertEquals("$l", "3.1", distanceBufferText(km, DistanceUnit.Mi))
         assertEquals("$l", "12.5", distanceBufferText(12.5, DistanceUnit.Km))
         assertEquals("$l", "80.5", bodyweightBufferText(80.5, WeightUnit.Kg))
-        // Duration digits typed on the keypad.
         val dur = "13000".fold("") { d, k -> editDurationDigits(d, k, replaceAll = false) }
         assertEquals("$l", "1:30:00", hmsDisplay(dur))
         assertEquals("$l", Triple(1, 30, 0), hmsDigits(dur))
@@ -109,8 +105,6 @@ class LocaleNumberTest {
             assertEquals("$l", expectedRun, run.toJson().toString())
         }
     }
-
-    // ── Displayed figures ─────────────────────────────────────────────────────
 
     @Test
     fun displayFigures_useAsciiDigitsAndAPoint_inEveryLocaleAndUnit() = eachLocale { l ->
@@ -133,16 +127,12 @@ class LocaleNumberTest {
             .forEach { assertEquals("$l: $it", "", foreignDigits(it)) }
     }
 
-    // ── Exports ───────────────────────────────────────────────────────────────
-
     @Test
     fun exportFileNames_areLocaleIndependent() = eachLocale { l ->
         assertEquals("$l", "run-2026-03-04-0506.gpx", gpxFileName(1_772_600_760L, TimeZone.UTC))
         val data = dataExportFilename()
         assertTrue("$l: $data", Regex("""lollop-\d{4}-\d{2}-\d{2}\.ndjson""").matches(data) && foreignDigits(data).isEmpty())
     }
-
-    // ── Case folding (tr-TR dotless i) ───────────────────────────────────────
 
     @Test
     fun caseFolding_ignoresTheTurkishDeviceLocale() {
@@ -177,8 +167,6 @@ class LocaleNumberTest {
         }
     }
 
-    // ── Digits in resource-formatted text ─────────────────────────────────────
-
     private val squatSets = listOf(
         LiftResultView(exercise = "Back Squat", weight_kg = 102.5, reps = 5, observed_at = 1_790_000_000L),
         LiftResultView(exercise = "Back Squat", weight_kg = 102.5, reps = 5, observed_at = 1_790_000_180L),
@@ -188,7 +176,7 @@ class LocaleNumberTest {
     /** "3 × 5 @ 102.5 kg" in every locale, Arabic (Egypt), Persian and Hindi with
      *  Devanagari digits included: the counts go through a `%d` string resource,
      *  formatted in the app's locale with Latin digits ([withLatinDigits]), like the
-     *  load ([loadFigure] → [trimDecimal], `Locale.US`). */
+     *  load ([loadFigure] → [formatFixed]). */
     @Test
     fun setSummaries_keepOneDigitScript_inEveryLocale() {
         val bad = Locales.mapNotNull { l ->
@@ -233,8 +221,6 @@ class LocaleNumberTest {
         assertEquals("reminder times with non-ASCII digits", emptyList<String>(), bad)
     }
 
-    // ── Session volume: one decimal mark per sheet ───────────────────────────
-
     private fun showSessionSheet() {
         val day = LocalDate.of(2026, 9, 21)
         val at = day.atTime(12, 0).toEpochSecond(ZoneOffset.UTC)
@@ -250,7 +236,6 @@ class LocaleNumberTest {
                     model = ViewModel(lifts = sets),
                     e1rmSeries = emptyMap(),
                     weightUnit = WeightUnit.Kg,
-                    nowMillis = (at + 3_600L) * 1000L,
                     scrollState = ScrollState(0),
                     onOpenSet = {},
                     onDismiss = {},
@@ -297,10 +282,8 @@ class LocaleNumberTest {
     }
 }
 
-/** Every digit in [s] that is not 0–9 (Arabic-Indic, Persian, Devanagari, …). */
 private fun foreignDigits(s: String): String = s.filter { Character.isDigit(it) && it !in '0'..'9' }
 
-/** Every text on screen, for assertions and failure messages. */
 private fun SemanticsNodeInteractionsProvider.shownTexts(): List<String> =
     onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true).fetchSemanticsNodes()
         .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }

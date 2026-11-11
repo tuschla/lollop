@@ -88,7 +88,6 @@ pub struct SignalState {
 /// A row's qualitative state and the claim of the rule that judged it.
 type Label = (Cow<'static, str>, Option<ClaimId>);
 
-/// State shown for a row whose displayed reading is recency-expired.
 const OUT_OF_DATE: &str = "out of date";
 
 /// Latest state of every signal that has at least one observation, in
@@ -161,8 +160,6 @@ fn displayed_input(inputs: &[ReadinessInput], signal: ReadinessSignal) -> Option
     }
 }
 
-/// The state of one signal's displayed reading `input`, through the verdict
-/// of the rule that reads that signal.
 fn signal_label(
     signal: ReadinessSignal,
     input: &ReadinessInput,

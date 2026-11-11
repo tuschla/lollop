@@ -25,13 +25,11 @@ pub(super) fn fmt_pct_range(lo: f64, hi: f64) -> String {
     if lo == hi { lo } else { format!("{lo}–{hi}") }
 }
 
-/// [`fmt_pct_range`] of a fraction band (`(0.4, 0.6) -> "40–60"`).
 pub(super) fn fmt_frac_pct_range(lo: f64, hi: f64) -> String {
     fmt_pct_range(lo * 100.0, hi * 100.0)
 }
 
 /// Monday-indexed weekday of an epoch-day (epoch day 0 = 1970-01-01 = Thursday).
-/// `rem_euclid` handles pre-epoch (negative) days too.
 ///
 /// Reduce BEFORE adding so a wire `epoch_day` near `i64::MAX` (a corrupt
 /// `SetToday`) can't debug-overflow on `+ 3`; the panic would cross the FFI
@@ -40,7 +38,6 @@ pub(super) fn mon0_weekday(epoch_day: i64) -> i64 {
     (epoch_day.rem_euclid(7) + 3).rem_euclid(7)
 }
 
-/// English weekday name for a local epoch day.
 pub(super) fn weekday_name(epoch_day: i64) -> &'static str {
     const NAMES: [&str; 7] = [
         "Monday",
@@ -105,7 +102,6 @@ pub(super) fn fmt_weight_num(kg: f64, lb: bool) -> String {
     }
 }
 
-/// The weight-unit suffix a profile renders in: "lb" when `lb`, else "kg".
 pub(super) fn weight_suffix(lb: bool) -> &'static str {
     if lb { "lb" } else { "kg" }
 }
@@ -151,7 +147,7 @@ pub(super) fn fmt_mi_of_km(km: f64) -> String {
 /// The smallest km figure a distance ratio is taken over (a run's 30-day
 /// longest for the spike copy and gate, a week-over-week base). Below it the
 /// base quotes as "0.0 km" and is no baseline: a corrupt log's subnormal
-/// distance (5e-324 km survives `sanitize_f64`) would otherwise divide to
+/// distance (5e-324 km survives `Sanitize`) would otherwise divide to
 /// "+inf%".
 pub(super) const MIN_RATIO_BASE_KM: f64 = 0.05;
 
@@ -249,7 +245,6 @@ pub(super) fn race_distance_title(km: f64) -> String {
     capitalize_first(&race_distance_label(km))
 }
 
-/// `s` with its first character upper-cased ("easy" → "Easy").
 pub(super) fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {

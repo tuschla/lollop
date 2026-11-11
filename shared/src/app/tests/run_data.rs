@@ -511,8 +511,6 @@ fn turkish_keyboard_spellings_continue_the_e1rm_chain() {
     assert_eq!(pr, vec![false, true, false]);
 }
 
-// ── Hard-run spacing and CAP-3 ────────────
-
 fn heavy_squat_at(at: i64) -> Event {
     log_set("Barbell back squat", 120.0, 5, 8.0, at)
 }

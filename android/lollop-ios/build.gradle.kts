@@ -31,8 +31,6 @@ kotlin {
         }
         iosTest.dependencies {
             implementation(kotlin("test"))
-            // Event.toJson's JsonElement, :lollop's implementation dependency.
-            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

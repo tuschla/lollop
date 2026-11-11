@@ -42,27 +42,27 @@ internal val Palette.isDark: Boolean get() = bgTop.luminance() < 0.5f
 
 /** Text and icons on the [Palette.accent] fill (spec "Accent fill + BgTop text"):
  *  the ground, the deep tinted one on the dark palettes (white fails AA on their
- *  light, bright accents: 2.2:1 on Rose-dark's #FF8AB5 vs 8.1:1 for its plum
- *  #24111F) and the soft one on the light palettes, whose accents are deepened for it. */
+ *  light, bright accents: 2.2:1 on Rose-dark's accent vs 8.1:1 for its plum
+ *  ground) and the soft one on the light palettes, whose accents are deepened for it. */
 internal val Palette.onAccent: Color get() = bgTop
 
 // Subtext tuned to pair with the theme-fixed danger surface (StatusColors.danger).
 // It does not vary by theme: the danger ground is identical in every theme.
-// #FFE4E4 clears WCAG AA (≈4.9:1) on the #C1272D danger ground at caption size.
-internal val DangerOn = Color(0xFFFFE4E4) // subtext on the danger surface
+// It clears WCAG AA (≈4.9:1) on the danger ground at caption size.
+internal val DangerOn = Color(0xFFFFE4E4)
 // Labels and glyphs on a fixed status fill, the same in every theme: the danger
-// surface (5.8:1 on #C1272D), the warn fill (4.9:1) and the evidence fills
+// surface (5.8:1), the warn fill (4.9:1) and the evidence fills
 // (ThemeContrastTest).
 internal val OnStatusFill = Color.White
 
-// Warn ochre for text. #E0A33A clears ≥5.85:1 on every dark ground (worst
-// Meadow-dark bgElevated), #8A5300 ≥5.19:1 on every light ground (worst
+// Warn ochre for text. The dark one clears ≥5.85:1 on every dark ground (worst
+// Meadow-dark bgElevated), the light one ≥5.19:1 on every light ground (worst
 // Iris-light bgSunken) (ThemeContrastTest).
 private val WarnTextOnDark = Color(0xFFE0A33A)
 private val WarnTextOnLight = Color(0xFF8A5300)
 
-// Danger red for text. #F87171 clears ≥4.69:1 on every dark ground (worst
-// Meadow-dark bgElevated), #B3261E ≥5.36:1 on every light ground (worst
+// Danger red for text. The dark one clears ≥4.69:1 on every dark ground (worst
+// Meadow-dark bgElevated), the light one ≥5.36:1 on every light ground (worst
 // Iris-light bgSunken) (ThemeContrastTest).
 private val DangerTextOnDark = Color(0xFFF87171)
 private val DangerTextOnLight = Color(0xFFB3261E)

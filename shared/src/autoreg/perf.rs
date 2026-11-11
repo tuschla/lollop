@@ -102,13 +102,11 @@ pub fn derive_performance(
         .filter(|s| !crate::day::is_undated(s.observed_at))
         .collect();
     ordered.sort_by_key(|s| s.observed_at);
-    // One movement key per distinct exercise name, not per set.
     let mut keys: HashMap<&str, Vec<String>> = HashMap::new();
     for s in &ordered {
         keys.entry(s.exercise)
             .or_insert_with(|| crate::exercise::movement_key(s.exercise));
     }
-    // movement key → local day → DaySlot.
     let mut by_lift: BTreeMap<&[String], BTreeMap<i64, DaySlot>> = BTreeMap::new();
     for s in ordered {
         let Some(e) = scored_e1rm(s) else { continue };

@@ -41,7 +41,6 @@ object UxInvariants {
         override fun toString() = "[$kind] $detail  @ $path"
     }
 
-    /** A flattened, test-friendly snapshot of one semantics node. */
     private class NodeInfo(
         val label: String,
         val clickable: Boolean,
@@ -78,7 +77,6 @@ object UxInvariants {
 
         val violations = mutableListOf<Violation>()
 
-        // 1) No garbage/placeholder text anywhere on the surface.
         for (n in nodes) {
             for (t in n.texts) {
                 for (bad in FORBIDDEN_SUBSTRINGS) {
@@ -92,7 +90,6 @@ object UxInvariants {
             }
         }
 
-        // 2) Every actionable node has a label and a >=48dp touch target.
         for (n in nodes.filter { it.clickable }) {
             if (n.label.isBlank()) {
                 violations += Violation(
@@ -114,8 +111,8 @@ object UxInvariants {
             }
         }
 
-        // 3) No duplicate action labels inside one card (a repeated pill in the
-        //    same card is an ambiguity a screen reader can't disambiguate).
+        // A repeated pill in the same card is an ambiguity a screen reader can't
+        // disambiguate.
         nodes.filter { it.clickable && it.cardKey != null && it.label.isNotBlank() }
             .groupBy { it.cardKey }
             .forEach { (card, group) ->
@@ -128,9 +125,9 @@ object UxInvariants {
                 }
             }
 
-        // 4) Required actions are not clipped off the right edge at large fonts:
-        //    the root bounds define the visible surface, so an action whose bounds
-        //    spill past the right edge is clipped.
+        // Required actions are not clipped off the right edge at large fonts: the
+        // root bounds define the visible surface, so an action whose bounds spill
+        // past the right edge is clipped.
         for (n in nodes.filter { it.clickable && it.visible && it.label.isNotBlank() }) {
             // 1dp tolerance for sub-pixel rounding; a genuinely clipped
             // action overhangs by far more.
@@ -143,11 +140,11 @@ object UxInvariants {
             }
         }
 
-        // 5) No sentence-level summary rendered twice on one screen (an
-        //    adjustment shown as a headline AND again nested in the session card).
-        //    The same prescription line on different plan items ("2×5 · pick a
-        //    weight for ~3 reps left" under Deadlift and under Bench press) is each
-        //    item's own line, not a repeated summary.
+        // No sentence-level summary rendered twice on one screen (an adjustment
+        // shown as a headline AND again nested in the session card). The same
+        // prescription line on different plan items ("2×5 · pick a weight for ~3
+        // reps left" under Deadlift and under Bench press) is each item's own line,
+        // not a repeated summary.
         nodes.filter { it.visible }
             .flatMap { n -> n.bodyTexts.filter { it.length >= SUMMARY_MIN_CHARS }.distinct().map { it to n } }
             .groupBy({ it.first }, { it.second })

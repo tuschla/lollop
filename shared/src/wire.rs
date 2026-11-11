@@ -12,13 +12,11 @@ use serde_json::Value;
 
 pub use shared_derive::Wire;
 
-/// A type whose wire shape is known.
 pub trait Wire {
     /// The shape of `Self` on the wire; named types it reaches are added to `reg`.
     fn shape(reg: &mut Registry) -> Shape;
 }
 
-/// The wire shape of one value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
     Bool,
@@ -272,7 +270,6 @@ pub enum ConstValue {
 
 macro_rules! constants {
     ($($(#[doc = $doc:literal])* $path:path as $kind:ident;)*) => {
-        /// The Rust constants the shell reads.
         pub fn constants() -> Vec<Constant> {
             vec![$(Constant {
                 name: {
@@ -320,7 +317,6 @@ constants! {
     crate::running::FIVE_K_M as Float;
     crate::running::TEN_K_M as Float;
     crate::running::MARATHON_M as Float;
-    /// Pounds per kilogram.
     crate::plates::LB_PER_KG as Float;
     /// Worst horizontal accuracy (m) a fix may carry to count (the QC gate).
     crate::gps::MAX_GPS_ACCURACY_M as Float;

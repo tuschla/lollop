@@ -121,9 +121,8 @@ import kotlinx.datetime.TimeZone
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Profile (04-profile), everyday things first: Calculators, Units, Appearance ·
- *  Theme, During training, Your data, Evidence & references; then the guided-setup
- *  answers folded under "Your plan answers"; Clear all data last. */
+/** Profile (04-profile), everyday things first; then the guided-setup answers
+ *  folded under "Your plan answers"; Clear all data last. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ProfileDestination(
@@ -142,10 +141,6 @@ internal fun ProfileDestination(
     planAnswersOpen: Boolean,
     onPlanAnswersOpenChange: (Boolean) -> Unit,
 ) {
-    // Reference library, opened from the Evidence row below. A ModalBottomSheet
-    // keeps it a read-only overlay. `showReferences` is shared between the row
-    // that opens it and this pre-LazyColumn sheet, so it stays in the parent; the
-    // section gets a callback.
     var showReferences by rememberSaveable { mutableStateOf(false) }
     if (showReferences) {
         AppSheet(onDismiss = { showReferences = false }) {
@@ -153,15 +148,12 @@ internal fun ProfileDestination(
         }
     }
 
-    // Which calculator's form + results are shown in the bottom sheet. null =
-    // sheet closed. Calculator forms and their result cards live in a
-    // ModalBottomSheet opened from the row, never inline in the Profile scroll,
-    // otherwise computing e.g. HR zones dumps ~7 EvidenceCards into the list.
+    // Calculator forms and their result cards live in a sheet opened from the
+    // row, never inline in the Profile scroll, otherwise computing e.g. HR zones
+    // dumps ~7 EvidenceCards into the list.
     var activeTool by rememberSaveable { mutableStateOf<CoachTool?>(null) }
     val tool = activeTool
     if (tool != null) {
-        // Fully expanded: every calculator form (keypad, fields, results) exceeds
-        // the partial detent.
         AppSheet(onDismiss = { activeTool = null }) {
             CoachToolSheet(tool, model, onEvent)
         }
@@ -184,7 +176,6 @@ internal fun ProfileDestination(
     // Last laid-out top edge (NaN before the first layout); read only in the layout
     // callback, so a plain holder, not snapshot state.
     val viewportTop = remember { floatArrayOf(Float.NaN) }
-    // One column on every window: centred at a readable width on a wide one.
     CompositionLocalProvider(LocalRevealViewport provides revealViewport) {
         ReadableWidth { gutter ->
             LazyColumn(
@@ -260,8 +251,6 @@ private fun LazyListScope.PlanAnswersSection(
             ) { onOpenChange(!open) }
             if (open) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Screen.dp)) {
-                    // The training profile's grouped rows, each opening its inline
-                    // editor; Re-run guided setup reopens the wizard pre-filled.
                     val initialProfile = model.profile?.let { Event.SetProfile.from(it) } ?: Event.SetProfile.SEED
                     ProfileEditor(
                         initial = initialProfile,
@@ -306,8 +295,6 @@ private fun LazyListScope.PlanAnswersSection(
 }
 
 
-/** Appearance: theme swatches, then one card with light/dark, the system accent
- *  (where the platform has one) and route maps. By default light/dark follows the OS. */
 private fun LazyListScope.AppearanceSection(ctx: PlatformContext) {
     item(key = "appearance") {
         val res = currentResources()
@@ -317,8 +304,6 @@ private fun LazyListScope.AppearanceSection(ctx: PlatformContext) {
             ThemeSwatchPicker(currentTheme) { AppSettings.setTheme(ctx, it) }
 
             PlainCard {
-                // Light / dark: one three-way choice, System follows the phone.
-                // Applies immediately, no Apply button (Profile changes apply at once).
                 val darkMode by AppSettings.darkMode.collectAsState()
                 SegmentedEnumRow(
                     label = stringResource(Res.string.main_dark_mode_pinned),
@@ -360,8 +345,7 @@ private fun LazyListScope.AppearanceSection(ctx: PlatformContext) {
     }
 }
 
-/** Units: weight (kg | lb, profile-backed), the distance unit and the live
- *  pace-bucket size. All apply immediately, like every Profile change. */
+/** Units; all apply immediately, like every Profile change. */
 private fun LazyListScope.UnitsSection(ctx: PlatformContext, model: ViewModel, onEvent: (Event) -> Unit) {
     item(key = "units") {
         val res = currentResources()
@@ -406,9 +390,8 @@ private fun LazyListScope.UnitsSection(ctx: PlatformContext, model: ViewModel, o
                             },
                         )
                     }
-                    // Live pace-bucket size (minutes): the run screen groups
-                    // pace into buckets of this many minutes of moving time. Digit
-                    // segments with the unit on the label; a list when they don't fit.
+                    // Live pace-bucket size: the run screen groups pace into buckets
+                    // of this many minutes of moving time.
                     val bucketMin by AppSettings.paceBucketMinutes.collectAsState()
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                         FieldLabel(stringResource(Res.string.main_live_pace_split), trailing = stringResource(Res.string.log_unit_min))
@@ -507,8 +490,6 @@ private fun LazyListScope.CalculatorsSection(model: ViewModel, onOpen: (CoachToo
     }
 }
 
-/** Evidence & references: a whole-row tap target opening the read-only Reference
- *  library (grade chips + why? intact) as a sheet. */
 private fun LazyListScope.EvidenceReferencesSection(onShowReferences: () -> Unit) {
     item(key = "evidence") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -640,7 +621,6 @@ private fun LazyListScope.DataSection(ctx: PlatformContext, model: ViewModel) {
     }
 }
 
-/** A validated import file: its lines and what they hold. */
 private class PendingImport(val uri: String, val lines: List<String>, val summary: ImportSummary)
 
 /** Restore [lines] ([DataRestore.restore]), or say why not. [entries] is what the
@@ -733,7 +713,6 @@ private fun ExportFirstDialog(
     )
 }
 
-/** A Profile action tile: a [TitleSubtitleRow] on its own outlined card. */
 @Composable
 private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean? = null, onClick: () -> Unit) =
     TitleSubtitleRow(
@@ -746,10 +725,8 @@ private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean
         contentPadding = PaddingValues(Space.Card.dp),
     )
 
-/** Gap between theme swatch cards, across a row and between grid rows. */
 private val ThemeSwatchGap = Space.Md.dp
 
-/** Side padding inside a theme swatch card (also the label's measured room). */
 private val ThemeSwatchInset = Space.Md.dp
 
 /**
@@ -794,7 +771,7 @@ fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
  * The light face is each theme's most recognisable one (rose blush, mint, butter
  * cream, white paper) and it reads the theme's own [AppTheme.light] palette, so
  * every card previews itself regardless of the active theme or dark mode. The
- * preview plate keeps a 1dp hairline so a white ground (Paper) never melts into a
+ * preview plate keeps a hairline so a white ground (Paper) never melts into a
  * light card, and an OnAccent hairline on the selected accent fill.
  */
 @Composable

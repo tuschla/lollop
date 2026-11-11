@@ -36,8 +36,6 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-// ── Calendar helpers ───────────────────────────────────────────────────────
-
 /// Monday-based weekday of an epoch day (epoch day 4 is a Monday).
 fn wd(d: i64) -> i64 {
     (d - 4).rem_euclid(7)
@@ -54,8 +52,6 @@ const START: i64 = 20_458;
 /// plus the 28-day detraining taper. A prescribed run is spike-bounded by the
 /// longest logged run inside it (RUN-SPIKE-001, DETRAIN-001).
 const RUN_HORIZON_DAYS: i64 = 58;
-
-// ── Ledger of what the simulated athlete actually logged ───────────────────
 
 #[derive(Clone, Debug)]
 struct SetRec {
@@ -233,13 +229,9 @@ fn round_to(x: f64, step: f64) -> f64 {
     (x / step).round() * step
 }
 
-fn norm(s: &str) -> String {
-    s.to_lowercase()
-}
-
 /// Starting guess for a never-logged movement, kg (a shell prefill).
 fn first_load(ex: &str) -> f64 {
-    let e = norm(ex);
+    let e = ex.to_lowercase();
     if e.contains("deadlift") {
         70.0
     } else if e.contains("squat") {
@@ -481,8 +473,6 @@ impl Sim {
             start_epoch_day: self.today,
         });
     }
-
-    // ── Logging ────────────────────────────────────────────────────────
 
     fn log_set_rec(&mut self, r: SetRec, backdate: bool) {
         let e = Event::LogSet {
@@ -765,8 +755,6 @@ impl Sim {
         }
     }
 
-    // ── Holds ──────────────────────────────────────────────────────────
-
     fn start_hold(&mut self, h: Hold) {
         let at = self.at(self.today, 7.5);
         match h {
@@ -831,8 +819,6 @@ impl Sim {
             self.returning = Some(h);
         }
     }
-
-    // ── The day loop ───────────────────────────────────────────────────
 
     /// Run `days` simulated days; `script(sim, day_index)` fires the
     /// archetype's scheduled events each morning before the view.
@@ -940,8 +926,6 @@ impl Sim {
             self.reentry_misses.extend(re.misses());
         }
     }
-
-    // ── Invariants ─────────────────────────────────────────────────────
 
     /// `LONG_HORIZON_DUMP=<name>:<day>,<day>…[;<name>:…]` prints that life's
     /// plan on those simulated days, for triaging a failure.
@@ -1576,11 +1560,11 @@ impl Sim {
                     }
                 }
                 let Some(load) = it.load_kg else { continue };
-                let name = norm(&it.exercise);
+                let name = it.exercise.to_lowercase();
                 let e = self
                     .sets
                     .iter()
-                    .filter(|s| s.day <= through && norm(&s.ex) == name && s.hold.is_none())
+                    .filter(|s| s.day <= through && s.ex.to_lowercase() == name && s.hold.is_none())
                     .map(|s| e1rm_bound(s.kg, s.reps, s.rpe))
                     .reduce(f64::max);
                 let Some(e) = e else {
@@ -1643,7 +1627,9 @@ impl Sim {
             let lifted = self
                 .sets
                 .iter()
-                .filter(|s| self.today - s.day <= 28 && norm(&s.ex) == key.0 && s.hold.is_none())
+                .filter(|s| {
+                    self.today - s.day <= 28 && s.ex.to_lowercase() == key.0 && s.hold.is_none()
+                })
                 .map(|s| s.kg)
                 .fold(0.0, f64::max);
             let in_ramp = ramp_until.is_some_and(|u| self.today <= u);
@@ -1699,7 +1685,7 @@ impl Sim {
             };
             for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today) {
                 for it in row.items.iter().filter(|i| kind(i) == ItemKind::Lift) {
-                    let ex = norm(&it.exercise);
+                    let ex = it.exercise.to_lowercase();
                     let Some(&(ratio, pre_e)) = re.pre_lifts.get(&ex) else {
                         continue;
                     };
@@ -1707,7 +1693,9 @@ impl Sim {
                     let e = self
                         .sets
                         .iter()
-                        .filter(|s| s.day < self.today && norm(&s.ex) == ex && s.hold.is_none())
+                        .filter(|s| {
+                            s.day < self.today && s.ex.to_lowercase() == ex && s.hold.is_none()
+                        })
                         .map(|s| e1rm_bound(s.kg, s.reps, s.rpe))
                         .fold(pre_e, f64::max);
                     // A prescribed load is floored to the 2.5 kg grid, so the
@@ -1727,7 +1715,7 @@ impl Sim {
                             let last = re.back_day - gap;
                             self.sets
                                 .iter()
-                                .filter(|s| norm(&s.ex) == ex && s.hold.is_none())
+                                .filter(|s| s.ex.to_lowercase() == ex && s.hold.is_none())
                                 .filter(|s| (0..=14).contains(&(last - s.day)))
                                 .map(|s| s.kg)
                                 .fold(0.0, f64::max)
@@ -2045,8 +2033,6 @@ impl Sim {
         );
     }
 }
-
-// ── Archetype lives ────────────────────────────────────────────────────────
 
 fn runner(goal: GoalDistance, days: u8, km: f64) -> Profile {
     Profile {
@@ -2417,8 +2403,6 @@ fn under_eighteen_turns_eighteen() {
     let sim = youth_life(horizon(190, 365));
     sim.finish(&["hold blocks", "gate lifts", "week strip", "history"]);
 }
-
-// ── Targeted scenarios ─────────────────────────────────────────────────────
 
 /// The highest planned week km and long run over the last `n` weeks (a
 /// recovery week among them does not hide the level reached).

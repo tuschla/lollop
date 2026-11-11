@@ -44,7 +44,6 @@ internal actual fun SheetNavBarScrim() {
     }
 }
 
-/** Material You's primary (Android 12+). */
 @Composable
 internal actual fun platformAccent(dark: Boolean): Color? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null

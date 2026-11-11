@@ -29,8 +29,6 @@ class DeepLinkPropertyTest {
     private val seed = 20_261_030L
     private val day = 20_400L
 
-    // ── Days ──────────────────────────────────────────────────────────────────
-
     private fun lift(name: String) = PrescriptionView(exercise = name, sets = 3, face_lead = "3 × 5")
 
     private fun runItem() =
@@ -62,7 +60,7 @@ class DeepLinkPropertyTest {
                 "rest" to ViewModel(today_epoch_day = day, profile = profile, next_session = next, week_plan = listOf(session(day, SessionType.Rest, SessionStatus.Rest, emptyList()), next))
             }
             5 -> {
-                // Today's lift moved to Thursday: today is a rest day.
+                // Today's lift moved to a later day: today is a rest day.
                 val moved = session(day + 3, SessionType.LiftMaxEffort, SessionStatus.Next, items).copy(moved_from_epoch_day = day)
                 "moved" to ViewModel(today_epoch_day = day, profile = profile, next_session = moved, week_plan = listOf(session(day, SessionType.Rest, SessionStatus.Rest, emptyList()), moved))
             }
@@ -89,8 +87,6 @@ class DeepLinkPropertyTest {
         val row = m.week_plan.firstOrNull { it.epoch_day == day && it.session_type.discipline == SessionDiscipline.Lift }
         return (ns?.items ?: emptyList()) + (row?.items ?: emptyList())
     }
-
-    // ── routeOpen ─────────────────────────────────────────────────────────────
 
     @Test
     fun everyDestFromEveryStateLandsSensibly() {
@@ -122,14 +118,11 @@ class DeepLinkPropertyTest {
         }
     }
 
-    // ── openDestOf ────────────────────────────────────────────────────────────
-
     @Test
     fun everyIntentShapeDecodes() {
         val byWire = mapOf("today" to OpenDest.Today, "log" to OpenDest.Log, "track" to OpenDest.Track, "log_set" to OpenDest.LogSet)
         val actions = listOf(ACTION_OPEN, Intent.ACTION_MAIN, Intent.ACTION_VIEW, Intent.ACTION_SEND, null, ACTION_OPEN.uppercase(), "$ACTION_OPEN ", "")
         val wires = byWire.keys.toList() + listOf("", "TODAY", "Today", " log", "log_set\u0000", "settings", "track/../log", "\uD83C\uDFC3", "x".repeat(10_000))
-        // Each wire as a string extra, then a non-string extra and none.
         val extras: List<Any?> = wires + listOf(7, arrayOf("log"), null)
         for (action in actions) for (x in extras) {
             val intent = Intent(action)
@@ -142,8 +135,6 @@ class DeepLinkPropertyTest {
             assertEquals("$action dest=${x.toString().take(20)}", expected, openDestOf(intent))
         }
     }
-
-    // ── What the surfaces hand out ────────────────────────────────────────────
 
     @Test
     fun surfacesOnlyOfferDestinationsTheirDaySupports() {

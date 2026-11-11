@@ -122,10 +122,8 @@ internal class ComposeRoutePainter(
         val l = layout
         l.layout(track, projector, bounds, options)
         val segs = track.segs
-        // Casing under every kept leg; trimmed legs dashed, no casing.
         for (si in segs.indices) strokeLegs(scope, si, segs[si], options, keptLegs = true, color = casing, stroke = casingStroke)
         if (options.trim) for (si in segs.indices) strokeLegs(scope, si, segs[si], options, keptLegs = false, color = cut, stroke = cutStroke)
-        // The progression ramp, in chunks of consecutive kept legs.
         val xs = l.xs
         val ys = l.ys
         l.forEachRampChunk(track, options) { si, from, to, step ->
@@ -144,7 +142,6 @@ internal class ComposeRoutePainter(
         }
         val finishR = RouteMarker.FinishSize.value * d / 2
         if (l.loop) {
-            // The start ring drawn around the finish flag disc, a hairline gap apart.
             val ringOuter = finishR + LoopRingGapDp * d + RouteMarker.StartRing.value * d
             drawStart(scope, l.fx, l.fy, ringOuter, halo)
             drawFinish(scope, l.fx, l.fy, finishR, halo = 0f)

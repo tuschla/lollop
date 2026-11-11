@@ -8,23 +8,21 @@ import UIKit
 // colour; the extension picks the face for the moment it draws and lays it out.
 
 extension WidgetPayload {
-    /// Whether [current] covers [date] in [zone]: the snapshot's local day, written
-    /// in the zone the reader is in (Android marks it stale on a zone change).
-    func isCurrent(at date: Date, zone: TimeZone = .current) -> Bool {
+    /// Whether [current] covers [date]: the snapshot's local day, written in the
+    /// reader's zone (Android marks it stale on a zone change).
+    func isCurrent(at date: Date) -> Bool {
         guard let current else { return false }
-        return current.zone == zone.identifier && current.start <= date && date < current.end
+        return current.zone == TimeZone.current.identifier && current.start <= date && date < current.end
     }
 
-    func shownFace(at date: Date, zone: TimeZone = .current) -> WidgetFace {
-        isCurrent(at: date, zone: zone) ? face : staleFace
+    func shownFace(at date: Date) -> WidgetFace {
+        isCurrent(at: date) ? face : staleFace
     }
 
-    func controlFace(at date: Date, zone: TimeZone = .current) -> ControlFace {
-        isCurrent(at: date, zone: zone) ? control : staleControl
+    func controlFace(at date: Date) -> ControlFace {
+        isCurrent(at: date) ? control : staleControl
     }
 
-    /// The moments after [now] at which the shown face changes: the start and the
-    /// end of the snapshot's day.
     func changes(after now: Date) -> [Date] {
         guard let current else { return [] }
         return [current.start, current.end].filter { $0 > now }
@@ -34,7 +32,7 @@ extension WidgetPayload {
         WidgetColors(scheme == .dark ? dark : light)
     }
 
-    /// The payload in [data], or nil when it is unreadable or of another version.
+    /// Nil when [data] is unreadable or of another version.
     static func decode(_ data: Data) -> WidgetPayload? {
         guard let payload = try? JSONDecoder().decode(WidgetPayload.self, from: data),
               payload.version == widgetPayloadVersion
@@ -44,8 +42,8 @@ extension WidgetPayload {
 
     /// The payload the app last wrote, or nil (no App Group container, nothing
     /// written yet, another version).
-    static func load(from url: URL? = SharedContainer.payloadURL) -> WidgetPayload? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+    static func load() -> WidgetPayload? {
+        guard let url = SharedContainer.payloadURL, let data = try? Data(contentsOf: url) else { return nil }
         return decode(data)
     }
 }
@@ -71,10 +69,8 @@ extension WidgetLines {
     /// Every line, the most a card can show.
     var total: Int { fits.count - 1 }
 
-    /// Only lead lines: nothing to cut but the lead.
     var leadOnly: Bool { total == lead }
 
-    /// The lines [slots] line slots show.
     func lines(_ slots: Int) -> [String] { fits[min(max(slots, 0), total)] }
 }
 
@@ -85,8 +81,6 @@ extension WidgetAction {
 extension ControlFace {
     var screen: LollopScreen { LollopScreen(wire: dest) }
 }
-
-// MARK: Colours
 
 /// One appearance's colours, per [WidgetInk].
 struct WidgetColors {
@@ -105,7 +99,6 @@ struct WidgetColors {
     var ground: Color { self[.ground] }
     var body: Color { self[.body] }
     var muted: Color { self[.muted] }
-    var faint: Color { self[.faint] }
     var accent: Color { self[.accent] }
     var onAccent: Color { self[.onAccent] }
     var accentTint: Color { self[.accentTint] }

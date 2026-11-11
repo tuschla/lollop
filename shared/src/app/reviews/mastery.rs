@@ -11,8 +11,7 @@ use crate::day::local_day;
 use crate::profile::Profile;
 use crate::{running, strength};
 
-/// Look-back window for personal bests: a best counts against the prior 90
-/// days of logged history.
+/// Look-back window for personal bests.
 const PR_WINDOW_DAYS: i64 = 90;
 
 /// A concrete mastery experience worth naming (feedback-005; ADH-PRAISE-001).

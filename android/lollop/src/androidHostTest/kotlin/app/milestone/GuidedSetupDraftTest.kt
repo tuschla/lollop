@@ -106,11 +106,9 @@ class GuidedSetupDraftTest {
         // A new modality (e.g. a Profile Focus switch) re-derives every volume.
         val switched = flags(modality = Modality.Run)
         assertFalse(switched.liftVolume || switched.runVolume || switched.runDays)
-        // More days: the run volume and run days re-derive, lifting volume stays.
         val moreDays = flags(days = 6)
         assertTrue(moreDays.liftVolume)
         assertFalse(moreDays.runVolume || moreDays.runDays)
-        // A new split only re-derives the run days.
         val split = flags(liftSplit = 3)
         assertTrue(split.runVolume)
         assertFalse(split.runDays)
@@ -252,7 +250,6 @@ class GuidedSetupDraftTest {
         assertEquals(5, seedTotalDays(Modality.Both, seed))
     }
 
-    /** A first-run (no seed) Lift answer set with only the required age given. */
     private fun firstRunLift(ageYears: Double?, female: Boolean?, bodyweightKg: Double?, weightLb: Boolean) = deriveDraft(
         modality = Modality.Lift,
         liftFocus = LiftFocus.Strength,
@@ -347,7 +344,6 @@ class GuidedSetupDraftTest {
         assertEquals(7, setupSteps(Modality.Lift).size)
         assertEquals(8, setupSteps(Modality.Run).size)
         assertFalse(SetupStep.Lead in setupSteps(Modality.Run))
-        // Running sides ask what you run now; lifting-only doesn't.
         assertTrue(SetupStep.RunNow in both)
         assertFalse(SetupStep.RunNow in setupSteps(Modality.Lift))
         // Calisthenics adds placement right after the lifting goal, a race goal adds
@@ -359,7 +355,6 @@ class GuidedSetupDraftTest {
         assertFalse(SetupStep.Placement in setupSteps(Modality.Run, calisthenics = true))
     }
 
-    /** A first-run answer set; only the arguments a test cares about change. */
     private fun firstRun(
         modality: Modality,
         days: Int,
@@ -406,7 +401,6 @@ class GuidedSetupDraftTest {
         val out = firstRun(Modality.Lift, days = 4)
         assertEquals(4, out.liftDaysPerWeek)
         assertEquals(0, out.runningDaysPerWeek)
-        // A runner has no lifting days.
         assertNull(firstRun(Modality.Run, days = 4).liftDaysPerWeek)
         // A re-run reopens the days step on the stored lifting days.
         assertEquals(4, seedTotalDays(Modality.Lift, out))
@@ -442,7 +436,6 @@ class GuidedSetupDraftTest {
         assertFalse(answered.toJson().toString().contains("running_km_per_week_set"))
         // A lifter has no running to leave unset.
         assertTrue(firstRun(Modality.Lift, days = 3).runningKmPerWeekSet)
-        // A display-unit answer converts back to canonical km.
         assertEquals(16.09, displayToKm(10.0, DistanceUnit.Mi), 1e-9)
     }
 
@@ -502,7 +495,6 @@ class GuidedSetupDraftTest {
         assertEquals(16, out.weeklySets)
         assertEquals(2, out.liftDaysPerWeek)
         assertEquals(3, out.runningDaysPerWeek)
-        // Running answers drive the km: none given, so it goes out as not set.
         assertFalse(out.runningKmPerWeekSet)
         assertFalse(out.advanced)
     }
@@ -563,7 +555,6 @@ class GuidedSetupDraftTest {
         assertEquals(CalisPlacement.PushKnee, seed.pushPlace)
         assertNull(seed.pullPlace)
         assertEquals(CalisPlacement.SquatBodyweight, seed.squatPlace)
-        // An untouched re-run re-places nothing; a changed answer is the only event.
         assertTrue(placementEvents(seed, seed, 0L).isEmpty())
         val changed = placementEvents(seed.copy(pushPlace = CalisPlacement.PushFull), seed, 0L)
         assertEquals(listOf(LadderId.HorizontalPush to 4), changed.map { it.ladder to it.rung })
@@ -573,7 +564,6 @@ class GuidedSetupDraftTest {
             mapOf(LadderId.VerticalPull to 4),
         )
         assertNull(noBar.pullPlace)
-        // A Weights profile seeds no placement.
         val weights = seedAnswers(calis.copy(resistanceModality = ResistanceModality.Weights), 20_000L, null, DistanceUnit.Km, null, rungs)
         assertNull(weights.pushPlace)
     }
@@ -603,7 +593,7 @@ class GuidedSetupDraftTest {
 
     @Test
     fun aSubFourMinuteMileIsAPlausibleRecentRace() {
-        // The core keeps any time_sec / distance_km >= 120 (app::format).
+        // The core keeps any time_sec / distance_km >= 120 (app::ingest).
         assertTrue(plausibleRaceTime(RaceDistance.Mile.km, 3 * 60 + 58))
         assertTrue(plausibleRaceTime(1.0, 120))
         assertFalse(plausibleRaceTime(1.0, 119))
@@ -613,7 +603,6 @@ class GuidedSetupDraftTest {
     fun raceDigitEntryIsSharedBySetupAndProfile() {
         assertEquals("2", appendRaceDigit("", '2', fresh = true))
         assertEquals("26", appendRaceDigit("2", '6', fresh = false))
-        // A fresh field starts over; a leading zero is dropped.
         assertEquals("7", appendRaceDigit("2615", '7', fresh = true))
         assertEquals("", appendRaceDigit("", '0', fresh = true))
         // h mm ss is six digits at most; non-digits are ignored.
@@ -678,7 +667,6 @@ class GuidedSetupDraftTest {
         assertEquals(6, switchSeedDays(Modality.Both, lifter, stashedRunDays = 3))
         // A runner has no lifting days to seed from.
         assertNull(switchSeedDays(Modality.Lift, firstRun(Modality.Run, days = 4), stashedRunDays = null))
-        // Dropping a side keeps the other and its goal coherent.
         val liftOnly = customised.withoutSide(Modality.Lift)
         assertEquals(0, liftOnly.runningDaysPerWeek)
         assertEquals(0.0, liftOnly.runningKmPerWeek, 0.0)
@@ -860,7 +848,6 @@ class GuidedSetupDraftTest {
         assertFalse(wire.contains("birth_epoch_day"))
         assertFalse(wire.contains("age_years"))
 
-        // Picking a birthday afterwards clears the skip.
         val picked = skipped.withBirthday(7_740L)
         assertFalse(picked.birthSkipped)
         assertEquals(35.0, SetupValues(picked, seed, null, null, DistanceUnit.Km, today).ageYears!!, 0.0)

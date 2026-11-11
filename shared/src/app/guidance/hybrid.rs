@@ -35,7 +35,6 @@ pub(super) fn build_hybrid_guidance(
     };
     push_guidance(rows, "Hybrid", so_text.to_string(), &so);
 
-    // Which side leads, and how the other side is dosed.
     let maint = Recommended::new((), claims::HYB_MAINT_002);
     let (lead_text, building, holding) = match lead {
         Some(HybridLead::Running) => (

@@ -47,7 +47,7 @@ import org.robolectric.RobolectricTestRunner
  * the log exactly as the last write left it); every thread's view at a quiet point
  * equals a fresh thread's; the live view equals a cold reboot's
  * replay of the log; nothing waits past [STALL_SEC] (a deadlock fails, not hangs).
- * `CORE_STRESS_ROUNDS` scales the main stress (default 3).
+ * `CORE_STRESS_ROUNDS` scales the main stress.
  */
 @RunWith(RobolectricTestRunner::class)
 class CoreConcurrencyTest {
@@ -65,8 +65,6 @@ class CoreConcurrencyTest {
         QaHarness.freshProcess(engine = null)
     }
 
-    // ── Harness ────────────────────────────────────────────────────────────────
-
     private fun boot(events: List<Event>): SendResult {
         QaHarness.seedLog(ctx, events)
         return QaHarness.reboot(ctx)
@@ -80,7 +78,6 @@ class CoreConcurrencyTest {
         return r
     }
 
-    /** A ~0.7 km run east at ~3 m/s, one fix every 3 s, the last at [end]. */
     private fun track(rng: Random, end: Long, entryId: Long): Event.LogRunTrack {
         val n = 240
         var x = 0.0
@@ -122,13 +119,10 @@ class CoreConcurrencyTest {
         assertNotNull("$what: line $i is not JSON: ${l.take(80)}", runCatching { json.parseToJsonElement(l) }.getOrNull())
     }
 
-    /** Fields that identify a set row and its last written values. */
     private data class SetRow(val id: Long, val at: Long, val exercise: String, val kg: Double, val reps: Int)
 
     private fun SetRow.log() = Event.LogSet(exercise, kg, reps, 8.0, observedAt = at, entryId = id)
     private fun SetRow.amend() = Event.AmendSet(id, exercise, kg, reps, 8.0, observedAt = at, observedAtFallback = at)
-
-    // ── 1. Everything at once ───────────────────────────────────────────────────
 
     @Test
     fun manyThreadsSendingExportingAndReadingLoseNothingAndReplayToTheLiveView() {
@@ -272,7 +266,6 @@ class CoreConcurrencyTest {
         assertFalse("coordinator still running (deadlock?)", coordinator.isAlive)
 
         val live = Core.currentView()
-        // Nothing lost, nothing doubled: each id once, with its last write.
         val liftIds = live.lifts.groupingBy { it.entry_id }.eachCount()
         for ((sid, row) in sets) {
             assertEquals("set $sid shown once", 1, liftIds[sid])
@@ -293,7 +286,6 @@ class CoreConcurrencyTest {
         val exports = gpsRuns.values.associate { it.entryId to Core.runGpx(it.entryId, it.observedAt) }
         exports.forEach { (rid, g) -> assertTrue("run $rid: empty export", !g.isNullOrBlank()) }
 
-        // A cold boot of the durable log renders the live view and the same routes.
         val replayed = QaHarness.reboot(ctx)
         assertTrue("replayed view is stale", !replayed.stale)
         assertTrue("reboot view differs from the live view", replayed.view == live)
@@ -301,8 +293,6 @@ class CoreConcurrencyTest {
             assertEquals("run $rid: export after reboot", g, Core.runGpx(rid, gpsRuns.getValue(rid).observedAt))
         }
     }
-
-    // ── 2. Racing edits of ONE entry ─────────────────────────────────────────────
 
     /** Six threads edit, delete and re-log (Undo) the same set at once. Whatever the
      *  interleaving, the rows the core shows for that id are exactly what the log
@@ -344,8 +334,6 @@ class CoreConcurrencyTest {
         assertEquals("rows for set ${base.id} vs the log order", expected.sortedBy { it.toString() }, shown.sortedBy { it.toString() })
         assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
-
-    // ── 3. A panic reset in the middle of the stress ─────────────────────────────
 
     /** One thread's event panics the core (the bridge swaps in an EMPTY core and
      *  answers `panic_reset`) while five others keep logging. [DurableCore.send]
@@ -404,8 +392,6 @@ class CoreConcurrencyTest {
         assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
 
-    // ── 4. Boot compaction racing the first sends ───────────────────────────────
-
     /** Boot's restore compacts and rewrites a long log while four threads queue their
      *  first entries the moment it begins: every send waits for the rewrite, lands in
      *  the NEW file exactly once, and a second boot replays to the same view. */
@@ -440,8 +426,6 @@ class CoreConcurrencyTest {
         assertEquals("every set once", (sent + old.map { it.entryId }).associateWith { 1 }, live.lifts.groupingBy { it.entry_id }.eachCount())
         assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
-
-    // ── 5. Widget, tile and reminder reads racing the snapshot writes ────────────
 
     /** [app.milestone.widget.WidgetSurfaces] writes the snapshot of each published view (app scope), the
      *  midnight / zone receiver marks it stale, and the tile and the session reminder

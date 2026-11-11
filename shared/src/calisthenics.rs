@@ -8,7 +8,6 @@
 //! (MEASURED force-plate rungs carry a `CAL-LOAD-*` claim; every other rung is
 //! `CAL-LOAD-INFERRED-001`, no invented number). Two power ladders (jumps,
 //! explosive push-ups) follow `13-calisthenics-addendum.md` cal-add-005/006.
-//! No IO, no clock, no randomness.
 //!
 //! Intensity is the leverage tier, then added load, then RIR (CAL-INTENSITY-001).
 
@@ -18,17 +17,13 @@ use crate::evidence::claims;
 use crate::schema::Recommended;
 use crate::strength::LiftGoal;
 
-// schema owns the plain wire enums (so it need not depend on evidence); the
-// calisthenics module is their public home for the rest of the engine.
+// schema owns the plain wire enums (so it need not depend on calisthenics);
+// the calisthenics module is their public home for the rest of the engine.
 pub use crate::schema::{LadderId, TierTarget};
 
 use FailurePolicy::{Ballistic, LeaveRir, SelfLimiting};
 use LadderId::*;
 use TierTarget::{HoldSec, Reps};
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 /// Failure policy for a rung (CAL-EFAIL-SAFE-001): momentary failure is only
 /// allowed on self-limiting movements; skill/lever/weighted/eccentric rungs
@@ -125,17 +120,14 @@ impl TierTarget {
             HoldSec { low, .. } => low,
         }
     }
-    /// True for a timed (hold-seconds) band.
     pub fn is_timed(&self) -> bool {
         matches!(self, HoldSec { .. })
     }
 }
 
-// ---------------------------------------------------------------------------
 // Ladder tables (calis-progression.md §3.1-§3.10). `mk` = Tier constructor:
 // (name, target, unilateral, bw_fraction, load_claim, failure, wrist_gate,
 // straight_arm). Load fractions from calis-load.md §1 (plan §3).
-// ---------------------------------------------------------------------------
 
 const INF: crate::evidence::ClaimId = claims::CAL_LOAD_INFERRED_001;
 const PUSHUP: crate::evidence::ClaimId = claims::CAL_LOAD_PUSHUP_001;
@@ -462,17 +454,12 @@ static ALIASES: &[(&str, LadderId, u8)] = &[
     ("plyo push-up", PlyoPush, 1),
 ];
 
-// ---------------------------------------------------------------------------
-// Lookups
-// ---------------------------------------------------------------------------
-
 /// The ladder for an id. `every_ladder_id_resolves_to_a_nonempty_ladder` pins
 /// the id-to-row order.
 pub fn ladder(id: LadderId) -> &'static Ladder {
     &LADDERS[id as usize]
 }
 
-/// The rung at `idx` in `id`'s ladder, if it exists.
 pub fn tier(id: LadderId, idx: u8) -> Option<&'static Tier> {
     ladder(id).tiers.get(idx as usize)
 }
@@ -540,10 +527,6 @@ pub fn inherently_loaded(tier: &Tier) -> bool {
     tier.name.starts_with("Weighted ")
 }
 
-// ---------------------------------------------------------------------------
-// Equipment (CAL-EQUIP-001)
-// ---------------------------------------------------------------------------
-
 /// Calisthenics equipment on hand, for rung filtering (CAL-EQUIP-001). Rings
 /// substitute for a bar (hanging/pulling) and for dip bars (support/dipping).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -561,7 +544,6 @@ impl Kit {
             .calis_equipment
             .map_or(Kit::ALL, Kit::from_equipment)
     }
-    /// Exactly the stated equipment.
     pub fn from_equipment(e: crate::profile::CalisEquipment) -> Kit {
         Kit {
             pull_up_bar: e.pull_up_bar,
@@ -575,11 +557,9 @@ impl Kit {
         dip_bars: true,
         rings: true,
     };
-    /// Something to hang and pull from.
     pub fn hang(&self) -> bool {
         self.pull_up_bar || self.rings
     }
-    /// Something to support and dip on.
     pub fn dip_support(&self) -> bool {
         self.dip_bars || self.rings
     }
@@ -633,7 +613,6 @@ pub fn rung_equipment(id: LadderId, idx: u8) -> Option<&'static str> {
     })
 }
 
-/// True when at least one rung of the ladder is doable with this equipment.
 pub fn ladder_available(id: LadderId, kit: Kit) -> bool {
     (0..ladder(id).tiers.len() as u8).any(|i| rung_available(id, i, kit))
 }
@@ -666,10 +645,6 @@ pub fn equipment_substitution() -> Recommended<()> {
     Recommended::new((), claims::CAL_EQUIP_001)
 }
 
-// ---------------------------------------------------------------------------
-// Graded rules
-// ---------------------------------------------------------------------------
-
 /// Tier-advance trigger (CAL-PROG-TRIGGER-001, contested CQ-F11-01): fires after
 /// 2 consecutive qualifying sessions — the calisthenics analogue of the
 /// strength 2-for-2 rule (STR-2FOR2-001).
@@ -687,7 +662,7 @@ const STRAIGHT_ARM_ACCLIMATION_DAYS: i64 = 28;
 
 /// Straight-arm static acclimation (CAL-GATE-NUMBERS-001 engine default,
 /// contested CQ-F11-02): tendon adapts on a weeks-to-months timescale, so a
-/// straight-arm lever tier must be held ≥ `STRAIGHT_ARM_ACCLIMATION_DAYS` (28)
+/// straight-arm lever tier must be held ≥ `STRAIGHT_ARM_ACCLIMATION_DAYS`
 /// before advancing (CAL-TENDON-001 rate-limit).
 pub fn static_acclimation_ok(days_at_current_tier: i64) -> Recommended<bool> {
     Recommended::new(
@@ -966,7 +941,7 @@ const CALIS_E1RM_REP_CAP: u32 = 12;
 
 /// Estimated 1-rep max on TOTAL system load for a loaded ladder set
 /// (CAL-E1RM-001: e1RM only for weighted calisthenics, on system load, at
-/// ≤ `CALIS_E1RM_REP_CAP` (12) reps). System load = measured %BW ×
+/// ≤ `CALIS_E1RM_REP_CAP` reps). System load = measured %BW ×
 /// bodyweight + added; for the weighted (two-arm) pull-up bodyweight + added,
 /// since a pull-up moves ~90–100% of bodyweight (CAL-LOAD-PULL-001). `None`
 /// for an unloaded set, too many reps, no bodyweight, or a rung with no known

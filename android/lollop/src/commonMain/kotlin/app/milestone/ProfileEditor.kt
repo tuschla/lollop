@@ -161,7 +161,6 @@ internal fun ProfileEditor(
     // `initial` so a new core profile (e.g. after a re-run setup) replaces a stale
     // draft that the next edit would otherwise re-send over it (HARD RULE 3).
     var draft by rememberSaveable(initial, stateSaver = jsonSaver(Event.SetProfile.serializer())) { mutableStateOf(initial) }
-    // Commit-and-apply: the single funnel every edit goes through.
     val commit: (Event.SetProfile) -> Unit = {
         draft = it
         onApply(it)
@@ -182,7 +181,6 @@ internal fun ProfileEditor(
         }
     }
 
-    // A future-only date row (meet, race day); a stored day that has passed reads as none.
     @Composable
     fun FutureDateRow(id: ProfileRowId, label: String, stored: Long?, onPick: (Long?) -> Unit) {
         val day = stored?.takeIf { it > today }
@@ -202,7 +200,6 @@ internal fun ProfileEditor(
         }
     }
 
-    // Which sides carry volume drives which rows and groups show.
     val lift = draft.weeklySets > 0
     val run = draft.runningDaysPerWeek > 0
     val both = lift && run
@@ -242,7 +239,6 @@ internal fun ProfileEditor(
             onConfirm = {
                 pendingFocus = null
                 open = null
-                // A side switched off: keep its answers for a later switch back.
                 if (target == Modality.Lift && run) ModalityStash.stashRun(ctx, draft)
                 if (target == Modality.Run && lift) ModalityStash.stashLift(ctx, draft)
                 when {
@@ -254,12 +250,10 @@ internal fun ProfileEditor(
         )
     }
 
-    // One accent-labelled card per group. The Plan rows come first for every
-    // Focus, so a row never moves when the modality changes.
+    // The Plan rows come first for every Focus, so a row never moves when the
+    // modality changes.
     Column(verticalArrangement = Arrangement.spacedBy(Space.Screen.dp)) {
         ProfileGroup(stringResource(Res.string.setup_section_plan)) {
-            // Focus: a short enum → segmented buttons; a change is confirmed first
-            // (re-tapping the active segment does nothing).
             SegmentedEnumRow(
                 label = stringResource(Res.string.setup_row_focus),
                 values = Modality.entries.toList(),
@@ -268,9 +262,9 @@ internal fun ProfileEditor(
                 onSelect = { if (it != focus) pendingFocus = it },
             )
             RowHairline()
-            // Which leads: Both only. A two-way choice (the core only reads
-            // lift-first vs run-first); lifting leading means the lift goal itself
-            // leads, so it can never contradict Training goal.
+            // A two-way choice (the core only reads lift-first vs run-first);
+            // lifting leading means the lift goal itself leads, so it can never
+            // contradict Training goal.
             if (both) {
                 SegmentedEnumRow(
                     label = stringResource(Res.string.setup_row_which_leads),
@@ -280,10 +274,8 @@ internal fun ProfileEditor(
                 ) { commit(draft.withLead(it)) }
                 RowHairline()
             }
-            // Training days: the ONE days control. The value is the week's
-            // session days; the caption carries the Both split and the weekdays
-            // ("2 lift · 3 run · Mon, Tue, …"), so the bold value stays one line.
-            // The picker sets the count per side and the weekdays.
+            // The ONE days control. The caption carries the Both split and the
+            // weekdays, so the bold value stays one line.
             val dayTotal = draft.trainingDayTotal()
             val daysCaption = listOfNotNull(
                 if (both) stringResource(Res.string.setup_days_split_sub, draft.shownLiftDays(), draft.runningDaysPerWeek) else null,
@@ -308,7 +300,6 @@ internal fun ProfileEditor(
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     val lead = work.concurrentGoal.lead()
                     if (lift) {
-                        // A run-led hybrid lifts at most 3 days (maintenance).
                         val liftLabel = stringResource(if (both) Res.string.setup_row_lift_days else Res.string.setup_days_scale_label)
                         val liftOptions = if (both) hybridLiftDayRange(lead) else dayOptions(Modality.Lift)
                         FieldLabel(liftLabel)
@@ -318,9 +309,7 @@ internal fun ProfileEditor(
                         }
                     }
                     if (run) {
-                        // The setup's ranges: a runner trains 2–7 days; a hybrid
-                        // runs the rest of the week beside its lift days, at most 3
-                        // while lifting leads. Dropping running is the Focus row's job.
+                        // Dropping running is the Focus row's job.
                         val runLabel = stringResource(if (both) Res.string.setup_row_running_days else Res.string.setup_days_scale_label)
                         val runOptions = if (both) hybridRunDayOptions(work.shownLiftDays(), lead) else dayOptions(Modality.Run)
                         FieldLabel(runLabel)
@@ -390,8 +379,7 @@ internal fun ProfileEditor(
 
         if (lift) {
             ProfileGroup(stringResource(Res.string.setup_section_lifting)) {
-                // Training goal: a short enum → segmented buttons, in the wizard's
-                // order and with its labels; the caption glosses the terms.
+                // In the wizard's order and with its labels.
                 SegmentedEnumRow(
                     label = stringResource(Res.string.setup_row_training_goal),
                     values = LiftFocus.entries.map { it.liftGoal },
@@ -735,9 +723,7 @@ internal fun ProfileEditor(
         // "Not set" until chosen, so a plain profile arms none of them.
         ProfileGroup(stringResource(Res.string.setup_section_context)) {
             if (run) {
-                // Environment only changes running guidance. Its temperature and
-                // altitude follow-ups show for Heat / Altitude, or while they hold a
-                // value (so a set value can always be seen and cleared).
+                // Environment only changes running guidance.
                 ProfileRow(
                     open == ProfileRowId.Environment,
                     { toggle(ProfileRowId.Environment) },
@@ -762,8 +748,7 @@ internal fun ProfileEditor(
                 RowHairline()
             }
             // Back from a break (REENTRY-001 / reentry-002): weeks fully off plus the
-            // day training restarted, so the re-entry ramp runs from that day. The
-            // value is "Since Sep 11" (the year only when it isn't this year).
+            // day training restarted, so the re-entry ramp runs from that day.
             val breakValue = draft.weeksOff?.let {
                 stringResource(Res.string.setup_break_value, epochDayShortLabel(draft.layoffReturnedEpochDay ?: today, today))
             }
@@ -778,7 +763,6 @@ internal fun ProfileEditor(
                     val weeksLabel = stringResource(Res.string.setup_break_weeks_label)
                     FieldLabel(weeksLabel)
                     ScrollableScaleRow(WEEKS_OFF_OPTIONS.toList(), draft.weeksOff?.toInt(), { res.getString(Res.string.setup_weeks_value, it) }, label = weeksLabel) {
-                        // A first answer dates the restart today; the date pill below moves it.
                         commit(draft.copy(weeksOff = it.toDouble(), layoffReturnedEpochDay = draft.layoffReturnedEpochDay ?: today))
                     }
                     AnswerChip(stringResource(Res.string.setup_break_none), selected = draft.weeksOff == null) {
@@ -803,7 +787,6 @@ internal fun ProfileEditor(
     }
 }
 
-/** Copy for the Focus-switch confirm: title, body and confirm label. */
 internal class FocusSwitchCopy(val titleRes: StringResource, val bodyRes: StringResource, val confirmRes: StringResource)
 
 internal fun focusSwitchCopy(from: Modality, to: Modality): FocusSwitchCopy = when (to) {
@@ -874,7 +857,6 @@ private val ENV_TEMP_OPTIONS_C = -10..45
  *  (running-041) and the 2,500 m KB environment-modifier mark (indiv-025). */
 private val ENV_ALTITUDE_OPTIONS_M = 0..4500 step 100
 
-/** Weeks fully off the Break row offers. */
 private val WEEKS_OFF_OPTIONS = 1..52
 
 /** Sex answer → its label; null (not given) → "Prefer not to say". */
@@ -901,12 +883,12 @@ private fun ProfileKeypadEditor(
     var text by rememberSaveable { mutableStateOf(seedText ?: "") }
     var fresh by rememberSaveable { mutableStateOf(true) }
     var touched by rememberSaveable { mutableStateOf(false) }
-    val valid = parseKeypadNumber(text)?.let { it in range } == true
+    val valid = text.toDoubleOrNull()?.let { it in range } == true
     val edit: (String) -> Unit = { t ->
         text = t
         fresh = false
         touched = true
-        parseKeypadNumber(t)?.takeIf { it in range }?.let(onValid)
+        t.toDoubleOrNull()?.takeIf { it in range }?.let(onValid)
     }
     // A keystroke can insert or drop the pinned hold banner above the list (an
     // under-18 age), which slides the field being typed under it: keep the whole
@@ -929,7 +911,6 @@ private fun ProfileKeypadEditor(
                 active = true,
                 invalid = touched && text.isNotEmpty() && !valid,
                 min = range.start, max = range.endInclusive, decimals = if (allowDecimal) 1 else 0,
-                // The keypad below is the one input; no ±1 steppers beside it.
                 adjustments = emptyList(),
                 onActivate = { fresh = true },
                 onText = edit,

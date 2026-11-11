@@ -118,13 +118,12 @@ fn lift_audit_flags_only_checks_that_ask_for_a_change() {
     assert!(dj.evidence.safety_critical, "{}", dj.summary);
 }
 
-// ── The lift audit buckets sets by the shell's LOCAL day ──
 #[test]
 fn lift_audit_buckets_sets_by_local_day() {
     // In a -3h zone a set logged 23:30 LOCAL Monday is 02:30 UTC Tuesday, and
     // a set at 20:00 LOCAL Monday stays on UTC Monday. All bucket to LOCAL
     // Monday, so the Prilepin audit sums them (25 reps, past the 10–20 window,
-    // so a row is emitted). The old raw-UTC audit split them across UTC Mon/Tue
+    // so a row is emitted). A raw-UTC audit would split them across UTC Mon/Tue
     // (15 + 10 reps, each inside the window, so no row at all).
     let app = Engine;
     let mut model = Model::default();
@@ -172,7 +171,6 @@ fn lift_audit_buckets_sets_by_local_day() {
     );
 }
 
-// ── The Session audit sums only the latest lifting day ──
 #[test]
 fn lift_audit_sums_only_the_latest_lifting_day() {
     // 4×5 Back squat yesterday, then 5×5 today (one set under a different casing).
@@ -242,7 +240,6 @@ fn lift_audit_sums_only_the_latest_lifting_day() {
     );
 }
 
-// ── An unrecorded RPE fabricates no RIR row or summary clause ──
 #[test]
 fn an_unrecorded_rpe_fabricates_no_rir() {
     // A set logged with no RPE (0.0) must not fabricate a "~10 RIR" audit row nor

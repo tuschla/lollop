@@ -18,7 +18,6 @@ use crate::schema::Recommended;
 use crate::strength::LiftGoal;
 use crate::{feedback, running};
 
-/// Weeks per trend block: the last 4 weeks against the 4 before.
 const BLOCK_WEEKS: u8 = 4;
 const BLOCK_DAYS: usize = BLOCK_WEEKS as usize * 7;
 

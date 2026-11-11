@@ -31,7 +31,6 @@ pub(super) fn sized_sets(
     week_in_block: u8,
     block_weeks: u8,
 ) -> SizedSets {
-    // Bound the weekly target to the muscle's MEV..MRV.
     let mev_floor = landmarks
         .map(|l| l.mev)
         .unwrap_or_else(|| hypertrophy::mev_sets_by_training_age(ta).value.0);
@@ -45,10 +44,8 @@ pub(super) fn sized_sets(
         .get((week_in_block.max(1) - 1) as usize)
         .copied()
         .unwrap_or(start);
-    // Even split across the lift days that train the primary muscle.
     let n = n_lift_days.max(1) as f64;
     let split = |weekly: u8| -> u8 {
-        // Per-session saturation cap + minimum, then into the day's own band.
         ((weekly as f64 / n).round() as u8)
             .clamp(
                 hypertrophy::MIN_SETS_PER_EXERCISE,

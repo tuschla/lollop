@@ -58,7 +58,6 @@ class ScreenshotThemesTest(private val theme: AppTheme, private val mode: DarkMo
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()) + lifts + runs)
     }
 
-    /** Today → History → back to Today with the Log chooser open, one capture each. */
     @Test
     fun capture() {
         AppSettings.setTheme(ctx, theme)
@@ -83,7 +82,6 @@ class ScreenshotThemesTest(private val theme: AppTheme, private val mode: DarkMo
     }
 
     companion object {
-        /** Every theme × light and dark. */
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun themes(): List<Array<Any>> =

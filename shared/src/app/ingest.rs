@@ -67,7 +67,6 @@ pub(super) fn apply(model: &mut Model, event: Event) {
         }
         Event::SubmitCheckin(input) => model.checkins.push(input),
         Event::RestartHrvBaseline { observed_at } => {
-            // Latest restart wins (never moves the cutoff backwards).
             if !is_undated(observed_at) {
                 model.hrv_baseline_from = Some(
                     model
@@ -86,7 +85,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             hold_sec,
         } => {
             if stores_row {
-                model.sets.push(logged_set(SetFields {
+                model.sets.push(logged_set(LoggedSet {
                     exercise,
                     weight_kg,
                     reps,
@@ -168,7 +167,6 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             avg_hr_bpm,
             utc_offset_sec,
         } => {
-            // Distance and duration derive from the track at `view()`.
             let mut run = logged_run(RunFields {
                 distance_km: 0.0,
                 duration_min: 0.0,
@@ -239,7 +237,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             // line for this). A set that fails the gate leaves the row as is.
             if stores_row && let Some(pos) = located(&model.sets, target) {
                 model.sets.remove(pos);
-                model.sets.push(logged_set(SetFields {
+                model.sets.push(logged_set(LoggedSet {
                     exercise,
                     weight_kg,
                     reps,
@@ -473,33 +471,14 @@ pub(super) fn sanitize_planning_fields(p: &mut Profile) {
         .and_then(|m| hypertrophy::resolve_muscle(&m).map(|lm| lm.muscle.to_string()));
 }
 
-/// A lift set as `LogSet` and `AmendSet` carry it.
-struct SetFields {
-    exercise: String,
-    weight_kg: f64,
-    reps: u32,
-    rpe: f64,
-    observed_at: i64,
-    entry_id: u64,
-    hold_sec: Option<u16>,
-}
-
 /// The stored set. A set logged under an earlier catalog label is stored
 /// under the current name (`exercise::renamed`), so every view shows one name
 /// for the lift.
-fn logged_set(f: SetFields) -> LoggedSet {
-    LoggedSet {
-        exercise: match crate::exercise::renamed(&f.exercise) {
-            Some(name) => name.to_owned(),
-            None => f.exercise,
-        },
-        weight_kg: f.weight_kg,
-        reps: f.reps,
-        rpe: f.rpe,
-        observed_at: f.observed_at,
-        entry_id: f.entry_id,
-        hold_sec: f.hold_sec,
+fn logged_set(mut set: LoggedSet) -> LoggedSet {
+    if let Some(name) = crate::exercise::renamed(&set.exercise) {
+        set.exercise = name.to_owned();
     }
+    set
 }
 
 /// A run as `LogRun` and `AmendRun` carry it. A GPS run (`LogRunTrack`) has

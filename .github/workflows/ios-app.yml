@@ -51,10 +51,7 @@ jobs:
           rust: "true"
           konan: "true"
 
-      - name: Generate the Xcode project
-        run: |
-          brew install xcodegen
-          xcodegen generate --spec iosApp/project.yml
+      - uses: ./.github/actions/xcode-project
 
       - name: Build for devices without signing
         # SideStore signs the app with the owner's Apple ID when it installs it.
@@ -122,10 +119,7 @@ jobs:
 
       - uses: ./.github/actions/pick-simulator
 
-      - name: Generate the Xcode project
-        run: |
-          brew install xcodegen
-          xcodegen generate --spec iosApp/project.yml
+      - uses: ./.github/actions/xcode-project
 
       - name: Test the extension
         run: |
@@ -133,7 +127,7 @@ jobs:
           TEST_RUNNER_LOLLOP_RENDER_DIR="$PWD/build/widget-renders" xcodebuild test \
             -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
             -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets
-          ls build/widget-renders | wc -l
+          find build/widget-renders -type f | wc -l
 
       - name: Upload the renders
         if: always()
@@ -159,10 +153,7 @@ jobs:
         with:
           boot: "true"
 
-      - name: Generate the Xcode project
-        run: |
-          brew install xcodegen
-          xcodegen generate --spec iosApp/project.yml
+      - uses: ./.github/actions/xcode-project
 
       - name: Build for the simulator
         run: >
@@ -192,7 +183,8 @@ jobs:
           mkdir -p "$out"
           xcrun simctl spawn "$SIMULATOR_UDID" log stream --level info --style compact \
             --predicate 'process == "lollop"' > "$out/app.log" 2>&1 &
-          trap "kill $! 2>/dev/null || true" EXIT
+          log_pid=$!
+          trap 'kill "$log_pid" 2>/dev/null || true' EXIT
           touch "$out/.launched"
           launched=$(xcrun simctl launch --stdout="$out/stdout.txt" --stderr="$out/stderr.txt" \
             "$SIMULATOR_UDID" "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")")

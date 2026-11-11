@@ -140,7 +140,6 @@ internal fun CalculatorResultCard(
                             // Safety is a rule, not a probability.
                             showConfidence = !c.row.safety_critical,
                             extraDetail = c.extraDetail,
-                            // The card's jargon links once, under its last claim.
                             glossaryKeys = if (i == claims.lastIndex) glossaryKeys else emptyList(),
                         )
                     }
@@ -167,8 +166,6 @@ internal fun CalculatorResultCard(
     }
 }
 
-/** A calculator result without structured figures: the core's rows as plain
- *  [EvidenceCard]s, then "Clear result". */
 @Composable
 private fun PlainCalcRows(rows: List<GuidanceView>, overline: String, onClear: () -> Unit) {
     rows.forEach {
@@ -177,7 +174,6 @@ private fun PlainCalcRows(rows: List<GuidanceView>, overline: String, onClear: (
     ClearResultAction(overline, onClear)
 }
 
-/** "Clear result" under a calculator result, naming the tool ([overline]) to TalkBack. */
 @Composable
 private fun ClearResultAction(overline: String, onClear: () -> Unit) {
     TextAction(
@@ -293,7 +289,7 @@ internal fun HrZonesResult(model: ViewModel, onClear: () -> Unit) {
         return
     }
     // The age estimate's Tanaka split rides under the HRmax claim (a measured
-    // maximum has none); built from the structured hr_max fields.
+    // maximum has none).
     val tanaka = hm.takeIf { !it.measured && it.tanaka_intercept > 0.0 }
         ?.let { stringResource(Res.string.log_tool_tanaka, it.tanaka_intercept.toInt(), trimDecimal(it.tanaka_slope), it.age_years.toInt()) }
     val faceRows = bands.map { it.row }.toSet() + 0
@@ -313,7 +309,6 @@ internal fun HrZonesResult(model: ViewModel, onClear: () -> Unit) {
     }
 }
 
-/** One zone row's texts, in the styles they render in. */
 private class HrZoneTexts(
     val name: String,
     val pct: String,
@@ -356,7 +351,6 @@ private val HrZoneNameStyle get() = Type.BodyBold
 private val HrZoneCaptionStyle get() = Type.Caption.merge(TabularFigures)
 private val HrZoneSwatch = 12.dp
 
-/** Column weights of a side-by-side zone row: name, %HRmax, bpm. */
 private const val HrZoneNameWeight = 1.3f
 private const val HrZonePctWeight = 1f
 private const val HrZoneBpmWeight = 1.2f
@@ -487,7 +481,6 @@ internal fun VolumeResult(model: ViewModel, onClear: () -> Unit) {
     }
 }
 
-/** Height of the volume ramp chart. */
 private val RampChartHeight = 112.dp
 
 /**
@@ -518,7 +511,7 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
     )
     val top = maxOf(fig.max_sets, ramp.maxOrNull() ?: 0) + 1
     // Laid out once per composition: the band label (two lines) sets the end
-    // gutter, the week labels add a caption row under the 112dp plot.
+    // gutter, the week labels add a caption row under the plot.
     val bandLayouts = bandLabel.split(' ', limit = 2).map { measurer.measure(it, captionStyle) }
     val weekLayouts = weekLabels.map { measurer.measure(it, captionStyle) }
     val weekRowPx = (weekLayouts.maxOfOrNull { it.size.height } ?: 0) + with(density) { Space.Sm.dp.roundToPx() }
@@ -538,7 +531,6 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
         val plotBottom = size.height - weekRowPx
         val plotH = plotBottom - numeralRoom
         fun y(v: Int) = numeralRoom + plotH * (1f - v.toFloat() / top)
-        // Productive band across the whole width, its label in the end gutter.
         val bandTop = y(fig.productive_high)
         val bandBottom = y(fig.productive_low)
         drawRect(band, topLeft = Offset(0f, bandTop), size = Size(size.width, bandBottom - bandTop))
@@ -547,7 +539,6 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
             drawText(it, topLeft = Offset(size.width - it.size.width, ly))
             ly += it.size.height
         }
-        // Max landmark: a dashed line over the bars' width.
         val my = y(fig.max_sets)
         val dash = 4.dp.toPx()
         drawLine(
@@ -572,8 +563,7 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
     }
 }
 
-/** Where the masters bracket begins, as the protein copy states it ("65"):
- *  [CoreConstants.MASTERS_AGE_YEARS], [trimDecimal]-trimmed. */
+/** Where the masters bracket begins, as the protein copy states it. */
 internal fun mastersAgeLabel(): String = trimDecimal(CoreConstants.MASTERS_AGE_YEARS)
 
 /** Display label for a planner wire muscle ("side delts" → "Side delts"); an

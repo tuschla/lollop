@@ -11,8 +11,6 @@ use crate::app::plan_views::adjust_fold::{
     LiftDowngrade, ONE_LEVEL_LOAD_FRAC, head_cold, lift_downgrade, reduce_percent_intensity,
     safety_easy,
 };
-#[cfg(test)]
-use crate::app::plan_views::adjust_fold::{fold_completion_adjustments, fold_item_numbers};
 use crate::app::plan_views::completion::refresh_item_statuses;
 use crate::app::plan_views::item_render::{
     FaceClause, cap_run_item_easy, clear_run_reps, refresh_lift_summary, repoint_evidence,
@@ -230,29 +228,9 @@ fn cap_rpe_intensity(intensity: &mut PlanIntensity, d: u8) -> Option<i32> {
     }
 }
 
-/// The numeric fold [`flatten_session`] gives every row, then the hero's
-/// [`annotate_and_rejudge`], over a hand-built session; no first-set step.
-/// Stacked deloads/reduce-loads take the single deepest cut instead of
-/// compounding, matching the per-day completion judgement.
-#[cfg(test)]
-pub(in crate::app) fn apply_adjustments_to_session(
-    ns: &mut PlanRow,
-    recommended: &[AdjustmentCall],
-    weight_lb: bool,
-) {
-    let fold = fold_completion_adjustments(recommended);
-    for it in ns.items.iter_mut() {
-        fold_item_numbers(it, fold, weight_lb);
-    }
-    annotate_and_rejudge(ns, recommended, None, weight_lb);
-    for it in ns.items.iter_mut() {
-        super::basis::render_basis(it, weight_lb);
-    }
-}
-
 /// The hero's fold: [`annotate_adjustments`], then each item's status
 /// re-judged against the same adjustments.
-pub(super) fn annotate_and_rejudge(
+pub(in crate::app) fn annotate_and_rejudge(
     ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
     today: Option<&CallCtx>,
@@ -827,7 +805,7 @@ fn stop_item_for_pain(it: &mut PlanItem, location: &str, r: &AdjustmentCall) {
         set_run_summary(it, None, None, &line, &line);
     } else {
         let lead = FaceClause::plain(format!("skip today ({location} pain)"));
-        set_named_summary(it, ": ", &[lead], &[]);
+        set_named_summary(it, &[lead], &[]);
     }
     clear_run_reps(it);
     it.run_volume = None;

@@ -15,8 +15,9 @@ ReadinessInput { signal, value, observed_at } → Recommended<Adjustment>
 ## Decisions
 
 - **`Recommended<T>` wrapper** enforces the non-negotiable rule structurally:
-  a `Prescription` or `Adjustment` cannot ship without `Evidence { grade, citation }`
-  and a `ConfidenceTag`. Prefer wrapping whole values over per-field evidence;
+  a `Prescription` or `Adjustment` cannot ship without a registered `ClaimId`,
+  whose registry row carries the grade, citation and confidence. Prefer
+  wrapping whole values over per-field evidence;
   granularity can increase later without breaking the invariant.
 - **Evidence grades** are the File 09 canonical five (Strong … MarketingMyth),
   ordered so `Ord` gives "stronger evidence" comparisons. Default confidence

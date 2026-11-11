@@ -8,10 +8,6 @@
 use crate::evidence::claims;
 use crate::schema::Recommended;
 
-// ---------------------------------------------------------------------------
-// Efficiency Factor & aerobic decoupling
-// ---------------------------------------------------------------------------
-
 /// Friel decoupling band verdict for a computed `decoupling_pct`.
 ///
 /// Bands per File 07 / `RUN-DECOUPLE-001`: `<5%` sound base, `5–9.99%` build
@@ -55,10 +51,6 @@ pub fn decoupling_high(pct: f64) -> bool {
     pct >= DECOUPLING_HIGH_PCT - 1e-9
 }
 
-// ---------------------------------------------------------------------------
-// Riegel race-time prediction (Riegel 1981)
-// ---------------------------------------------------------------------------
-
 /// Riegel endurance exponent by weekly training volume (File 07, verbatim):
 /// Elite/100+ km ≈ 1.04; 60–100 km ≈ 1.06; 30–60 km ≈ 1.09; <30 km ≈ 1.12.
 /// Higher mileage → flatter fatigue slope → smaller exponent. `[Moderate]`
@@ -92,10 +84,6 @@ pub fn riegel_predict(t1_sec: f64, d1: f64, d2: f64, exponent: f64) -> f64 {
     if t2.is_finite() { t2 } else { 0.0 }
 }
 
-// ---------------------------------------------------------------------------
-// Impulse-response: EWMA, CTL, ATL, TSB
-// ---------------------------------------------------------------------------
-
 /// Exponentially-weighted moving average of daily training load (File 07,
 /// impulse-response / fitness–fatigue bookkeeping).
 ///
@@ -125,19 +113,11 @@ pub fn tsb(ctl: f64, atl: f64) -> f64 {
     ctl - atl
 }
 
-// ---------------------------------------------------------------------------
-// Karvonen target HR (File 07)
-// ---------------------------------------------------------------------------
-
 /// Karvonen target HR: `target = HRrest + frac·(HRmax − HRrest)` (File 07).
 /// `frac` is the desired %HR-reserve as a fraction (0..1). `[Moderate]`
 pub fn karvonen_target_hr(hr_rest: f64, hr_max: f64, frac: f64) -> f64 {
     hr_rest + frac * (hr_max - hr_rest)
 }
-
-// ---------------------------------------------------------------------------
-// VDOT / Daniels & Gilbert (File 07)
-// ---------------------------------------------------------------------------
 
 /// Daniels & Gilbert VO2 at running speed `v` (m/min):
 /// `VO2 = −4.60 + 0.182258·v + 0.000104·v²` (File 07 verbatim).
@@ -184,8 +164,6 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
     if !distance_m.is_finite() || distance_m <= 0.0 {
         return 0.0;
     }
-    // vdot(d, t) decreases monotonically in t, so bisect: when the midpoint's
-    // VDOT still exceeds the target the time is too short (raise the low bound).
     let mut lo = 1.0; // 1 s - faster than any real finish
     // At 24 m/min `daniels_vo2` is negative (its root is ~24.9 m/min), so the
     // VDOT there is below any positive target; a fixed cap would return the
@@ -226,10 +204,6 @@ pub fn pace_sec_per_km_at(vdot: f64, pct_vo2max: f64) -> Option<f64> {
     daniels_speed_for_vo2(vdot * pct_vo2max / 100.0).map(|v| 60_000.0 / v)
 }
 
-// ---------------------------------------------------------------------------
-// Session-RPE load (Foster 2001; KB 13-run-feedback-load load-srpe-001)
-// ---------------------------------------------------------------------------
-
 /// Session-RPE training load in arbitrary units: `duration_min × CR-10`
 /// (Foster et al. 2001; `LOAD-SRPE-001`). A SEPARATE series from the HR-based
 /// TRIMP (the two are not interchangeable on interval sessions), never summed
@@ -242,10 +216,6 @@ pub fn srpe_load_au(duration_min: f64, session_rpe: u8) -> f64 {
     duration_min * f64::from(session_rpe.min(10))
 }
 
-// ---------------------------------------------------------------------------
-// Zonal TRIMP variants (File 07)
-// ---------------------------------------------------------------------------
-
 /// Lucia TRIMP: 3 zones (below VT1, VT1–VT2, above VT2) weighted 1/2/3
 /// (File 07). `minutes[0]` = low zone … `minutes[2]` = high zone. `[Moderate]`
 pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
@@ -255,10 +225,6 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
         .map(|(i, m)| m * (i as f64 + 1.0))
         .sum()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -274,14 +240,11 @@ mod tests {
         );
         // Verbatim: 1200 * 2^1.06 ≈ 2502 s.
         assert!((t10 - 2502.0).abs() < 5.0, "got {t10}");
-        // Exponent bands by weekly volume.
         assert!((riegel_exponent(120.0) - 1.04).abs() < 1e-9);
         assert!((riegel_exponent(70.0) - 1.06).abs() < 1e-9);
         assert!((riegel_exponent(40.0) - 1.09).abs() < 1e-9);
         assert!((riegel_exponent(10.0) - 1.12).abs() < 1e-9);
-        // Non-positive inputs guarded.
         assert_eq!(riegel_predict(0.0, 5.0, 10.0, 1.06), 0.0);
-        // A finite prediction round-trips normally.
         assert!(riegel_predict(1200.0, 5000.0, 10_000.0, 1.06).is_finite());
         // An absurd goal distance overflows the power to ±inf → collapse to the
         // degenerate 0.0 sentinel, never leak Inf/NaN to the caller.
@@ -308,7 +271,6 @@ mod tests {
         // a pure distance scaling (endurance fades with duration).
         let t10 = daniels_predict(v, 10_000.0);
         assert!(t10 > 2.0 * t, "10k must exceed doubled 5k time, got {t10}");
-        // Non-positive inputs guarded.
         assert_eq!(daniels_predict(0.0, 5000.0), 0.0);
         assert_eq!(daniels_predict(50.0, 0.0), 0.0);
     }

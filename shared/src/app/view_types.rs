@@ -143,7 +143,6 @@ pub(crate) mod zone_or_dash {
     }
 }
 
-/// A run's zone as card text: `"Z1"`..`"Z3"`, or `"-"` when none is shown.
 pub(crate) fn zone_label(zone: Option<ThreeZone>) -> &'static str {
     match zone {
         Some(ThreeZone::Z1) => "Z1",
@@ -926,7 +925,6 @@ pub struct WhyView {
 pub(crate) mod basis_sentences {
     use serde::{Deserialize, Deserializer, Serializer};
 
-    /// The sentences of `basis`, trimmed, empty ones dropped.
     pub(crate) fn split(basis: &str) -> Vec<&str> {
         let mut out = Vec::new();
         let mut start = 0;

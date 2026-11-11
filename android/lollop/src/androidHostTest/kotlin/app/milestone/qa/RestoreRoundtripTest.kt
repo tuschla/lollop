@@ -185,8 +185,6 @@ class RestoreRoundtripTest {
         QaHarness.freshProcess()
     }
 
-    // ── Shared drivers ──────────────────────────────────────────────────────────
-
     private fun recreate() {
         checkNotNull(lastScenario).recreate()
         rule.waitUntil(15_000) { rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() }
@@ -207,8 +205,6 @@ class RestoreRoundtripTest {
         // process); Android recommends keeping it to tens of KB.
         assertTrue("saved instance state is $size bytes", size < 200_000)
     }
-
-    // ═══ 1. A half-filled set in the gym loop ═══════════════════════════════════
 
     private val todayStartSec get() = QaHarness.daysAgoAtMidday(0) - 43_200L
 
@@ -257,8 +253,6 @@ class RestoreRoundtripTest {
         assertEquals(2, logCount("LogSet"))
     }
 
-    // ═══ 2. The morning check-in ════════════════════════════════════════════════
-
     private fun openMorningCheckin() {
         rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
         rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
@@ -297,8 +291,6 @@ class RestoreRoundtripTest {
         assertEquals(3, echo.mood)
         assertEquals(1, logCount("SubmitCheckin"))
     }
-
-    // ═══ 3. The run Finish review ═══════════════════════════════════════════════
 
     private fun launchOnTracker() {
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
@@ -355,8 +347,6 @@ class RestoreRoundtripTest {
         assertEquals(7, model.runs.single().session_rpe)
         assertEquals("no recovery offered for a saved run", 0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
     }
-
-    // ═══ 4 + 6. An open run detail sheet, its rate sheet and the trim sheet ═════
 
     /** This morning's 10K, finished at 07:00. */
     private fun gpsTenK() = QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(0) - 5 * 3600 - 1010 * 3L)
@@ -428,7 +418,6 @@ class RestoreRoundtripTest {
         rule.onNodeWithTag("run-trim").performScrollTo().performClick()
         rule.waitUntil(15_000) { trimThumbs().fetchSemanticsNodes().size == 2 }
 
-        // Cut 5 min off the start and 10 min off the end.
         setThumb(0, 300f)
         setThumb(1, (last - first - 600).toFloat())
         val keeps = keepsLine()
@@ -466,8 +455,6 @@ class RestoreRoundtripTest {
         assertEquals(trimmedKm, model.runs.single { it.entry_id == run.entryId }.distance_km, 1e-9)
         assertEquals(1, logCount("TrimRunTrack"))
     }
-
-    // ═══ 5. Guided setup, mid-way ══════════════════════════════════════════════
 
     private fun onSetupScreen(name: String): Boolean {
         val marker = when (name) {
@@ -539,8 +526,6 @@ class RestoreRoundtripTest {
         assertEquals(null, EventDispatcher.model.value?.profile)
     }
 
-    // ═══ 7. A calculator with a result ═════════════════════════════════════════
-
     @Test
     fun aRecomputedCalculatorResultSurvivesRotationAndProcessDeath() {
         QaHarness.seedLog(
@@ -569,7 +554,6 @@ class RestoreRoundtripTest {
         rule.waitForNode(hasTestTag("calc-result"))
         val first = model.protein_figures.single()
 
-        // A new bodyweight, typed on the keypad, then Compute.
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.log_field_bodyweight), substring = true))
             .performScrollTo().performClick()
         for (k in "95") {
@@ -594,13 +578,10 @@ class RestoreRoundtripTest {
         assertEquals(95.0, model.protein_input?.bodyweight_kg)
     }
 
-    /** The calculator's answer (tagged text, read in the unmerged tree). */
     private fun assertHeadline(text: String) {
         val m = hasTestTag("calc-headline") and hasText(text)
         rule.waitUntil(10_000) { rule.onAllNodes(m, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
     }
-
-    // ═══ 8. Theme and unit switches ═══════════════════════════════════════════
 
     private fun segment(label: String) = hasText(label) and isSelectable()
 
@@ -685,14 +666,12 @@ class RestoreRoundtripTest {
         assertEquals(before.runs.map { it.distance_km to it.duration_min }, model.runs.map { it.distance_km to it.duration_min })
     }
 
-    // ═══ 9. The persisted run session (crash sidecar → RunSession.restore) ══════
-
     private val metresPerDegLat = 111_195.0
 
     /**
      * A seeded wandering run of [n] fixes every [dtSec] s at about [mps] (±15 %),
-     * with standing-still stretches (a traffic light: 8 fixes within a metre) every
-     * 150 fixes, so the moving-time gate is exercised.
+     * with periodic standing-still stretches (a traffic light, within a metre), so
+     * the moving-time gate is exercised.
      */
     private fun synthRun(seed: Long, startSec: Long, n: Int, dtSec: Long = 3, mps: Double = 3.0): List<GpsPoint> {
         val rnd = Random(seed)
@@ -773,7 +752,7 @@ class RestoreRoundtripTest {
         val atCrash = liveSnapshot()
         dieAndRecover()
 
-        // Two minutes later and 80 m away the GPS is back; the next 400 fixes run on.
+        // Later and a short way off, the GPS is back and the run goes on.
         val resumeAt = before.last().observedAt + 120
         val after = synthRun(seed = 33, startSec = resumeAt, n = 400).map {
             it.copy(lat = it.lat - 52.52 + before.last().lat + 80.0 / metresPerDegLat, lon = it.lon - 13.40 + before.last().lon)
@@ -828,7 +807,7 @@ class RestoreRoundtripTest {
 
     @Test
     fun aVeryLongRecoveredRunIsThinnedWithoutLosingItsShape() {
-        // 2 h 30 at 1 Hz: 9000 fixes, past the recovery cap.
+        // Enough 1 Hz fixes to pass the recovery cap.
         val t0 = AppClock.nowSec() - 10_000
         val pts = synthRun(seed = 35, startSec = t0, n = 9000, dtSec = 1)
         ActiveRunStore.begin()
@@ -857,8 +836,6 @@ class RestoreRoundtripTest {
         assertEquals(pts, recovered)
         assertTrue(RunSession.tracking.value)
     }
-
-    // ── The resume prompt, end to end ──────────────────────────────────────────
 
     @Test
     fun aRunInterruptedByProcessDeathIsOfferedResumedWithEveryFixAndSavedOnce() {
@@ -929,7 +906,7 @@ class RestoreRoundtripTest {
         TestClock.offsetMillis = 0
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         val now = System.currentTimeMillis() / 1000
-        // Four hours old: past the 3 h resume window.
+        // Older than the resume window.
         val stale = synthRun(seed = 39, startSec = now - 4 * 3600 - 900, n = 200)
         ActiveRunStore.begin()
         stale.forEach { ActiveRunStore.append(it, segmentStart = false) }

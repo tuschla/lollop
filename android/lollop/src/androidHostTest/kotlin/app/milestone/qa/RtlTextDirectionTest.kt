@@ -83,7 +83,6 @@ class RtlTextDirectionTest {
     private val note = "Back Squat: today's top set beat your recent best. You can add about 4% next time."
     private val delta = "\u22122.5"
 
-    /** Base direction LTR, every character in an LTR bidi run. */
     private fun assertLtr(what: String, layout: TextLayoutResult) {
         val text = layout.layoutInput.text.text
         assertEquals("$what '$text': paragraph direction", ResolvedTextDirection.Ltr, layout.getParagraphDirection(0))
@@ -134,10 +133,8 @@ class RtlTextDirectionTest {
         layouts.getValue("delta").let { assertLeftOf(it, 0, 1) }
         layouts.getValue("note").let { l ->
             val last = note.lastIndex
-            // The sentence's final '.' follows "time", on the same line.
             assertEquals(l.getLineForOffset(last - 1), l.getLineForOffset(last))
             assertLeftOf(l, last - 1, last)
-            // The mid-sentence '.' follows "best".
             val stop = note.indexOf(". You")
             assertEquals(l.getLineForOffset(stop - 1), l.getLineForOffset(stop))
             assertLeftOf(l, stop - 1, stop)
@@ -285,7 +282,6 @@ class RtlTextDirectionTest {
             }
             val thumbs = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
             val span = thumbs[0].fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].range.endInclusive
-            // Keep the second half: the start thumb moves to the middle.
             thumbs[0].performSemanticsAction(SemanticsActions.SetProgress) { it(span * 0.5f) }
             rule.waitForIdle()
             fun midwayIsAccent(): Boolean {

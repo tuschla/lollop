@@ -27,7 +27,6 @@ internal interface RunTracker {
      *  location services are off, so the tracker surfaces this state. */
     fun isLocationEnabled(ctx: PlatformContext): Boolean
 
-    /** Open the system's location settings (the location toggle). */
     fun openLocationSettings(ctx: PlatformContext)
 
     /** Call [onChange] whenever the location toggle or grant may have changed, until
@@ -90,10 +89,8 @@ internal interface RunTracker {
  *  its ongoing notification, and the battery-optimisation exemption that keeps a long
  *  background run's location stream alive. */
 internal interface RunServiceGrants {
-    /** The app may post notifications (the run's ongoing notification). */
     fun canPostNotifications(ctx: PlatformContext): Boolean
 
-    /** Open the app's notification settings. */
     fun openNotificationSettings(ctx: PlatformContext)
 
     /** The notification prompt, bound to the composition and launched from a click;
@@ -105,7 +102,6 @@ internal interface RunServiceGrants {
      *  tracker nudges. */
     fun isBatteryUnrestricted(ctx: PlatformContext): Boolean
 
-    /** Ask the system to exempt the app from battery optimisation. */
     fun requestBatteryUnrestricted(ctx: PlatformContext)
 }
 

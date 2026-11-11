@@ -36,7 +36,7 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * Fault-injection / torture tests of the shell's persistence: the append-only event
- * log ([Core.apply]'s append, [EventLog.load]'s compaction rewrite), the data
+ * log (`DurableCore.apply`'s append, [EventLog.load]'s compaction rewrite), the data
  * backup swap ([swapLogFile] / [streamValidateImport]), the setup/theme prefs and the
  * run sidecar ([ActiveRunStore]).
  *
@@ -79,11 +79,8 @@ class PersistenceTortureTest {
         RunSession.reset()
     }
 
-    // ── Fixtures ────────────────────────────────────────────────────────────────
-
     private fun line(e: Event) = e.toJson().toString()
 
-    /** A small track (a 600 m loop, one fix / 5 s). */
     private fun track(startSec: Long, entryId: Long): Event.LogRunTrack {
         val pts = (0 until 40).map { i ->
             GpsPoint(52.52 + i * 0.00012, 13.405 + (i % 7) * 0.00003, startSec + i * 5L, 5.0)
@@ -91,9 +88,6 @@ class PersistenceTortureTest {
         return Event.LogRunTrack(pts, 0.0, observedAt = pts.last().observedAt, entryId = entryId)
     }
 
-    /** The committed history every crash test starts from: a profile, a plan, sets
-     *  (one deleted), a manual run, a track, a check-in and a pain report. Multibyte
-     *  exercise names make a torn line also a torn UTF-8 sequence. */
     private fun committed(): List<Event> = listOf(
         QaHarness.strengthProfile(),
         Event.GeneratePlan(todayEpochDay() - 7),
@@ -108,18 +102,15 @@ class PersistenceTortureTest {
     /** The event a crash tears: multibyte name, so the cut lands inside UTF-8 too. */
     private val torn = Event.LogSet("深蹲 🏋 Squat", 102.5, 3, 9.0, observedAt = at(0, -7200), entryId = at(0, -7200) * 1000)
 
-    /** The first event the next process appends after the crash. */
     private val next = Event.LogSet("Deadlift", 140.0, 3, 8.5, observedAt = at(0, -3600), entryId = at(0, -3600) * 1000)
 
     private fun writeLog(events: List<Event>) = QaHarness.seedLog(ctx, events)
 
-    /** The view a cold boot of exactly [events] produces (a clean, uncrashed log). */
     private fun viewOf(events: List<Event>): ViewModel {
         writeLog(events)
         return QaHarness.reboot(ctx).view
     }
 
-    /** Every non-blank line on disk parses as JSON (no torn line survived). */
     private fun assertAllLinesParse(f: File = logFile) {
         f.readLines().filter { it.isNotBlank() }.forEachIndexed { i, l ->
             assertNotNull("line $i must parse: ${l.take(80)}", runCatching { json.parseToJsonElement(l) }.getOrNull())
@@ -131,15 +122,12 @@ class PersistenceTortureTest {
 
     private fun entryIdCount(id: Long) = countLines { "\"entry_id\":$id" in it }
 
-    /** Set the engine's private [name] field (declared by [DurableCore], Core's superclass). */
     private fun setField(name: String, value: Any?) {
         DurableCore::class.java.getDeclaredField(name).apply { isAccessible = true }.set(Core, value)
     }
 
-    // ── 1. Crash at every byte of an append ─────────────────────────────────────
-
     /**
-     * A kill mid-`appendText` leaves the committed log plus a prefix of the new line.
+     * A kill mid-append leaves the committed log plus a prefix of the new line.
      * For EVERY prefix length: the next boot replays exactly the committed state (the
      * torn event counts only once its whole JSON is on disk), the tail is healed, and
      * the next process's first append lands as its own line: after another reboot the
@@ -193,8 +181,6 @@ class PersistenceTortureTest {
         }
     }
 
-    // ── 2. Crash at every byte of the compaction rewrite / import swap ──────────
-
     /** A log big enough in superseded lines that [EventLog.load] rewrites it. */
     private fun compactableLog(): List<String> {
         val base = committed().map(::line)
@@ -238,7 +224,6 @@ class PersistenceTortureTest {
             check("rewrite tmp torn at $k", compacted)
             assertTrue("rewrite tmp torn at $k: original replaced by its compaction", compactedBytes.contentEquals(logFile.readBytes()))
         }
-        // Renamed: the compacted log is in place; nothing more to drop.
         logFile.writeBytes(compactedBytes)
         check("rewrite renamed", compacted)
         assertTrue(compactedBytes.contentEquals(logFile.readBytes()))
@@ -281,8 +266,6 @@ class PersistenceTortureTest {
         assertEquals("next append replays after the reboot", baseNext, QaHarness.reboot(ctx).view)
         assertEquals(1, entryIdCount(next.entryId))
     }
-
-    // ── 3. Garbage, partial UTF-8 and lines from a newer app ────────────────────
 
     @Test
     fun garbageAndPartialUtf8LinesNeverCostAnIntactEvent() {
@@ -345,10 +328,8 @@ class PersistenceTortureTest {
         assertTrue(r.accepted && r.persisted)
     }
 
-    // ── 4. Disk full / read-only storage ────────────────────────────────────────
-
     /**
-     * Disk full mid-append ([Core.apply]'s `appendText` throws after writing part of
+     * Disk full mid-append (`DurableCore.apply`'s [AppFiles.append] throws after writing part of
      * the line): the event is reported not persisted, the following append must not
      * glue onto the partial bytes, and the next boot has every persisted event once
      * and the failed one not at all.
@@ -409,8 +390,6 @@ class PersistenceTortureTest {
         assertEquals(1, entryIdCount(next.entryId))
     }
 
-    // ── 5. Concurrency ──────────────────────────────────────────────────────────
-
     /** A reader ([EventLog.read]: export, panic-reset replay) racing a writer only
      *  ever sees whole committed events, in order, never fewer than before. */
     @Test
@@ -466,8 +445,6 @@ class PersistenceTortureTest {
         assertEquals(1, entryIdCount(next.entryId))
     }
 
-    // ── 6. Prefs vs log ─────────────────────────────────────────────────────────
-
     /** The setup prefs wiped (or corrupted to empty) while the log is intact: the app
      *  must boot to the main screen with the user's data, not re-run first-run setup. */
     @Test
@@ -515,8 +492,6 @@ class PersistenceTortureTest {
         assertFalse(ctx.setupPrefs().contains(KEY_PLAN_CLEARED))
     }
 
-    // ── 7. Backup import interrupted ────────────────────────────────────────────
-
     /** A backup cut at every byte (an interrupted copy/transfer): validation either
      *  refuses it or returns only whole, known events, never a partial line. */
     @Test
@@ -554,9 +529,9 @@ class PersistenceTortureTest {
 
     /**
      * The app's own export must be importable. Every GPS run is one LogRunTrack line
-     * of up to [TRACK_DECIMATION_CAP] fixes (~90 bytes each), so one year of a hybrid
-     * athlete's history recorded at the tracker's screen-OFF cadence (one fix / 4 s,
-     * RunTrackingService FUSED_BG_INTERVAL_MS; screen-on is 2 s) is ~11.7 MiB; the
+     * of up to [CoreConstants.TRACK_DECIMATION_CAP] fixes (~90 bytes each), so one year of a hybrid
+     * athlete's history recorded at the tracker's screen-off cadence
+     * (RunTrackingService FUSED_BG_INTERVAL_MS) is ~11.7 MiB; the
      * import cap ([MAX_IMPORT_BYTES]) once refused it at 8 MiB.
      */
     @Test
@@ -634,7 +609,6 @@ class PersistenceTortureTest {
         QaHarness.reboot(ctx)
         val before = logFile.readBytes()
         val profile = line(QaHarness.strengthProfile())
-        // The OOM strikes after two lines reached the temporary.
         val lines = object : AbstractList<String>() {
             override val size = 3
             override fun get(index: Int): String =
@@ -682,10 +656,6 @@ class PersistenceTortureTest {
         assertEquals(viewOf(committed()), QaHarness.reboot(ctx).view)
     }
 
-    // ── 8. Very large log (5 years) ─────────────────────────────────────────────
-
-    /** Five years of a hybrid athlete's history as the app writes it, one GPS fix
-     *  every [fixEverySec]. */
     private fun fiveYearLog(fixEverySec: Long = 10L): Pair<File, Int> {
         val history = LongHistorySeed.build(days = 5 * 365, fixEverySec = fixEverySec)
         val big = File(ctx.cacheDir, "five-year.ndjson")
@@ -693,7 +663,6 @@ class PersistenceTortureTest {
         return big to history.events.size
     }
 
-    /** Boot's [EventLog.load] of a 5-year log finishes in bounded time (host JVM). */
     @Test
     fun aFiveYearLogLoadsInBoundedTime() {
         val big = fiveYearLog().first
@@ -710,7 +679,7 @@ class PersistenceTortureTest {
      * 128 MB of application memory for the WHOLE app. The load runs in a child JVM
      * capped at that; an OOM there is a boot crash loop on such a device, and the log
      * only grows, so the user cannot even reach Export. Always at the tracker's
-     * screen-off cadence (one fix / 4 s, ~49 MiB of log).
+     * screen-off cadence (~49 MiB of log).
      */
     @Test
     fun aFiveYearLogLoadsInTheMinimumPhoneHeap() {
@@ -760,8 +729,7 @@ class PersistenceTortureTest {
         }
     }
 
-    /** Runs [main]'s `main` in a child JVM with an `-Xmx[heapMb]m` cap and this JVM's
-     *  library path, so the child loads the same host core. */
+    /** The child gets this JVM's library path so it loads the same host core. */
     private fun runProbe(main: Class<*>, heapMb: Int, vararg args: String): Pair<Int, String> {
         val java = File(System.getProperty("java.home"), "bin/java").path
         val cp = System.getProperty("java.class.path")
@@ -772,8 +740,6 @@ class PersistenceTortureTest {
         assertTrue("probe finished", p.waitFor(120, TimeUnit.SECONDS))
         return p.exitValue() to out.takeLast(2000)
     }
-
-    // ── 9. Run sidecar torn writes ──────────────────────────────────────────────
 
     private fun fix(i: Int) = GpsPoint(52.52 + i * 0.0001, 13.405 + i * 0.00005, at(0, -1800L + i * 2), 4.5)
 
@@ -827,7 +793,6 @@ class PersistenceTortureTest {
         assertEquals("…and still opens a segment", listOf(5), again.segmentStarts)
     }
 
-    /** Garbage and invalid UTF-8 lines inside the sidecar cost only themselves. */
     @Test
     fun sidecarGarbageLinesCostOnlyThemselves() {
         ActiveRunStore.start(ctx)

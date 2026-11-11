@@ -49,7 +49,7 @@ internal class CoachSession(
     val markOnboardingDone: () -> Unit,
     /** A pending [OpenDest] from an open intent or URL; [CoachScaffold] applies and clears it. */
     val openRequest: OpenRequests,
-    /** The platform's run recorder, or null where the app has none (iOS for now):
+    /** The platform's run recorder, or null where the app has none:
      *  then every tracker entry is hidden and runs are logged by hand. */
     val tracker: RunTracker?,
 ) {
@@ -170,21 +170,17 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             if (!RunSession.runActive && !RunSession.locating.value) {
                 session.showTracker = false
             }
-            // The guided setup only on a first run not yet completed or skipped.
             session.showSetup = showSetupOnBoot(fresh, vm, setupStore)
             // A data import just restarted the process: confirm what it restored.
             takeRestoredEntries(setupStore)?.let { restored ->
                 UiMessages.post(UiMessage(res.getQuantityString(Res.plurals.main_restored_entries, restored, restored)))
             }
-            // An interrupted run's sidecar is offered, never auto-resumed; skipped when
-            // a run is live in memory.
             val tracker = session.tracker
             if (tracker != null && !RunSession.tracking.value && RunSession.points.value.isEmpty() &&
                 tracker.hasInterruptedRun(ctx)
             ) {
                 val recovered = withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
                 if (resumable(recovered, wallClockMillis() / 1000)) {
-                    // Ask; Resume reuses these fixes instead of re-reading the file.
                     session.recoveredRun = recovered
                     session.showResumePrompt = true
                 } else {

@@ -75,11 +75,9 @@ fn legacy_labels_name_their_rung_and_display_as_it() {
 #[test]
 fn tier_by_name_matches_names_and_aliases() {
     for (name, want) in [
-        // Case, spacing and punctuation are normalized.
         ("full push-up", Some((HorizontalPush, 4))),
         ("  Full pull-up ", Some((VerticalPull, 4))),
         ("Negative muscle-up", Some((MuscleUp, 2))),
-        // Common aliases.
         ("Pull ups", Some((VerticalPull, 4))),
         ("Pull-up", Some((VerticalPull, 4))),
         ("pullups", Some((VerticalPull, 4))),
@@ -89,10 +87,8 @@ fn tier_by_name_matches_names_and_aliases() {
         ("Dips", Some((Dip, 3))),
         ("Pistol", Some((Squat, 5))),
         ("Front lever tuck", Some((FrontLever, 0))),
-        // Plurals of canonical names.
         ("Archer push-ups", Some((HorizontalPush, 7))),
         ("scapular pull", Some((VerticalPull, 1))),
-        // A barbell lift or an unknown name is not a rung.
         ("Bench press", None),
         ("Back squat", None),
         ("nope", None),

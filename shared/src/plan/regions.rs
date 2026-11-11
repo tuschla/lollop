@@ -14,17 +14,14 @@ pub(crate) enum DayRegion {
 }
 
 impl DayRegion {
-    /// The day loads the legs (squat / hinge work).
     pub(crate) fn has_lower(self) -> bool {
         !matches!(self, DayRegion::Upper)
     }
 
-    /// The day loads the upper body (push / pull work).
     pub(crate) fn has_upper(self) -> bool {
         !matches!(self, DayRegion::Lower)
     }
 
-    /// Two days train at least one muscle group in common.
     pub(crate) fn overlaps(self, other: DayRegion) -> bool {
         (self.has_lower() && other.has_lower()) || (self.has_upper() && other.has_upper())
     }
@@ -41,7 +38,7 @@ impl DayRegion {
 }
 
 /// The region of every lift day of one week, in weekday order (index = the
-/// day's `LiftDay::slot`). `Copy`, so it rides along in `LiftDay`.
+/// day's `LiftDay::slot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WeekRegions {
     regions: [DayRegion; 7],
@@ -56,7 +53,6 @@ impl WeekRegions {
         Self { regions: r, len }
     }
 
-    /// `n` full-body days.
     pub(crate) fn full(n: usize) -> Self {
         Self {
             regions: [DayRegion::Full; 7],

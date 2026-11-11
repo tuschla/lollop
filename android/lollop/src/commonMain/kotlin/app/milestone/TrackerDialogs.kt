@@ -45,8 +45,7 @@ import app.milestone.resources.track_stat_elapsed
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Confirm before deleting a recorded run (no undo, nothing logged). Each button maps
- * to exactly one action: [onCancel] keeps the run, [onConfirm] deletes it. [enabled]
+ * Confirm before deleting a recorded run (no undo, nothing logged). [enabled]
  * is false while a save is in flight.
  */
 @Composable
@@ -113,9 +112,6 @@ internal fun RunFinishPanel(
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Distance and moving time are the core's figures for the very event Save sends
-    // ([RunSession.trackEventForCore]): the same QC and derivation as the saved run,
-    // so the review shows exactly what History then lists.
     val points by RunSession.points.collectAsStateWithLifecycle()
     val figures = remember(points) {
         AppCore.engine.savedFigures(RunSession.trackEventForCore(entryId = 0L, workoutType = null, sessionRpe = null))
@@ -191,7 +187,7 @@ internal fun RunFinishPanel(
                     }
                     // A run under the keep threshold says so here, inline: Save keeps
                     // it, Discard drops it, and the effort/type picks are never lost to
-                    // a dialog. The threshold reads as a round figure ("0.3 mi").
+                    // a dialog.
                     if (isShortRun(km, elapsedSec)) {
                         InlineNotice(
                             stringResource(
@@ -274,7 +270,6 @@ private fun finishColumnFits(
  *  the pair centres beyond it, like [TwoPaneRow]. */
 internal val FinishPairMaxWidth = PaneMaxWidth * 2 + Space.Lg.dp
 
-/** Height of the Finish review's route thumbnail. */
 private val FinishRouteHeight = 160.dp
 
 /** The Finish review's figures read aloud with units spelled out, e.g. "0.60

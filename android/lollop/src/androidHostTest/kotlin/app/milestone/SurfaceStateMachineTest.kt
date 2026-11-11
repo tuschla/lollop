@@ -46,8 +46,8 @@ import org.robolectric.Shadows.shadowOf
 /**
  * Seeded walks over the surfaces that read the widget snapshot (session reminder,
  * home screen widget, Quick Settings tile): clock, zone, plan, run and process
- * steps in [Walk.step], invariants in [Walk.check]. `SURFACE_SM_SEEDS` (12) ×
- * `SURFACE_SM_STEPS` (150) from `SURFACE_SM_SEED`; a failure prints its replay line.
+ * steps in [Walk.step], invariants in [Walk.check]. `SURFACE_SM_SEEDS` ×
+ * `SURFACE_SM_STEPS` from `SURFACE_SM_SEED`; a failure prints its replay line.
  */
 @RunWith(RobolectricTestRunner::class)
 class SurfaceStateMachineTest {
@@ -80,8 +80,6 @@ class SurfaceStateMachineTest {
         shadowOf(am).scheduledAlarms.toList().forEach { it.operation?.let(am::cancel) }
     }
 
-    // ── Pure: the next alarm times against an independent oracle ─────────────
-
     /** Every tz rule set, instants around each 2025–2028 transition: the reminder's next
      *  fire is the first valid local reminder time strictly after now (a skipped
      *  time moves forward by the gap, a repeated one fires at its first pass) and
@@ -113,13 +111,11 @@ class SurfaceStateMachineTest {
         }
     }
 
-    // ── The real core ────────────────────────────────────────────────────────
-
     /**
      * Day by day through the real core's plans (lifter, hybrid 10K, under 18,
      * calisthenics), training, moving or skipping each day: every model's surfaces
      * agree with it, and each morning the reminder an older snapshot would post from
-     * its days ahead is today's own. `SURFACE_CORE_SEEDS` (4) × `SURFACE_CORE_DAYS` (28).
+     * its days ahead is today's own. `SURFACE_CORE_SEEDS` × `SURFACE_CORE_DAYS`.
      */
     @Test
     fun realCoreDaysKeepTheSurfacesInStep() {
@@ -182,7 +178,6 @@ class SurfaceStateMachineTest {
             when {
                 ns == null -> {}
                 r < 55 -> {
-                    // Train today: every item, or the first few.
                     val items = if (rng.nextInt(3) == 0) ns.items.take(rng.nextInt(1, ns.items.size + 1)) else ns.items
                     v = QaHarness.logPlanItems(d, ns.session_type, items, firstId = d * 1_000) { m, item ->
                         checkCoreModel(m, d, "after logging ${item.exercise}")
@@ -207,7 +202,6 @@ class SurfaceStateMachineTest {
         }
     }
 
-    /** The surfaces' reading of one real model on day [d]. */
     private fun checkCoreModel(v: ViewModel, d: Long, at: String) {
         val s = widgetSnapshotOf(v, DistanceUnit.Km, "UTC")
         assertEquals("$at: snapshot day", d, s.epochDay)
@@ -236,8 +230,6 @@ class SurfaceStateMachineTest {
             assertTrue("$at: Start run with no open run", today.items.any { isRunItem(it, today.session_type) && !it.done })
         }
     }
-
-    // ── The state machine ────────────────────────────────────────────────────
 
     @Test
     fun randomWalksKeepTheSurfacesConsistent() {
@@ -288,7 +280,6 @@ class SurfaceStateMachineTest {
             return monday..monday + 6
         }
 
-        /** Move [day]'s untouched session to a later rest day of its week. */
         fun move(day: Long, rng: Random): Boolean {
             val s = session(day)
             if (s.kind == K.Rest || doneCount(day) > 0) return false
@@ -435,8 +426,6 @@ class SurfaceStateMachineTest {
             else -> rng.nextInt(MINUTES_PER_DAY)
         }
 
-        // ── Steps ────────────────────────────────────────────────────────────
-
         private fun step(): String {
             val w = rng.nextInt(100)
             return when {
@@ -530,10 +519,8 @@ class SurfaceStateMachineTest {
             return open.takeIf { !(it.kind == K.Run && RunSession.tracking.value) }
         }
 
-        /** [TodayWidgetReceiver] gets the midnight tick. */
         private fun dayChanged(intent: Intent) = rederiving { TodayWidgetReceiver().onReceive(app, intent) }
 
-        /** The system's clock or time zone change ([changed]) reaches every feature. */
         private fun timeChanged(changed: Intent) = rederiving { SystemChangeReceiver().onReceive(app, changed) }
 
         /** Run [mark]; a stale mark that ticks [WidgetSnapshotStore.staleMarks] makes
@@ -682,15 +669,12 @@ class SurfaceStateMachineTest {
             shown = n
         }
 
-        // ── Invariants ───────────────────────────────────────────────────────
-
         private fun check(op: String) {
             observe(op)
             val setting = SessionReminder.setting(app)
             val alarms = shadowOf(am).scheduledAlarms
             fun withAction(a: String) = alarms.filter { it.operation?.let { pi -> shadowOf(pi).savedIntent.action } == a }
 
-            // The reminder alarm: only while on, at the next valid local time.
             val reminderAlarms = withAction(AndroidReminder.ACTION_FIRE)
             if (setting.enabled) {
                 val a = reminderAlarms.singleOrNull() ?: throw AssertionError("reminder on, alarms: ${reminderAlarms.size}")
@@ -704,12 +688,9 @@ class SurfaceStateMachineTest {
                 assertNull("reminder off but shown", shown)
             }
 
-            // The midnight tick: the start of the next local day.
             val tick = withAction(TodayWidgetReceiver.ACTION_MIDNIGHT).singleOrNull() ?: throw AssertionError("no single midnight tick")
             assertEquals("midnight tick in ${zone.id}", oracleNextMidnight(now, zone), tick.triggerAtTime)
 
-            // The snapshot describes today and is not marked stale. While the app
-            // process holds today's model, the snapshot it wrote must be that one.
             val stored = WidgetSnapshotStore.read(app)
             val fresh = stored != null && !stored.stale && stored.epochDay == today
             if (held?.today_epoch_day == today) {

@@ -301,7 +301,6 @@ fn reds_profile_reference_carries_no_deficit_framing() {
     }
 }
 
-// ── Youth derived from age alone gates the view + blocks the plan ──
 #[test]
 fn age_15_gates_even_with_empty_health_screen() {
     let app = Engine;
@@ -337,7 +336,6 @@ fn age_15_gates_even_with_empty_health_screen() {
         "no plan may render through a gate"
     );
     assert!(vm.program.is_none());
-    // And the model's derived flag is set.
     assert!(model.profile().unwrap().health.youth);
     // A gates-only hold produces NO adjustment rows: the headline's
     // safety_hold rung is therefore the ONLY cited surface for this state,
@@ -364,7 +362,6 @@ fn age_15_gates_even_with_empty_health_screen() {
     assert!(!m2.profile().unwrap().health.youth, "18 is not youth");
 }
 
-// ── Birthday: age derived from the model's today, never stale ──
 const BORN_1991_03_12: i64 = 7740;
 const D_2026_03_11: i64 = 20523;
 const D_2026_03_12: i64 = 20524;

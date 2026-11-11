@@ -29,7 +29,7 @@ internal fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double):
 internal fun segmentKm(a: GpsPoint, b: GpsPoint): Double = haversineM(a.lat, a.lon, b.lat, b.lon) / 1000.0
 
 /** The "Precise start" gate's accuracy bound (m): recording only begins on a fix at
- *  or under this. Typical post-lock consumer GPS is 5–15 m open sky, so 20 m is a
+ *  or under this. Typical post-lock consumer GPS is 5–15 m open sky, so this is a
  *  trustworthy start anchor without being unachievable under light tree/building
  *  cover. Consumed by [ArmTrigger]'s precise gate (RunSession.kt). */
 internal const val GPS_PRECISE_ACCURACY_M = 20.0
@@ -47,7 +47,7 @@ internal fun movingLegKm(km: Double, dtSec: Double): Double? {
 }
 
 /**
- * One parsed GPX fix reduced to what the trim preview needs: its absolute
+ * One route fix reduced to what the trim preview needs: its absolute
  * epoch-second timestamp, the cumulative haversine distance (km) and the cumulative
  * MOVING seconds from the track start up to this point. PREVIEW figures ONLY — the
  * of-record distance/duration are always re-derived in the core after a trim event.

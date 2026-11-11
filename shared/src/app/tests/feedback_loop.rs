@@ -34,8 +34,6 @@ fn hero_squat_load(app: &Engine, model: &Model) -> f64 {
         .expect("anchored squat load")
 }
 
-// ── A session review never wipes the weekly check-in ──
-
 #[test]
 fn weekly_bone_pain_referral_survives_a_later_session_review() {
     let app = Engine;
@@ -167,8 +165,6 @@ fn compulsive_flag_cleared_only_by_a_later_weekly_no() {
     );
 }
 
-// ── Concern copy routes to a professional, never labels ──
-
 fn msg(cat: FeedbackCategory, recovery_week_active: bool) -> String {
     feedback_message(&MessageCtx {
         cat,
@@ -246,8 +242,6 @@ fn feedback_copy_carries_no_label_guilt_or_jargon() {
         }
     }
 }
-
-// ── Overtraining → one card + a lighter plan ──
 
 #[test]
 fn overtraining_concern_folds_a_deload_into_the_next_session() {
@@ -393,8 +387,6 @@ fn running_down_week_row_absent_for_a_pure_lifter() {
         vm.review_adjustments
     );
 }
-
-// ── Feedback derived from the logs, no form ──
 
 #[test]
 fn completed_lift_day_emits_feedback_without_a_review() {
@@ -555,8 +547,6 @@ fn run_spike_feedback_fires_without_a_review() {
     assert!(fb.message.contains("11.0 km"), "{}", fb.message);
 }
 
-// ── Personal bests with their numbers ──
-
 #[test]
 fn e1rm_pr_beyond_5pct_emits_anchored_mastery() {
     let app = Engine;
@@ -662,8 +652,6 @@ fn beginner_mastery_copy_has_no_rir_or_e1rm_terms() {
         fb.message
     );
 }
-
-// ── Copy with its numbers, the right branch ──
 
 #[test]
 fn split_fade_copy_mentions_split_not_easy_days() {
@@ -777,8 +765,6 @@ fn harder_than_planned_lift_gets_its_own_copy() {
     assert!(!fb.message.contains("in the tank"), "{}", fb.message);
 }
 
-// ── Trend from logged data, actionable ──
-
 #[test]
 fn four_flat_weeks_of_e1rm_emit_plateau_with_named_lever() {
     // feedback-028: one lever, from the KB rule for the goal. No hypertrophy
@@ -872,8 +858,6 @@ fn decline_with_low_wellness_emits_recovery_first() {
     );
 }
 
-// ── What changed since last time ──
-
 #[test]
 fn anchored_lift_basis_names_last_set_and_delta() {
     let (app, model) = planned_strength_model_on(POS_MON, true);
@@ -898,8 +882,6 @@ fn anchored_lift_basis_names_last_set_and_delta() {
     }
 }
 
-// ── Compaction: weekly events replay identically ──
-
 #[test]
 fn weekly_events_round_trip_the_wire() {
     let ev: Event = serde_json::from_str(
@@ -919,8 +901,6 @@ fn weekly_events_round_trip_the_wire() {
     app.update(clear, &mut model).expect_only_render();
     assert!(!app.view(&model).weekly_checkin_present);
 }
-
-// ── Protective adjustments silence praise and load-increase cues ──
 
 #[test]
 fn protective_adjustment_turns_a_progression_nudge_into_hold_the_plan() {

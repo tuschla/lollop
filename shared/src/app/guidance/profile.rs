@@ -36,21 +36,10 @@ pub(in crate::app) fn stated_or_measured_weekly_km(
     }
 }
 
-/// Run the programming engine over the profile, producing evidence-cited rows.
-/// Uses the STATED weekly volume (no logged-run history in scope) and no
-/// training hold; `view()` calls [`build_guidance_measured`] with the measured
-/// volume and today's [`calculator_hold`].
-#[cfg(test)]
-pub(in crate::app) fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
-    let (weekly_km, basis) = stated_or_measured_weekly_km(p, None);
-    build_guidance_measured(p, weekly_km, basis, None)
-}
-
-/// [`build_guidance_measured_uncached`], memoized ([`MemoId::Guidance`]) on
-/// the profile, weekly volume, basis and hold: rebuilding the whole
-/// evidence-cited guidance list (every strength/running/hybrid rule) on every
-/// event is wasted work, and the inputs change only when the profile, measured
-/// mileage or today's hold changes.
+/// `weekly_km` and `weekly_basis` come from [`stated_or_measured_weekly_km`],
+/// so the km-gated safety/hybrid guards read the athlete's real recent
+/// mileage rather than a stale stated figure; `hold` is today's
+/// [`calculator_hold`].
 pub(in crate::app) fn build_guidance_measured(
     p: &Profile,
     weekly_km: f64,
@@ -67,10 +56,6 @@ pub(in crate::app) fn build_guidance_measured(
     })
 }
 
-/// The uncached guidance builder behind [`build_guidance_measured`]. As
-/// [`build_guidance`] but with the caller's effective weekly volume + its
-/// source, so the km-gated safety/hybrid guards read the athlete's real recent
-/// mileage rather than a stale stated figure, and today's [`calculator_hold`].
 fn build_guidance_measured_uncached(
     p: &Profile,
     weekly_km: f64,
@@ -151,8 +136,6 @@ fn build_guidance_measured_uncached(
     rows
 }
 
-/// Leading Safety block: onboarding gates, pregnancy avoid-list, and the
-/// high-mileage bone-stress / energy-availability guards (all `p`-gated).
 fn build_safety_guidance(
     p: &Profile,
     weekly_km: f64,
@@ -232,7 +215,6 @@ fn build_safety_guidance(
     }
 }
 
-/// Environment modifier row, when the profile declares one.
 fn build_environment_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // File 08 indiv-025 / safety-024 environment modifiers, when declared.
     if let Some(env) = p.environment {
@@ -260,7 +242,6 @@ fn build_environment_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     }
 }
 
-/// Layoff re-entry ramp + post-layoff MEV reduction, when a layoff is declared.
 fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // REENTRY-001 layoff re-entry ramp + the post-layoff MEV reduction.
     if let Some(weeks_off) = p.weeks_off

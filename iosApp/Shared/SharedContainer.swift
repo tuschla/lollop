@@ -27,7 +27,6 @@ enum SharedContainer {
 
     private final class BundleMarker {}
 
-    /// The widget payload's file name in the container.
     static let payloadFile = "widget-today.json"
 
     /// The container, or nil when the bundle is entitled to no matching group (an
@@ -43,12 +42,12 @@ enum SharedContainer {
 
     static var payloadURL: URL? { url?.appendingPathComponent(payloadFile) }
 
-    static func candidateGroups(bundle: Bundle = .main) -> [String] {
+    static func candidateGroups() -> [String] {
         var groups: [String] = []
-        if let alt = bundle.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] {
+        if let alt = Bundle.main.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] {
             groups += alt.filter { $0.hasPrefix(declaredGroup) }
         }
-        groups += provisionedGroups(bundle: bundle).filter { $0.hasPrefix(declaredGroup) }
+        groups += provisionedGroups().filter { $0.hasPrefix(declaredGroup) }
         groups.append(declaredGroup)
         var seen = Set<String>()
         return groups.filter { seen.insert($0).inserted }
@@ -56,8 +55,8 @@ enum SharedContainer {
 
     /// The application groups in the bundle's provisioning profile (a CMS envelope
     /// around a plist), or none.
-    static func provisionedGroups(bundle: Bundle = .main) -> [String] {
-        let profile = bundle.bundleURL.appendingPathComponent("embedded.mobileprovision")
+    static func provisionedGroups() -> [String] {
+        let profile = Bundle.main.bundleURL.appendingPathComponent("embedded.mobileprovision")
         guard let data = try? Data(contentsOf: profile) else { return [] }
         return applicationGroups(inProfile: data)
     }

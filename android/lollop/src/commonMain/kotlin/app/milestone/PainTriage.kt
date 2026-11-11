@@ -71,7 +71,7 @@ private val PainArea.labelRes: StringResource
 @Composable
 internal fun painAreaLabel(area: PainArea?): String? = area?.let { stringResource(it.labelRes) }
 
-/** Pain severity, 0 (none) to 10 (worst), left to right. */
+/** Pain severity from none to worst, left to right. */
 private val PainSeverityValues = (0..10).toList()
 
 /**
@@ -93,12 +93,8 @@ fun PainTriageSheet(
     // A delayed-worsening report (tendon reactive: worse the morning AFTER load) is
     // a distinct signal from immediate rising pain; the core reads it as Rising.
     var worseningAfter24h by rememberSaveable { mutableStateOf(false) }
-    // Backdatable stamp (every editor supports it): defaults to now; the picked
-    // value is what the emitted report carries.
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
-    // The now captured at open, so a real backdate is told apart from the default.
     val initialObservedAt = rememberSaveable { observedAt }
-    // Any filled-in triage marks the sheet dirty, so a close or swipe-down asks first.
     val dirty = location != null ||
         character != PainCharacter.NotSure ||
         severity != null ||

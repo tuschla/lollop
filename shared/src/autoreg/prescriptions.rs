@@ -1,8 +1,8 @@
 //! Set-level and next-load prescriptions from scalar inputs (File 06): a single
 //! lift's within-session observations (AMRAP reps, first-set RPE,
 //! reference-load velocity) rather than the daily readiness vector, plus the
-//! overtraining-continuum deferrals (File 08 safety-041/042; autoreg-042). All
-//! pure and deterministic; thresholds verbatim from File 06.
+//! overtraining-continuum deferrals (File 08 safety-041/042; autoreg-042).
+//! Thresholds verbatim from File 06.
 
 use super::rules::HRV_ESCALATE_STREAK;
 use crate::evidence::claims;
@@ -87,12 +87,6 @@ pub fn set_volume_action(
         SetVolumeAction::HoldPlanned
     };
     Recommended::new(a, claims::AUTOREG_SETVOL_001)
-}
-
-/// RPE-stop: cut remaining sets once the target RPE is reached before the
-/// planned set count (File 06 autoreg-013). `true` = stop now.
-pub fn rpe_stop_reached(rpe_actual: f64, rpe_target: f64) -> bool {
-    rpe_actual >= rpe_target
 }
 
 /// The standard RP-framework 1-week deload used by the multi-session triggers
@@ -273,7 +267,6 @@ pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<AdjustmentCall> {
     sign_cluster_present.then(|| weekly_deload(DeloadTrigger::MrvSigns, claims::AUTOREG_MRV_001))
 }
 
-/// The standard deload fired by a weekly `trigger`.
 fn weekly_deload(trigger: DeloadTrigger, claim: crate::evidence::ClaimId) -> AdjustmentCall {
     AdjustmentKind::WeeklyDeload(trigger).call(standard_deload(), claim)
 }
@@ -285,18 +278,15 @@ pub(crate) const PACE_RETEST_WEEKS: u8 = 2;
 /// autoreg-032: pace at target HR improved by at least a smallest-worthwhile
 /// amount, sustained over 2–3 weeks → re-test / raise threshold pace. `true` =
 /// schedule the re-test. The SWC magnitude itself is unstated in the KB, so
-/// the caller judges "improved ≥ SWC"; the ≥2-week duration bound is the
-/// stated number. AUTOREG-PACE-RETEST-001 (Moderate, File 06 §3B).
-pub fn threshold_retest_due(improved_ge_swc: bool, weeks_sustained: u8) -> Recommended<bool> {
+/// the caller judges "improved ≥ SWC" and passes the weeks it has held; the
+/// ≥2-week duration bound is the stated number. AUTOREG-PACE-RETEST-001
+/// (Moderate, File 06 §3B).
+pub fn threshold_retest_due(weeks_sustained: u8) -> Recommended<bool> {
     Recommended::new(
-        improved_ge_swc && weeks_sustained >= PACE_RETEST_WEEKS,
+        weeks_sustained >= PACE_RETEST_WEEKS,
         claims::AUTOREG_PACE_RETEST_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Overtraining continuum (File 08 safety-041/042 Table 4.4; File 06 autoreg-042)
-// ---------------------------------------------------------------------------
 
 /// Weeks of unexplained performance decline at which the overtraining
 /// referrals fire (File 08 safety-042, SAFE-OTS-001; File 06 autoreg-042,

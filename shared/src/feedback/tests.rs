@@ -35,7 +35,6 @@ fn trend_summary_precedence_and_bands() {
         trend_summary(TrendDirection::Down, 0, true, false, true).value,
         TrendSummary::LoadExplainedDecline
     );
-    // Improving.
     assert_eq!(
         trend_summary(TrendDirection::Up, 0, false, false, false).value,
         TrendSummary::Improving
@@ -101,7 +100,6 @@ fn safety_gate_priority_order() {
         FeedbackCategory::ConcernRecovery
     );
 
-    // Spike alone.
     let spike = SafetySignals {
         single_session_spike_frac: Some(0.11),
         ..Default::default()
@@ -111,7 +109,6 @@ fn safety_gate_priority_order() {
         FeedbackCategory::DangerousProgression
     );
 
-    // Clear session.
     assert!(safety_gate(SafetySignals::default()).is_none());
     // A single NFOR signal does not fire (needs >=2).
     assert!(
@@ -238,22 +235,18 @@ fn resolve_suppresses_praise_under_concern() {
 
 #[test]
 fn lifting_branches() {
-    // Missed reps.
     assert_eq!(
         lifting_feedback(false, 2, 2).0.value,
         FeedbackCategory::CorrectiveProcess
     );
-    // Reps met, RIR 0 vs 2-3 target, caution.
     assert_eq!(
         lifting_feedback(true, 0, 3).0.value,
         FeedbackCategory::CorrectiveProcess
     );
-    // Reps met, RIR 4 vs 1-2 target, nudge.
     assert_eq!(
         lifting_feedback(true, 4, 1).0.value,
         FeedbackCategory::ProgressionNudge
     );
-    // Reps met at target cost, mastery.
     assert_eq!(
         lifting_feedback(true, 2, 2).0.value,
         FeedbackCategory::PositiveMastery
@@ -327,8 +320,6 @@ fn decoupling_gated_and_banded() {
     ));
 }
 
-// --- feedback-036: the >=1-2 wk duration condition ---
-
 #[test]
 fn recovery_concern_respects_duration_condition() {
     // Two signals over half a week is a "single noisy night" territory -
@@ -367,8 +358,6 @@ fn recovery_concern_respects_duration_condition() {
     assert!(safety_gate(untracked).is_some());
 }
 
-// --- feedback-015: interval/threshold mastery ---
-
 #[test]
 fn interval_mastery_needs_paces_and_rpe() {
     let m = interval_mastery_feedback(true, true).expect("mastery fires");
@@ -378,8 +367,6 @@ fn interval_mastery_needs_paces_and_rpe() {
     assert!(interval_mastery_feedback(true, false).is_none());
     assert!(interval_mastery_feedback(false, true).is_none());
 }
-
-// --- feedback-035: female BSI clinician prompt ---
 
 #[test]
 fn female_bsi_prompt_gated_on_both_conditions() {
@@ -394,8 +381,6 @@ fn female_bsi_prompt_gated_on_both_conditions() {
     // The copy defers to the clinician and diagnoses nothing.
     assert!(BSI_FEMALE_PROMPT.contains("tell them about your periods"));
 }
-
-// --- feedback-023/024: verbosity personalization ---
 
 #[test]
 fn verbosity_defaults_by_experience() {

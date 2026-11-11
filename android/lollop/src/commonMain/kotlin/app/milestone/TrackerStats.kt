@@ -50,7 +50,6 @@ import app.milestone.resources.track_stat_to_go
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Opacity of the live figures while paused. */
 private const val PAUSED_FIGURE_ALPHA = 0.6f
 
 /** Starting size (sp) of a live figure beside the map. */
@@ -59,14 +58,12 @@ internal const val LIVE_FIGURE_MAX_SP = 36
 /** Starting size (sp) of the live figures when no map shares the screen. */
 private const val LIVE_FIGURE_LARGE_SP = 48
 
-/** Smallest size (sp) a live figure steps down to, and the step. */
 private const val LIVE_FIGURE_MIN_SP = 18
 private const val LIVE_FIGURE_STEP_SP = 2
 
 /** Line height of a live figure over its font size (sp). */
 private const val LIVE_FIGURE_LEADING_SP = 4
 
-/** Size (sp) of a live figure's unit suffix. */
 private const val LIVE_FIGURE_SUFFIX_SP = 13
 
 /**
@@ -133,7 +130,6 @@ internal fun TrackerStats(
     Column(
         modifier = Modifier
             .clearAndSetSemantics { contentDescription = spoken }
-            // Paused: the figures are frozen, so all of them step back together.
             .alpha(if (paused) PAUSED_FIGURE_ALPHA else 1f),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
@@ -159,7 +155,6 @@ internal fun TrackerStats(
                 note = toGoText,
                 modifier = Modifier.weight(1f),
             )
-            // The whole-run average sits with the pace it qualifies, under PACE NOW.
             LiveFigure(
                 label = stringResource(Res.string.track_stat_pace_now),
                 value = nowText,
@@ -238,7 +233,6 @@ internal fun LiveFigure(
     }
 }
 
-/** A [LiveFigure]'s value with its small faint unit. */
 private fun liveFigureText(value: String, suffix: String?, faint: Color): AnnotatedString = buildAnnotatedString {
     append(value)
     if (suffix != null) {
@@ -248,7 +242,6 @@ private fun liveFigureText(value: String, suffix: String?, faint: Color): Annota
     }
 }
 
-/** A [LiveFigure]'s value style at [sp]. */
 private fun liveFigureStyle(sp: Int): TextStyle =
     Type.Display.copy(fontWeight = FontWeight.ExtraBold, fontSize = sp.sp, lineHeight = (sp + LIVE_FIGURE_LEADING_SP).sp).merge(TabularFigures)
 

@@ -28,19 +28,18 @@ import org.jetbrains.compose.resources.stringResource
 /** Street-level zoom the live map opens at (256 px tiles, unscaled to density). */
 internal const val TRACK_ZOOM = 17.0
 
-// Route stroke (06 spec): `Accent` 10dp over an 18dp ground casing, so the route
+// Route stroke (06 spec): an `Accent` line over a ground casing, so the route
 // stays legible on any tile.
 internal const val CASING_WIDTH_DP = 18f
 internal const val TRACK_WIDTH_DP = 10f
 
-// Current-location blip (spec: `Accent` fill, 3dp `BgTop` casing, r9): outer disc,
+// Current-location blip (spec: `Accent` fill, `BgTop` casing): outer disc,
 // inner disc, and the inset between them. The start ring is the shared
 // [RouteMarker] start marker on its halo, so it matches every other route map.
 internal const val DOT_OUTER_DP = 24f
 internal const val DOT_INNER_DP = 18f
 internal const val MARKER_RING_DP = 3f
 
-/** Opacity of the tile attribution's ink over the map. */
 private const val ATTRIBUTION_ALPHA = 0.7f
 
 /** Test tag of the tracker's map frame (the area only the status pill and Recenter
@@ -80,7 +79,6 @@ internal interface LiveMapSurface {
     fun showLocation(lat: Double, lon: Double)
     fun showStart(lat: Double, lon: Double)
 
-    /** Empties the route stroke. */
     fun clearTrack()
 
     /** Extends the route stroke with `points[from until points.size]`. */
@@ -90,7 +88,6 @@ internal interface LiveMapSurface {
     fun invalidate()
 }
 
-/** The platform's live map, themed for [palette]. */
 internal expect fun newLiveMapSurface(ctx: PlatformContext, palette: Palette): LiveMapSurface
 
 /**
@@ -99,7 +96,6 @@ internal expect fun newLiveMapSurface(ctx: PlatformContext, palette: Palette): L
  * follows the locate preview. Retained across recompositions by [rememberTrackerMap].
  */
 internal class TrackerMap(private val surface: LiveMapSurface) {
-    /** Embeds the map. */
     @Composable
     fun View(modifier: Modifier) = surface.View(modifier)
 
@@ -118,7 +114,6 @@ internal class TrackerMap(private val surface: LiveMapSurface) {
 
     fun centerOn(lat: Double, lon: Double) = surface.setCenter(lat, lon)
 
-    /** Animate to the latest recorded fix, else the locate preview's. */
     fun recenter() {
         val last = RunSession.points.value.lastOrNull()
         if (last != null) {
@@ -173,7 +168,6 @@ internal class TrackerMap(private val surface: LiveMapSurface) {
     }
 }
 
-/** The tracker's [TrackerMap], built once and repainted whenever the palette changes. */
 @Composable
 internal fun rememberTrackerMap(): TrackerMap {
     val ctx = currentPlatformContext()
@@ -184,7 +178,7 @@ internal fun rememberTrackerMap(): TrackerMap {
 }
 
 /** Pitch of the placeholder grid, raw px: osmdroid's not-yet-loaded tile draws its
- *  grid lines every 16 px of a 256 px tile, unscaled (tiles aren't scaled to dpi). */
+ *  grid lines at this pitch on a 256 px tile, unscaled (tiles aren't scaled to dpi). */
 private const val MAP_GRID_PITCH_PX = 16f
 
 /**
@@ -258,8 +252,6 @@ internal fun TrackerMapFrame(
                     .align(Alignment.BottomStart)
                     .padding(overlayInset),
             )
-            // Recenter: separate from the sheet's control row, only once there is a
-            // position to centre on.
             if (canRecenter) {
                 MapOverlayButton(
                     Res.drawable.ic_track_recenter,

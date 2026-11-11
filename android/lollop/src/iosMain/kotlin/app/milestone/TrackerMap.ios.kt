@@ -62,7 +62,6 @@ private const val LEGAL_LINK_BOTTOM_PT = 28.0
 
 internal actual fun newLiveMapSurface(ctx: PlatformContext, palette: Palette): LiveMapSurface = MapKitLiveMap(palette)
 
-/** An opaque UIColor of [color]. */
 private fun uiColor(color: Color): UIColor =
     UIColor.colorWithRed(color.red.toDouble(), color.green.toDouble(), color.blue.toDouble(), color.alpha.toDouble())
 
@@ -134,7 +133,6 @@ private class MapKitLiveMap(private var palette: Palette) : LiveMapSurface {
 
     val view = LollopMapView().apply {
         delegate = this@MapKitLiveMap.delegate
-        // MapKit's legal link sits above the OSM attribution the frame draws.
         layoutMargins = UIEdgeInsetsMake(0.0, 0.0, LEGAL_LINK_BOTTOM_PT, 0.0)
         onLayout = { openAtTrackZoom() }
     }
@@ -249,7 +247,6 @@ private class MapKitLiveMap(private var palette: Palette) : LiveMapSurface {
         startAnnotation = place(startAnnotation, lat, lon)
     }
 
-    /** Moves [annotation] to a fix, or adds a new one there the first time. */
     private fun place(annotation: MKPointAnnotation?, lat: Double, lon: Double): MKPointAnnotation {
         val coordinate = CLLocationCoordinate2DMake(lat, lon)
         if (annotation != null) {

@@ -104,7 +104,6 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
     let weekly = profile.weekly_sets;
     let mut prescriptions: Vec<Rx> = Vec::new();
 
-    // 1. Power: ballistic items first.
     if goal == LiftGoal::Power {
         for (id, on) in [(LadderId::Jump, lower), (LadderId::PlyoPush, upper)] {
             if on && let Some(p) = ladder_prescription(&ctx, id, Dose::Ballistic) {
@@ -113,9 +112,6 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
         }
     }
 
-    // 2. Skill items, ≤2/day on upper-body days: round-robin over the ACTIVE
-    // skill-track anchors the equipment allows, in LadderId order, taking
-    // [2*upper_ordinal % n ..] wrapping (deterministic).
     if upper {
         let skill_anchors: Vec<&CalisAnchor> = calisthenics::LADDERS
             .iter()
@@ -131,7 +127,6 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
         }
     }
 
-    // 3. Pattern items.
     let pattern = |weekly_sets: u8, sessions: usize| Dose::Pattern {
         weekly_sets,
         sessions,
@@ -173,8 +168,6 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
         }
     }
 
-    // A calisthenics day is `Lift(Calisthenics)`, not a barbell
-    // Heavy/Power/Volume day.
     Session {
         session_type: SessionType::Lift(LiftSessionType::Calisthenics),
         day: day.day,

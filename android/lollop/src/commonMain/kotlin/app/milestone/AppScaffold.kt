@@ -63,7 +63,6 @@ internal fun CoachScaffold(session: CoachSession) {
 @Composable
 private fun CoachScaffoldBody(session: CoachSession) {
     val ctx = currentPlatformContext()
-    // Live tracking state drives the "run in progress" reentry chip below.
     val liveTracking by RunSession.tracking.collectAsState()
 
     // Hoisted above the full-screen setup/tracker returns so it survives them.
@@ -96,8 +95,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
     // The plan DAY a past-session Log/Track targets: drives the editor's seed
     // stamp + the missed-day prescription lookup. null = today's flow.
     var sheetPlanDay by rememberSaveable { mutableStateOf<Long?>(null) }
-    // The shown editor's unsaved edits and set-loop lock: what a sheet close or an
-    // open intent must not drop.
     val logGuard = remember { EditorGuard() }
     fun resetSheet() {
         sheetPlanExercise = null
@@ -198,7 +195,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
             model = session.model,
             onEvent = EventDispatcher::send,
             onFinish = {
-                // The run save routes its Core.send through EventDispatcher.exclusive,
+                // The run save routes through EventDispatcher.exclusive,
                 // so the consumer already published the saved model in queue order and
                 // the model collector re-seeds session.model — nothing to publish here.
                 session.showTracker = false
@@ -335,7 +332,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     val logLabel = stringResource(Res.string.main_log)
                     ExtendedFloatingActionButton(
                         onClick = openLog,
-                        // Extended ("+ Log") at the top of Today; icon-only once the list scrolls.
                         expanded = fabExpanded,
                         // The extended FAB clears its content's semantics, so the
                         // visible "Log" text never reaches TalkBack; name the button.
@@ -439,7 +435,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     val items = session.model.week_plan.firstOrNull { it.epoch_day == day }?.items.orEmpty()
                     items.firstOrNull { it.exercise == key && !it.done } ?: items.firstOrNull { it.exercise == key }
                 }
-                // Seed the editor's stamp to a past plan day's local noon (null = today's flow).
                 val planObservedAt = sheetPlanDay?.takeIf { it != session.model.today() }?.let(::planDayObservedAt)
 
                 if (sheetOpen) {
@@ -467,15 +462,11 @@ private fun CoachScaffoldBody(session: CoachSession) {
                         )
                     }
                 }
-                // "How evidence grading works" legend, reached from the "?" on any
-                // grade badge. Static reference copy; no coaching logic.
                 if (showLegend) {
                     AppSheet(onDismiss = { showLegend = false }) {
                         EvidenceLegendSheet(session.model.grade_definitions)
                     }
                 }
-                // Glossary: one app-wide sheet defining the jargon, opened from any
-                // term chip. Static UI copy; no coaching logic, no KB claim.
                 glossaryTerm?.let { term ->
                     AppSheet(onDismiss = { glossaryTerm = null }) { GlossarySheet(term) }
                 }

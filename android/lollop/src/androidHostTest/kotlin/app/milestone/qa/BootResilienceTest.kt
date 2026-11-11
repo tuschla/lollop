@@ -97,8 +97,6 @@ class BootResilienceTest {
 
     private fun fix(northM: Double, t: Long) = GpsPoint(52.52 + northM / 111_195.0, 13.405, t, 5.0)
 
-    // ── B1: resume after a location revoke ──────────────────────────────────
-
     /** A live run's sidecar, then process death and a location revoke (the
      *  platform kills the process on revoke). */
     private fun interruptedRunWithLocationRevoked(): Int {
@@ -131,7 +129,6 @@ class BootResilienceTest {
         rule.waitForNode(hasText(str(R.string.track_resume_perm_caption), substring = true))
         assertFalse("nothing records before the grant", RunSession.tracking.value)
         assertEquals("no recording start without a grant", emptyList<String?>(), drainStartedServiceActions())
-        // The run so far stays savable while it waits.
         assertTrue(rule.countOf(hasText(str(R.string.track_btn_save_run), substring = true)) > 0)
 
         // The user allows location from the tracker's rationale (Continue).
@@ -161,7 +158,6 @@ class BootResilienceTest {
         assertEquals(n, RunSession.points.value.size)
         assertTrue("the sidecar survives the unconfirmed ✕", File(ctx.filesDir, AppFileNames.ACTIVE_RUN).length() > 0)
         rule.onNode(hasText(str(R.string.main_cancel)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
-        // Save keeps what was recorded before the revoke.
         rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
         rule.onNode(hasText(str(R.string.track_btn_save_run)) and hasClickAction()).performClick()
         // The core publishes the saved run before the save's IO block clears the
@@ -172,16 +168,12 @@ class BootResilienceTest {
         assertFalse(RunSession.resumeAwaitingLocation.value)
     }
 
-    // ── Core unavailable at boot ────────────────────────────────────────────
-
     private val seeded = listOf(
         QaHarness.strengthProfile(),
         QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2)),
         QaHarness.loggedRun(QaHarness.daysAgoAtMidday(1)),
     )
 
-    /** Boot on [fault] over a user's log and assert the error state: no setup, no
-     *  scaffold, the log byte-identical, nothing hydrated. */
     private fun bootsIntoCoreUnavailable(fault: CoreFault) {
         QaHarness.seedLog(ctx, seeded)
         val before = logFile.readBytes()
@@ -210,7 +202,6 @@ class BootResilienceTest {
         rule.waitForIdle()
         assertArrayEquals("no write after boot either", before, logFile.readBytes())
 
-        // The raw log can still leave the phone.
         val out = File(ctx.cacheDir, "export-${System.nanoTime()}.ndjson")
         // Off the test (main) thread's stack: the export's exclusive turn runs on the
         // main-dispatched consumer, so blocking main on it would deadlock.

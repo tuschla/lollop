@@ -5,8 +5,7 @@ import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSSystemTimeZoneDidChangeNotification
 import platform.UIKit.UIApplicationSignificantTimeChangeNotification
 
-/** The iOS app's one start, before its UI: [AppRuntime.start] (the settings, the
- *  notifications and reminders, the surfaces' sync). */
+/** The iOS app's one start, before its UI. */
 fun startIosApp() = AppRuntime.start(PlatformContext.INSTANCE)
 
 internal actual fun platformFeatures(): List<AppFeature> = listOf(

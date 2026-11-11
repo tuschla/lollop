@@ -67,9 +67,7 @@ import app.milestone.resources.main_run_in_progress
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-// Shared shell chrome (design/screens/00-chrome.md): brand top bar, three-slot
-// bottom nav with pill selection and the run-in-progress chip. Pure
-// presentation, every value here is a token or an exact dp from the chrome spec.
+// Shared shell chrome, specified in planning/design/screens/00-chrome.md.
 
 /** Bar height of [BrandTopBar] (chrome §2). */
 private val BrandTopBarHeight = 44.dp
@@ -115,10 +113,8 @@ fun BrandTopBar() {
 }
 
 /**
- * Bottom navigation bar (chrome §1): three equal slots, icon pill above label.
- * Selected slot = [AccentTint] pill (5×18dp padding, pill radius) + `Accent`
- * icon/label, label Bold; unselected = no pill, `OnBgFaint`, Regular. Only the
- * Today icon fills when selected (the asset pair encodes that).
+ * Bottom navigation bar (chrome §1). Only the Today icon fills when selected
+ * (the asset pair encodes that).
  */
 @Composable
 fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
@@ -269,8 +265,7 @@ private val RailWidth = 80.dp
 
 /**
  * Run-in-progress chip (chrome §4): pinned just above the nav bar on every
- * destination while a run records. `BgElevated` fill, `1dp Accent @40%`
- * border, Radius Card; `content-run` 18dp + label + "Return ›" in `Accent`.
+ * destination while a run records.
  */
 @Composable
 fun RunInProgressChip(onClick: () -> Unit) {
@@ -386,10 +381,7 @@ internal fun DetailSheet(
     }
 }
 
-/** A sheet's scrolling body: full width, scrolled by [scroll], clear of the
- *  navigation bar, with the sheet's [sheetPadding] at [gutter]. */
 internal fun Modifier.sheetBody(scroll: ScrollState, gutter: Dp = Space.Sheet.dp): Modifier =
     fillMaxWidth().verticalScroll(scroll).navigationBarsPadding().sheetPadding(gutter)
 
-/** A sheet body's side ([gutter]) and bottom padding. */
 internal fun Modifier.sheetPadding(gutter: Dp = Space.Sheet.dp): Modifier = padding(horizontal = gutter).padding(bottom = Space.Lg.dp)

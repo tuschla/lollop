@@ -1,15 +1,11 @@
 package app.milestone
 
-// A logged History entry as the screens hand it around, and the events that
-// delete and restore it.
-
 /** A tapped History entry, routed to the detail sheet. */
 internal sealed interface HistoryEntry {
     data class Lift(val v: LiftResultView) : HistoryEntry
     data class Run(val v: RunResultView) : HistoryEntry
 }
 
-/** The [Event.DeleteEntry] for a logged entry, by entry_id. */
 internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
     is HistoryEntry.Lift -> Event.DeleteEntry(
         EntryKind.Set, entry.v.entry_id, observedAtFallback = entry.v.observed_at,

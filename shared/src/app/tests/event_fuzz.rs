@@ -25,13 +25,11 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
-use crate::compact_event_log;
+use crate::log::compact_event_log;
 use crate::schema::{LadderId, PainDetail, PainKind, PainTrend};
 
 /// A Monday-ish epoch day in late 2025; every sequence starts near it.
 const BASE_DAY: i64 = 20_400;
-
-// ── Seeded PRNG (64-bit LCG, the `view_equivalence` pattern) ───────────────
 
 struct Rng(u64);
 
@@ -80,8 +78,6 @@ impl Rng {
         if self.chance(p) { Some(f(self)) } else { None }
     }
 }
-
-// ── Case driver ───────────────────────────────────────────────────────────
 
 fn env_iters(default: usize) -> usize {
     std::env::var("FUZZ_ITERS")
@@ -140,8 +136,6 @@ fn short(e: &Event) -> String {
     }
     s
 }
-
-// ── Generator ─────────────────────────────────────────────────────────────
 
 /// How far values stray from what the Android shell sends.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1470,8 +1464,6 @@ fn fit_fixture(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("fixture {}: {e}", path.display()))
 }
 
-// ── Invariants ────────────────────────────────────────────────────────────
-
 /// Every float the view carries, with its field path, through a serde
 /// `Serializer` that discards everything else: an `Option::None` never
 /// reaches `serialize_f64`, so a non-finite value is told apart from an
@@ -1989,8 +1981,6 @@ fn fuzz_absurd_values_never_break_the_view() {
     );
 }
 
-// ── Delete → Undo and Edit → Undo, with the shell's own restore events ─────
-
 /// `HistoryDetail.kt::deleteEventFor` (and the activity list's delete).
 fn delete_of(kind: EntryKind, entry_id: u64, observed_at: i64) -> Event {
     Event::DeleteEntry {
@@ -2420,8 +2410,6 @@ fn edit_then_undo_restores_the_view() {
     );
 }
 
-// ── Mutated wire JSON ("NaN-like" values the JSON grammar can carry) ───────
-
 /// Every JSON-pointer path to a leaf (or empty container) of `v`.
 fn leaves(v: &serde_json::Value, path: &mut String, out: &mut Vec<String>) {
     use serde_json::Value as V;
@@ -2585,8 +2573,6 @@ fn mutated_wire_json_never_breaks_the_core() {
         mutation_case,
     );
 }
-
-// ── Focused regressions for the bugs the fuzzers found ─────────────────────
 
 /// A hand-entered run with a typed average HR, logged under a profile that
 /// knows the athlete's HRmax.

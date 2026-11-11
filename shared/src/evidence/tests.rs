@@ -359,7 +359,6 @@ fn every_non_myth_primary_citation_names_a_year() {
         if c.grade == EvidenceGrade::MarketingMyth {
             continue;
         }
-        // A claim with no primary citation has no lead citation to check.
         let Some(lead) = c.primary_citations.first() else {
             continue;
         };
@@ -502,7 +501,6 @@ fn evidence_update_2026_10_regrades_hold() {
     // longer rides in HYB-CAP-001's statement.
     assert_eq!(grade(claims::HYB_RUNCAP_001), EvidenceGrade::ExpertOpinion);
     assert!(!claims::HYB_CAP_001.entry().statement.contains("3 d"));
-    // CONC-MODE-001 lists the KB's contradictions and is contested.
     let mode = claims::CONC_MODE_001.entry();
     assert_eq!(mode.grade, EvidenceGrade::Weak);
     assert!(mode.contradicting.len() >= 2);

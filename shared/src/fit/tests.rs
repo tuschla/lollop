@@ -34,7 +34,6 @@ fn the_import_gate_refuses_a_fragment_and_keeps_a_real_run() {
         ],
     };
     assert_eq!(import_gate(&split), Ok(()));
-    assert_eq!(FitError::TooShort.context(), "");
 }
 
 #[test]
@@ -147,7 +146,6 @@ fn a_real_bike_ride_is_reported_as_not_a_run() {
     let bytes = fixture("garmin-fenix-5-bike.fit");
     let err = parse_fit(&bytes).expect_err("cycling is not a run");
     assert_eq!(err, FitError::NotARun("cycling".to_string()));
-    assert_eq!(err.context(), "cycling");
 }
 
 #[test]
@@ -281,8 +279,6 @@ fn happy_path_extracts_a_real_gps_and_hr_track() {
         "fenix-5 fixture carries no gps_accuracy → must stay None, not a stand-in"
     );
 
-    // Timestamps are monotonic non-decreasing across the whole segment -
-    // a sanity check that we read `timestamp`, not some other field.
     assert!(fixes.windows(2).all(|w| w[1].time_sec >= w[0].time_sec));
 }
 
@@ -317,7 +313,6 @@ fn gps_accuracy_messages() -> Vec<u8> {
     let to_semi = |deg: f64| -> i32 { (deg * 2_147_483_648.0 / 180.0) as i32 };
 
     let mut data: Vec<u8> = Vec::new();
-    // --- definition message (local type 0) ---
     data.push(0x40); // definition, local type 0
     data.push(0x00); // reserved
     data.push(0x00); // architecture: little-endian
@@ -356,7 +351,6 @@ fn synthetic_gps_accuracy_field_flows_through() {
     let track = parse_fit(&file).expect("hand-encoded FIT should parse");
     let fixes: Vec<FitFix> = track.segments.into_iter().flatten().collect();
     assert_eq!(fixes.len(), 2);
-    // The device's real recorded accuracy comes through unchanged, in metres.
     assert_eq!(fixes[0].accuracy_m, Some(8.0));
     assert_eq!(fixes[1].accuracy_m, Some(12.0));
     assert!((fixes[0].lat - 52.5200).abs() < 1e-4, "lat: {:?}", fixes[0]);
@@ -408,7 +402,6 @@ fn sentinel_position_value_yields_no_fix() {
         "sentinel lon drops the fix"
     );
 
-    // A valid pair still yields a fix: the guard must not over-reject.
     let good = record(vec![
         field("timestamp", 253, Value::UInt32(1_500_000_000)),
         field("position_lat", 0, Value::SInt32(626_000_000)),
@@ -437,7 +430,6 @@ fn invalid_heart_rate_sentinel_drops_hr_but_keeps_fix() {
         "0xFF sentinel must not surface as 255 bpm"
     );
 
-    // A real strap reading comes through.
     let good_hr = record(vec![
         field("timestamp", 253, Value::UInt32(1_500_000_000)),
         field("position_lat", 0, Value::SInt32(626_000_000)),

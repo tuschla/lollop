@@ -62,17 +62,14 @@ class ScreenshotTest {
     // Today, History and the Log chooser in the default theme are the Rose captures
     // of [ScreenshotThemesTest]; the guided setup is [ScreenshotSetupTest].
 
-    // ── Profile ────────────────────────────────────────────────────────────
     @Test fun profileLight() { useDarkMode(DarkMode.Light); openToday(); rule.selectTab(str(R.string.main_dest_profile)); rule.shot("profile-light") }
 
     @Test fun profileDark() { useDarkMode(DarkMode.Dark); openToday(); rule.selectTab(str(R.string.main_dest_profile)); rule.shot("profile-dark") }
 
-    // ── Set editor ─────────────────────────────────────────────────────────
     @Test fun setEditorLight() { useDarkMode(DarkMode.Light); openToday(); openEditor(); rule.shot("set-editor-light") }
 
     @Test fun setEditorDark() { useDarkMode(DarkMode.Dark); openToday(); openEditor(); rule.shot("set-editor-dark") }
 
-    // ── Pain triage: severity as one 0–10 rating row ─────────────────────────
     @Test fun painTriageLight() {
         useDarkMode(DarkMode.Light); openToday(); openChooser()
         rule.onNodeWithText(str(R.string.main_report_pain)).performScrollTo().performClick()
@@ -81,7 +78,6 @@ class ScreenshotTest {
         rule.shot("pain-triage-light")
     }
 
-    // ── Per-set loop editor (opened from a plan item) ──────────────────────
     @Test fun setLoopLight() { useDarkMode(DarkMode.Light); openToday(); openLoop(); rule.shot("set-loop-light") }
 
     @Test fun setLoopDark() { useDarkMode(DarkMode.Dark); openToday(); openLoop(); rule.shot("set-loop-dark") }
@@ -89,7 +85,6 @@ class ScreenshotTest {
     private fun openChooser() {
         rule.onNode(logButton).performClick()
         rule.waitForIdle()
-        // Wait until the chooser's "Log set" tile is composed in the sheet.
         rule.waitUntil(5_000) {
             rule.onAllNodesWithText(str(R.string.main_log_set_title)).fetchSemanticsNodes().isNotEmpty()
         }

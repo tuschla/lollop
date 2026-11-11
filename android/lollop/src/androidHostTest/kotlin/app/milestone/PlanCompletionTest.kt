@@ -13,7 +13,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Pure per-set completion helpers: slot derivation, the
+ * Per-set completion helpers: slot derivation, the
  * next-open-item selection the "Today's plan" fast-path and the loop use, the
  * "set k of N" computation, and the hold / RPE line formatting. Each asserts a
  * user-visible outcome that the pre-fix behaviour got wrong (a fabricated "@ RPE

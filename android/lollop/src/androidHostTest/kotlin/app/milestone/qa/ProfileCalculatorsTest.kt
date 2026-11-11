@@ -49,7 +49,6 @@ class ProfileCalculatorsTest {
         rule.launchApp()
         val volume = str(R.string.main_tool_volume_title)
 
-        // Today: no Volume planner row anywhere down the list.
         repeat(10) {
             rule.onAllNodes(hasText(volume)).assertCountEquals(0)
             rule.onAllNodes(hasScrollToIndexAction())[0].performTouchInput { swipeUp() }
@@ -57,12 +56,11 @@ class ProfileCalculatorsTest {
         }
         rule.onAllNodes(hasText(volume)).assertCountEquals(0)
 
-        // Profile: the row is there, and tapping it opens the Volume planner sheet
-        // (its form's "Not growing" switch is a node only the sheet renders).
         rule.selectTab(str(R.string.main_dest_profile))
         val row = hasText(volume) and hasClickAction()
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(row)
         rule.waitForIdle()
+        // The form's "Not growing" switch is a node only the sheet renders.
         val formNode = hasText(str(R.string.log_switch_not_growing))
         rule.onAllNodes(formNode).assertCountEquals(0)
         rule.onAllNodes(row).onFirst().performClick()

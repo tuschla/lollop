@@ -76,8 +76,6 @@ class ImportExportRoundtripTest {
     private fun logLines(): List<String> =
         File(ctx.filesDir, AppFileNames.EVENT_LOG).takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
 
-    // ── The core without the UI (GPX round trips, import planning) ──────────────
-
     /** Seed [seed] as the durable log, replay it into the real core and date it to
      *  the pinned today, as boot does. Later [Core.send]s append to that log. */
     private fun bootCore(vararg seed: Event): ViewModel {
@@ -98,16 +96,13 @@ class ImportExportRoundtripTest {
         return r.view
     }
 
-    // ── Synthetic, seeded tracks ────────────────────────────────────────────────
-
     private val metresPerDegLat = 111_195.0
 
     /**
-     * A seeded wandering run: [n] fixes every [dtSec] s at about [mps] (±10 % per
-     * leg, heading drifting), accuracy 4–8 m. A fix index in [pauseAt] opens a new
-     * recording segment after a [pauseSec] stop during which the runner walked 60 m
-     * (a pause bridge the core must not count). Returns the points and the
-     * segment-start indices, as the tracker hands them to the core.
+     * A seeded wandering run. A fix index in [pauseAt] opens a new recording segment
+     * after a [pauseSec] stop during which the runner walked 60 m (a pause bridge the
+     * core must not count). Returns the points and the segment-start indices, as the
+     * tracker hands them to the core.
      */
     private fun synthRun(
         seed: Long,
@@ -167,7 +162,6 @@ class ImportExportRoundtripTest {
         append("</trk></gpx>\n")
     }
 
-    /** The same fixes as a single-activity TCX with [sport]. */
     private fun tcxDoc(fixes: List<GpsPoint>, sport: String): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<TrainingCenterDatabase xmlns=\"http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2\">")
@@ -205,11 +199,8 @@ class ImportExportRoundtripTest {
         assertEquals("$what logged-at stamp", a.observed_at, b.observed_at)
     }
 
-    // ═══ GPX: export → import ═══════════════════════════════════════════════════
-
     @Test
     fun aRunsGpxImportedIntoAFreshInstallKeepsItsDistanceMovingTimeAndPauses() {
-        // ~5.6 km over two pauses (each a 150 s stop with a 60 m walk).
         val (points, starts) = synthRun(seed = 11, startSec = QaHarness.daysAgoAtMidday(2), n = 1800, pauseAt = setOf(600, 1200))
         val original = bootCore(QaHarness.strengthProfile()).let { send(trackEvent(points, starts)) }.runs.single()
         val gpx = gpxOf(original)
@@ -224,7 +215,6 @@ class ImportExportRoundtripTest {
         assertTrue(restored.has_gpx)
         val restoredGpx = gpxOf(restored)
         assertEquals("pauses survive the round trip", 3, segmentCount(restoredGpx))
-        // A second export → import cycle is a fixed point: nothing drifts.
         val again = freshInstallCore(QaHarness.strengthProfile())
             .let { send(importedRunEvent(parseRunFile(restoredGpx.toByteArray(), Core::parseRunFile).single(), null)) }
             .runs.single()
@@ -252,7 +242,6 @@ class ImportExportRoundtripTest {
     fun aRunEndingStandingStillIsStillRecognisedWhenItsGpxIsReimported() {
         val (moving, _) = synthRun(seed = 13, startSec = QaHarness.daysAgoAtMidday(1), n = 900)
         val last = moving.last()
-        // 40 s at the door: fixes every 2 s within ~0.5 m of the finish.
         val rnd = Random(13)
         val standing = (1..20).map { k ->
             GpsPoint(last.lat + (rnd.nextDouble() - 0.5) * 1e-5, last.lon + (rnd.nextDouble() - 0.5) * 1e-5, last.observedAt + 2L * k, 5.0)
@@ -291,7 +280,6 @@ class ImportExportRoundtripTest {
         assertEquals(1, plan.runs.size)
         assertEquals(2, plan.duplicates)
         assertTrue(plan.failures.isEmpty())
-        // And once it is in history, the same three files add nothing.
         val vm = bootCore(QaHarness.strengthProfile()).let { send(plan.runs.single().event) }
         val again = planImport(
             vm.runs.mapTo(HashSet()) { it.observed_at },
@@ -301,8 +289,6 @@ class ImportExportRoundtripTest {
         assertEquals(0, again.runs.size)
         assertEquals(2, again.duplicates)
     }
-
-    // ═══ Odd files ══════════════════════════════════════════════════════════════
 
     @Test
     fun oddFilesEachEndInTheirOwnNamedReasonAndTheGoodOneStillImports() {
@@ -338,19 +324,16 @@ class ImportExportRoundtripTest {
         assertEquals(ImportFailure.ImplausiblePace, reasons["car.gpx"])
         assertEquals(ImportFailure.NotARun, reasons["bike.fit"])
         assertEquals(ImportFailure.TooShort, reasons["fragment.fit"])
-        // Each reason reads as a plain sentence naming the file (no blank detail).
         for (f in plan.failures) {
             val line = importFailureLine(ctx.resources, f)
             assertTrue(line, line.startsWith(f.fileName) && line.length > f.fileName.length + 5)
         }
         assertTrue(importFailureReason(ctx.resources, plan.failures.single { it.fileName == "bike.fit" }).contains("cycling"))
-        // The core accepts what the importer built, with sane numbers.
         val run = bootCore(QaHarness.strengthProfile()).let { send(plan.runs.single().event) }.runs.single()
         assertTrue("distance ${run.distance_km}", run.distance_km in 5.0..6.5)
         assertTrue("moving time ${run.duration_min}", run.duration_min in 25.0..35.0)
     }
 
-    /** A cut-off download: the file starts like a GPX but the XML stops mid-point. */
     @Test
     fun aTruncatedGpxIsReportedAsDamaged() {
         val (good, _) = synthRun(seed = 18, startSec = QaHarness.daysAgoAtMidday(2), n = 300)
@@ -364,8 +347,8 @@ class ImportExportRoundtripTest {
      * A ride exported as TCX says so: `<Activity Sport="Biking">`. At an easy
      * 20 km/h it is slower than the importer's fastest-believable-run gate, so the
      * sport is the only thing that tells it apart. The FIT path refuses another
-     * sport by name ([aFitFileForAnotherSportIsRefusedWithItsSport] in
-     * RunImportTest); a TCX ride must not become running volume either.
+     * sport by name ([ImportParserFuzzTest.aFitRefusalReachesTheShellWithItsReason]);
+     * a TCX ride must not become running volume either.
      */
     @Test
     fun aTcxBikeRideIsRefusedAsNotARun() {
@@ -386,7 +369,6 @@ class ImportExportRoundtripTest {
 
     @Test
     fun aHugeGpxImportsDecimatedWithTheSameDistanceAndAnOversizedFileIsRefusedUnread() {
-        // 25 000 fixes at 1 Hz (~7 h, ~80 km): an ultra recorded at full rate.
         val (pts, _) = synthRun(seed = 21, startSec = QaHarness.daysAgoAtMidday(5), n = 25_000, dtSec = 1)
         val trueKm = pts.zipWithNext { a, b -> segmentKm(a, b) }.sum()
         val bytes = gpxDoc(listOf(pts)).toByteArray()
@@ -399,7 +381,6 @@ class ImportExportRoundtripTest {
         assertTrue("distance ${run.distance_km} vs true $trueKm", abs(run.distance_km - trueKm) / trueKm < 0.02)
         assertTrue("moving time ${run.duration_min}", abs(run.duration_min - (pts.last().observedAt - pts.first().observedAt) / 60.0) < 2.0)
 
-        // Past the 32 MB cap the read stops with "too large", never buffering it all.
         var served = 0L
         val endless = object : InputStream() {
             override fun read(): Int = if (served++ < 40L * 1024 * 1024) 'x'.code else -1
@@ -415,8 +396,6 @@ class ImportExportRoundtripTest {
         assertTrue("stopped near the cap, read $served bytes", served <= 33L * 1024 * 1024)
     }
 
-    // ═══ Run import through the real share/pick pipeline ═════════════════════════
-
     private fun writeCacheFile(name: String, bytes: ByteArray): Uri {
         val f = File(ctx.cacheDir, "import-test/$name")
         f.parentFile!!.mkdirs()
@@ -431,31 +410,25 @@ class ImportExportRoundtripTest {
         val (points, _) = synthRun(seed = 22, startSec = QaHarness.daysAgoAtMidday(2), n = 800)
         val uri = writeCacheFile("morning.gpx", gpxDoc(listOf(points)).toByteArray())
 
-        // Shared twice in one go: one run, the copy counted as already there.
         RunImport.importRuns(ctx, listOf(uri, uri))
         val dup = plural(R.plurals.main_import_summary_duplicates, 1, 1)
         rule.assertCountEventually(hasText(str(R.string.import_result_one, importDateLabel(points.last().observedAt)), substring = true), 1, 20_000)
         rule.assertCountEventually(hasText(dup, substring = true), 1)
         assertEquals(1, EventDispatcher.model.value!!.runs.size)
 
-        // The same file again: nothing new, and it says why.
         RunImport.importRuns(ctx, listOf(uri))
         rule.assertCountEventually(hasText(str(R.string.main_import_duplicate)), 1, 20_000)
         assertEquals("still exactly one run", 1, EventDispatcher.model.value!!.runs.size)
         assertEquals("one LogRunTrack line in the log", 1, logLines().count { EventLog.variantOf(it) == "LogRunTrack" })
 
-        // A cold start replays exactly that one run.
         ProcessDeath.kill(ctx)
         rule.launchApp()
         assertEquals(1, EventDispatcher.model.value!!.runs.size)
         assertEquals(points.last().observedAt, EventDispatcher.model.value!!.runs.single().observed_at)
     }
 
-    // ═══ Full data backup: export → fresh install → import ═══════════════════════
-
-    /** Profile, an anchored plan, three weeks of lifting and running (hand-logged
-     *  and GPS), check-ins and a calculator query, with an amend, a delete and a
-     *  trim so compaction has real work to do. Oldest first. */
+    /** With an amend, a delete and a trim so compaction has real work to do. Oldest
+     *  first. */
     private fun richHistory(): List<Event> {
         val profile = Event.SetProfile(
             progressionCadence = ProgressionCadence.WeekToWeek,
@@ -545,7 +518,6 @@ class ImportExportRoundtripTest {
         assertTrue("export reports success", onAppScope { exportDataTo(ctx, Uri.fromFile(backup)) })
         assertTrue(backup.length() > 0)
 
-        // A brand-new install on another phone: guided setup up, nothing logged.
         QaHarness.teardown()
         QaHarness.reset(ctx)
         QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Km)
@@ -558,7 +530,6 @@ class ImportExportRoundtripTest {
         assertTrue("entries counted ${summary.entries}", summary.entries >= original.lifts.size + original.runs.size)
         rule.assertCountEventually(hasText(plural(R.plurals.main_restored_entries, summary.entries, summary.entries)), 1)
 
-        // The very same backup imported again: still the same, nothing doubled.
         importBackupAndReboot(backup)
         val twice = EventDispatcher.model.value!!
         val diff2 = diffViews(original, twice)
@@ -567,8 +538,6 @@ class ImportExportRoundtripTest {
         assertEquals(original.runs.size, twice.runs.size)
     }
 
-    /** A user who removed their plan and restores their backup onto a new phone
-     *  gets their data back as it was: without a plan, not a freshly generated one. */
     @Test
     fun aBackupOfARemovedPlanRestoresWithoutAPlan() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2)), Event.ClearPlan))
@@ -600,7 +569,6 @@ class ImportExportRoundtripTest {
             RunSession.markStopped()
         }
         assertEquals(logBefore, logLines())
-        // And the core still persists: a later entry lands in the same log.
         val at = AppClock.nowSec() - 60
         EventDispatcher.send(Event.LogSet("Deadlift", 140.0, 3, 8.0, at, at * 1000))
         QaHarness.pumpMainUntil("the set to persist") { logLines().size == logBefore.size + 1 }
@@ -614,7 +582,6 @@ class ImportExportRoundtripTest {
         assertTrue(onAppScope { exportDataTo(ctx, Uri.fromFile(backup)) })
         val (pts, _) = synthRun(seed = 25, startSec = QaHarness.daysAgoAtMidday(2), n = 200)
         val gpx = File(ctx.cacheDir, "backup/run.gpx").apply { writeText(gpxDoc(listOf(pts))) }
-        // A copy cut off mid-line (an interrupted transfer).
         val text = backup.readText()
         val cut = File(ctx.cacheDir, "backup/cut.ndjson").apply { writeText(text.substring(0, text.length - 40)) }
         val empty = File(ctx.cacheDir, "backup/empty.ndjson").apply { writeText("") }

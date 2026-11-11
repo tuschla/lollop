@@ -270,6 +270,5 @@ fn reference_carries_new_hybrid_and_safety_rows() {
             "reference row missing: {needle}"
         );
     }
-    // Sections stay contiguous in the reference list too.
     assert_sections_contiguous(&vm.reference, &"reference");
 }

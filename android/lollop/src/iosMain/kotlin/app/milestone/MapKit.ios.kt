@@ -36,7 +36,6 @@ internal class LollopMapView : MKMapView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0))
         showsUserLocation = false
     }
 
-    /** Whether the view has a size yet. */
     val hasSize: Boolean get() = bounds.useContents { size.width > 0.0 && size.height > 0.0 }
 
     override fun layoutSubviews() {

@@ -53,7 +53,6 @@ object CoreConstants {
     const val FIVE_K_M: Double = 5000.0
     const val TEN_K_M: Double = 10000.0
     const val MARATHON_M: Double = 42195.0
-    /** Pounds per kilogram. */
     const val LB_PER_KG: Double = 2.2046226218
     /** Worst horizontal accuracy (m) a fix may carry to count (the QC gate). */
     const val MAX_GPS_ACCURACY_M: Double = 30.0
@@ -1241,7 +1240,10 @@ data class FeedbackView(
         get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
 }
 
-/** The message category the engine emits for a session (File 05 decision tree). */
+/**
+ * The message category the engine emits for a session (File 05 decision tree,
+ * §6.1).
+ */
 @Serializable
 enum class FeedbackCategory {
     /** Bone-stress red flag: stop + refer (feedback-032/033/034). Suppresses praise. */
@@ -1441,7 +1443,7 @@ data class Profile(
      * When the edit was made, unix seconds (the shell's clock). On its
      * effective day the edit is in force only from this instant, so an
      * evening edit leaves a run logged that morning on the profile it was
-     * logged under (`app::profile_at`); it also orders same-day edits in the
+     * logged under (`app::model::profile_at`); it also orders same-day edits in the
      * history. `None` = from the start of that day.
      * Ignored on an undated edit.
      */
@@ -2865,7 +2867,7 @@ data class CalisItemView(
 /**
  * Identifies one calisthenics leverage ladder (see `crate::calisthenics`
  * `LADDERS`). A plain data enum: `schema` owns the shared wire types so it need
- * not depend on `evidence`/`calisthenics`; `calisthenics.rs` re-exports this.
+ * not depend on `calisthenics`; `calisthenics.rs` re-exports this.
  */
 @Serializable
 enum class LadderId {
@@ -3803,7 +3805,6 @@ sealed interface Event {
         @SerialName("hold_sec") @EncodeDefault(EncodeDefault.Mode.NEVER) val holdSec: Int? = null,
     ) : Event
 
-    /** Drop all logged sets. */
     data object ClearSets : Event
 
     /**
@@ -3899,7 +3900,6 @@ sealed interface Event {
         @SerialName("utc_offset_sec") @EncodeDefault(EncodeDefault.Mode.NEVER) val utcOffsetSec: Long? = null,
     ) : Event
 
-    /** Drop all logged runs. */
     data object ClearRuns : Event
 
     /**
@@ -4202,7 +4202,7 @@ sealed interface Event {
          * When the edit was made, unix seconds (the shell's clock). On its
          * effective day the edit is in force only from this instant, so an
          * evening edit leaves a run logged that morning on the profile it was
-         * logged under (`app::profile_at`); it also orders same-day edits in the
+         * logged under (`app::model::profile_at`); it also orders same-day edits in the
          * history. `None` = from the start of that day.
          * Ignored on an undated edit.
          */

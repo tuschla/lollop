@@ -31,7 +31,7 @@ class WeeklyDistanceChartTest {
     @get:Rule
     val rule = createComposeRule()
 
-    /** 16 Monday-start weeks (epoch day 20_004 is a Monday), each [kmAt] km. */
+    /** Monday-start weeks: epoch day 20_004 is a Monday. */
     private fun weeks(kmAt: (Int) -> Double) = (0 until 16).associate { i -> 20_004L + i * 7L to kmAt(i) }
 
     /** Taps the middle week's bar (its per-week node sits over the bar). */

@@ -26,12 +26,8 @@ macro_rules! dashed_id {
     }};
 }
 
-/// Declares one discipline's rows: an enum with one variant per row, a
-/// [`ClaimId`] constant per row, and the rows in variant order, so
-/// `ROWS[row as usize]` is the row a variant names. A row's `claim_id` is its
-/// name spelled with dashes (`RUN_SPIKE_001` → `"RUN-SPIKE-001"`). A row
-/// prefixed `#[kb_only]` is recorded from the knowledge base but cited by no
-/// engine rule.
+/// Declares one discipline's rows. A row prefixed `#[kb_only]` is recorded
+/// from the knowledge base but cited by no engine rule.
 macro_rules! claim_group {
     (@surfaced) => {
         true
@@ -40,7 +36,6 @@ macro_rules! claim_group {
         false
     };
     ($group:ident => $variant:ident; $( $(#[$marker:ident])? $id:ident => $draft:expr ),* $(,)?) => {
-        /// One variant per registry row of this discipline group.
         #[allow(non_camel_case_types)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $group {
@@ -59,12 +54,11 @@ macro_rules! claim_group {
         ];
 
         impl $group {
-            /// The registry row this variant names.
             pub(crate) fn entry(self) -> &'static $crate::evidence::EvidenceEntry {
                 &ROWS[self as usize]
             }
 
-            /// Every row of this group, in variant order.
+            #[cfg(test)]
             pub(crate) fn rows() -> &'static [$crate::evidence::EvidenceEntry] {
                 ROWS
             }
@@ -86,7 +80,7 @@ pub use contested::{CONTESTED_QUESTIONS, ContestedId, ContestedQuestion};
 use draft::ClaimDraft;
 pub use grade::EvidenceGrade;
 
-/// `id` with every `_` replaced by `-`; `N` is `id.len()`.
+/// `N` is `id.len()`.
 const fn dash_bytes<const N: usize>(id: &str) -> [u8; N] {
     let bytes = id.as_bytes();
     let mut out = [0; N];
@@ -101,7 +95,6 @@ const fn dash_bytes<const N: usize>(id: &str) -> [u8; N] {
 /// One graded claim in the registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvidenceEntry {
-    /// Typed handle of this row.
     pub id: ClaimId,
     /// Stable key, e.g. `"HYP-VOL-001"`: the [`ClaimId`] spelled with dashes.
     pub claim_id: &'static str,
@@ -122,7 +115,6 @@ pub struct EvidenceEntry {
 }
 
 impl EvidenceEntry {
-    /// The finished row `id` names from its `draft`, keyed `claim_id`.
     const fn from_draft(
         draft: ClaimDraft,
         id: ClaimId,
@@ -153,8 +145,6 @@ impl EvidenceEntry {
         matches!(self.grade, EvidenceGrade::MarketingMyth)
     }
 
-    /// The citation line shown for this claim: its lead primary citation, or
-    /// a plain statement that the KB records no published source.
     pub fn reference(&self) -> &'static str {
         self.primary_citations
             .first()
@@ -167,8 +157,6 @@ impl EvidenceEntry {
 pub const NO_PUBLISHED_SOURCE: &str =
     "A common coaching rule; no published study behind the exact numbers";
 
-/// Declares [`ClaimId`] over the discipline groups in [`claims`] plus the
-/// lookups that dispatch on the group.
 macro_rules! claim_groups {
     ($($variant:ident($group:ty)),* $(,)?) => {
         /// Compile-checked handle for one registry row: its discipline group
@@ -180,7 +168,6 @@ macro_rules! claim_groups {
         }
 
         impl ClaimId {
-            /// The registry row this id names.
             pub fn entry(self) -> &'static EvidenceEntry {
                 match self {
                     $(Self::$variant(row) => row.entry()),*
@@ -198,7 +185,7 @@ macro_rules! claim_groups {
             }
         }
 
-        /// Every registry row, group by group.
+        #[cfg(test)]
         pub fn all_claims() -> impl Iterator<Item = &'static EvidenceEntry> {
             [$(<$group>::rows()),*].into_iter().flatten()
         }

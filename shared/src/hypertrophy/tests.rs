@@ -71,7 +71,6 @@ fn frequency_bands_follow_table_3() {
 fn set_ramp_matches_rp_worked_example() {
     let ramp = weekly_set_ramp(10, 20, 4);
     assert_eq!(ramp.value, vec![10, 13, 16, 20]);
-    // Degenerate cases.
     assert_eq!(weekly_set_ramp(10, 20, 1).value, vec![10]);
     assert!(weekly_set_ramp(10, 20, 0).value.is_empty());
     // MRV below MEV clamps flat.
@@ -209,7 +208,6 @@ fn rir_ramp_never_extrapolates_past_kb_schedule() {
     }
 }
 
-// -- hyp-012 --
 #[test]
 fn load_is_interchangeable_30_to_85_pct() {
     let r = interchangeable_load_range();
@@ -222,7 +220,6 @@ fn load_is_interchangeable_30_to_85_pct() {
     assert!(!load_below_effective_floor(30).value);
 }
 
-// -- hyp-017 --
 #[test]
 fn high_skill_lifts_keep_reps_and_rir_floors() {
     let g = high_skill_guard();
@@ -232,7 +229,6 @@ fn high_skill_lifts_keep_reps_and_rir_floors() {
     assert_eq!(g.grade(), EvidenceGrade::ExpertOpinion);
 }
 
-// -- hyp-018 --
 #[test]
 fn default_rir_is_one_to_three_and_contested() {
     let d = default_rir_band();
@@ -242,7 +238,6 @@ fn default_rir_is_one_to_three_and_contested() {
     assert_eq!(d.contested(), Some(ContestedId::CQ_02));
 }
 
-// -- hyp-020 --
 #[test]
 fn rir_accuracy_degrades_far_from_failure() {
     assert_eq!(rir_reliability(0).value, RirReliability::WithinOneRep);
@@ -252,7 +247,6 @@ fn rir_accuracy_degrades_far_from_failure() {
     assert_eq!(novice_start_rir().grade(), EvidenceGrade::Moderate);
 }
 
-// -- hyp-031 --
 #[test]
 fn meso_structure_is_4_to_6_plus_1_deload() {
     let m = meso_structure().value;
@@ -262,7 +256,6 @@ fn meso_structure_is_4_to_6_plus_1_deload() {
     assert_eq!(meso_structure().grade(), EvidenceGrade::Moderate);
 }
 
-// -- hyp-043 --
 #[test]
 fn intermediate_default_program_matches_synthesis() {
     let p = intermediate_default_program();
@@ -280,7 +273,6 @@ fn intermediate_default_program_matches_synthesis() {
     assert_eq!(p.grade(), EvidenceGrade::Moderate);
 }
 
-// -- 7b: any-name resolution, fractional volume, block targets --
 #[test]
 fn muscle_credits_follow_table_4_with_half_sets_for_helpers() {
     assert_eq!(

@@ -383,8 +383,6 @@ fn pain_of(kind: crate::schema::PainKind, observed_at: i64) -> Event {
 fn an_undated_pain_undo_compacts_against_the_report_it_removes() {
     // `update` undoes the worst active pain report (the one the verdict
     // reads), not the newest: the sharp joint pain goes, the later DOMS stays.
-    // Compaction used to pair the undo with the newest report, so the
-    // compacted log replayed the sharp pain's training stop.
     let sharp = pain_of(crate::schema::PainKind::SharpJoint, 100);
     let doms = pain_of(crate::schema::PainKind::Doms, 200);
     let events = vec![sharp, doms.clone(), remove(ReadinessSignal::Pain)];
@@ -661,8 +659,6 @@ fn replay_equivalence_across_new_singleton_families() {
     ]);
 }
 
-// ── Rule 3: DeleteEntry / AmendSet / AmendRun ──────────────
-
 fn set_id(exercise: &str, id: u64, observed_at: i64) -> Event {
     Event::LogSet {
         hold_sec: None,
@@ -766,12 +762,10 @@ fn amend_after_delete_never_resurrects_the_entry() {
     // amend then matches nothing and is dropped; the entry stays deleted, both
     // in a live `update` replay and after compaction.
     let events = vec![set_id("Bench", 5, 0), del_set(5), amend_set(5, 120.0)];
-    // Live replay: the amend is a no-op on the missing row → nothing survives.
     assert!(
         replay(&events).lifts.is_empty(),
         "the deleted set is not resurrected"
     );
-    // Compaction: the whole sequence is inert.
     assert!(
         compact_event_log(events.clone()).is_empty(),
         "delete cancels the entry; the orphan amend is dropped"
@@ -875,8 +869,6 @@ fn run_amend_keeps_its_base_log() {
     assert_eq!(compact_event_log(amended.clone()), amended);
     assert_replay_equivalent(amended);
 }
-
-// ── Rule 3 + Rule 1: TrimRunTrack ──────────────────────────
 
 fn run_track_id(id: u64, observed_at: i64) -> Event {
     Event::LogRunTrack {
@@ -1198,8 +1190,6 @@ fn delete_and_amend_interleaved_with_everything_replay_equivalent() {
     ]);
 }
 
-// ── Family 15: logged other activities ──
-
 fn act(minutes: f64, id: u64, observed_at: i64) -> Event {
     Event::LogActivity {
         kind: ActivityKind::Sport,
@@ -1336,8 +1326,6 @@ fn activities_interleaved_with_everything_replay_equivalent() {
     ]);
 }
 
-// ── Rule 2: SetToday ──
-
 #[test]
 fn set_today_keeps_every_offset_change_and_the_last_day() {
     let today = |epoch_day, utc_offset_sec| Event::SetToday {
@@ -1405,8 +1393,6 @@ fn compaction_keeps_a_pinned_legacy_runs_hr_figure() {
     assert_eq!(full.runs[0].hr_pct_max, compacted.runs[0].hr_pct_max);
     assert_eq!(full, compacted);
 }
-
-// ── Raw wire lines (the shell's JNI path) ──
 
 fn wire(events: &[Event]) -> Vec<String> {
     events

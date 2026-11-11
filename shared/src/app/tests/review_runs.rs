@@ -150,7 +150,7 @@ fn a_stop_whose_fixes_settle_off_the_spot_still_counts_the_stride_out() {
 
 #[test]
 fn preview_of_malformed_tracks_is_finite_and_never_panics() {
-    // The trackFigures JNI input path: wire JSON → Event → preview. Malformed
+    // The `TrackFigures` op's input path: wire JSON → Event → preview. Malformed
     // wire JSON is a serde error (the ffi returns its error envelope); a
     // well-formed but corrupt track must give finite figures (a NaN would
     // serialize as `null` and fail the shell's TrackFigures decode).
@@ -217,7 +217,7 @@ fn preview_of_malformed_tracks_is_finite_and_never_panics() {
 #[test]
 fn negative_zero_manual_run_never_reads_minus_zero() {
     // The -0.0 fix covered GPS sums; a hand-entered run's -0.0 wire floats go
-    // through `sanitize_f64(..).max(0.0)`. The whole ViewModel JSON must not
+    // through `sanitize::non_negative`. The whole ViewModel JSON must not
     // carry a "-0.0" for it.
     let app = Engine;
     let mut model = Model::default();
@@ -345,7 +345,7 @@ fn finish_preview_equals_saved_card_on_random_tracks() {
 #[test]
 fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
     // Undo of a deleted GPS run re-logs the EXPORTED (QC'd) route, not the raw
-    // fixes (RunDetailSheet → Core.exportGpx → restoreEventFor). With the
+    // fixes (`DurableCore.runGpx` → `restoreEventFor`). With the
     // standing-fix reinsertion the QC must still be idempotent or Undo moves
     // distance / moving time.
     let mut rng = XorShift(0x0DD0_1DE0_9999_0001);
@@ -364,10 +364,9 @@ fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
     }
 }
 
-/// Every f32 accuracy in [1, 30] m as the export → shell import → core path
-/// turns it: the exported `<hdop>` (`gps::gpx_hdop`, written with `{}`),
-/// read as a Double, × 5 (Gpx.kt `hdopToAccuracyM`), deserialized by the core
-/// as f32.
+/// Every f32 accuracy in [1, 30] m as the export → import path turns it: the
+/// exported `<hdop>` (`gps::gpx_hdop`, written with `{}`), read as an f64,
+/// × 5 (`gps::hdop_accuracy_m`), stored as f32.
 fn hdop_round_trips() -> impl Iterator<Item = (f32, f32)> {
     let mut a = 1.0f32;
     std::iter::from_fn(move || {

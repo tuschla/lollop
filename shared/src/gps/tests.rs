@@ -30,7 +30,6 @@ fn windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
 
 #[test]
 fn track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
-    // A normal km split works.
     let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.02, 300)]; // ~2.2 km, 5 min
     assert!(
         !track_splits(&track, KM_M, &[]).is_empty(),
@@ -161,7 +160,6 @@ fn splits_even_pace_all_full_splits_equal_pace() {
         );
         assert!((s.distance_m - KM_M).abs() < 1e-6);
     }
-    // Indices are 1-based and contiguous.
     assert_eq!(
         km.iter().map(|s| s.index).collect::<Vec<_>>(),
         vec![1, 2, 3, 4, 5, 6]
@@ -195,7 +193,6 @@ fn splits_mid_run_stop_does_not_inflate_split_pace() {
             s.pace_sec_per_unit
         );
     }
-    // Explicitly: split 1 (which contains the stop) equals split 2.
     assert!(
         (full[0].pace_sec_per_unit - full[1].pace_sec_per_unit).abs() < 0.5,
         "stop split {} vs clean split {}",
@@ -275,7 +272,6 @@ fn splits_degenerate_tracks_are_empty() {
         track_splits(&stacked, KM_M, &[]).is_empty(),
         "zero distance"
     );
-    // Non-positive unit.
     assert!(track_splits(&even_equator_track(50, 0.001, 30), 0.0, &[]).is_empty());
 }
 
@@ -321,7 +317,6 @@ fn variability_index_separates_interval_from_steady_same_average() {
         "interval {vi_interval} not clearly above steady {vi_steady}",
     );
 
-    // Normalized speed exceeds the plain average for the interval run.
     let ns = normalized_speed(&moving_legs(&interval, &[])).expect("interval NS");
     let avg = di * 1000.0 / 120.0;
     assert!(ns > avg, "NS {ns} should exceed avg {avg}");
@@ -344,7 +339,6 @@ fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
     let mut lon = 0.0f64;
     let mut t = 0i64;
     let deg_per_m = 1.0 / 111_320.0;
-    // Seed the first fix.
     pts.push(GpsPoint {
         lat: 0.0,
         lon: 0.0,
@@ -353,7 +347,7 @@ fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
     });
     for &(speed, dur) in profile {
         for _ in 0..dur {
-            lon += speed * deg_per_m; // advance ~speed metres this second
+            lon += speed * deg_per_m;
             t += 1;
             let lat = jitter_deg * (t as f64 * 1.3).sin();
             pts.push(GpsPoint {
@@ -553,7 +547,6 @@ fn export_gpx_wraps_fixes_and_escapes_name() {
     // All five XML predefined entities are escaped so the name cannot break
     // the document (& " < > ').
     assert!(gpx.contains("<name>Tom &amp; &quot;Jerry&quot; &lt;run&gt;&apos;s</name>"));
-    // One trkpt per fix, with lat/lon and an RFC-3339 timestamp.
     assert_eq!(gpx.matches("<trkpt ").count(), 2);
     assert!(gpx.contains("lat=\"52.52\" lon=\"13.405\""));
     assert!(gpx.contains("<time>2023-11-14T22:13:20Z</time>"));
@@ -587,8 +580,6 @@ fn export_gpx_writes_accuracy_as_hdop_the_importer_reads_back() {
         .unwrap();
     assert_eq!((hdop * GPX_HDOP_UERE_M) as f32, 12.5);
 }
-
-// ── Segment-aware track fns (pause + relocation) ──────────────────
 
 /// A pause + relocation: segment 1 is four ~111 m legs at the equator, then
 /// the runner relocates ~111 km east and runs segment 2 (four more ~111 m
@@ -743,7 +734,6 @@ fn segmented_vi_and_split_match_the_reanchored_equivalent() {
 fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
     let t = relocation_fixture();
     let gpx = export_gpx(&t, "paused run", &[5], None);
-    // Two recording segments → two <trkseg> blocks with a gap between.
     assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments\n{gpx}");
     assert_eq!(gpx.matches("</trkseg>").count(), 2);
     // TRUE coordinates: segment 2's real relocated longitude (1.000…) is
@@ -751,7 +741,6 @@ fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
     assert!(gpx.contains("lon=\"1\""), "true seg-2 coord\n{gpx}");
     // Every real fix is still emitted (10 points across the two segments).
     assert_eq!(gpx.matches("<trkpt").count(), 10);
-    // Empty starts → a single <trkseg>.
     let flat = export_gpx(&t, "paused run", &[], None);
     assert_eq!(flat.matches("<trkseg>").count(), 1);
 }
@@ -770,8 +759,6 @@ fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
         "extensions precede the segments\n{gpx}"
     );
 }
-
-// ── Save and crash-recovery thinning (the recorder's `ThinTrack` op) ─────────
 
 #[test]
 fn thinning_keeps_a_track_at_or_under_the_cap_whole() {

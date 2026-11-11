@@ -65,7 +65,6 @@ impl SetIndex {
         idx
     }
 
-    /// The facts of set `i`'s name.
     pub(super) fn facts(&self, i: usize) -> NameFacts {
         self.names[self.name_of[i] as usize]
     }

@@ -17,7 +17,6 @@ use crate::schema::Rx;
 /// The face cue for a row done with no bar or rings (CAL-EQUIP-001).
 const TABLE_ROW_CUE: &str = "use a sturdy table edge";
 
-/// Flatten a `Prescription::Calisthenics` arm into its [`PlanItem`].
 /// Load is the leverage tier (never a settable bar weight), so `load_kg` stays
 /// `None`; a MEASURED-fraction rung surfaces its honest %BW line (and an
 /// effective-kg estimate when bodyweight is known) in `anchored_on`, and inferred
@@ -141,7 +140,7 @@ pub(super) fn flatten_calisthenics_prescription(
         }),
         ..Default::default()
     };
-    set_named_summary(&mut view, ": ", &[lead], &clauses);
+    set_named_summary(&mut view, &[lead], &clauses);
     PlanItem {
         view,
         intensity,
@@ -438,14 +437,12 @@ fn calis_summary(
         let _ = write!(lead, " · {TABLE_ROW_CUE}");
     }
     let mut clauses = Vec::with_capacity(1);
-    // A dynamic rung's effort, in the same "reps left" words as every lift.
     if let PlanIntensity::RirRange { lo: rlo, hi: rhi } = *intensity {
         clauses.push(FaceClause::effort(rir_band_left(rlo, rhi)));
     }
     (FaceClause::plain(lead), clauses)
 }
 
-/// One rung as a picker row: canonical name, band label, equipment availability.
 fn calis_rung_view(ladder: crate::schema::LadderId, rung: u8, available: bool) -> CalisRungView {
     let Some(t) = crate::calisthenics::tier(ladder, rung) else {
         return CalisRungView {

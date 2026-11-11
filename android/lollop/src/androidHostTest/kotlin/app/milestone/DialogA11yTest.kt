@@ -84,8 +84,6 @@ class DialogA11yTest {
         assertStartToEnd(str(R.string.main_cancel), str(R.string.log_ok))
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-
     private fun openFirstClickableWithLabel(label: String) {
         rule.onNode(
             androidx.compose.ui.test.SemanticsMatcher("onClick label $label") {
@@ -95,7 +93,6 @@ class DialogA11yTest {
         rule.waitForIdle()
     }
 
-    /** In the top window, TalkBack reaches [first] before [second]. */
     private fun assertStartToEnd(first: String, second: String) {
         val root = composeRoots().last()
         root.forceAccessibilityForTesting(true)

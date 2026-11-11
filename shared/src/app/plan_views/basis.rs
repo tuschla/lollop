@@ -7,7 +7,6 @@ use crate::app::format::fmt_weight;
 use crate::app::plan_views::item_render::{sets_reps_lead, shown_rir, with_reps_left};
 use crate::app::plan_views::plan_item::{BasisPiece, BasisRx, PlanItem};
 
-/// `"at least two left"`.
 fn at_least(n: i64) -> String {
     format!("at least {} left", reps_word(n.clamp(0, 255) as u8))
 }

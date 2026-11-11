@@ -31,7 +31,7 @@ internal const val CoachSummaryWeeks = 4
  * minutes · effort). A run of weeks with nothing logged folds into one line.
  * Facts only, straight from the logged rows; no coaching.
  * Undated rows (observed_at 0) have no day and are left out; a run is filed under
- * the day it STARTED ([runDaySec]), the day its History title names. Pure.
+ * the day it STARTED ([runDaySec]), the day its History title names.
  */
 internal fun buildCoachSummary(
     res: PlatformResources,

@@ -39,8 +39,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** The widget's data path: snapshot from a model, the file round trip, the stale
- *  day rules, and the text each state puts on the widget. */
 @RunWith(RobolectricTestRunner::class)
 class WidgetSnapshotTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
@@ -59,7 +57,6 @@ class WidgetSnapshotTest {
     private fun lift(name: String, lead: String, done: Boolean = false) =
         PrescriptionView(exercise = name, face_lead = lead, done = done)
 
-    /** A model as the core sends it; [state] is the core's today state for it. */
     private fun model(
         ns: SessionPlanView? = null,
         week: List<SessionPlanView> = listOfNotNull(ns),
@@ -79,8 +76,6 @@ class WidgetSnapshotTest {
 
     private fun face(m: ViewModel) = widgetFace(widgetSnapshotOf(m, DistanceUnit.Km), day, res)
 
-    // ── Store ────────────────────────────────────────────────────────────────
-
     @Test
     fun snapshotWriteReadRoundtrip() {
         val snap = widgetSnapshotOf(
@@ -95,7 +90,6 @@ class WidgetSnapshotTest {
         // The same snapshot again is no write and no widget update.
         assertFalse(WidgetSnapshotStore.write(ctx, snap))
         assertEquals(before + 1, WidgetSnapshotStore.revision.value)
-        // The file is versioned JSON.
         val text = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).readText()
         assertTrue(text, text.contains("\"version\":$WIDGET_SNAPSHOT_VERSION"))
         assertTrue(text, text.contains("\"kind\":\"Lift\""))
@@ -110,8 +104,6 @@ class WidgetSnapshotTest {
         assertNull(WidgetSnapshotStore.read(ctx))
         assertEquals(res.getString(app.milestone.R.string.widget_open_to_update), widgetFace(WidgetSnapshotStore.read(ctx), day, res).title)
     }
-
-    // ── Stale day ────────────────────────────────────────────────────────────
 
     @Test
     fun snapshotFromAnotherDayNeverShowsAsToday() {
@@ -178,8 +170,6 @@ class WidgetSnapshotTest {
         // Exactly at midnight: the following one, never now.
         assertEquals(expected + 24 * 3_600_000L + 3_600_000L, nextLocalMidnightMillis(expected, zone.toKotlinTimeZone()))
     }
-
-    // ── Content per state ────────────────────────────────────────────────────
 
     @Test
     fun liftDayShowsTitleItemsWeekAndTheTilesLogSet() {

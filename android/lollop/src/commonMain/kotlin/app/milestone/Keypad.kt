@@ -55,7 +55,6 @@ import kotlin.math.abs
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Corner shape of a raised keypad key (and the Done key under the grid). */
 private val KeypadKeyShape = RoundedCornerShape(10.dp)
 
 /** The smallest size (sp, the [Type.Title] size) a field's value figure steps
@@ -65,8 +64,7 @@ private const val ValueFigureStepSp = 2
 
 /** The value figure's style in [maxWidthPx]: [base] ([Type.Display]) while the
  *  figure fits one line, else stepped down to [ValueFigureFloorSp]; the flag is
- *  false when even the floor does not fit (the figure then wraps). Pure but for
- *  the measurer. */
+ *  false when even the floor does not fit (the figure then wraps). */
 private fun fittedValueStyle(
     measurer: androidx.compose.ui.text.TextMeasurer,
     text: String,
@@ -154,7 +152,7 @@ fun KeypadValueField(
             }
             // Steps only from a real displayed value: an empty (or unparseable)
             // buffer disables the keys rather than inventing a value from the range floor.
-            val base = parseKeypadNumber(text)
+            val base = text.toDoubleOrNull()
             adjustments.forEach { adj ->
                 // Spoken as the action with its unit ("Add 2.5 kg"), not a bare "+2.5".
                 val adjDesc = stringResource(
@@ -179,9 +177,9 @@ fun KeypadValueField(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    // The one choice-cell look (4% wash + hairline, 40dp visual) in
-                    // every calculator and the set editor; a disabled step (empty
-                    // field) stays flat, so it can't pass for a live key.
+                    // The one choice-cell look in every calculator and the set
+                    // editor; a disabled step (empty field) stays flat, so it can't
+                    // pass for a live key.
                     Box(
                         modifier = Modifier
                             .heightIn(min = ChipVisualHeight)
@@ -272,7 +270,6 @@ fun NumericKeypad(
         .testTag("numeric-keypad")
         .fillMaxWidth()
         .clip(RoundedCornerShape(Space.Card.dp))
-        // The palette's recessed ground, so it follows the resolved theme.
         .background(BgSunken)
         .padding(Space.Sm.dp)
     if (onDone != null && LocalKeypadBeside.current) {
@@ -304,7 +301,6 @@ fun NumericKeypad(
             ) {
                 row.forEach { key ->
                     if (key == '.' && !allowDecimal) {
-                        // Keeps the 3-column grid; nothing to tap or announce.
                         Spacer(Modifier.weight(1f))
                     } else {
                         KeypadKey(key, onKey, onBackspace, Modifier.weight(1f))
@@ -316,8 +312,6 @@ fun NumericKeypad(
     }
 }
 
-/** The keypad's "Done" key ([label]; TalkBack hears [description] when given):
- *  [onDone] folds the keypad away or moves on. */
 @Composable
 private fun DoneKey(onDone: () -> Unit, label: String, description: String?, modifier: Modifier) {
     Box(
@@ -377,7 +371,6 @@ fun KeypadPanel(
     Box(Modifier.bringIntoViewRequester(requester)) { content() }
 }
 
-/** One raised [NumericKeypad] key: a digit, the decimal point or backspace. */
 @Composable
 private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit, modifier: Modifier) {
     Box(
@@ -407,14 +400,12 @@ private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit,
     }
 }
 
-/** A keypad key face: 22sp Bold, tabular. */
 internal val KeypadKeyStyle = androidx.compose.ui.text.TextStyle(
     fontSize = 22.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
     fontFeatureSettings = "tnum", textDirection = AppTextDirection,
 )
 
-/** A raised keypad key's chrome: ≥48dp tall, rounded, on the elevated ground
- *  (a theme colour, so it reads the composition). */
+/** Composable: the elevated ground is a theme colour, read from the composition. */
 @Composable
 private fun Modifier.keypadKey(onClick: () -> Unit): Modifier = this
     .heightIn(min = ActionMinHeight)

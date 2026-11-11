@@ -14,10 +14,6 @@ use std::fmt::Write as _;
 
 use crate::sanitize::{positive_zero, sum0};
 
-// ---------------------------------------------------------------------------
-// Limits (File 07 "Sanity / QC")
-// ---------------------------------------------------------------------------
-
 /// Mean Earth radius (metres) for the haversine great-circle distance.
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
@@ -34,9 +30,6 @@ pub const MAX_PLAUSIBLE_SPEED_MPS: f64 = 12.0;
 /// The smallest move that counts as one (File 07, Apple pattern): a fix closer
 /// than this to the previous one is jitter.
 const GPS_MIN_MOVE_M: f64 = 2.5;
-
-/// The steepest vertical rate (m/s) the File 07 point-acceptance gate accepts.
-const MAX_VERTICAL_RATE_MPS: f64 = 5.0;
 
 /// Ground speed (m/s) below which a leg counts as stopped (File 07 auto-pause
 /// rule): it adds no moving time or distance.
@@ -67,10 +60,10 @@ fn gps_speed_plausible(speed_m_s: f64) -> bool {
 }
 
 /// GPS point-acceptance gate (Apple pattern, File 07): accept a new fix only if
-/// it moved ≥ [`GPS_MIN_MOVE_M`] AND the implied vertical rate is ≤
-/// [`MAX_VERTICAL_RATE_MPS`].
-fn gps_point_accept(distance_moved_m: f64, vertical_rate_m_s: f64) -> bool {
-    distance_moved_m >= GPS_MIN_MOVE_M && vertical_rate_m_s.abs() <= MAX_VERTICAL_RATE_MPS
+/// it moved ≥ [`GPS_MIN_MOVE_M`]. File 07's vertical-rate arm (≤ 5 m/s) never
+/// applies: fixes carry no altitude.
+fn gps_point_accept(distance_moved_m: f64) -> bool {
+    distance_moved_m >= GPS_MIN_MOVE_M
 }
 
 /// Stop detection for pace/load exclusion: below [`MIN_MOVING_SPEED_MPS`]
@@ -79,14 +72,9 @@ fn is_stopped(speed_m_s: f64) -> bool {
     speed_m_s < MIN_MOVING_SPEED_MPS
 }
 
-/// Whether a fix is accurate enough to use (within [`MAX_GPS_ACCURACY_M`]).
 fn accurate(p: &GpsPoint) -> bool {
     p.accuracy_m <= MAX_GPS_ACCURACY_M
 }
-
-// ---------------------------------------------------------------------------
-// Track geometry
-// ---------------------------------------------------------------------------
 
 /// One GPS fix from a run track. Deterministic core input: wall-clock time
 /// enters only as `observed_at` (unix seconds), never a live clock. Lat/lon in
@@ -241,7 +229,6 @@ pub fn track_positive_split_pct(points: &[GpsPoint], segment_starts: &[u32]) -> 
     if total <= 0.0 {
         return None;
     }
-    // First interior fix that reaches the halfway distance is the split point.
     let half = total / 2.0;
     let split = (1..usable.len() - 1).find(|&i| cumulative[i] >= half)?;
 
@@ -312,9 +299,6 @@ pub fn track_splits(points: &[GpsPoint], unit_m: f64, segment_starts: &[u32]) ->
     if usable.len() < 2 {
         return Vec::new();
     }
-    // Cumulative MOVING distance to each fix (a pause-bridge or below-floor leg
-    // adds nothing), so km-split boundaries and the total track the headline
-    // distance and the splits sum to it (see `cumulative_moving_m`).
     let cumulative = cumulative_moving_m(&usable, &is_start);
     let total = *cumulative.last().unwrap_or(&0.0);
     if total <= 0.0 {
@@ -324,7 +308,6 @@ pub fn track_splits(points: &[GpsPoint], unit_m: f64, segment_starts: &[u32]) ->
     let mut splits = Vec::new();
     let mut index = 1u32;
     let mut boundary = unit_m;
-    // Time accumulated into the CURRENT split since the last unit boundary.
     let mut moving_s = 0.0; // the split's pace clock (moving legs only)
     for i in 1..usable.len() {
         let leg_d = cumulative[i] - cumulative[i - 1];
@@ -376,7 +359,6 @@ pub fn track_splits(points: &[GpsPoint], unit_m: f64, segment_starts: &[u32]) ->
             moving_s += dt * ((cumulative[i] - pos) / leg_d);
         }
     }
-    // Final partial split: whatever remains after the last full unit.
     let remaining = total - unit_m * (index - 1) as f64;
     if remaining > 1e-6 {
         let dur = moving_s;
@@ -412,7 +394,6 @@ pub(crate) fn moving_legs(points: &[GpsPoint], segment_starts: &[u32]) -> Vec<(f
             usable_track(seg)
                 .windows(2)
                 .filter_map(|w| {
-                    // Cap distance so speed ≤ the plausible-runner ceiling.
                     leg(w[0], w[1]).map(|(dt, d)| (dt, d.min(MAX_PLAUSIBLE_SPEED_MPS * dt)))
                 })
                 .collect::<Vec<_>>()
@@ -499,16 +480,12 @@ pub fn track_variability_index(points: &[GpsPoint], segment_starts: &[u32]) -> O
     if dur <= 0.0 {
         return None;
     }
-    let avg = dist / dur; // moving distance ÷ moving time
+    let avg = dist / dur;
     if avg <= 0.0 {
         return None;
     }
     Some(((ns / avg) * 100.0).round() / 100.0)
 }
-
-// ---------------------------------------------------------------------------
-// QC pass (File 07 gates over a recorded track)
-// ---------------------------------------------------------------------------
 
 /// File 07 GPS quality gates over a fix track, applied BEFORE any distance /
 /// duration / split is derived. Returns the surviving fixes and the remapped
@@ -518,7 +495,7 @@ pub fn track_variability_index(points: &[GpsPoint], segment_starts: &[u32]) -> O
 /// undefined), an implied speed over [`MAX_PLAUSIBLE_SPEED_MPS`]
 /// ([`gps_speed_plausible`], impossible for a runner), and a move under
 /// [`GPS_MIN_MOVE_M`] ([`gps_point_accept`], the Apple jitter/auto-pause
-/// pattern; the vertical-rate arm passes 0.0 because fixes carry no altitude).
+/// pattern).
 /// Stops are judged over a [`StopWindow`], never leg by leg: a stop keeps one
 /// fix, so the leg into it is no move and the stride out of it
 /// ([`stride_out_start`]) is a normal moving leg.
@@ -632,7 +609,7 @@ fn qc_pass(points: &[GpsPoint], segment_starts: &[u32]) -> QcFixes {
             continue;
         }
         let dist_m = haversine_m(last, p);
-        if !gps_speed_plausible(dist_m / dt as f64) || !gps_point_accept(dist_m, 0.0) {
+        if !gps_speed_plausible(dist_m / dt as f64) || !gps_point_accept(dist_m) {
             continue;
         }
         out.push(p);
@@ -681,7 +658,7 @@ fn stop_window(points: &[GpsPoint], bounds: &[usize], from: usize, s: GpsPoint) 
                 last_standing,
             };
         }
-        if !gps_point_accept(d, 0.0) && leg(s, *q).is_none() {
+        if !gps_point_accept(d) && leg(s, *q).is_none() {
             last_standing = Some(j);
         }
     }
@@ -842,10 +819,6 @@ pub fn thin_track(n: usize, max_points: usize, starts: &[u32]) -> (Vec<usize>, V
     (kept, remapped)
 }
 
-// ---------------------------------------------------------------------------
-// GPX export
-// ---------------------------------------------------------------------------
-
 /// Nominal GNSS range error (m) a GPX `<hdop>` multiplies into a horizontal
 /// accuracy: the export writes `accuracy_m / 5` and the importer reads
 /// `hdop × 5` ([`hdop_accuracy_m`]), so a fix's accuracy round-trips.
@@ -947,11 +920,9 @@ fn xml_escape_into(out: &mut String, text: &str) {
     }
 }
 
-/// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC), pure integer math, no
-/// `chrono`, no clock. Uses Howard Hinnant's civil-from-days algorithm so it is
-/// correct across the whole proleptic Gregorian range. A year outside
+/// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC). A year outside
 /// 0000–9999 takes the ISO 8601 expanded form java.time's `Instant` writes and
-/// the shell's importer (`Gpx.kt` `parseImportTimeSec`) reads: an explicit sign
+/// the importer (`import::time::parse_import_time_sec`) reads: an explicit sign
 /// and at least four digits (`+10000-01-01T00:00:00Z`, `-0001-…`), never a bare
 /// five-digit year it would read as no timestamp.
 fn unix_to_rfc3339_utc(secs: i64) -> String {

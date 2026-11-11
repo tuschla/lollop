@@ -8,9 +8,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** The pure rules behind the set/run editors: the loop's double-tap guard, quick
- *  picks, timer-style run duration, the rest countdown, and which sets count as
- *  "today's" for the loop. */
 @RunWith(RobolectricTestRunner::class)
 class SetLoggingLogicTest {
 

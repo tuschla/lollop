@@ -89,7 +89,6 @@ fn set_credit(
     }
 }
 
-/// Whether a set fell short of the prescribed reps (or hold).
 fn short_of_target(it: &PrescriptionView, reps: u32, hold_sec: Option<u16>) -> bool {
     if it.timed_hold {
         hold_sec.unwrap_or(0) < it.hold_low_sec

@@ -30,7 +30,6 @@ pub(crate) fn parse_import_time_sec(raw: &str) -> i64 {
         .unwrap_or(0)
 }
 
-/// How an [`IsoStamp`] names its offset.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IsoOffset {
     None,
@@ -48,7 +47,6 @@ struct IsoStamp {
     day: i64,
     hour: i64,
     minute: i64,
-    /// `None` when the stamp has no seconds.
     second: Option<i64>,
     /// No fraction, or one of only zeros.
     whole_second: bool,

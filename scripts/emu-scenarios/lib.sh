@@ -2,7 +2,7 @@
 # Variables here (dates, AVD, FINISH, ...) are read by the scripts that source it.
 # shellcheck disable=SC2034
 # The device-test library of scripts/emulator-scenarios.sh, qa-emulator.sh,
-# soak-emulator.sh, monkey-gate.sh and scripts/emu-scenarios/{surfaces,upgrade}.sh
+# soak-emulator.sh and scripts/emu-scenarios/{surfaces,upgrade}.sh
 # (also usable from an interactive shell: `source scripts/emu-scenarios/lib.sh`).
 # The app's ids, file names, notification ids, actions and strings come from its
 # sources through contract.py (APP_ID, COMP, STR, RX, DEST, EVENT_LOG_FILE, ...).
@@ -34,8 +34,6 @@ KEEP_EMU=0
 # attributes logcat lines by them) and to $OUT/.phase (current_phase).
 PHASE_TAG="EMUSCN"
 
-# ── Output ───────────────────────────────────────────────────────────────────
-# out_init DIR: OUT=DIR with its shots/, ui/, logs/ and an empty checks.tsv.
 out_init() {
   OUT="$1"
   mkdir -p "$OUT"/{shots,ui,logs}
@@ -97,18 +95,14 @@ fmt() {
   printf '%s' "${s//%%/%}"
 }
 
-# ── Device ───────────────────────────────────────────────────────────────────
 adb_() { "$ADB" -s "$SERIAL" "$@"; }
 sh_() { adb_ shell "$@" 2>/dev/null | tr -d '\r'; }
 dev_now() { sh_ date +%s; }
 # "W H" of the display in pixels.
 screen_size() { sh_ wm size | sed -n 's/.*: *\([0-9]*\)x\([0-9]*\).*/\1 \2/p' | tail -1; }
-# epoch_day DAY: days since 1970-01-01 of the date DAY.
 epoch_day() { echo $(( $(TZ=UTC date -d "$1" +%s) / 86400 )); }
 
-# ── UI tree ──────────────────────────────────────────────────────────────────
-# The app window's UI tree (uiautomator dump, which first waits for the UI to go
-# idle; a dump that fails is retried 1 s later, up to 4 times).
+# The app window's UI tree (uiautomator dump first waits for the UI to go idle).
 dump_ui() {
   local x i
   for i in 1 2 3 4; do
@@ -195,7 +189,6 @@ scroll_to() {
 shot() { adb_ exec-out screencap -p >"$OUT/shots/$1.png" || log "screencap $1 failed"; }
 evidence() { shot "$1"; dump_ui >"$OUT/ui/$1.xml" || log "UI dump $1 failed"; }
 
-# ── App ──────────────────────────────────────────────────────────────────────
 focus() { sh_ dumpsys window | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^ }]*\)}.*/\1/p' | head -1; }
 _am_start() {
   local r; r="$(sh_ am start "$@")"
@@ -266,8 +259,6 @@ meminfo() { sh_ dumpsys meminfo "$APP_ID" | python3 "$HELP/parse.py" meminfo "$@
 # duration TEXT: seconds of the first duration in TEXT, -1 when none (parse.py).
 duration() { python3 "$HELP/parse.py" duration "$1"; }
 
-# ── App state ────────────────────────────────────────────────────────────────
-# wipe_app: no app data, the device baseline, permissions granted.
 wipe_app() {
   stop_feeder
   adb_ shell am force-stop "$APP_ID"
@@ -316,7 +307,6 @@ seed_basic() {
 EOF
 }
 
-# ── Set editor ───────────────────────────────────────────────────────────────
 open_set_editor() {
   tap_node eq "${STR[main_log]}" || return 1
   tap_node eq "${STR[main_log_set_title]}" || return 1
@@ -381,7 +371,6 @@ tap_log_set() {
   wait_for 10 sets_above "$n0"
 }
 
-# ── Run tracker ──────────────────────────────────────────────────────────────
 # Log › Track run (GPS): the tracker's pre-start screen.
 open_tracker() {
   tap_node eq "${STR[main_log]}" || return 1
@@ -419,7 +408,6 @@ finish_run() {
   return 0
 }
 
-# ── GPS feed ─────────────────────────────────────────────────────────────────
 # start_feeder NAME [TIMELINE T0]: feeder.py (its ellipse, or TIMELINE from host
 # time T0) until stop_feeder; log FEED_LOG=$OUT/logs/feed-NAME.log. Returns once
 # the first fix is fed.
@@ -440,7 +428,6 @@ stop_feeder() {
   FEEDER_PID=""
 }
 
-# ── System UI: home screen, notifications, Quick Settings tile, Today widget ─
 launcher() { sh_ cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1 | cut -d/ -f1; }
 launcher_up() { [[ "$(focus)" == "$(launcher)"* ]]; }
 # None of the app's activities is resumed, paused or between states: it is in
@@ -449,7 +436,6 @@ app_stopped() {
   ! sh_ dumpsys activity activities | sed -n "/Hist .*ActivityRecord{[^}]* $APP_ID\//,/state=/p" |
     grep -E 'state=(INITIALIZING|STARTED|RESUMED|PAUSING|PAUSED|STOPPING)' >/dev/null
 }
-# home: the launcher in front, the app in the background.
 home() {
   adb_ shell input keyevent 3
   wait_for 5 launcher_up || log "home: launcher not in front ($(focus))"
@@ -466,11 +452,11 @@ wdump() {
   return 1
 }
 wfind() { q "$2" "$3" <"$OUT/ui/$1.xml"; } # wfind DUMP MODE TEXT
-# notif NAME [ID]: the app's posted notifications (notif.py; the one with ID, `null`
-# when it is not posted), saved as logs/NAME-notif.{txt,json} and printed.
+# notif NAME ID: the app's notification ID (notif.py; `null` when it is not
+# posted), saved as logs/NAME-notif.{txt,json} and printed.
 notif() {
   sh_ dumpsys notification --noredact | tee "$OUT/logs/$1-notif.txt" |
-    python3 "$HELP/notif.py" "$APP_ID" "${2:-}" >"$OUT/logs/$1-notif.json"
+    python3 "$HELP/notif.py" "$APP_ID" "$2" >"$OUT/logs/$1-notif.json"
   cat "$OUT/logs/$1-notif.json"
 }
 # nfield NAME EXPR: EXPR (python, the notif() record bound to r) of logs/NAME-notif.json.
@@ -484,8 +470,6 @@ ocr_find() {
   tesseract "$OUT/shots/$1.png" - --psm 11 -l "$lang" tsv 2>/dev/null |
     awk -F'\t' -v w="$2" '$12 == w { print int($7 + $9 / 2), int($8 + $10 / 2); found = 1; exit } END { exit !found }'
 }
-# shade_open NAME: expand the notification shade and dump every window as
-# ui/NAME.xml once it is open.
 shade_open() {
   adb_ shell cmd statusbar expand-notifications
   wait_for 5 shade_expanded && wdump "$1"
@@ -653,7 +637,6 @@ widget_dp() {
   awk -v d="$d" '{ printf "%d %d\n", ($5 - $3) * 160 / d, ($6 - $4) * 160 / d }' <<<"$b"
 }
 
-# ── Monkey ───────────────────────────────────────────────────────────────────
 MONKEY_ACTIVE=0
 # monkey_run DIR SEED EVENTS THROTTLE CHUNK: a seeded monkey pass restricted to
 # the app, CHUNK events per monkey call (chunk N seeded SEED*1000+N), with System
@@ -704,7 +687,6 @@ monkey_checks() {
   [[ $escapes -eq 0 ]] || check INFO "$1" "$2: left the app" "$escapes chunk(s); relaunched ($3/escapes.txt)"
 }
 
-# ── Session ──────────────────────────────────────────────────────────────────
 EMU_PID=""
 LOGCAT_PID=""
 API=0
@@ -761,7 +743,6 @@ stop_emulator() {
   wait_for 15 _emu_gone || kill "$EMU_PID"
   wait "$EMU_PID"
 }
-# logcat_capture: append the device log to $OUT/logcat.txt in the background.
 logcat_capture() {
   adb_ logcat -v threadtime -b main,system,crash,events >>"$OUT/logcat.txt" 2>&1 &
   LOGCAT_PID=$!
@@ -813,7 +794,6 @@ session_end() {
   ! grep -q '^FAIL' "$OUT/checks.tsv"
 }
 
-# ── Device state ─────────────────────────────────────────────────────────────
 # pin_clock DAY [HH:MM[:SS]] [TZ]: the device clock and zone (default 08:00, $TZ0).
 pin_clock() {
   local tz="${3:-$TZ0}"

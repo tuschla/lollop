@@ -32,8 +32,6 @@ use super::*;
 use crate::fit::{self, FitError, FitTrack};
 use crux_core::bridge::{Bridge, JsonFfiFormat};
 
-// ── Environment knobs ───────────────────────────────────────────────────────
-
 fn env_u64(key: &str) -> Option<u64> {
     std::env::var(key).ok().and_then(|v| v.trim().parse().ok())
 }
@@ -41,8 +39,6 @@ fn env_u64(key: &str) -> Option<u64> {
 fn iters(default: usize) -> usize {
     env_u64("PARSER_FUZZ_ITERS").map_or(default, |n| n as usize)
 }
-
-// ── Panic capture (quiet, this thread only) ─────────────────────────────────
 
 thread_local! {
     static QUIET: Cell<bool> = const { Cell::new(false) };
@@ -74,8 +70,6 @@ fn guarded<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     QUIET.with(|q| q.set(false));
     out.map_err(|_| LAST_PANIC.with(|p| p.borrow().clone()))
 }
-
-// ── FIT encoding ────────────────────────────────────────────────────────────
 
 const FIT_EPOCH: i64 = 631_065_600; // unix seconds at 1989-12-31T00:00:00Z
 
@@ -372,8 +366,6 @@ fn fit_seeds() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-// ── The FIT reader, the ParseRunFile op's verdict and their invariants ──────
-
 /// What the FIT reader decides for some bytes, before the import's run gates.
 #[derive(Debug, Clone, PartialEq)]
 enum FitOutcome {
@@ -443,7 +435,7 @@ fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
         FitOutcome::Fail(e) => {
             let ok_ctx = match e {
                 FitError::NotARun(s) => !s.is_empty() && !s.contains('_'),
-                _ => e.context().is_empty(),
+                _ => true,
             };
             if !ok_ctx {
                 return Err(format!("bad error envelope {e:?}"));
@@ -480,15 +472,12 @@ fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
     if !consistent {
         return Err(format!("verdict {wire} for FIT outcome {first:?}"));
     }
-    // Same input, same answer.
     let again = guarded(|| decide(bytes)).map_err(|p| format!("PANIC on 2nd call: {p}"))?;
     if again != first {
         return Err(format!("nondeterministic: {first:?} then {again:?}"));
     }
     Ok(first)
 }
-
-// ── Mutators ────────────────────────────────────────────────────────────────
 
 const INTERESTING: [u8; 12] = [
     0x00, 0x01, 0x0C, 0x0E, 0x20, 0x40, 0x7F, 0x80, 0x9F, 0xE0, 0xFE, 0xFF,
@@ -577,8 +566,6 @@ fn hex_head(b: &[u8]) -> String {
     b.iter().take(48).map(|x| format!("{x:02x}")).collect()
 }
 
-// ── FIT tests ───────────────────────────────────────────────────────────────
-
 #[test]
 fn every_seed_parses_to_its_known_outcome() {
     let kinds: Vec<(&str, String)> = fit_seeds()
@@ -587,7 +574,8 @@ fn every_seed_parses_to_its_known_outcome() {
             let out = check_fit(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
             let kind = match &out {
                 FitOutcome::Track(t) => format!("track {} segs", t.segments.len()),
-                FitOutcome::Fail(e) => format!("{} {}", fit_kind(e), e.context()),
+                FitOutcome::Fail(FitError::NotARun(sport)) => format!("not_a_run {sport}"),
+                FitOutcome::Fail(e) => format!("{} ", fit_kind(e)),
             };
             (name, kind)
         })
@@ -894,8 +882,6 @@ fn a_developer_field_whose_size_is_not_a_multiple_of_its_type_keeps_the_rest_of_
     );
 }
 
-// ── GPX export ──────────────────────────────────────────────────────────────
-
 /// Minimal XML well-formedness for the export's own subset: balanced tags,
 /// quoted attributes, no raw `<`/`&` in text, no XML 1.0-illegal characters.
 fn xml_well_formed(doc: &str) -> Result<(), String> {
@@ -948,8 +934,9 @@ fn xml_well_formed(doc: &str) -> Result<(), String> {
 }
 
 /// Every `<trkpt>` lat/lon an xsd:decimal (no NaN/inf/exponent) in range, every
-/// `<time>` a UTC stamp the shell importer (java.time `Instant.parse`) reads: a
-/// four-digit year, or past 9999 the ISO 8601 expanded year with its `+` sign.
+/// `<time>` a UTC stamp the importer (`parse_import_time_sec`, java.time
+/// `Instant.parse` rules) reads: a four-digit year, or past 9999 the ISO 8601
+/// expanded year with its `+` sign.
 fn gpx_values_sane(doc: &str) -> Result<usize, String> {
     let mut n = 0;
     for pt in doc.split("<trkpt ").skip(1) {
@@ -1087,7 +1074,7 @@ fn gpx_export_track_name_with_xml_specials_stays_well_formed() {
 
 #[test]
 fn a_far_future_fix_the_importer_accepted_exports_a_time_it_can_read_back() {
-    // Gpx.kt's parseImportTimeSec reads "+10000-01-01T00:00:00Z" (java.time
+    // The importer's `parse_import_time_sec` reads "+10000-01-01T00:00:00Z" (java.time
     // ISO_INSTANT needs the sign past four digits), so such a run can be logged;
     // its export must name a time the same importer reads.
     let t0 = 253_402_300_800; // 10000-01-01T00:00:00Z
@@ -1111,7 +1098,7 @@ fn semicircle_track(n: usize, t0: i64) -> Vec<GpsPoint> {
 
 #[test]
 fn a_logged_track_survives_the_event_wire_bit_for_bit() {
-    // running.rs promises the export's shortest-decimal coordinates rebuild the
+    // `gps::export_gpx` promises its shortest-decimal coordinates rebuild the
     // route bit for bit (Undo, re-import). The shell re-sends those digits as
     // JSON numbers (kotlinx writes the shortest decimal; its parser is exact),
     // so the core's Event decode must read them back to the same f64.
@@ -1168,8 +1155,6 @@ fn a_logged_track_survives_the_event_wire_bit_for_bit() {
         moved.first()
     );
 }
-
-// ── trackFigures body ───────────────────────────────────────────────────────
 
 /// The bridge's `TrackFigures` op body: decode the event, preview the figures.
 fn track_figures(bytes: &[u8]) -> Result<(f64, f64), String> {
@@ -1253,8 +1238,6 @@ fn track_figures_refuses_malformed_json_without_panicking() {
         }
     }
 }
-
-// ── The JSON bridge (update / view) ─────────────────────────────────────────
 
 fn seed_events() -> Vec<String> {
     vec![

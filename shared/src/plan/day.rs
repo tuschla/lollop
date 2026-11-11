@@ -32,7 +32,6 @@ impl LiftDay {
             .unwrap_or(DayRegion::Full)
     }
 
-    /// The week's lift days before this one.
     pub(super) fn days_before(&self) -> &[DayRegion] {
         let regions = self.regions.as_slice();
         &regions[..self.slot.min(regions.len())]

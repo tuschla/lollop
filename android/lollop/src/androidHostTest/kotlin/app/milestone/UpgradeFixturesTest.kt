@@ -50,7 +50,10 @@ class UpgradeFixturesTest {
     val rule = createEmptyComposeRule()
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val versions = listOf("203ab56", "4728546", "901d239")
+
+    /** Every `<sha>.log.ndjson` in the fixture directory (scripts/upgrade-fixtures/generate.sh writes them). */
+    private val versions = File(REPO_ROOT, "shared/tests/fixtures/upgrade")
+        .list()!!.filter { it.endsWith(".log.ndjson") && '-' !in it }.map { it.removeSuffix(".log.ndjson") }.sorted()
 
     /** The day and offset the fixtures' expected views were taken at. */
     private val fixtureToday = Event.SetToday(20725, 7200)
@@ -74,7 +77,6 @@ class UpgradeFixturesTest {
         logFile.writeBytes(fixture("upgrade/$v.log.ndjson"))
     }
 
-    /** Boot the core over the log on disk, dated to the fixtures' day. */
     private fun bootCore(): SendResult {
         Core.restore(ctx)
         return Core.send(fixtureToday)

@@ -45,9 +45,8 @@ internal data class DestructiveAction(
 
 /**
  * The footer of every detail sheet (ui-sweep §0.5): a [PlainCard] of full-width
- * ≥56dp rows, each a 24dp `OnBgMuted` icon, a `Type.Body` label and a chevron when
- * it opens something, separated by `OnBgBody @8%` hairlines. The [destructive]
- * row comes last in `DangerText`, without a chevron, and confirms first.
+ * rows divided by hairlines, a chevron on each that opens something. The
+ * [destructive] row comes last, without a chevron, and confirms first.
  */
 @Composable
 internal fun ActionRows(
@@ -65,9 +64,8 @@ internal fun ActionRows(
             ActionRowLine(d.label, d.icon, destructive = true, d.testTag) { confirming = true }
         }
     }
-    destructive?.let { d ->
+    if (confirming) destructive?.let { d ->
         ClearConfirmDialog(
-            visible = confirming,
             title = d.confirmTitle,
             message = d.confirmMessage,
             confirmLabel = d.confirmLabel,
@@ -81,7 +79,6 @@ internal fun ActionRows(
 private fun ActionRowLine(
     label: String,
     icon: Painter,
-    // DangerText icon and label, no chevron (it confirms first).
     destructive: Boolean,
     tag: String?,
     onClick: () -> Unit,

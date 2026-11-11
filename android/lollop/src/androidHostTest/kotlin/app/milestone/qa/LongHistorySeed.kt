@@ -77,10 +77,9 @@ internal object LongHistorySeed {
     private const val HOME_LON = 13.405
     private const val M_PER_DEG_LAT = 111_195.0
 
-    /** Longest run of the history: 34.2 km = 21.25 mi, so it folds its splits in either unit. */
+    /** Longest run of the history: long enough in both km and mi to fold its splits. */
     const val LONGEST_KM = 34.2
 
-    /** Hybrid athlete: lifts 3×/week for strength, runs toward a half marathon. */
     fun profile(lb: Boolean, bodyweightKg: Double, effectiveFrom: Long?): Event = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
         liftGoal = LiftGoal.MaxStrength,
@@ -125,14 +124,12 @@ internal object LongHistorySeed {
         events += profile(lb, 84.0, first)
         events += Event.GeneratePlan(first)
 
-        // Blocked spans: a sharp knee (pain hold) and two illnesses; no training inside.
         val painStart = today - 410
         val painEnd = painStart + 9
         val illStart = today - 205
         val illEnd = illStart + 6
         val coldStart = today - 62
         val coldEnd = coldStart + 4
-        // A two-week holiday each summer.
         val holidays = listOf(today - 380 until today - 366, today - 15 - 365 * 2 until today - 365 * 2)
         fun blocked(day: Long) = day in painStart..painEnd || day in illStart..illEnd ||
             day in coldStart..coldEnd || holidays.any { day in it }
@@ -164,7 +161,6 @@ internal object LongHistorySeed {
             if (day == importAfterDay) {
                 imported.forEach { (ev, sr) -> events += ev; runs += sr }
             }
-            // A bodyweight update twice a year (a realistic profile edit).
             if ((day - first) % 182 == 90L) {
                 lastBodyweight = Math.round((lastBodyweight + rng.range(-1.5, 1.0)) * 10.0) / 10.0
                 events += profile(lb, lastBodyweight, day)
@@ -181,7 +177,6 @@ internal object LongHistorySeed {
             if (day == coldStart) events += Event.SubmitReadiness(ReadinessSignal.Illness, 1.0, at(day, 7, 30))
             if (day == coldEnd + 1) events += Event.ResolveHold(ReadinessSignal.Illness, at(day, 7, 30))
 
-            // Morning check-in on most days.
             if (rng.chance(0.7)) {
                 events += Event.SubmitCheckin(
                     observedAt = at(day, 7, rng.int(0, 20)),
@@ -197,7 +192,6 @@ internal object LongHistorySeed {
             if (blocked(day)) continue
 
             val wd = dow(day)
-            // ── Lifting: Mon / Wed / Fri, A-B-C rotation.
             if (wd == 0 || wd == 2 || wd == 4) {
                 val big = day == bigSessionDay
                 if (big || rng.chance(0.88)) {
@@ -211,7 +205,6 @@ internal object LongHistorySeed {
                     for ((exercise, base) in plan) {
                         val n = if (big) 4 else rng.int(3, 5)
                         val reps = if (exercise == "Plank") 1 else rng.int(3, 8)
-                        // ~45 % stronger over the span, with day-to-day noise.
                         val kg = if (base == 0.0) 0.0 else base * (1.0 + 0.45 * progress) * rng.range(0.96, 1.03)
                         val wire = if (base == 0.0) {
                             0.0
@@ -238,7 +231,6 @@ internal object LongHistorySeed {
                     }
                 }
             }
-            // ── Running: Tue / Thu easy-ish, Sat tempo, Sun long.
             val runKind: WorkoutType? = when (wd) {
                 1, 3 -> if (rng.chance(0.85)) WorkoutType.Easy else null
                 5 -> if (rng.chance(0.7)) WorkoutType.Tempo else null
@@ -260,7 +252,7 @@ internal object LongHistorySeed {
                     WorkoutType.LongRun -> rng.range(345.0, 365.0)
                     else -> rng.range(330.0, 375.0)
                 } * (1.0 - 0.06 * progress)
-                // Untagged ~15 %: the history card then titles it by weekday.
+                // An untagged run: the history card titles it by weekday.
                 val tag = if (rng.chance(0.15) && day != longestDay) null else runKind
                 val rpe = if (rng.chance(0.4)) rng.int(3, 8) else null
                 val manual = day != longestDay && rng.chance(0.2)
@@ -324,9 +316,9 @@ internal object LongHistorySeed {
     private data class Route(val points: List<GpsPoint>, val segmentStarts: List<Int>, val km: Double)
 
     /**
-     * A wandering route of [km] at about [paceSecPerKm] (±4 % per kilometre), one fix
-     * every [everySec] seconds; [pauseAt] (a share of the distance) inserts a 4-minute
-     * stop where recording resumes as a new segment (the tracker's pause boundary).
+     * A wandering route of [km] at about [paceSecPerKm], one fix every [everySec]
+     * seconds; [pauseAt] (a share of the distance) inserts a stop where recording
+     * resumes as a new segment (the tracker's pause boundary).
      */
     private fun route(rng: Lcg, start: Long, km: Double, paceSecPerKm: Double, everySec: Long, pauseAt: Double?): Route {
         val points = ArrayList<GpsPoint>()

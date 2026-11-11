@@ -85,7 +85,7 @@ internal const val LoopRepeatGuardMs = 800L
 
 /** Whether a loop Save tapped at [nowMillis] is a new set rather than a repeat
  *  tap of the save committed at [lastCommitMillis]. A clock that stepped back
- *  never blocks saving. Pure. */
+ *  never blocks saving. */
 internal fun loopSaveAccepted(lastCommitMillis: Long?, nowMillis: Long): Boolean {
     if (lastCommitMillis == null) return true
     val gap = nowMillis - lastCommitMillis
@@ -140,7 +140,6 @@ fun EditorScaffold(
     // second tap in that window would log a second fresh entry_id (a plain
     // `remember`, so it resets when a new editor is mounted).
     var submitted by remember { mutableStateOf(false) }
-    // Clock time of the last committed loop save, for the double-tap guard.
     var lastCommitAt by remember { mutableStateOf<Long?>(null) }
     val haptic = LocalHapticFeedback.current
     val label = actionLabel ?: stringResource(Res.string.main_save)
@@ -184,13 +183,9 @@ fun EditorScaffold(
                     modifier = Modifier
                         .fillMaxWidth()
                         .verticalScroll(scroll)
-                        // The end of the form clears the pinned action by a full
-                        // step, so the last field never sits flush against it.
                         .padding(top = Space.Sm.dp, bottom = Space.Lg.dp),
                     verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
                 ) { content() }
-                // While more form lies below, the content fades into the sheet
-                // ground above the pinned action instead of being cut hard.
                 if (scroll.canScrollForward) {
                     Box(
                         modifier = Modifier
@@ -201,14 +196,11 @@ fun EditorScaffold(
                     )
                 }
             }
-            // A full step between the pinned extras (the effort chips) and the
-            // primary, so the chips never sit flush on Save.
             Column(
                 modifier = Modifier.fillMaxWidth().padding(top = Space.Md.dp),
                 verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
             ) {
                 bottomExtra()
-                // The pinned primary action, tagged `editor-primary`.
                 primary()
             }
         }
@@ -220,8 +212,6 @@ fun EditorScaffold(
             EditorTitleRow(title, requestClose)
             content()
             bottomExtra()
-            // The same full-width primary at the end of the form as the pinned
-            // editors, so Save sits in one place in every editor.
             primary()
         }
     }
@@ -383,7 +373,7 @@ internal fun EditorSheet(
     }
 }
 
-/** An editor's top row: `ui-close` (a 48dp target) and the centered title. The
+/** An editor's top row: `ui-close` and the centered title. The
  *  primary action lives at the bottom, so the right side only balances the
  *  close box. */
 @Composable
@@ -432,7 +422,6 @@ fun ObservedAtRow(
     // The stamp a future pick was clamped to, so the row can say so instead of
     // silently moving it; a stamp set from outside (the next set) hides the note.
     var clampedTo by rememberSaveable { mutableStateOf<Long?>(null) }
-    // Clamp a picked instant to now and record whether it had to, then emit it.
     fun commit(dayMillis: Long, hour: Int, minute: Int) {
         val raw = localInstantSeconds(dayMillis, hour, minute)
         val now = AppClock.nowSec()
@@ -504,7 +493,6 @@ fun ObservedAtRow(
                     pendingDayUtcMillis = sel
                     showTime = true
                 } else {
-                    // Keep the entry's current local time-of-day.
                     val cur = Instant.fromEpochSeconds(epochSec).toLocalDateTime(TimeZone.currentSystemDefault())
                     commit(sel, cur.hour, cur.minute)
                 }
@@ -525,7 +513,7 @@ fun ObservedAtRow(
 }
 
 /** The DatePicker stamp (UTC midnight) of today's LOCAL calendar date at
- *  [nowMillis]: the latest day a log may be dated. Pure for a given [zone]. */
+ *  [nowMillis]: the latest day a log may be dated. */
 internal fun latestSelectableDayUtcMillis(nowMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
     Instant.fromEpochMilliseconds(nowMillis).toLocalDateTime(zone).date
         .atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
@@ -543,7 +531,7 @@ private fun formatObservedAt(epochSec: Long, withTime: Boolean, use24h: Boolean,
 }
 
 /** A quiet disclosure row ("More", "More details"): an Accent label with the
- *  shared row chevron, turned down while [expanded]. A whole-row ≥48dp target,
+ *  shared row chevron, turned down while [expanded]. A whole-row target,
  *  announced as expanded / collapsed. The caller renders the folded content. */
 @Composable
 internal fun ExpandRow(label: String, expanded: Boolean, onToggle: () -> Unit) =
@@ -551,7 +539,6 @@ internal fun ExpandRow(label: String, expanded: Boolean, onToggle: () -> Unit) =
         Text(label, color = Accent, style = Type.BodyBold)
     }
 
-/** The editors' flat field card: the elevated ground, fields a step apart. */
 @Composable
 internal fun FormCard(content: @Composable () -> Unit) {
     Card(

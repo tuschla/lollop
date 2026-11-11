@@ -4,7 +4,6 @@ import android.content.res.Resources
 import app.milestone.DayMark
 import app.milestone.HoldReason
 
-/** A widget state: the day snapshot and whether a GPS run records. */
 internal data class WidgetState(val snapshot: WidgetSnapshot, val recording: Boolean = false)
 
 /**

@@ -18,9 +18,7 @@
 //!
 //! **HARD RULE 3 — safety overrides goals.** The engine never programs through
 //! injury, under-fuelling or a medical red flag. Safety gates run before and
-//! above any goal logic, and the `schema::SafetyTier` ladder resolves competing
-//! signals in a fixed order: medical referral > pain > illness > objective
-//! performance > subjective multi-day > HRV trend > single-day marker. A
+//! above any goal logic, and `schema::SafetyTier` orders competing signals. A
 //! blocking tier blanks the prescription rather than softening it.
 //!
 //! **Determinism.** The core holds no clock, no randomness and no IO. Time
@@ -56,15 +54,5 @@ pub mod schema;
 pub mod strength;
 pub mod wire;
 
-pub use app::{
-    ActivityResultView, AdjustmentView, BaselineStatusView, E1rmRangeView, Effect, Engine,
-    FeedbackView, GradeDefView, GuidanceView, HrMaxView, HrZoneInputView, HypertrophyInputView,
-    IntervalVerdictView, LiftResultView, Model, PrescriptionView, ProgramSummaryView,
-    ProteinFigureView, ProteinInputView, RacePredictionView, ReadinessSignalView, RunResultView,
-    RunSplitView, SessionPlanView, SignalGroupView, SplitVerdictView, TodayHeadlineView,
-    TrainingLoadView, ViewModel, WhyView, YouthActivityView,
-};
-pub use crux_core::Core;
-pub use event::{ActivityKind, Decouple, EntryKind, Event, IntervalExec, LiftExec, SessionReview};
-pub use log::compact_event_log;
-pub use profile::{Profile, ResistanceModality};
+pub use app::{Engine, Model};
+pub use event::Event;

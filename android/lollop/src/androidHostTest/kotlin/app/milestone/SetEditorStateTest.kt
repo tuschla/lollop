@@ -7,7 +7,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** The set loop's pure field reducers ([SetEditorState]). */
 @RunWith(RobolectricTestRunner::class)
 class SetEditorStateTest {
 

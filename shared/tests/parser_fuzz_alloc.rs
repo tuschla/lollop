@@ -134,7 +134,6 @@ fn import(bytes: &[u8]) -> bool {
     shared::import::import_run_file(bytes).refusal.is_none()
 }
 
-/// The import cap in MB.
 const CAP_MB: usize = shared::import::MAX_RUN_IMPORT_BYTES as usize / (1024 * 1024);
 
 /// Heap per input byte the import may use: at the 32 MB cap this is a 512 MB

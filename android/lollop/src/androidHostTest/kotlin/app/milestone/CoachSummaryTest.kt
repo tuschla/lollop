@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /** The plain-text coach summary: the week window, per-day grouping, set folding
- *  and the user's units. Pure builder over a hand-made view. */
+ *  and the user's units, built from a hand-made view. */
 @RunWith(RobolectricTestRunner::class)
 class CoachSummaryTest {
 
@@ -26,7 +26,7 @@ class CoachSummaryTest {
     private fun day(y: Int, m: Int, d: Int) = LocalDate.of(y, m, d).toEpochDay()
     private fun at(day: Long, minute: Int = 0) = day * 86_400L + 43_200L + minute * 60L
 
-    /** Wednesday 2026-09-23. */
+    /** A Wednesday. */
     private val today = day(2026, 9, 23)
     private val monday = day(2026, 9, 21)
     private val lastMonday = day(2026, 9, 14)

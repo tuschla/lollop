@@ -23,7 +23,6 @@ import androidx.core.location.LocationManagerCompat
 
 internal actual fun platformRunTracker(): RunTracker? = ServiceRunTracker
 
-/** [RunTracker] over the [RunTrackingService] foreground service. */
 private object ServiceRunTracker : RunTracker {
     override fun hasLocationPermission(ctx: Context): Boolean = hasFineLocation(ctx)
 
@@ -91,7 +90,6 @@ private object ServiceRunTracker : RunTracker {
     override fun stop(ctx: Context) = RunTrackingService.stop(ctx)
 }
 
-/** The foreground service's notification grant and battery exemption. */
 private object ServiceGrants : RunServiceGrants {
     override fun canPostNotifications(ctx: Context): Boolean = app.milestone.canPostNotifications(ctx)
 

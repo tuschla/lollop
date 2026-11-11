@@ -57,13 +57,10 @@ class LayoutRegressionTest : UiProbeTest() {
         listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + runs(2) +
             Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning) + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning + 600)
 
-    /** Every text on screen, merged or not. */
     private fun screenTexts(): List<String> = allUnmergedRoots().flatMap { flatten(it) }.flatMap { n ->
         n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
     }
 
-    /** Log one rated work set of today's first lift (at [fallbackKg] without a plan
-     *  load) and return that lift. */
     private fun logFirstWorkSet(fallbackKg: Double): PrescriptionView {
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
         val at = QaHarness.daysAgoAtMidday(0)
@@ -155,7 +152,7 @@ class LayoutRegressionTest : UiProbeTest() {
         assertTrue("an untouched Save stores the shown $figure kg, got $saved", saved == figure.toDouble())
     }
 
-    /** Landscape (411dp tall) at 200 % font under a two-action hold banner: the top
+    /** Landscape at 200 % font under a two-action hold banner: the top
      *  chrome (the "lollop" wordmark) never lies over the bottom navigation, nor any
      *  text over another. */
     @Test
@@ -170,7 +167,7 @@ class LayoutRegressionTest : UiProbeTest() {
     }
 
     /** The pinned DO-NOT-TRAIN banner is never overlapped (INVARIANT 3): in
-     *  landscape at 100/150/200 % font on a 360dp- and a 411dp-tall phone, with a
+     *  landscape at each font scale on a short and a taller phone, with a
      *  two-action hold (illness + pain), no banner node (the card, any tap target's
      *  touch bounds, the "?") intersects the bottom nav or the Log button, and Log
      *  stays reachable. */
@@ -342,7 +339,7 @@ class LayoutRegressionTest : UiProbeTest() {
 
     /** The move day picker in landscape at 200 % font with the most target days a
      *  generated week offers (one run day: the long run may go to all four free
-     *  days): every target row scrolls whole (≥ 48dp) into the body between the
+     *  days): every target row scrolls whole into the body between the
      *  title and Cancel, and a tap on the last one moves the session there. */
     @Test
     fun moveDayPicker_landscapeFont200_reachesEveryTargetDay() {

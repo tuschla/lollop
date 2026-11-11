@@ -1,7 +1,7 @@
 //! Program synthesis: compose the graded band functions (`strength::dup_day_rx`,
 //! `strength::loading_rx`, `running::workout_rx`, `running::goal_week_plan`)
 //! into a dated [`Program`] of `Recommended<Prescription>` for ONE Mon..Sun
-//! week at 0-based `day` offsets. Pure and deterministic; `app/` maps the
+//! week at 0-based `day` offsets. `app/` maps the
 //! offsets to calendar days and applies readiness/safety downstream.
 //!
 //! 1. Shape: lift and run day counts on the athlete's weekdays (LIFT-DAYS-001,
@@ -46,6 +46,7 @@ pub(crate) use hypertrophy::{
     hypertrophy_block_targets, hypertrophy_week_targets, uses_double_progression,
 };
 pub(crate) use regions::{DayRegion, lift_template};
+pub use run::prescribed_run_km;
 pub(crate) use schedule::{
     DayLoad, MoveBlock, MoveConflict, SAME_MUSCLE_GAP_H, SpacingRule, move_conflict, move_options,
     session_load,
@@ -214,7 +215,7 @@ fn load_week_km(pp: &PlanProfile, anchors: &Anchors, week_index: u32, back: u32)
     let anchors = anchors.weeks_back(back);
     let plan = run_plan(pp, &anchors, week_index.saturating_sub(back));
     let (_, placement) = place(pp, &anchors, Some(&plan));
-    run::prescribed_km(
+    prescribed_run_km(
         &run_week_sessions(&plan, &placement.runs, pp.profile(), &anchors),
         &anchors,
     )
@@ -258,8 +259,6 @@ pub fn synthesize(pp: &PlanProfile, anchors: &Anchors, week_index: u32) -> Optio
         return None;
     }
 
-    // Run content first (kinds + volume, phase-aware), then the lift days and
-    // both sides placed (CAP-1 / CAP-3).
     let run_plan = (pp.shape().run_days > 0).then(|| run_plan(pp, anchors, week_index));
     let run_recovery = run_plan.as_ref().is_some_and(|p| p.recovery);
     let (lower_cap, placement) = place(pp, anchors, run_plan.as_ref());
@@ -300,14 +299,6 @@ pub fn synthesize(pp: &PlanProfile, anchors: &Anchors, week_index: u32) -> Optio
             sessions,
         },
     })
-}
-
-/// The run km a synthesized week prescribes, as the plan sizes a week: each
-/// run's main set, its jog-distance recoveries and its warm-up and cool-down,
-/// minutes counted at the athlete's accounting easy pace (`anchors`, the
-/// anchors the week was synthesized with).
-pub fn prescribed_run_km(program: &Program, anchors: &Anchors) -> f64 {
-    run::prescribed_km(&program.mesocycle.sessions, anchors)
 }
 
 /// The plan's first day as a weekday offset into the week being built (only
@@ -466,9 +457,8 @@ fn build_lift_sessions(week: &LiftWeek, lifts: &[(u16, LiftSpec)]) -> Vec<Sessio
             .collect()
     } else if double_progression(effective_goal, pp.profile()) {
         let hypertrophy_week = HypertrophyWeek::new(
-            pp.profile(),
+            pp,
             &week.anchors.lift,
-            pp.training_age(),
             week.block.week_in_block,
             week.block.block_weeks,
             week.regions.as_slice(),
@@ -547,7 +537,6 @@ fn apply_lift_week_modifiers(
         modifiers::apply_lower_cap(sessions, cap);
     }
 
-    // A meet taper replaces the calendar deload in the weeks it reaches.
     let taper_offset = meet_taper_offset(pp, week.anchors.week_start_epoch_day, || {
         sessions
             .iter()
@@ -663,8 +652,6 @@ pub(crate) enum ProgramFocus {
     Lifting(LiftGoal),
     /// Running only, toward the goal distance.
     Running(GoalDistance),
-    /// Neither lifting nor running.
-    Unplanned,
 }
 
 impl ProgramFocus {
@@ -677,12 +664,10 @@ impl ProgramFocus {
                 ProgramFocus::Calisthenics(profile.lift_goal)
             }
             (true, false) => ProgramFocus::Lifting(profile.lift_goal),
-            (false, true) => ProgramFocus::Running(profile.goal_distance),
-            (false, false) => ProgramFocus::Unplanned,
+            (false, _) => ProgramFocus::Running(profile.goal_distance),
         }
     }
 
-    /// The program's top-level goal.
     fn goal(self) -> Goal {
         match self {
             ProgramFocus::Hybrid(_) => Goal::Hybrid,
@@ -697,7 +682,6 @@ impl ProgramFocus {
                         distance_km: (m / 1000.0) as f32,
                     })
             }
-            ProgramFocus::Unplanned => Goal::GeneralEndurance,
         }
     }
 }
@@ -705,25 +689,22 @@ impl ProgramFocus {
 /// A representative registry claim for the whole program (drives the summary
 /// card's evidence chip). Always the dominant branch's own claim.
 pub fn summary_claim(pp: &PlanProfile) -> crate::evidence::ClaimId {
+    if !pp.lifts() {
+        return claims::RUN_WORKOUT_001;
+    }
+    if pp.plans_calisthenics() {
+        return claims::CAL_PROG_MECHANIC_001;
+    }
     let lift_goal = pp.profile().lift_goal;
-    match (pp.lifts(), pp.runs()) {
-        (true, _) => {
-            if pp.plans_calisthenics() {
-                return claims::CAL_PROG_MECHANIC_001;
-            }
-            if pp.training_age() == TrainingAge::Novice {
-                match lift_goal {
-                    LiftGoal::Power => claims::STR_PWR_001,
-                    _ => claims::STR_INTENT_001,
-                }
-            } else if lift_goal == LiftGoal::Hypertrophy {
-                claims::HYP_DEFAULT_PROG_001
-            } else {
-                claims::STR_DUP_001
-            }
+    if pp.training_age() == TrainingAge::Novice {
+        match lift_goal {
+            LiftGoal::Power => claims::STR_PWR_001,
+            _ => claims::STR_INTENT_001,
         }
-        (false, true) => claims::RUN_WORKOUT_001,
-        (false, false) => claims::HYP_MESO_STRUCT_001,
+    } else if lift_goal == LiftGoal::Hypertrophy {
+        claims::HYP_DEFAULT_PROG_001
+    } else {
+        claims::STR_DUP_001
     }
 }
 

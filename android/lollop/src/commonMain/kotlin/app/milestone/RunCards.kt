@@ -82,7 +82,6 @@ internal fun RunCard(r: RunResultView, nowMillis: Long, selected: Boolean = fals
                 color = OnBgBody,
                 modifier = Modifier.weight(1f),
             )
-            // The day once: no "2 days ago" chip beside "Saturday run".
             DateBadge(runDateChip(r, nowMillis))
         }
         // A GPS run with no usable fixes has no measurable zone/pace/distance -
@@ -97,13 +96,10 @@ internal fun RunCard(r: RunResultView, nowMillis: Long, selected: Boolean = fals
             color = OnBgBody,
             style = Type.Body.merge(TabularFigures),
         )
-        // The athlete's whole-session rating ("Effort 7/10"), once rated.
         RunEffortLine(r)
-        // Zone row, hidden when no HR was measured. No "?" here: the card's one
-        // disclosure is its findings "?" (the detail sheet explains HR zones).
+        // No "?" here: the card's one disclosure is its findings "?" (the detail
+        // sheet explains HR zones).
         RunHrRow(r, explain = false)
-        // Only the findings that ask for something (a real spike, a fading split,
-        // SAFETY); neutral notes and praise wait in the detail sheet.
         RunFindings(r, face = true)
         // The run's single most significant record ("Fastest 10K"): the core orders
         // the labels by distance.
@@ -258,7 +254,7 @@ internal data class SplitBar(val fraction: Float, val tone: SplitTone, val delta
  * full splits only the fastest is `Accent` (the rest `AccentFaint`), else every full
  * bar is; the partial split is its own tone. Fastest / Slowest tags only with 3+
  * full splits whose fastest and slowest paces read differently. A split without a
- * numeric pace gets an empty bar. Pure.
+ * numeric pace gets an empty bar.
  */
 internal fun splitBars(splits: List<RunSplitView>): List<SplitBar> {
     val timed = splits.filter { it.seconds_per_unit > 0 }
@@ -303,7 +299,6 @@ internal fun splitDeltaLabel(deltaSec: Int): String {
     return "$sign${a / 60}:${zeroPad(a % 60)}"
 }
 
-/** The partial split's length in [unit]: its end minus the previous split's end. */
 private fun partialLength(splits: List<RunSplitView>, i: Int, unit: DistanceUnit): Double {
     val prevKm = if (i > 0) splits[i - 1].distance_km else 0.0
     return metersToDisplay((splits[i].distance_km - prevKm) * 1000.0, unit)
@@ -321,7 +316,6 @@ internal fun partialIndexLabel(length: Double): String = when ((length * 4).roun
 private const val SplitsShownFolded = 10
 private const val SplitsFoldAt = 20
 
-/** Height of a split row. */
 private val SplitRowHeight = 40.dp
 
 /** Minimum width of the split index column. */
@@ -331,8 +325,8 @@ private val SplitIndexWidth = 24.dp
  * The run's SPLITS (spec §2.5): the core's pacing verdict with its "?", then one
  * row per split: index, pace, a speed bar on a full-length track ([splitBars]) and
  * the delta versus the average full split (the partial split shows its distance),
- * with Fastest / Slowest beside their deltas. 20 or more splits show the first 10
- * and "Show all N splits". Each row is one spoken group.
+ * with Fastest / Slowest beside their deltas. [SplitsFoldAt] or more splits show the
+ * first [SplitsShownFolded] and "Show all N splits". Each row is one spoken group.
  */
 @Composable
 internal fun RunSplitsSection(run: RunResultView, splits: List<RunSplitView>, unit: DistanceUnit) {
@@ -440,10 +434,8 @@ internal fun RunSplitsSection(run: RunResultView, splits: List<RunSplitView>, un
     }
 }
 
-/** Height of a split bar and its track. */
 private val SplitBarHeight = 10.dp
 
-/** Opacity of the partial split's `OnBgFaint` bar. */
 private const val PartialBarAlpha = 0.3f
 
 /** "Split 1, 8 minutes 22 seconds per mile, 1 second faster than average,
@@ -502,6 +494,6 @@ private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
     }
 }
 
-/** Floor of a split bar's domain, as a fraction of the slowest split's pace. */
+/** Floor of a split bar's domain, as a fraction of the slowest split's speed. */
 const val SplitBarBaseline = 0.85f
 

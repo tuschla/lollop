@@ -22,9 +22,9 @@ import kotlin.math.ceil
  * [RunStructureView] becomes an ordered list of [RunStep]s (warm-up → rep k of N
  * with recovery between → cool-down → strides, or the run/walk bouts of a beginner
  * session). [RunStepMachine] walks them on two clocks the tracker already has:
- * ACTIVE time (monotonic, frozen while paused) and the live run distance. Pure: no
- * Android, no SystemClock; the foreground service feeds it `elapsedRealtime` and
- * [RunSession.distanceKm], so it keeps stepping with the screen off.
+ * ACTIVE time (monotonic, frozen while paused) and the live run distance. No
+ * platform API: [RunRecorder] feeds it (through [RunSession]) the host's monotonic
+ * clock and [RunSession.distanceKm], so it keeps stepping with the screen off.
  */
 internal enum class RunStepKind { WarmUp, Main, Rep, Recovery, CoolDown, Stride, StrideRecovery, Run, Walk }
 
@@ -135,8 +135,6 @@ internal class RunStepMachine(val steps: List<RunStep>, nowMs: Long, distanceM: 
         var changed = false
         while (!finished) {
             val step = steps[index]
-            // An open step (null) never auto-ends; a bounded one ends once its time
-            // or distance is used up.
             if (stepEnd(step) != true) break
             completeCurrent(boundaryActiveMs(step), boundaryDistanceM(step))
             changed = true

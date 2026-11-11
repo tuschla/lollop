@@ -54,7 +54,6 @@ class OwnerThemeJourneyTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    /** A theme swatch card: a radio-button card named by the theme's name. */
     private fun swatch(t: AppTheme) = hasText(t.name) and isSelectable()
 
     /** The "Use system accent color" row (the whole row is the switch). */
@@ -85,7 +84,6 @@ class OwnerThemeJourneyTest {
         rule.waitForIdle()
     }
 
-    /** Exactly [selected] is the picked swatch, and the accent switch reads [accentOn]. */
     private fun assertAppearance(selected: AppTheme, accentOn: Boolean) {
         scrollTo(swatch(selected))
         AppTheme.entries.forEach { t ->
@@ -97,7 +95,6 @@ class OwnerThemeJourneyTest {
 
     @Test
     fun freshInstall_startsOnPaperWithSystemAccent_andThemeChoiceCouplesTheAccent() {
-        // A true first run: no event log, no saved theme, guided setup on screen.
         assertFalse(File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule)
@@ -109,7 +106,6 @@ class OwnerThemeJourneyTest {
         rule.waitForIdle()
         openProfile()
 
-        // The fresh-install default.
         assertAppearance(AppTheme.Paper, accentOn = true)
 
         // Rose / Iris / Meadow each turn the accent OFF, even after the user turned it

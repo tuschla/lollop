@@ -21,9 +21,6 @@ pub struct ContestedQuestion {
     pub other_side: Option<&'static str>,
 }
 
-/// Declares [`ContestedId`] with one variant per row and
-/// [`CONTESTED_QUESTIONS`] in variant order; a row's id string is its name
-/// spelled with dashes (`CQ_F10_01` → `"CQ-F10-01"`).
 macro_rules! contested_questions {
     ($($id:ident { $($field:tt)* }),* $(,)?) => {
         /// Compile-checked id of one contested question.
@@ -41,7 +38,6 @@ macro_rules! contested_questions {
                 }
             }
 
-            /// The question this id names.
             pub fn question(self) -> &'static ContestedQuestion {
                 &CONTESTED_QUESTIONS[self as usize]
             }

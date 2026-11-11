@@ -63,7 +63,7 @@ internal fun LollopApp(openRequest: OpenRequests) {
  * Boot found the core unusable ([DurableCore.probe]): say so instead of rendering an
  * empty model as a fresh install. Nothing here can dispatch an event (the core
  * refuses them anyway, [DurableCore.unavailable]); the one action is the raw-log
- * export, which reads the durable log in pure Kotlin ([exportDataTo]), so the
+ * export, which reads the durable log in pure Kotlin ([readDataExport]), so the
  * user's data can leave the phone before an update or reinstall.
  */
 @Composable

@@ -101,16 +101,13 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Gap between the controls of one control row. */
 private val ControlGap = (Space.Md + Space.Sm).dp
 
 /** Least room between a [ControlPill]'s label and each of its rounded ends. */
 private val ControlPillLabelRoom = Space.Card.dp
 
-/** A [ControlPill]'s label style. */
 private val ControlPillLabel = Type.Body.copy(fontWeight = FontWeight.ExtraBold)
 
-/** Diameter of a status-pill dot. */
 private val StatusDotSize = 8.dp
 
 /** How often the status pill re-ages the last fix while its state can still change. */
@@ -279,8 +276,7 @@ internal fun DiscardRunCircle(enabled: Boolean = true, onClick: () -> Unit) {
 }
 
 /** The wide pill on the control row: [primary] is the Accent-filled main action
- *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary.
- *  The label keeps [ControlPillLabelRoom] from each rounded end. */
+ *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary. */
 @Composable
 internal fun ControlPill(
     label: String,
@@ -508,7 +504,6 @@ internal fun startGatesCaptionRes(precise: Boolean, moving: Boolean): StringReso
     else -> Res.string.track_gates_caption_none
 }
 
-/** Before Start: the planned run the tracker will follow, with its targets. */
 @Composable
 private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
     val res = currentResources()
@@ -524,7 +519,6 @@ private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
     }
 }
 
-/** The elevated card the plan preview and the live step guide share. */
 @Composable
 private fun PlanCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
@@ -557,7 +551,6 @@ internal fun RunGuideCard(item: PrescriptionView, progress: StepProgress?, onSki
     }
 }
 
-/** The guided run's current step, what is left of it, and the step after it. */
 @Composable
 private fun RunStepCard(res: PlatformResources, progress: StepProgress, onSkip: () -> Unit) {
     PlanCard {
@@ -606,7 +599,6 @@ private fun RunStepCard(res: PlatformResources, progress: StepProgress, onSkip: 
     }
 }
 
-/** A guided-run step's countdown: 28sp/32sp ExtraBold, tabular. */
 internal val CountdownStyle = androidx.compose.ui.text.TextStyle(
     fontSize = 28.sp, lineHeight = 32.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
     fontFeatureSettings = "tnum", textDirection = AppTextDirection,

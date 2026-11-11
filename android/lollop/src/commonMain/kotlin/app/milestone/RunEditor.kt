@@ -37,7 +37,6 @@ import app.milestone.resources.track_log_hr_avg
 import app.milestone.resources.track_log_hr_bpm
 import org.jetbrains.compose.resources.stringResource
 
-/** Run analog of [setEditEvent]: fresh [Event.LogRun] or an [Event.AmendRun]. */
 private fun runEditEvent(
     initial: RunResultView?,
     distanceKm: Double,
@@ -57,19 +56,15 @@ private fun runEditEvent(
     else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
-/** Which numeric field the run editor's shared keypad currently edits. */
 private enum class RunField { Distance, Duration, HeartRate }
 
-/** The run editor's distance ceiling, km. */
 private const val RunDistanceMaxKm = 100.0
 
-/** The distance field's ceiling in [unit]: 100 km, or that limit on the field's
- *  0.01 mi grid (62.14 mi, which saves as 100.00 km), so a ± chip or a prefill at
- *  the ceiling stays valid. */
+/** The distance field's ceiling in [unit]: the km limit, or that limit rounded to
+ *  the field's 0.01 mi grid, so a ± chip or a prefill at the ceiling stays valid. */
 internal fun runDistanceMax(unit: DistanceUnit): Double =
     if (unit == DistanceUnit.Mi) (kmToMi(RunDistanceMaxKm) * 100.0).roundOrZero() / 100.0 else RunDistanceMaxKm
 
-/** The run editor's duration ceiling, minutes (10 h). */
 private const val RunDurationMaxMin = 600.0
 
 /** Average heart-rate entry bounds: a floor shared by bpm and % of max, and the
@@ -107,8 +102,6 @@ fun LogRunEditor(
     // typed mi figure as km.
     val unit = rememberSaveable { EventDispatcher.model.value.distanceUnit() }
     var distText by rememberSaveable {
-        // km-native prefill is lossless; mi shows the converted %.2f figure. A blank
-        // buffer (a fresh entry with nothing to seed) stays empty.
         mutableStateOf(
             initial?.let {
                 if (unit == DistanceUnit.Mi) formatFixed(kmToMi(it.distance_km), 2)
@@ -118,7 +111,6 @@ fun LogRunEditor(
     }
     // Lossless untouched-prefill for distance, mirroring weightFresh: a mi entry
     // the user never edits must re-emit the stored km verbatim (km→mi→km drifts).
-    // Flips false on the first distance edit.
     var distFresh by rememberSaveable { mutableStateOf(initial != null) }
     // Duration is typed like a timer: h:mm:ss filling right to left ("14530" reads
     // 1:45:30). The digit buffer is exactly what is displayed and parsed at Save.
@@ -155,11 +147,9 @@ fun LogRunEditor(
     var hrText by rememberSaveable {
         mutableStateOf((loggedBpm ?: loggedPct)?.let { fmtLosslessPrefill(it) } ?: "")
     }
-    val hrParsed = parseKeypadNumber(hrText)
+    val hrParsed = hrText.toDoubleOrNull()
     val hrMax = if (bpmMode) RunAvgHrMaxBpm else CoreConstants.HR_PCT_MAX_CEILING
-    // Blank is a legitimate "no HR"; anything typed must be in range.
     val hrValid = hrText.isBlank() || (hrParsed != null && hrParsed in RunHrMin..hrMax)
-    // Whole-session effort (CR-10), optional; prefilled from the row when editing.
     var sessionRpe by rememberSaveable { mutableStateOf(initial?.session_rpe) }
     var observedAt by rememberSaveable {
         mutableStateOf(
@@ -167,14 +157,11 @@ fun LogRunEditor(
         )
     }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    // User-declared run-intent label. Optional; null = untagged, which the
-    // editor never fabricates. Prefilled from the row when editing, and from
-    // the planned run a new entry logs.
     var workoutType by rememberSaveable {
         mutableStateOf(if (initial != null) initial.workout_type else plannedType)
     }
 
-    val distParsed = parseKeypadNumber(distText)
+    val distParsed = distText.toDoubleOrNull()
     val durParsed = durationDigitsToMin(durDigits)
     val distMax = runDistanceMax(unit)
     val distValid = distParsed != null && distParsed in 0.0..distMax
@@ -203,8 +190,6 @@ fun LogRunEditor(
             if (distParsed != null && durParsed != null) {
                 val ev = runEditEvent(
                     initial,
-                    // Canonical km on the wire: a mi entry converts at the save
-                    // boundary via miToKmWire (km entry passes through exact).
                     distanceKm = runSaveDistanceKm(initial, distFresh, unit, distParsed),
                     durationMin = if (initial != null && durFresh) initial.duration_min else durParsed,
                     hrPctMax = if (bpmMode || hrText.isBlank()) 0.0 else hrParsed ?: 0.0,
@@ -233,8 +218,6 @@ fun LogRunEditor(
             fresh = false
             dirty = true
         }
-        // The shared keypad, right under the field it types into. Distance takes a
-        // decimal; the h:mm:ss digits and the HR number don't.
         val keypadUnder: @Composable (RunField) -> Unit = { field ->
             KeypadPanel(keypadOpen && active == field, alsoReveal = fieldRequesters.getValue(field)) {
                 when (field) {
@@ -283,7 +266,6 @@ fun LogRunEditor(
                 )
             }
             keypadUnder(RunField.Duration)
-            // Typed on the shared keypad too, like distance and duration.
             Box(Modifier.bringIntoViewRequester(fieldRequesters.getValue(RunField.HeartRate))) {
                 KeypadValueField(
                     stringResource(Res.string.track_log_hr_avg),
@@ -342,7 +324,7 @@ internal fun runSaveDistanceKm(
 /** Timer-style duration digits → minutes. Digits fill right to left: the last two
  *  are seconds, the two before minutes, the rest hours ("14530" = 1:45:30 =
  *  105.5 min). Null when empty, when seconds reach 60, or when minutes reach 60
- *  under an hours field (with no hours, "9000" reads 90:00 = 90 min). Pure. */
+ *  under an hours field (with no hours, "9000" reads 90:00 = 90 min). */
 internal fun durationDigitsToMin(digits: String): Double? {
     val (h, m, s) = hmsDigits(digits) ?: return null
     if (s >= 60 || (h > 0 && m >= 60)) return null
@@ -350,13 +332,13 @@ internal fun durationDigitsToMin(digits: String): Double? {
 }
 
 /** A stored duration (minutes) as a timer digit buffer, rounded to the second
- *  ("105.5" → "14530"); "" for zero. Pure. */
+ *  ("105.5" → "14530"); "" for zero. */
 internal fun minutesToDurationDigits(min: Double): String =
     secondsToHmsDigits((min * 60.0).roundOrZero().coerceIn(0L, 359_999L).toInt())
 
 /** Apply one keypad key to a duration digit buffer: digits append (no leading
  *  zero, at most hhmmss), the decimal point is ignored. [replaceAll] starts a
- *  fresh number, like [editNumericBuffer]. Pure. */
+ *  fresh number, like [editNumericBuffer]. */
 internal fun editDurationDigits(digits: String, key: Char, replaceAll: Boolean): String {
     if (!key.isDigit()) return digits
     val base = if (replaceAll) "" else digits
@@ -376,9 +358,8 @@ private val RunTypeOrder = listOf(
 )
 
 /**
- * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]:
- * Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only; [onSelect]
- * gets the tapped type, and the caller toggles a re-tapped type off.
+ * The run's type as single-select chips under its [FieldLabel]. USER DATA only;
+ * [onSelect] gets the tapped type, and the caller toggles a re-tapped type off.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

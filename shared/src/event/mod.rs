@@ -102,7 +102,9 @@ pub enum Event {
     /// `observed_at` is ignored from now on, so the baseline rebuilds from the
     /// new source. Only HRV is affected; the other check-in items stay. The
     /// latest restart wins; `ClearCheckins` also resets it.
-    RestartHrvBaseline { observed_at: i64 },
+    RestartHrvBaseline {
+        observed_at: i64,
+    },
     /// Log one completed lift set (weight in kg, reps, session RPE).
     LogSet {
         exercise: String,
@@ -124,7 +126,6 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         hold_sec: Option<u16>,
     },
-    /// Drop all logged sets.
     ClearSets,
     /// Mark a plan exercise ended early for a session day, or reopen it.
     /// Last-write-wins per `rules::end_marker_key` (movement, `epoch_day`);
@@ -215,7 +216,6 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         utc_offset_sec: Option<i64>,
     },
-    /// Drop all logged runs.
     ClearRuns,
     /// Log one other activity (sport, cycling, a PE lesson…) of moderate or
     /// harder effort, for the under-18 WHO activity card (YOUTH-PA-001).
@@ -404,7 +404,9 @@ pub enum Event {
     /// Accept a synthesized training plan: the user tapped "Plan
     /// my training". `start_epoch_day` anchors the block; the `Program` is
     /// re-derived in `view()` from profile + logged anchors (determinism).
-    GeneratePlan { start_epoch_day: i64 },
+    GeneratePlan {
+        start_epoch_day: i64,
+    },
     /// Drop the plan (Coach returns to no-plan state).
     ClearPlan,
     /// The shell's clock as event data: today's LOCAL epoch-day, sent

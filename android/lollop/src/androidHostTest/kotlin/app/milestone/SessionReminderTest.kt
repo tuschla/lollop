@@ -79,8 +79,6 @@ class SessionReminderTest {
         RunSession.markStopped()
     }
 
-    // ── Fixtures ─────────────────────────────────────────────────────────────
-
     private val liftItems = listOf(
         WidgetItem(WidgetItemKind.Lift, "Back squat", "3 × 5 @ 100 kg"),
         WidgetItem(WidgetItemKind.Lift, "Bench press", "3 × 8 @ 60 kg"),
@@ -113,8 +111,6 @@ class SessionReminderTest {
         app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().remove(AndroidReminder.KEY_REMINDED_DAYS).commit()
     }
 
-    // ── Next time ────────────────────────────────────────────────────────────
-
     @Test
     fun nextFireIsTheNextLocalTimeInTheZone() {
         val berlin = ZoneId.of("Europe/Berlin").toKotlinTimeZone()
@@ -129,8 +125,6 @@ class SessionReminderTest {
         // A time the spring-forward jump skips moves forward by the gap.
         assertEquals(millis("2026-03-29T03:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-03-29T01:00", "Europe/Berlin"), 2 * 60 + 30, berlin))
     }
-
-    // ── Scheduling ───────────────────────────────────────────────────────────
 
     @Test
     fun offByDefaultWithNoAlarm() {
@@ -158,7 +152,6 @@ class SessionReminderTest {
         assertEquals(SessionReminderReceiver::class.java.name, op.savedIntent.component?.className)
         assertEquals(AndroidReminder.ACTION_FIRE, op.savedIntent.action)
 
-        // A new time replaces the alarm.
         SessionReminder.setMinuteOfDay(app, 18 * 60 + 15)
         val b = alarms().single()
         val now = AppClock.nowMillis()
@@ -167,7 +160,6 @@ class SessionReminderTest {
 
         SessionReminder.setEnabled(app, false)
         assertTrue(alarms().isEmpty())
-        // Back on: the chosen time stays.
         SessionReminder.setEnabled(app, true)
         assertEquals(18 * 60 + 15, SessionReminder.setting(app).minuteOfDay)
     }
@@ -212,8 +204,6 @@ class SessionReminderTest {
         val next = alarms().single().triggerAtTime
         assertTrue(next > AppClock.nowMillis())
     }
-
-    // ── What it posts ────────────────────────────────────────────────────────
 
     @Test
     fun liftDayPostsTitleLineAndLogFirstSet() {
@@ -308,8 +298,6 @@ class SessionReminderTest {
         assertNull(posted())
     }
 
-    // ── An earlier snapshot's days ahead ─────────────────────────────────────
-
     private fun yesterday(
         kind: WidgetDayKind = WidgetDayKind.Rest,
         age: Long = 1,
@@ -328,7 +316,6 @@ class SessionReminderTest {
         assertEquals("Log first set", posted()!!.actions.single().title.toString())
         nm.cancelAll()
         forgetRemindedDays()
-        // A run day ahead, from a lift day's snapshot a week old.
         store(yesterday(kind = WidgetDayKind.Lift, age = 7, ahead = listOf(WidgetAheadDay(today, WidgetDayKind.Run, "Easy run 8 km", runItems))))
         fire()
         assertEquals(OpenDest.Track.wire, destOf(posted()!!.actions.single().actionIntent))
@@ -371,12 +358,9 @@ class SessionReminderTest {
         assertEquals(WidgetDayKind.Run, s.ahead[0].kind)
         assertEquals(WidgetItem(WidgetItemKind.Run, detail = "8 km", pace = "5:40–6:00 /km", figure = true), s.ahead[0].items.single())
         assertEquals(WidgetDayKind.Lift, s.ahead[1].kind)
-        // Paused: nothing ahead.
         val held = widgetSnapshotOf(model.copy(hold_reason = HoldReason.Pain, today_surface = TodaySurfaceView(state = TodayState.Paused)), DistanceUnit.Km, zone = "Europe/Berlin")
         assertTrue(held.ahead.isEmpty())
     }
-
-    // ── A newer snapshot ─────────────────────────────────────────────────────
 
     @Test
     fun doneSessionOrAPlanChangeTakesThePostedReminderDown() {
@@ -404,7 +388,6 @@ class SessionReminderTest {
     @Test
     fun aChangedSessionRedrawsAShownReminderAndNoneIsPostedUnasked() {
         SessionReminder.setEnabled(app, true)
-        // A snapshot write alone never posts.
         store(liftDay())
         assertNull(posted())
         fire()
@@ -423,8 +406,6 @@ class SessionReminderTest {
         assertNull(posted())
         assertTrue(alarms().isEmpty())
     }
-
-    // ── Stale reminders ──────────────────────────────────────────────────────
 
     /** "Start run" opens the tracker; an action tap does not auto-cancel the
      *  notification, so the reminder must go once the run records (the reminder
@@ -599,9 +580,6 @@ class SessionReminderTest {
         assertNull("Thursday's reminder on Friday", posted())
     }
 
-    // ── Days ahead from the real core ────────────────────────────────────────
-
-    /** Fire the reminder at 07:30:30 UTC on [day] from [snapshot], the one the app last wrote. */
     private fun fireOn(day: Long, snapshot: WidgetSnapshot) {
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         TestClock.offsetMillis = day * 86_400_000L + (7 * 60 + 30) * 60_000L + 30_000L - System.currentTimeMillis()
@@ -610,7 +588,7 @@ class SessionReminderTest {
         fire()
     }
 
-    /** Set up on Sunday 2025-11-09 (calisthenics) and train that day's session; the
+    /** Set up on a Sunday (calisthenics) and train that day's session; the
      *  app is not opened on Monday. In its own week Tuesday is a rest day, so the
      *  reminder must not post on Tuesday. */
     @Test
@@ -641,7 +619,7 @@ class SessionReminderTest {
         }
     }
 
-    /** A hybrid 10K plan set up on Friday 2025-11-14; the app is last opened on
+    /** A hybrid 10K plan set up on a Friday; the app is last opened on
      *  Sunday, whose long run is still open, and not on Monday. Monday has an easy
      *  run: Sunday's snapshot carries it from the core's next week, so Monday's
      *  reminder posts. */

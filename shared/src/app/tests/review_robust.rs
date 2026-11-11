@@ -763,7 +763,7 @@ fn review_spike_card_and_gate_agree_on_a_sub_50m_baseline() {
 /// an empty `f64` sum when the week has no threshold/interval run, and an
 /// empty float sum is -0.0 (rustc 1.96), so the "within weekly limits" row
 /// could print "threshold -0.0, intervals -0.0". Every report sum goes through
-/// `weekly_report::sum0` (`+ 0.0`).
+/// `sanitize::sum0` (`+ 0.0`).
 #[test]
 fn review_weekly_report_never_prints_negative_zero() {
     let app = Engine;
@@ -920,8 +920,6 @@ fn review_extreme_days_never_panic_the_view() {
     );
 }
 
-// ── Standing guards of the fixes a fuzz seed alone used to catch ────────────
-
 /// Log `entries` (kind, entry id, stamp, its log event) after `setup`, then
 /// delete each entry and log it again (the shell's Undo, which re-pushes the
 /// row at the tail): every Undo must render the view byte for byte as
@@ -965,7 +963,7 @@ fn undo_each_entry_diffs(
 /// (`RunFacts::chrono`), never in storage order: these minutes put the share
 /// at exactly 87.5 %, where the float sum order decides the printed digit
 /// (storage order after an Undo of the first run sums to 87.49999999999999,
-/// "87%", vs "88%"). Replaces the `FUZZ_SEED=0x33fb24393cdfcb91` replay.
+/// "87%", vs "88%").
 #[test]
 fn undo_of_a_run_keeps_the_weekly_easy_share() {
     let setup = vec![set_today_ev(D0), Event::SetProfile(running_profile())];
@@ -1013,8 +1011,7 @@ fn undo_of_a_run_keeps_the_weekly_easy_share() {
 /// `entry_id`), never the later-stored one: two 12 km runs today after a
 /// 10 km run seven weeks ago. The earlier 12 km has no 30-day baseline (no
 /// praise); the later one would (the earlier is its baseline), so a storage-
-/// order tie flips the feedback card on an Undo. Replaces the
-/// `FUZZ_SEED=0xbcf5ea6d20e1a264` replay.
+/// order tie flips the feedback card on an Undo.
 #[test]
 fn undo_of_a_tied_longest_run_keeps_the_feedback() {
     let setup = vec![set_today_ev(D0), Event::SetProfile(running_profile())];
@@ -1045,8 +1042,7 @@ fn undo_of_a_tied_longest_run_keeps_the_feedback() {
 
 /// The lift trend takes no ratio over a prior 4-week best under
 /// `MIN_RATIO_BASE_KG` (a corrupt-log subnormal or near-zero weight), which
-/// would print "up inf%" or "up 856000%". Replaces the
-/// `FUZZ_SEED=0x9c8af499c8f7b82f` replay.
+/// would print "up inf%" or "up 856000%".
 #[test]
 fn a_near_zero_prior_best_never_reads_as_a_trend() {
     // 80 kg is the control: a real prior best does read as a trend here.

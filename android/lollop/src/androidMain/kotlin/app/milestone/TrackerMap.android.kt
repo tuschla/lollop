@@ -49,7 +49,6 @@ private class OsmLiveMap(ctx: Context, palette: Palette) : LiveMapSurface {
         intrinsicHeight = (sizeDp * density).toInt()
     }
 
-    /** An [outer] disc with an [inner] disc inset [MARKER_RING_DP] inside it. */
     private fun ringIcon(outer: Color, outerDp: Float, inner: Color, innerDp: Float): LayerDrawable {
         val inset = (MARKER_RING_DP * density).toInt()
         return LayerDrawable(arrayOf(circle(outer, outerDp), circle(inner, innerDp)))
@@ -58,8 +57,6 @@ private class OsmLiveMap(ctx: Context, palette: Palette) : LiveMapSurface {
 
     private fun locationDotIcon(palette: Palette) = ringIcon(palette.bgTop, DOT_OUTER_DP, palette.accent, DOT_INNER_DP)
 
-    /** [RouteMarker] start: the halo in the route's casing colour, the `Accent` ring
-     *  disc, then the `BgElevated` centre, each layer inset inside the one before. */
     private fun startRingIcon(palette: Palette): LayerDrawable {
         val halo = RouteMarker.Halo.value
         val ring = RouteMarker.StartRing.value

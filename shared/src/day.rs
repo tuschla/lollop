@@ -1,7 +1,6 @@
 //! Day bucketing for wire `observed_at` stamps: the one calendar convention
 //! every module shares.
 
-/// Seconds per day: the one deterministic day bucket every module shares.
 pub(crate) const DAY_SEC: i64 = 86_400;
 
 /// LOCAL epoch day for a UTC `observed_at` shifted by `offset` seconds. The one

@@ -78,9 +78,6 @@ OUT_DIR="$HOME/.cache/emu-surfaces/$AVD/$(date +%Y%m%d-%H%M%S)"
 [[ -e "$OUT_DIR" ]] && { echo "output folder exists: $OUT_DIR" >&2; exit 2; }
 out_init "$OUT_DIR"
 
-# ── Device state ─────────────────────────────────────────────────────────────
-# Seeds (seed_basic "$SEED_DAY" 2 is the default profile: 2 run days, a squat
-# and a 5 km run on Sun SEED_DAY, so Mon run, Tue rest, Wed lift).
 # seed_basic plus a pain report on DAY 07:30: training paused.
 seed_hold() { # seed_hold DAY
   seed_basic "$SEED_DAY" 2
@@ -109,7 +106,6 @@ reseed() {
 }
 snap_stale() { [[ "$(snap_field stale)" == True ]]; }
 
-# ── Screens ──────────────────────────────────────────────────────────────────
 # Which app screen is in front: today | log | track | log_set (the open intent's
 # destinations) | other | none.
 screen() {
@@ -126,7 +122,6 @@ on_screen() { [[ "$(screen)" == "$1" ]]; }
 wait_screen() { wait_for "${2:-10}" on_screen "$1"; } # wait_screen NAME [seconds]
 # Close the set editor with its X (not "Done for now").
 editor_x() { tap_node eq "${STR[main_close]}" 2 && dismiss_editor; }
-# The UI tree's root is wider than tall.
 landscape() { dump_ui | grep -o 'bounds="\[0,0\]\[[0-9]*,[0-9]*\]"' | head -1 | awk -F'[],[]' '{ exit !($5 > $6) }'; }
 portrait() { ! landscape; }
 screen_off() { ! screen_on; }
@@ -139,7 +134,6 @@ notif_is() { notif "$1" "$2" >/dev/null; [[ "$(nfield "$1" "r['extras'].get('$3'
 # notif_clock NAME ID: its chip text (android.shortCriticalText) is a running time.
 notif_clock() { notif "$1" "$2" >/dev/null; [[ $(duration "$(nfield "$1" "r['extras'].get('android.shortCriticalText')")") -gt 0 ]]; }
 
-# ── Tile helpers (tile_label, add_tile in lib.sh) ────────────────────────────
 tap_tile() { # tap_tile DUMP LABEL (QS already open from tile_label)
   local r p
   r="$(tile_node "$1" "$2")" || return 1
@@ -171,7 +165,6 @@ tile_case() {
   adb_ shell cmd statusbar collapse
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
 sc_links() {
   local S=links d want s ex
   fresh "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
@@ -312,7 +305,6 @@ sc_tilelock() {
   tilelock_case lift-day "${STR[tile_log_set]}" log_set
 }
 
-# ── Widget (place_widget, widget_texts in lib.sh) ────────────────────────────
 # widget_tap NAME LABEL WANT-SCREEN
 widget_tap() {
   local S=widget s
@@ -390,7 +382,6 @@ sc_widget() {
     eval '! grep -qxF "text=${STR[widget_open_to_update]}" <<<"$t" && if ((dated)); then grep -qiF "$rest_date" <<<"$t"; else grep -qxF "text=${STR[widget_rest_day]}" <<<"$t"; fi'
 }
 
-# ── Run notification ─────────────────────────────────────────────────────────
 sc_run() {
   local S=run c1 c2 t1 t2 t0 RUN=$RUN_NOTIF_ID
   fresh "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
@@ -419,7 +410,6 @@ sc_run() {
   wait_for 30 notif_is run-wait "$RUN" android.title "${STR[track_notif_recording_title]}"
   expect $S "moving feed starts the armed run" "title '${STR[track_notif_recording_title]}' after ~$((SECONDS - t0))s of feed" \
     test "$(nfield run-wait "r['extras'].get('android.title')")" = "${STR[track_notif_recording_title]}"
-  # Two chip readings 10 s apart, the first 8 s into the run.
   sleep 8
   c1="$(chip run-chip-1)"; sb_shot run-chip-1; notif run-rec-1 "$RUN" >/dev/null
   sleep 10
@@ -503,7 +493,6 @@ sc_guided() {
   open_tracker || { check FAIL $S "open tracker" "failed"; return; }
   wait_text re "${RX[track_pill_fresh_lock]}|^${STR[track_cd_pill_fresh_lock]}\$" 20; evidence guided-tracker
   tap_node eq "${STR[track_btn_start]}" || { check FAIL $S "start run" "no Start"; return; }
-  # 12 s into the guided run.
   wait_text eq "${STR[track_btn_stop]}" 20; sleep 12
   home
   notif guided "$RUN" >/dev/null
@@ -524,7 +513,6 @@ sc_guided() {
   stop_feeder
 }
 
-# ── Rest timer ───────────────────────────────────────────────────────────────
 # The rest notification's line: "Next: Set N of M · …".
 NEXT_SET_RX="^$(fmt log_rest_notif_next "$(fmt log_set_header_n_of_n '[0-9]+' '[0-9]+')")"
 rest_done_posted() { notif_is "$1" "$REST_DONE_NOTIF_ID" android.title "${STR[log_rest_notif_done_title]}"; }
@@ -545,7 +533,6 @@ sc_rest() {
   editor_x
   home
   wait_for 5 eval 'notif rest-1 "$REST_NOTIF_ID" | grep -qv "^null$"'
-  # Two chip readings 6 s apart.
   c1="$(chip rest-chip-1)"; sb_shot rest-chip-1
   sleep 6
   c2="$(chip rest-chip-2)"; sb_shot rest-chip-2
@@ -587,7 +574,6 @@ sc_rest() {
   fi
 }
 
-# ── Rest-done alert with the app in the background ───────────────────────────
 # The app process: "frozen" (cgroup v2 freezer), "cached" (a cch entry in the
 # LRU list), "gone" or "alive".
 proc_state() {
@@ -670,7 +656,6 @@ sc_restbg() {
   sh_ appops set "$APP_ID" SCHEDULE_EXACT_ALARM default
 }
 
-# ── Live Updates toggle ──────────────────────────────────────────────────────
 promo_settings() {
   adb_ shell am start -a android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS --es android.provider.extra.APP_PACKAGE "$APP_ID" >/dev/null
   wait_for 5 settings_up
@@ -753,7 +738,6 @@ sc_toggle() {
   home
 }
 
-# ── Session reminder ─────────────────────────────────────────────────────────
 REM_ID=$REMINDER_NOTIF_ID
 REM_PIN=1234
 REM_ALARM=""
@@ -787,7 +771,6 @@ else:
 print(day["title"], line, act, sep="\t")
 PY
 }
-# The first open lift of the stored snapshot's day.
 rem_open_lift() { snapshot | python3 -c "import json,sys;print(next(i['name'] for i in json.load(sys.stdin)['items'] if i['kind']=='Lift' and not i['done']))"; }
 rem_set_line() { echo "{\"LogSet\":{\"exercise\":\"$1\",\"weight_kg\":$2,\"reps\":$3,\"rpe\":8.0,\"observed_at\":$4,\"entry_id\":${4}000}}"; }
 # seed_basic plus the lift day's sets from 06:00, all but the last Cable row set.
@@ -914,7 +897,6 @@ rem_lock() {
     "before the PIN: '${bouncer:-action not tapped}'; after: screen '$s'; action on shots/$d.png; logs/rem-lock-bouncer-window.txt shots/rem-lock*.png shots/rem-lock-unlocked.png" \
     eval '[[ "$bouncer" == *KeyguardShowing=true* && "$bouncer" != "not shown"* && "$s" == "$want" ]]'
 }
-# reboot_device: reboot, wait for the boot and adbd as root, restart the logcat capture.
 reboot_device() {
   adb_ reboot
   wait_for 60 eval '! _booted'
@@ -1133,7 +1115,6 @@ sc_reminder() {
   if [[ "$want" == "$LIFT_DAY 07:45" ]]; then rem_case reboot "$LIFT_DAY" "$w" keep; else rem_case reboot "$LIFT_DAY" "$w"; fi
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 trap session_cleanup EXIT
 config_run
 config apk "$APK ($(date -r "$APK" -Is))"

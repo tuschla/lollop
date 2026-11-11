@@ -34,7 +34,6 @@ private const val PROFILE =
         """"goal_distance":"FiveK","concurrent_goal":"Strength","weekly_sets":12,""" +
         """"running_days_per_week":3,"running_km_per_week":30.0,"advanced":false}}"""
 
-/** One logged set with a unique entry id. */
 private fun setEvent(entryId: Int): String =
     """{"LogSet":{"exercise":"Back Squat","weight_kg":100.0,"reps":5,"rpe":8.0,""" +
         """"observed_at":1725904800,"entry_id":$entryId,"hold_sec":null}}"""

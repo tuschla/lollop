@@ -5,7 +5,7 @@
   track LOG             JSON facts of the last LogRunTrack: points, first/last
                         observed_at, max_gap_s, observed_at, segment_starts,
                         utc_offset_sec (moving figures: the core's, via
-                        shared/tests/track_figures_of_record.rs)
+                        shared/examples/track_figures)
   canon LOG             every event re-serialized with sorted keys, one per line,
                         in log order (SetToday — the shell clock — dropped)
 """

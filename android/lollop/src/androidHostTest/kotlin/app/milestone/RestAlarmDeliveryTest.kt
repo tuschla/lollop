@@ -53,9 +53,6 @@ class RestAlarmDeliveryTest {
     private fun alarm() = shadowOf(am).scheduledAlarms.single()
     private fun deliver(intent: Intent) = RestEndReceiver().onReceive(app, intent)
 
-    /** One rest-end alarm, [restSec] from [before] (elapsed realtime), waking the
-     *  device and allowed while idle, sent to [RestEndReceiver] as an immutable
-     *  broadcast. */
     private fun assertRestEndAlarm(a: ShadowAlarmManager.ScheduledAlarm, before: Long, after: Long, restSec: Int) {
         assertEquals(AlarmManager.ELAPSED_REALTIME_WAKEUP, a.type)
         assertTrue("trigger ${a.triggerAtTime} is the rest end", a.triggerAtTime in (before + restSec * 1000L)..(after + restSec * 1000L))
@@ -127,7 +124,6 @@ class RestAlarmDeliveryTest {
         // The saved "Rest timer alert" off is read in the fresh process.
         assertFalse(AppSettings.restAlert.value)
 
-        // The saved rest is used up: a repeated broadcast posts nothing.
         nm.cancelAll()
         deliver(fired)
         assertNull(posted())
@@ -164,7 +160,6 @@ class RestAlarmDeliveryTest {
 
         assertEquals(restDone, title(shadowOf(nm).getNotification(AndroidIds.REST_DONE_NOTIFICATION)))
         assertEquals(1, shadowOf(nm).allNotifications.size)
-        // A new rest or cancel still clears the alert.
         RestAlarm.cancel(app)
         assertEquals(0, shadowOf(nm).allNotifications.size)
     }
@@ -209,8 +204,6 @@ class RestAlarmDeliveryTest {
         assertEquals(resting, title(posted()))
     }
 
-    // ── The set loop's one-time notice ──
-
     @Test
     fun theNoticeIsShownOnceAndStaysDismissed() {
         ShadowAlarmManager.setCanScheduleExactAlarms(false)
@@ -220,7 +213,6 @@ class RestAlarmDeliveryTest {
         assertFalse(RestAlarm.exactAlarmPrompt.value)
         RestAlarm.schedule(app, 90, "Back squat")
         assertFalse("not again", RestAlarm.exactAlarmPrompt.value)
-        // Nor in a later process.
         AppRuntime.resetForTest(clock = TestClock)
         RestAlarm.schedule(app, 90, "Back squat")
         assertFalse("not after a restart", RestAlarm.exactAlarmPrompt.value)

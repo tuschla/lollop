@@ -53,8 +53,8 @@ class RunSaveCriticalSectionTest {
             try {
                 runSaveCriticalSection(
                     send = {
-                        sendStarted.complete(Unit) // signal: persist is in flight
-                        releaseSend.await()        // ...and suspended, like a slow JNI call
+                        sendStarted.complete(Unit)
+                        releaseSend.await()        // suspended, like a slow JNI call
                         order.add("send")
                     },
                     clearSidecar = { order.add("clear") },
@@ -68,18 +68,15 @@ class RunSaveCriticalSectionTest {
             }
         }
 
-        sendStarted.await() // wait until the persist is genuinely suspended
+        sendStarted.await()
         job.cancel()        // rotation cancels the calling scope mid-save
         releaseSend.complete(Unit) // the non-cancellable JNI send returns
         job.join()
 
-        // Persist ran, THEN the sidecar clear, THEN the session reset: the whole
-        // teardown completed despite the cancellation, and in order.
         assertEquals("persist + teardown all ran, in order", listOf("send", "clear", "reset"), order)
         // The regression itself: a cancellation must NEVER be treated as a failed
         // save (that re-shows Save/Discard for a logged run → duplicate / phantom).
         assertFalse("cancellation is not a save failure", failureCalled)
-        // It propagates as cancellation, is not swallowed.
         assertTrue(
             "cancellation re-thrown, not swallowed: ${propagated?.javaClass?.simpleName}",
             propagated is kotlinx.coroutines.CancellationException,
@@ -110,15 +107,9 @@ class RunSaveCriticalSectionTest {
         )
 
         assertTrue("persist failure routes to the failure path", failureCalled)
-        // The sidecar + session are untouched, so the captured run is still there to
-        // retry: clear/reset/finish never ran.
         assertEquals("no teardown on a failed persist", listOf("send"), order)
     }
 
-    /**
-     * (c) Happy path (no cancellation): persist, clear, reset, then navigate, in
-     * that exact order, and the failure path is never taken.
-     */
     @Test
     fun happyPathRunsSendThenClearThenResetThenFinish() = runTest {
         val order = Collections.synchronizedList(mutableListOf<String>())
@@ -165,7 +156,7 @@ class RunSaveCriticalSectionTest {
                         sends.incrementAndGet()
                     },
                     clearSidecar = {},
-                    resetSession = { saving.value = false }, // reset() releases the claim
+                    resetSession = { saving.value = false },
                     finish = {},
                     onFailure = { saving.value = false },
                 )
@@ -174,9 +165,9 @@ class RunSaveCriticalSectionTest {
         }
 
         assertTrue("first entry wins the claim", enter())
-        sendStarted.await()                                 // the winner's send is in flight
+        sendStarted.await()
         assertFalse("second entry during the in-flight save is rejected", enter())
-        releaseSend.complete(Unit)                          // let the persist finish
+        releaseSend.complete(Unit)
         scope.coroutineContext[Job]!!.children.forEach { it.join() }
         assertEquals("exactly one send despite two entries", 1, sends.get())
         assertFalse("flag released after the save resolved", saving.value)
@@ -197,7 +188,7 @@ class RunSaveCriticalSectionTest {
             claimSaving(saving, ownsSaving = true),
         )
         assertFalse("a non-owning entry against a held flag loses", claimSaving(saving, ownsSaving = false))
-        saving.value = false // reset() releases
+        saving.value = false
         assertTrue("released flag can be re-claimed", claimSaving(saving))
     }
 
@@ -225,7 +216,7 @@ class RunSaveCriticalSectionTest {
                 send = { order.add("send") },
                 clearSidecar = { order.add("clear") },
                 resetSession = {
-                    saving.value = false // reset() releases the claim
+                    saving.value = false
                     order.add("reset")
                 },
                 finish = { order.add("finish") },

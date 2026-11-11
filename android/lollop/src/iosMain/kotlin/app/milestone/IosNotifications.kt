@@ -119,7 +119,7 @@ private val delegate by ProcessLocal { NotificationDelegate() }
 
 /**
  * Install the delegate (a tap on a notification opens its destination,
- * [requestOpen]) and register the reminder's actions ([IosReminder.start]).
+ * [requestOpen]) and register the reminder's actions. Called from [IosReminder.start].
  */
 internal fun installNotificationDelegate() {
     val center = notificationCenter

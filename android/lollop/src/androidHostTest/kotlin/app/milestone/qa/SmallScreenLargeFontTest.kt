@@ -44,9 +44,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * The owner journeys on the smallest common phone width (320dp) at the largest
- * system font scale (200 %) and the common enlarged one (130 %), over the REAL
- * core. On every screen of every journey: no action spills off either edge, no
+ * The owner journeys on the smallest common phone width at the largest system
+ * font scale and the common enlarged one, over the REAL core. On every screen of
+ * every journey: no action spills off either edge, no
  * text is cut off (ellipsis, height clip, an unwrapped line wider than its box),
  * no two actions overlap, every action keeps a 48dp target, every action of the
  * screen can be brought into view (and is not left under the floating Log
@@ -71,13 +71,10 @@ class SmallScreenLargeFontTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    // ── Layout checks ───────────────────────────────────────────────────────
-
     private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
     private fun dp(px: Float) = with(rule.density) { px.toDp().value }
 
-    /** Every layout problem on the current screen, each naming its node. */
     private fun layoutProblems(): List<String> {
         rule.waitForIdle()
         val out = mutableListOf<String>()
@@ -147,8 +144,6 @@ class SmallScreenLargeFontTest {
             ?: n.config.getOrNull(SemanticsProperties.TestTag)
             ?: "node#${n.id}").let { "\"${it.take(40)}\"" }
 
-    /** The layout dropped text: lines past maxLines or below a height clip, an
-     *  ellipsis, or an unwrapped line wider than its box. */
     private val TextLayoutResult.cutsOffText: Boolean
         get() = didOverflowHeight ||
             (0 until lineCount).any { isLineEllipsized(it) } ||
@@ -165,7 +160,6 @@ class SmallScreenLargeFontTest {
         fontFamilyResolver = layoutInput.fontFamilyResolver,
     ).lineCount
 
-    /** A line-capped (maxLines) wrapping text needs more lines than it may show. */
     private fun TextLayoutResult.needsMoreLinesAt(widthPx: Int): Boolean =
         layoutInput.softWrap && layoutInput.maxLines != Int.MAX_VALUE && linesAt(widthPx) > layoutInput.maxLines
 
@@ -183,7 +177,6 @@ class SmallScreenLargeFontTest {
     private fun Rect.encloses(o: Rect) =
         o.left >= left - 1f && o.top >= top - 1f && o.right <= right + 1f && o.bottom <= bottom + 1f
 
-    /** Layout problems seen along the journey, "[where] problem". */
     private val problems = mutableListOf<String>()
 
     private fun record(where: String, found: List<String>) {
@@ -247,7 +240,6 @@ class SmallScreenLargeFontTest {
         return r.id
     }
 
-    /** The three tabs: whole, ≥48dp, inside the window, and each one switches. */
     private fun assertTabsWholeAndWorking(where: String) {
         val tabs = listOf(R.string.main_dest_today, R.string.main_dest_history, R.string.main_dest_profile)
         val window = rule.onAllNodes(isRoot()).fetchSemanticsNodes()[0].boundsInRoot
@@ -262,7 +254,6 @@ class SmallScreenLargeFontTest {
         assertTrue("[$where] tab labels: $navCut", navCut.isEmpty())
     }
 
-    /** Switch to [tab] by tapping it; the tap lands (the tab turns selected). */
     private fun goTo(tab: Int) {
         rule.onNode(hasText(str(tab)) and hasClickAction()).performClick()
         rule.waitForIdle()
@@ -279,21 +270,17 @@ class SmallScreenLargeFontTest {
 
     private fun fabWidthDp() = dp(rule.onNode(logFab).fetchSemanticsNode().boundsInRoot.width)
 
-    // ═══════════════ Today + the Log FAB + the chooser ═════════════════════
-
     private fun todayAndChooser(scale: Float) {
         useFont(scale)
         QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         assertClean("today top")
         assertTabsWholeAndWorking("today")
-        // Extended "+ Log" at the top, inside the screen.
         val window = rule.onAllNodes(isRoot()).fetchSemanticsNodes()[0].boundsInRoot
         val fabTop = rule.onNode(logFab).fetchSemanticsNode().boundsInRoot
         assertTrue("the Log FAB fits the 320dp screen: $fabTop", fabTop.left >= window.left && fabTop.right <= window.right + 1f)
         val extended = fabWidthDp()
         assertTrue("extended FAB at the top (${extended}dp)", extended > 60f)
-        // Every action on Today can be reached and is not left under the FAB.
         assertEveryActionReachable(
             "today",
             hasClickAction() and hasAnyAncestor(hasScrollToIndexAction()),
@@ -306,7 +293,6 @@ class SmallScreenLargeFontTest {
         val lastBottom = listNode.children.map { it.boundsInRoot }.filter { it.height > 0f }.maxOf { it.bottom }
         val fab = rule.onNode(logFab).fetchSemanticsNode().boundsInRoot
         assertTrue("the last row (${dp(lastBottom)}dp) clears the Log FAB (${dp(fab.top)}dp)", lastBottom <= fab.top + 1f)
-        // The chooser: every row reachable, nothing cut or overlapping.
         rule.onNode(logFab).performClick()
         rule.waitUntil(10_000) { rule.onAllNodes(hasText(str(R.string.main_report_pain)) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
         assertClean("chooser")
@@ -321,8 +307,6 @@ class SmallScreenLargeFontTest {
     /** Also the week strip's day-type label "Rest" cut to "Res". */
     @Test fun todayAndChooser_font130() = todayAndChooser(1.3f)
 
-    // ═══════════════ The set loop ═════════════════════════════════════════
-
     private fun setLoop(scale: Float) {
         useFont(scale)
         QaHarness.seedStrengthHistory(ctx)
@@ -334,7 +318,6 @@ class SmallScreenLargeFontTest {
         ).performScrollTo().performClick()
         rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("editor-primary")).fetchSemanticsNodes().isNotEmpty() }
         assertClean("set loop")
-        // The pinned primary is whole and on screen without a scroll.
         val primary = rule.onNode(hasTestTag("editor-primary")).fetchSemanticsNode()
         assertEquals("the loop's primary is whole", primary.size.height.toFloat(), primary.boundsInRoot.height, 1f)
         assertEveryActionReachable("set loop", hasClickAction() and hasAnyAncestor(hasTestTag("effort-scale")))
@@ -385,8 +368,6 @@ class SmallScreenLargeFontTest {
         assertTrue("the undo row shows \"${l.layoutInput.text.text}\" whole: needs $needed lines, shows at most 2", needed <= 2)
     }
 
-    // ═══════════════ History › run detail › rate sheet ════════════════════
-
     private fun runDetail(scale: Float) {
         useFont(scale)
         val end = QaHarness.daysAgoAtMidday(1)
@@ -428,9 +409,7 @@ class SmallScreenLargeFontTest {
 
     @Test fun runDetail_font130() = runDetail(1.3f)
 
-    // ═══════════════ A pinned DO-NOT-TRAIN banner ═════════════════════════
-
-    /** The banner is pinned (never scrolls); on a 320dp screen at a large font
+    /** The banner is pinned (never scrolls); on the small screen at a large font
      *  it must still show every one of its actions whole, and leave Today and
      *  the tabs usable under it. */
     private fun painHold(scale: Float) {
@@ -480,8 +459,6 @@ class SmallScreenLargeFontTest {
 
     @Test fun painHold_font130() = painHold(1.3f)
 
-    // ═══════════════ Check-ins (RatingScale rows + pinned Save) ════════════
-
     private fun checkins(scale: Float) {
         useFont(scale)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -511,8 +488,6 @@ class SmallScreenLargeFontTest {
     @Test fun checkins_font200() = checkins(2.0f)
 
     @Test fun checkins_font130() = checkins(1.3f)
-
-    // ═══════════════ Profile › HR zones calculator ════════════════════════
 
     private fun profileCalculator(scale: Float) {
         useFont(scale)

@@ -85,7 +85,6 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
     }
 
     companion object {
-        /** Every theme × light and dark. */
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun themes(): List<Array<Any>> =

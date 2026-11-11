@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** JVM unit tests for the pure units math in Units.kt (no Android context). */
+/** JVM unit tests for the units math (no Android context). */
 class UnitsTest {
 
     @Test
@@ -44,7 +44,6 @@ class UnitsTest {
 
     @Test
     fun paceConvertsKmToMile() {
-        // A mile is longer, so min/mi > min/km for the same speed.
         val minPerKm = 5.0
         val minPerMi = paceInUnit(minPerKm, DistanceUnit.Mi)
         assertEquals(minPerKm * (CoreConstants.MILE_M / 1000.0), minPerMi, 1e-9)
@@ -86,7 +85,6 @@ class UnitsTest {
         assertEquals(1.0, kmToMi(CoreConstants.MILE_M / 1000.0), 1e-9)
         assertEquals(CoreConstants.MILE_M / 1000.0, miToKm(1.0), 1e-9)
         assertEquals(10.0, miToKm(kmToMi(10.0)), 1e-9)
-        // 10 km ≈ 6.21 mi.
         assertEquals(6.21371, kmToMi(10.0), 1e-5)
     }
 
@@ -126,7 +124,7 @@ class UnitsTest {
 
     @Test
     fun bodyweightBoundsCoverHeavyAndLightAdults() {
-        // kg: 30–250, so a 182 kg lifter (old scale capped at 150) can enter their weight.
+        // A 182 kg lifter (old scale capped at 150) can enter their weight.
         val kg = bodyweightBounds(WeightUnit.Kg)
         assertEquals(30.0, kg.start, 0.0)
         assertEquals(250.0, kg.endInclusive, 0.0)
@@ -147,11 +145,9 @@ class UnitsTest {
 
     @Test
     fun weeklyVolumeScaleFollowsDistanceUnit() {
-        // mi: a 25 mi pick stores 40.23 km and re-highlights 25.
         assertEquals(40.23, weeklyVolumeScaleToKm(25, DistanceUnit.Mi), 1e-9)
         assertEquals(25, weeklyVolumeScaleValue(weeklyVolumeScaleToKm(25, DistanceUnit.Mi), DistanceUnit.Mi))
         assertEquals(93, weeklyVolumeScaleOptions(DistanceUnit.Mi).last())
-        // km: exact, 1–150.
         assertEquals(24.0, weeklyVolumeScaleToKm(24, DistanceUnit.Km), 0.0)
         assertEquals(24, weeklyVolumeScaleValue(24.0, DistanceUnit.Km))
         assertEquals(150, weeklyVolumeScaleOptions(DistanceUnit.Km).last())

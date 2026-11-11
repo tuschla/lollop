@@ -105,7 +105,6 @@ internal enum class HoldAction { RemovePain, RemoveIllness, EndIllness, CheckAge
 /** Profile health answers that hold training until a doctor's OK. */
 private val DoctorHoldReasons = setOf(HoldReason.Parq, HoldReason.Pregnancy, HoldReason.Reds, HoldReason.InjuryRehab, HoldReason.Symptomatic)
 
-/** [HoldAction] for the core's `hold_reason` or, without one, its tier. */
 internal fun holdAction(holdReason: HoldReason?, tier: SafetyTier?): HoldAction = when (holdReason) {
     HoldReason.Pain -> HoldAction.RemovePain
     HoldReason.Illness -> HoldAction.RemoveIllness
@@ -212,8 +211,7 @@ internal fun SafetyBannerHost(
         onAddDetails = onAddDetails,
         onResolveHold = { resolveHoldSignal = it.signal },
     )
-    ClearConfirmDialog(
-        visible = confirmReadiness,
+    if (confirmReadiness) ClearConfirmDialog(
         title = stringResource(Res.string.main_clear_readiness_title),
         message = stringResource(Res.string.main_clear_readiness_message),
         onDismiss = { confirmReadiness = false },
@@ -249,7 +247,6 @@ internal fun RemoveReportDialog(
     val undo = stringResource(Res.string.log_undo)
     val holds = model.train_blocked
     ClearConfirmDialog(
-        visible = true,
         title = stringResource(if (illness) Res.string.main_remove_illness_title else Res.string.main_remove_pain_title),
         message = stringResource(if (holds) Res.string.main_remove_report_message_hold else Res.string.main_remove_report_message),
         confirmLabel = stringResource(Res.string.main_delete),
@@ -324,8 +321,6 @@ private fun SafetyBanner(
     // report, so the "?" fallback copy must not call it one.
     val profileHold = action == HoldAction.ReviewHealth ||
         action == HoldAction.EndIllness || model.hold_reason == HoldReason.MedicalSignal
-    // Sub-line: the characterized pain detail when we have it ("right
-    // knee · sharp · 6/10"), else the reason the hold applies.
     val pregnancyWarning = model.profile?.health?.pregnancy_warning_sign == true
     val subLine = holdDetail?.takeIf { action == HoldAction.RemovePain }
         ?.let { stringResource(Res.string.main_pain_prefix, it) }
@@ -412,8 +407,6 @@ private fun SafetyBanner(
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 solidActions.forEachIndexed { i, (label, onClick) ->
                     if (!hasTextActions && i == solidActions.lastIndex) {
-                        // No text actions below: the "?" shares the last action's row
-                        // instead of spending a row of its own.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
@@ -459,7 +452,6 @@ private fun SafetyBanner(
                 }
             }
         }
-        // Reading order: headline + reason, the paused line, the actions, the "?" panel.
         Layout(listOf(headline, paused, actions, why), Modifier.padding(Space.Card.dp)) { slots, c ->
             val loose = c.copy(minWidth = 0, minHeight = 0, maxHeight = Constraints.Infinity)
             val head = slots[0].first().measure(loose)
@@ -565,8 +557,6 @@ internal fun YouthHoldCard(model: ViewModel, onOpenProfile: (ProfileRowId) -> Un
     }
 }
 
-/** The banner's pulse ring: one fade from [PulseAlphaMin] to
- *  [PulseAlphaMin] + [PulseAlphaSpan] white takes [PulseHalfPeriodMs], then reverses. */
 private const val PulseHalfPeriodMs = 1200
 private const val PulseAlphaMin = 0.15f
 private const val PulseAlphaSpan = 0.4f
@@ -575,12 +565,10 @@ private const val PulseAlphaSpan = 0.4f
  *  more than its hold statement (its extra text scrolls inside it instead). */
 private const val BannerMaxScreenFraction = 0.5f
 
-/** The banner headline: 23sp Black. */
 internal val BannerTitleStyle = androidx.compose.ui.text.TextStyle(
     fontSize = 23.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Black, textDirection = AppTextDirection,
 )
 
-/** A solid white full-width action on the danger banner (its primary actions). */
 @Composable
 private fun BannerSolidAction(label: String, onFill: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
@@ -612,7 +600,6 @@ internal fun HoldResolveDialog(
 ) {
     if (resolution == null) return
     ClearConfirmDialog(
-        visible = true,
         title = resolution.action_label,
         message = resolution.confirm_text,
         confirmLabel = stringResource(Res.string.main_resolve_hold_confirm),
@@ -622,7 +609,6 @@ internal fun HoldResolveDialog(
     )
 }
 
-/** The evidence behind the active hold. */
 internal class HoldEvidence(
     val summary: String,
     val evidence: EvidenceTagView,

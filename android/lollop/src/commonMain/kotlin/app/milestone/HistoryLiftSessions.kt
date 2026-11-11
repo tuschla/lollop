@@ -64,8 +64,6 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-// ── Lift sessions (History "Lifts" stream) ─────────────────────────────────
-
 /**
  * One lifting session in History: every set logged on one local calendar day.
  * [epochDay] is null for legacy undated sets (observed_at 0), which share one
@@ -206,7 +204,6 @@ private fun liftSessionTitle(session: LiftSession): String {
     return localizedDayFormatter(SESSION_DATE_SKELETON).formatEpochDay(day)
 }
 
-/** "3 exercises · 12 sets", the count line under a session's date on its card and sheet. */
 @Composable
 private fun sessionCounts(session: LiftSession): List<String> {
     val exercises = session.exercises.size
@@ -372,7 +369,6 @@ internal fun LiftSessionSheet(
     // Per-exercise best-e1RM-per-session series ([bestE1rmByExerciseDay]).
     e1rmSeries: Map<String, List<Pair<Long, Double>>>,
     weightUnit: WeightUnit,
-    nowMillis: Long,
     // Hoisted by the caller so the sheet returns to the set the user just edited.
     scrollState: ScrollState,
     onOpenSet: (LiftResultView) -> Unit,
@@ -466,7 +462,6 @@ internal fun LiftSessionSheet(
     }
 }
 
-/** The session sheet's title: the day, then "3 exercises · 9 sets · 4,690 lb lifted". */
 @Composable
 private fun LiftSessionSheetHeader(session: LiftSession, weightUnit: WeightUnit) {
     val volume = sessionVolume(session.sets, weightUnit)?.let {
@@ -485,13 +480,8 @@ private fun LiftSessionSheetHeader(session: LiftSession, weightUnit: WeightUnit)
 /** Width of the set table's index column, so loads line up across every card. */
 private val SetIndexWidth = 24.dp
 
-/**
- * One exercise of the session sheet: the name (with "New best" end-aligned when a set
- * beat every prior e1RM), the best e1RM with its change since the exercise's first
- * session ([e1rmSeries], one point per session) as a pill and, when [glossary], the
- * e1RM "?" at the end of the line; then the set table. Each 48dp row (index, load,
- * reps left) opens that set.
- */
+/** [e1rmSeries]: the exercise's best e1RM of each session up to this one (one point
+ *  per session); its first-to-last change shows as a pill. */
 @Composable
 private fun ExerciseSetsCard(
     name: String,

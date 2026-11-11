@@ -1,9 +1,9 @@
-"""Parse `dumpsys notification --noredact` (stdin) into one JSON object per posted
-notification of a package.
+"""Parse `dumpsys notification --noredact` (stdin) into a JSON object for one
+posted notification of a package.
 
-argv: package [id]
-Prints a JSON list (or the one record with that notification id, `null` when it
-is not posted) of {"id", "channel", "category", "vis", "flags": [...], "when",
+argv: package id
+Prints the record with that notification id (`null` when it is not posted):
+{"id", "channel", "category", "vis", "flags": [...], "when",
 "actions": [title, ...], "extras": {name: value}}.
 `extras` keeps the dump's value text ("String (Tracking run)" → "Tracking run",
 "Boolean (true)" → "true"); `flags` are names (an API 34 dump's hex is decoded).
@@ -31,7 +31,7 @@ def flag_names(s):
 
 
 pkg = sys.argv[1]
-want = int(sys.argv[2]) if len(sys.argv) > 2 else None
+want = int(sys.argv[2])
 text = sys.stdin.read()
 records = []
 cur = None
@@ -71,7 +71,4 @@ for line in text.splitlines():
         m = re.match(r"([\w.]+)=(?:\w[\w.$\[\]]* \((.*)\)|(null))$", s)
         if m:
             cur["extras"][m.group(1)] = m.group(2) if m.group(2) is not None else None
-if want is None:
-    print(json.dumps(records, ensure_ascii=False))
-else:
-    print(json.dumps(next((r for r in records if r["id"] == want), None), ensure_ascii=False))
+print(json.dumps(next((r for r in records if r["id"] == want), None), ensure_ascii=False))

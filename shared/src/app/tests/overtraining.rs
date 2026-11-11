@@ -100,7 +100,6 @@ fn mrv_cluster_and_threshold_retest_surface_in_review() {
             .any(|a| a.summary.contains("Re-test")),
         "autoreg-032 threshold re-test cue surfaces"
     );
-    // Neither blocks training.
     assert!(vm.hold_reason.is_none());
     // One week of improvement is below the autoreg-032 bound → no cue.
     let review = SessionReview {

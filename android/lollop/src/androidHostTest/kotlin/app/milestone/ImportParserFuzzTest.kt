@@ -36,7 +36,7 @@ import org.robolectric.RobolectricTestRunner
  * (`shared/src/import/tests.rs`).
  *
  * Seeds: generated GPX / TCX / FIT files, the core's own GPX export and the real
- * device FIT fixtures (`shared/tests/fixtures`, on the test classpath). Mutations:
+ * device FIT fixtures (`shared/tests/fixtures`). Mutations:
  * bit flips, byte insert/delete/duplicate, truncation, duplicated and nested tags,
  * entity tricks, BOMs, CRLF, giant attributes, weird coordinates and times.
  *
@@ -113,7 +113,6 @@ class ImportParserFuzzTest {
             figures.distance_km >= 0.0 && figures.duration_min >= 0.0)
     }
 
-    /** Check one input end to end; returns its outcome. */
     private fun check(what: String, bytes: ByteArray): Out {
         val out = bounded(what) { runCatching { parse(bytes) } }
             .getOrElse { e -> throw AssertionError("$what: unexpected ${e::class.java.name}: ${e.message}", e) }
@@ -124,11 +123,8 @@ class ImportParserFuzzTest {
         return out
     }
 
-    // ── Seed files ─────────────────────────────────────────────────────────────
-
     private data class Fix(val lat: Double, val lon: Double, val t: Long, val hr: Int)
 
-    /** A seeded wandering 1 Hz run at ~3 m/s. */
     private fun run(n: Int, t0: Long = 1_750_000_000L, seed: Int = 1): List<Fix> {
         val rnd = Random(seed)
         var lat = 47.37
@@ -236,8 +232,6 @@ class ImportParserFuzzTest {
 
     private fun Fix.point() = GpsPoint(lat, lon, t, 5.0)
 
-    // ── Mutators ───────────────────────────────────────────────────────────────
-
     private val interesting = byteArrayOf(0, 1, 0x0C, 0x0E, 0x20, 0x26, 0x3C, 0x3E, 0x40, 0x7F, 0x80.toByte(), 0xFF.toByte())
 
     private fun mutateBytes(rnd: Random, seed: ByteArray): ByteArray {
@@ -261,7 +255,6 @@ class ImportParserFuzzTest {
     private val weirdTimes = listOf("", "garbage", "9999-12-31T23:59:59Z", "+10000-01-01T00:00:00Z", "1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z",
         "2025-06-15T12:00:00+14:00", "2025-06-15T12:00:00.999999999Z", "2025-06-15T12:00:00", "2025-02-30T00:00:00Z", "-999999999-01-01T00:00:00Z")
 
-    /** XML-structure mutations on the document text. */
     private fun mutateXml(rnd: Random, doc: String): String {
         var s = doc
         repeat(1 + rnd.nextInt(3)) {
@@ -312,8 +305,6 @@ class ImportParserFuzzTest {
         }
         if (onlyCase == null) assertTrue("$name: some mutants still import ($runsOk)", runsOk > 0)
     }
-
-    // ═══ Run files through the core ════════════════════════════════════════════
 
     @Test
     fun gpxMutantsAlwaysEndInARunOrANamedReason() {
@@ -385,8 +376,6 @@ class ImportParserFuzzTest {
         for ((bytes, want) in cases) assertEquals(want, check("fit refusal", bytes))
     }
 
-    // ═══ A logged run's route fixes ════════════════════════════════════════════
-
     @Test
     fun aTrackSentToTheCoreComesBackAsItsRouteBitForBit() {
         val pts = run(400, seed = 10).mapIndexed { i, f -> f.point().copy(accuracyM = 3.0 + (i % 7)) }
@@ -410,8 +399,6 @@ class ImportParserFuzzTest {
         assertEquals(ev.points.map { it.observedAt }, back.points.map { it.observedAt })
         assertEquals(ev.observedAt, back.observedAt)
     }
-
-    // ═══ The core's byte ops over JNI ═════════════════════════════════════════
 
     private fun malformed(rnd: Random, seeds: List<String>): ByteArray = when (rnd.nextInt(6)) {
         0 -> ByteArray(rnd.nextInt(64)) { rnd.nextInt(256).toByte() }

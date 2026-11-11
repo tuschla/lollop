@@ -93,7 +93,6 @@ fn is_hard_logged_run(
         .is_some_and(|slow| r.km > 0.0 && r.minutes > 0.0 && r.minutes * 60.0 / r.km <= slow)
 }
 
-/// Sum of the realised km of `runs` that started in local week `w`, in log order.
 fn week_km(runs: &[DatedRun], offset: i64, w: i64) -> f64 {
     sum0(
         runs.iter()

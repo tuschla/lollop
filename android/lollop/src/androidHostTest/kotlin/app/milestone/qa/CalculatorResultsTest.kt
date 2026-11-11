@@ -80,7 +80,6 @@ class CalculatorResultsTest {
     private val keypad = hasTestTag("numeric-keypad")
     private val result = hasTestTag("calc-result")
 
-    /** Seed the profile and every calculator query, open Profile and tap [titleRes]'s row. */
     private fun openCalculator(titleRes: Int, mode: DarkMode = DarkMode.Light) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(hybridProfile()) + queries)
@@ -247,7 +246,7 @@ class CalculatorResultsTest {
     }
 
     /** The reference library's training-load detail: the core counts one run with
-     *  heart rate as sessions_counted = 1 (calculators/training_load.rs). */
+     *  heart rate as sessions_counted = 1 (shared/src/app/calculators/training_load.rs). */
     @Test
     fun trainingLoadDetailUsesTheSingular() {
         val one = ctx.resources.getQuantityString(R.plurals.main_training_load_detail, 1, "TRIMP", 1, 1)

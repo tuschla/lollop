@@ -33,8 +33,6 @@ fn logrun_noon(distance_km: f64, day: i64) -> Event {
     )
 }
 
-// ── Karvonen bands use the %HRR (VO2max) reserve, not %HRmax ───────────────
-
 #[test]
 fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
     // running-005 / RUN-KARVONEN-001: %HRR ≈ %VO2R ≈ %VO2max, never %HRmax. At
@@ -61,8 +59,6 @@ fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
         easy.summary
     );
 }
-
-// ── The ≤3 d/wk endurance cap is co-primary-conditional ────────────────────
 
 fn hybrid_run_profile(concurrent_goal: ConcurrentGoal, days: u8, km: f64) -> Profile {
     Profile {
@@ -100,8 +96,6 @@ fn endurance_priority_hybrid_keeps_full_run_frequency() {
         );
     }
 }
-
-// ── Run-plan anchors: completed-week km and race-date taper wiring ─────────
 
 fn manual_run(km: f64, at: i64) -> LoggedRun {
     logged_run(km, km * 6.0, 70.0, at)
@@ -593,7 +587,6 @@ fn build_run_anchors_uses_the_trailing_windows() {
     );
 }
 
-// ── Run anchors bucket by LOCAL day, so a run logged today counts ──
 #[test]
 fn run_anchors_count_a_same_day_run_by_local_day() {
     let today = 500i64;
@@ -661,7 +654,6 @@ fn run_anchors_offset_zero_midnight_history_is_unchanged() {
     );
 }
 
-// ── Past the window, credit tapers on a detraining slope, no cliff ──
 #[test]
 fn longest_run_anchor_tapers_past_the_window_instead_of_a_cliff() {
     // Flagship: a lone 21.1 km race is the only logged run. Across the 30-day
@@ -731,7 +723,6 @@ fn a_fresh_run_overrides_a_decayed_older_run_no_change() {
     assert!(!det, "a fresh winning anchor is not detraining-adjusted");
 }
 
-// ── Interval rep structure + HR band ceiling copy ──
 #[test]
 fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
     use crate::schema::RunPrescription;

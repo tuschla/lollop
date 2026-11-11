@@ -34,8 +34,6 @@ internal object EventDispatcher {
         val notices = Channel<CoreNotice>(Channel.BUFFERED)
         val noticeFlow: Flow<CoreNotice> = notices.receiveAsFlow()
 
-        // Whether the last reported result was already stale, so a run of stale
-        // results raises ONE notice rather than one per event.
         @Volatile var staleReported = false
 
         override fun close() {
@@ -51,7 +49,7 @@ internal object EventDispatcher {
     // so every later event's model reaches the UI.
     val model: MutableStateFlow<ViewModel?> get() = queue.model
 
-    // Boot found the native core unusable (Android: Core.probe / Core.markUnavailable):
+    // Boot found the native core unusable ([DurableCore.probe] / [DurableCore.markUnavailable]):
     // the shell shows [CoreUnavailableScreen] instead of any screen that could write,
     // and the splash lets go although [model] stays null.
     val coreUnavailable: MutableStateFlow<Boolean> get() = queue.coreUnavailable
@@ -59,8 +57,6 @@ internal object EventDispatcher {
     /** Core outcomes the user must hear about ([report]). */
     val notices: Flow<CoreNotice> get() = queue.noticeFlow
 
-    // One serial consumer per process on the app scope; it drains the queue
-    // strictly in order.
     private fun startConsumer(q: Queue) {
         AppProcess.scope.launch {
             for (m in q.channel) when (m) {
@@ -79,8 +75,6 @@ internal object EventDispatcher {
                 is Block -> {
                     val r = runCatching { m.body() }
                     if (isActive) r.getOrNull()?.let { q.model.value = it }
-                    // Complete the awaiter with the body's value (null included) or its
-                    // exception; a thrown body reaches the awaiter, never kills the consumer.
                     r.fold({ m.done.complete(it) }, { m.done.completeExceptionally(it) })
                 }
             }

@@ -142,7 +142,6 @@ class NotificationStyleTest {
 
     @Test
     fun accentFollowsTheShadeModeAndTheSystemAccentSetting() {
-        // A dark shade gets the dark palette's accent.
         AppSettings.setTheme(app, AppTheme.Meadow)
         RuntimeEnvironment.setQualifiers("+night")
         assertEquals(AppTheme.Meadow.dark.accent.toArgb(), notificationAccent(app))

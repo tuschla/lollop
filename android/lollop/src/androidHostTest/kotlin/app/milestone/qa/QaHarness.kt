@@ -19,6 +19,7 @@ import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
 import app.milestone.ResistanceModality
 import app.milestone.RunSession
+import app.milestone.REPO_ROOT
 import app.milestone.RecentRace
 import app.milestone.SendResult
 import app.milestone.SessionType
@@ -46,7 +47,7 @@ import java.util.Locale
  * starts from a clean slate.
  *
  * Seeding writes the exact ndjson wire form [app.milestone.Core] itself persists
- * (`event.toJson().toString()` per line — see Core.apply), so a scenario is
+ * (`event.toJson().toString()` per line — see `DurableCore.apply`), so a scenario is
  * indistinguishable from a real user's history: [Core.restore] replays it through
  * JNI on launch, no shell-side shortcut.
  */
@@ -54,11 +55,8 @@ object QaHarness {
 
     internal fun logFile(ctx: Context) = File(ctx.filesDir, AppFileNames.EVENT_LOG)
 
-    /** The durable log's non-blank lines. */
     fun logLines(ctx: Context): List<String> = logFile(ctx).readLines().filter { it.isNotBlank() }
 
-    /** Process death, then the boot sequence: restore (compaction + replay) and the
-     *  boot SetToday. */
     fun reboot(ctx: Context): SendResult {
         killProcess()
         AppCore.engine.restore(ctx)
@@ -150,7 +148,6 @@ object QaHarness {
         lastScenario = null
     }
 
-    /** Write [events] as the durable log the boot restore replays. */
     fun seedLog(ctx: Context, events: List<Event>) {
         val f = logFile(ctx)
         f.parentFile?.mkdirs()
@@ -185,11 +182,8 @@ object QaHarness {
         return job.getCompleted()
     }
 
-    /** The bytes of test resource [name] (a path under `src/test/resources` or a
-     *  `shared/tests/fixtures` source root). */
-    fun fixture(name: String): ByteArray =
-        checkNotNull(QaHarness::class.java.classLoader!!.getResourceAsStream(name)) { "fixture $name not on the test classpath" }
-            .use { it.readBytes() }
+    /** The bytes of the core's test fixture [name] (a path under `shared/tests/fixtures`). */
+    fun fixture(name: String): ByteArray = File(REPO_ROOT, "shared/tests/fixtures/$name").readBytes()
 
     /**
      * Log [items] of a [sessionType] plan session to the real core, dated midday on
@@ -225,9 +219,7 @@ object QaHarness {
         return v
     }
 
-    // ── Scenario event builders ────────────────────────────────────────────
-
-    /** Monday 2026-09-21 10:00 UTC: the instant [reset] pins [AppClock] to. */
+    /** A Monday: the instant [reset] pins [TestClock] to. */
     val PINNED_NOW_MILLIS: Long = java.time.Instant.parse("2026-09-21T10:00:00Z").toEpochMilli()
 
     /**
@@ -273,48 +265,40 @@ object QaHarness {
         ageYears = 30.0,
     )
 
-    /** [strengthProfile] with loads displayed in pounds. */
     fun strengthProfileLb(): Event.SetProfile = strengthProfile().copy(weightLb = true)
 
-    /** A calisthenics athlete profile, for a bodyweight/hold-set history. */
     fun calisthenicsProfile(): Event.SetProfile =
         strengthProfile().copy(bodyweightKg = 72.0, resistanceModality = ResistanceModality.Calisthenics)
 
-    /** [strengthProfile] training for a 10K on 3 running days, 25 km a week. */
     fun hybridTenKProfile(): Event.SetProfile =
         strengthProfile().copy(goalDistance = GoalDistance.TenK, runningDaysPerWeek = 3, runningKmPerWeek = 25.0)
 
-    /** [strengthProfile] at 80 kg also training for a 5K on 3 running days, 20 km a
-     *  week: lifts and runs, so every chooser row and every calculator is offered. */
+    /** Lifts and runs, so every chooser row and every calculator is offered. */
     fun hybridFiveKProfile(): Event.SetProfile = strengthProfile().copy(
         goalDistance = GoalDistance.FiveK, runningDaysPerWeek = 3, runningKmPerWeek = 20.0, bodyweightKg = 80.0,
     )
 
-    /** An advanced 10K runner (4 days, 35 km a week, no lifting) with a resting HR and
-     *  a 25:00 5K two weeks ago, so run items carry pace, heart-rate and effort targets. */
+    /** A runner with a resting HR and a recent 5K, so run items carry pace,
+     *  heart-rate and effort targets. */
     fun tenKRunnerProfile(): Event.SetProfile = strengthProfile().copy(
         goalDistance = GoalDistance.TenK, concurrentGoal = ConcurrentGoal.EndurancePriority, weeklySets = 0,
         runningDaysPerWeek = 4, runningKmPerWeek = 35.0, advanced = true, bodyweightKg = 70.0, restingHrBpm = 55.0,
         recentRace = RecentRace(distance_km = 5.0, time_sec = 25 * 60, epoch_day = app.milestone.todayEpochDay() - 14),
     )
 
-    /** A 5K runner (4 days, 30 km a week, no lifting) with a 25:00 5K a week ago. */
     fun fiveKRunnerProfile(): Event.SetProfile = strengthProfile().copy(
         goalDistance = GoalDistance.FiveK, concurrentGoal = ConcurrentGoal.EndurancePriority, weeklySets = 0,
         runningDaysPerWeek = 4, runningKmPerWeek = 30.0, bodyweightKg = 70.0,
         recentRace = RecentRace(distance_km = 5.0, time_sec = 1500, epoch_day = app.milestone.todayEpochDay() - 7),
     )
 
-    /** A 15-year-old 60 kg lifter (age only, no birthday). */
     fun youthProfile(): Event.SetProfile = strengthProfile().copy(bodyweightKg = 60.0, ageYears = 15.0)
 
-    /** Seed [strengthProfile] with a Back Squat set 6, 4 and 2 days ago. */
     fun seedStrengthHistory(ctx: Context) = seedLog(
         ctx,
         listOf(strengthProfile(), loggedSquat(daysAgoAtMidday(6)), loggedSquat(daysAgoAtMidday(4)), loggedSquat(daysAgoAtMidday(2))),
     )
 
-    /** A logged reps×load lift set (observed_at anchored to a fixed instant). */
     fun loggedSquat(observedAt: Long): Event = Event.LogSet(
         exercise = "Back Squat",
         weightKg = 120.0,
@@ -324,7 +308,6 @@ object QaHarness {
         entryId = observedAt * 1000,
     )
 
-    /** A logged timed-hold set (calisthenics), for the History hold-set render. */
     fun loggedHold(observedAt: Long): Event = Event.LogSet(
         exercise = "Front Lever",
         weightKg = 0.0,
@@ -335,7 +318,6 @@ object QaHarness {
         holdSec = 30,
     )
 
-    /** A logged run, for the run-history render. */
     fun loggedRun(observedAt: Long): Event = Event.LogRun(
         distanceKm = 5.0,
         durationMin = 27.5,
@@ -344,8 +326,7 @@ object QaHarness {
         entryId = observedAt * 1000,
     )
 
-    /** A 10.1 km GPS run at an even 5:00 /km, heading north: 1011 clean fixes, 10 m
-     *  apart every 3 s, the first at [observedAt]. */
+    /** A 10.1 km GPS run at an even 5:00 /km, the first fix at [observedAt]. */
     fun gpsTenK(observedAt: Long, sessionRpe: Int? = null): Event.LogRunTrack {
         val points = (0 until 1011).map { i ->
             GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = observedAt + i * 3L, accuracyM = 5.0)
@@ -359,10 +340,9 @@ object QaHarness {
         )
     }
 
-    /** A live recording as the service leaves it: 21 fixes, ~30 m every 10 s (600 m,
-     *  200 s moving, past the short-run gate), tracking on. The fix stamps sit far
-     *  ahead of Robolectric's elapsed clock, so the GPS pill reads a steady
-     *  "Recording". */
+    /** A live recording as the service leaves it, past the short-run gate, tracking
+     *  on. The fix stamps sit far ahead of Robolectric's elapsed clock, so the GPS
+     *  pill reads a steady "Recording". */
     fun seedRecordingRun() {
         val t0 = AppClock.nowSec() - 400
         for (i in 0..20) {
@@ -372,14 +352,11 @@ object QaHarness {
     }
 }
 
-/** Wait until at least one node matches [matcher]. */
 internal fun ComposeTestRule.waitForNode(matcher: SemanticsMatcher, timeoutMs: Long = 15_000) =
     waitUntil(timeoutMs) { onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
 
-/** How many nodes match [matcher] now. */
 internal fun ComposeTestRule.countOf(matcher: SemanticsMatcher): Int = onAllNodes(matcher).fetchSemanticsNodes().size
 
-/** Wait until the launched app has booted (the boot effect ran and a model is published). */
 internal fun ComposeTestRule.waitForBoot() {
     waitUntil(30_000) { AppRuntime.bootHandled && EventDispatcher.model.value != null }
     waitForIdle()

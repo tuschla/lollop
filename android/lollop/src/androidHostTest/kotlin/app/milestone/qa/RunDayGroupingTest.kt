@@ -79,13 +79,13 @@ class RunDayGroupingTest {
 
     private fun day(y: Int, mo: Int, d: Int): Long = LocalDate.of(y, mo, d).toEpochDay()
 
-    /** Sun 18 Oct 23:40 → Mon 19 Oct 00:20: across midnight. */
+    /** Across midnight, Sunday into Monday. */
     private val acrossMidnight = RunResultView(
         distance_km = 7.0, duration_min = 40.0, entry_id = 1, has_gpx = true,
         started_at = at(2026, 10, 18, 23, 40), observed_at = at(2026, 10, 19, 0, 20),
     )
 
-    /** Sat 31 Oct 23:40 → Sun 1 Nov 00:20: across a month boundary. */
+    /** Across a month boundary, Saturday into Sunday. */
     private val acrossMonth = RunResultView(
         distance_km = 8.0, duration_min = 40.0, entry_id = 2, has_gpx = true,
         started_at = at(2026, 10, 31, 23, 40), observed_at = at(2026, 11, 1, 0, 20),
@@ -118,8 +118,6 @@ class RunDayGroupingTest {
         val nav = buildMonthNav(stream.map(::runDaySec), base = 0, zone = utc, fmt = fmt)
         assertEquals(mapOf(0 to "October 2026"), nav.headerBefore)
 
-        // Heatmap: the cells are the start days (Sun 18 Oct, Sat 31 Oct), and a tap on
-        // one opens its run; the end days (Mon 19 Oct, Sun 1 Nov) are empty.
         val days = historyActivityDays(emptyList(), runs, utc)
         assertEquals(setOf(day(2026, 10, 18), day(2026, 10, 31)), days.keys)
         assertTrue(days.values.all { it.runs == 1 && !it.lifted })
@@ -128,7 +126,6 @@ class RunDayGroupingTest {
         assertNull(latestRunOnDay(runs, day(2026, 10, 19), utc))
         assertNull(latestRunOnDay(runs, day(2026, 11, 1), utc))
 
-        // Daily distance chart: km on the start days.
         assertEquals(mapOf(day(2026, 10, 18) to 7.0, day(2026, 10, 31) to 8.0), runKmByDay(runs, utc))
 
         // Records (the core keys them by observed_at): the cell dates the run's start,
@@ -140,7 +137,6 @@ class RunDayGroupingTest {
             assertEquals(runDateChip(r, now), formatLogDate(recordDaySec(longest, r.observed_at), now))
         }
 
-        // Coach summary: each run is listed under its start day's line.
         val res = ApplicationProvider.getApplicationContext<Context>().resources
         val lines = buildCoachSummary(
             res, ViewModel(runs = runs), today = day(2026, 11, 2), zone = utc,

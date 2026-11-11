@@ -13,17 +13,16 @@ use crate::plates::{plates_per_side, round_load_grid};
 use crate::profile::DistanceUnit;
 use crate::schema::{AdjustmentCall, RunVolume};
 
-/// Rebuild a lift item's one-line summary from its (possibly adjusted) fields.
 pub(super) fn refresh_lift_summary(it: &mut PlanItem, weight_lb: bool) {
     if it.is_run() {
-        return; // a run item - its summary is not sets×reps
+        return;
     }
     // A timed-hold calisthenics item has no reps (reps_low == 0): render the hold
     // volume (carried in `rep_volume`, e.g. "30 s hold"), never "×0".
     if it.timed_hold {
         let lead = FaceClause::plain(format!("{}×{}", it.sets, it.rep_volume));
         let label = FaceClause::plain(it.intensity_label.clone());
-        set_named_summary(it, ": ", &[lead], &[label]);
+        set_named_summary(it, &[lead], &[label]);
         return;
     }
     let reps = range_text(it.reps_low, it.reps_high);
@@ -68,8 +67,7 @@ pub(super) fn refresh_lift_summary(it: &mut PlanItem, weight_lb: bool) {
     if setup_cue {
         lead.push(FaceClause::plain(it.effort_cue.clone()));
     }
-    set_named_summary(it, ": ", &lead, &parts);
-    // The plate breakdown always follows the load actually shown.
+    set_named_summary(it, &lead, &parts);
     it.plates_per_side = if crate::exercise::is_barbell_lift(&it.exercise) {
         it.load_kg
             .or(it.suggested_load_kg)
@@ -101,7 +99,6 @@ impl FaceClause {
     }
 }
 
-/// `clauses` joined by " · ", without the effort ones unless `with_effort`.
 fn join_clauses<'a>(clauses: impl Iterator<Item = &'a FaceClause>, with_effort: bool) -> String {
     clauses
         .filter(|c| with_effort || !c.effort)
@@ -110,17 +107,16 @@ fn join_clauses<'a>(clauses: impl Iterator<Item = &'a FaceClause>, with_effort: 
         .join(" · ")
 }
 
-/// Set a named item's `summary` (`"<exercise><sep><lead> · <clause> · …"`) and
+/// Set a named item's `summary` (`"<exercise>: <lead> · <clause> · …"`) and
 /// the face parts the shell renders from it: the name line, the prescription
 /// line after it (with and without its effort wording) and that line's lead.
 pub(super) fn set_named_summary(
     it: &mut PrescriptionView,
-    sep: &str,
     lead: &[FaceClause],
     clauses: &[FaceClause],
 ) {
     let detail = join_clauses(lead.iter().chain(clauses), true);
-    it.summary = format!("{}{sep}{detail}", it.exercise);
+    it.summary = format!("{}: {detail}", it.exercise);
     it.face_name.clone_from(&it.exercise);
     it.face_detail = detail;
     it.face_detail_without_effort = join_clauses(lead.iter().chain(clauses), false);
@@ -403,14 +399,12 @@ pub(in crate::app) fn run_planned(it: &PlanItem) -> (Option<f64>, Option<f64>) {
     }
 }
 
-/// Drop a run item's rep structure ("N × …" and its per-rep amount).
 pub(super) fn clear_run_reps(it: &mut PlanItem) {
     it.rep_count = 0;
     it.rep_volume.clear();
     it.rep_amount = None;
 }
 
-/// The intensity label of a run capped to easy.
 pub(super) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
 
 /// Cap a RUN item to an easy target: keep the bounded volume but replace the
@@ -480,7 +474,6 @@ pub(super) fn repoint_evidence(
 }
 
 impl WhyView {
-    /// Add a sentence to the basis.
     pub(in crate::app) fn append_basis(&mut self, line: &str) {
         if !self.basis.is_empty() {
             self.basis.push(' ');

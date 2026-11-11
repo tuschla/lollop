@@ -41,8 +41,8 @@ class RunTrackingUnitTest {
         RunSession.reset()
         assertEquals(0.0, RunSession.distanceKm.value, 1e-12)
         // Realistic running legs: ~30 m north every 10 s ≈ 3 m/s, well under the
-        // 12.5 m/s jitter guard, so every leg is accepted and the incremental sum
-        // equals a full haversine. (0.00027° lat ≈ 30 m.)
+        // jitter guard, so every leg is accepted and the incremental sum equals a
+        // full haversine. (0.00027° lat ≈ 30 m.)
         val pts = listOf(
             GpsPoint(52.52000, 13.4050, 0, 5.0),
             GpsPoint(52.52027, 13.4050, 10, 5.0),
@@ -72,7 +72,7 @@ class RunTrackingUnitTest {
         val b = GpsPoint(0.0, 180.0, 10, 5.0)
         val seg = segmentKm(a, b)
         assertTrue("near-antipodal segment is finite (no NaN)", seg.isFinite())
-        // ~π·6371 km with the core-matching 6371.0 km radius (running.rs EARTH_RADIUS_M).
+        // ~π·6371 km with the core's Earth radius (gps.rs EARTH_RADIUS_M).
         assertTrue("near-antipodal distance ≈ half the Earth's circumference", seg in 20_000.0..20_100.0)
         assertTrue("oracle over a near-antipodal track is finite too", haversineKm(listOf(a, b)).isFinite())
     }
@@ -81,9 +81,9 @@ class RunTrackingUnitTest {
     fun runSessionCapsGpsJitterSpikeInLiveDistanceLikeTheCore() {
         RunSession.reset()
         // Two clean ~30 m / 10 s legs, then a teleport (~800 km in 1 s). The jitter
-        // guard (MAX_PLAUSIBLE_SPEED_MPS = 12.0 m/s) CAPS the spike leg's distance at
-        // 12 m/s·dt rather than dropping it, mirroring the core's `moving_legs`
-        // (running.rs) so live pace matches the of-record moving pace instead of
+        // guard (CoreConstants.MAX_PLAUSIBLE_SPEED_MPS) CAPS the spike leg's distance
+        // at that speed·dt rather than dropping it, mirroring the core's `moving_legs`
+        // (gps.rs) so live pace matches the of-record moving pace instead of
         // reading slightly slow (the leg's time still elapsed and is counted).
         val clean = listOf(
             GpsPoint(52.52000, 13.4050, 0, 5.0),
@@ -92,8 +92,8 @@ class RunTrackingUnitTest {
         )
         clean.forEach { RunSession.add(it, it.observedAt * 1_000_000_000L) }
         val cleanKm = RunSession.distanceKm.value
-        // Spike: huge jump in 1 s (monotonic dt = 1 s) → capped at 12 m/s · 1 s =
-        // 12 m = 0.012 km added, never the ~800 km haversine.
+        // Spike: huge jump in 1 s (monotonic dt = 1 s) → capped at the guard speed
+        // × 1 s, never the ~800 km haversine.
         RunSession.add(GpsPoint(57.0, 18.0, 21, 5.0), 21_000_000_000L)
         assertEquals(cleanKm + 0.012, RunSession.distanceKm.value, 1e-9)
         RunSession.reset()
@@ -132,9 +132,9 @@ class RunTrackingUnitTest {
     @Test
     fun restoreRebuildsDistanceForARecoveredRun() {
         RunSession.reset()
-        // Realistic ~3.3 m/s legs (0.0003° lat ≈ 33 m / 10 s): under the 12 m/s
-        // jitter clamp restore() now applies, so the recovered distance equals a
-        // full haversine over the track.
+        // Realistic ~3.3 m/s legs (0.0003° lat ≈ 33 m / 10 s): under the jitter
+        // clamp restore() applies, so the recovered distance equals a full
+        // haversine over the track.
         val pts = listOf(
             GpsPoint(48.8566, 2.3522, 0, 5.0),
             GpsPoint(48.8569, 2.3522, 10, 5.0),
@@ -385,10 +385,11 @@ class RunTrackingUnitTest {
         RunSession.reset()
         val degPerM = 1.0 / 111_320.0
         // 60 s standing still at 1 Hz: the fix drifts within a ~±2 m envelope but each
-        // consecutive-fix step is ≈0.2 m/s peak: every leg is below the 0.5 m/s stop
-        // floor (MIN_MOVING_SPEED_MPS, mirroring load::is_stopped), so NONE accrues
-        // live distance or moving time. (A real stationary GPS wanders slowly, not by
-        // whole metres per second.) Standing at a red light must not inflate the run.
+        // consecutive-fix step is ≈0.2 m/s peak: every leg is below the stop floor
+        // (CoreConstants.MIN_MOVING_SPEED_MPS, mirroring the core's gps.rs `is_stopped`),
+        // so NONE accrues live distance or moving time. (A real stationary GPS wanders
+        // slowly, not by whole metres per second.) Standing at a red light must not
+        // inflate the run.
         RunSession.add(GpsPoint(52.52, 13.405, 0, 5.0), 0L)
         for (t in 1..60) {
             val latOff = 2.0 * degPerM * kotlin.math.sin(2.0 * Math.PI * t / 60.0)
@@ -468,7 +469,7 @@ class RunTrackingUnitTest {
     @Test
     fun stationaryGapDoesNotSlowTheCurrentPaceBucket() {
         RunSession.reset()
-        RunSession.setPaceBucketMinutes(1) // 1-min slices from the default 4
+        RunSession.setPaceBucketMinutes(1)
         val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         // 30 s of moving at 3 m/s → an OPEN (partial) 30 s slice at ~5.56 min/km.
@@ -480,8 +481,8 @@ class RunTrackingUnitTest {
         val before = RunSession.paceBucketsFlow.value.last()
         assertFalse("open trailing slice", before.complete)
         // 120 s standing still at 1 Hz: the fix drifts within a ~±2 m envelope but every
-        // consecutive-fix step is well below the 0.5 m/s stop floor (a real stationary
-        // GPS wanders slowly, not by whole metres/s), and each 1 s dt is under the 30 s
+        // consecutive-fix step is well below the stop floor (a real stationary GPS
+        // wanders slowly, not by whole metres/s), and each 1 s dt is under the
         // segment-break gap, so no boundary opens either. Every such leg must be DROPPED
         // from the pace accumulator: standing at a red light must not slow the slice.
         for (t in 31..150) {
@@ -492,7 +493,6 @@ class RunTrackingUnitTest {
         assertFalse("still the same open slice, never a fabricated full one", after.complete)
         assertEquals("stationary gap adds no moving time to the slice", before.minutes, after.minutes, 1e-9)
         assertEquals("stationary gap does not slow the pace", before.paceMinPerKm, after.paceMinPerKm, 1e-9)
-        // No slice ever completed from the idle stretch.
         assertTrue("no completed slice from an idle stretch", RunSession.paceBucketsFlow.value.none { it.complete })
         // The incremental output still equals a from-scratch recompute over the track.
         assertEquals(RunSession.paceBuckets(1), RunSession.paceBucketsFlow.value)
@@ -545,8 +545,6 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── Save-time GPS-track decimation (event-log growth prong a) ──────────────
-
     @Test
     fun decimatedTrackReturnsAShortTrackUnthinned() {
         RunSession.reset()
@@ -598,7 +596,7 @@ class RunTrackingUnitTest {
             lon += 3.0 * degPerM
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
-        // A 61 s gap (> MAX_FIX_GAP_SEC = 30) opens a new segment at index 201.
+        // A 61 s gap (> MAX_FIX_GAP_SEC) opens a new segment at index 201.
         var t = 261L
         for (k in 1..199) {
             lon += 3.0 * degPerM
@@ -640,8 +638,6 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── trackForCore sends TRUE coords + segment starts (no re-anchor) ──
-
     @Test
     fun trackForCoreKeepsTrueCoordsAndReportsSegmentStarts() {
         RunSession.reset()
@@ -663,7 +659,6 @@ class RunTrackingUnitTest {
         // builds re-anchored segment 2 onto segment 1: now the core is
         // segment-aware, so the shell keeps the real geometry).
         assertEquals(seg1 + seg2, RunSession.points.value)
-        // The boundary that begins segment 2 is reported for the core.
         assertEquals(listOf(3), RunSession.segmentStartIndices())
         RunSession.reset()
     }
@@ -679,7 +674,7 @@ class RunTrackingUnitTest {
             lon += 3.0 * degPerM
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
-        // A 61 s gap (> MAX_FIX_GAP_SEC = 30) opens a new segment at index 201.
+        // A 61 s gap (> MAX_FIX_GAP_SEC) opens a new segment at index 201.
         var t = 261L
         for (k in 1..199) {
             lon += 3.0 * degPerM
@@ -697,8 +692,6 @@ class RunTrackingUnitTest {
         assertEquals("remapped start points at the true boundary fix", boundaryFix, dec[starts[0]])
         RunSession.reset()
     }
-
-    // ── short-run gate, non-monotonic-fix drop, sidecar recovery thinning ────────
 
     @Test
     fun shortRunGateUsesMovingTimeNotWallSpan() {
@@ -746,10 +739,6 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── append-only storage + incremental pace buckets. The saved track must ──
-    // ── stay unchanged, and the incremental                                  ──
-    // ── accumulator must equal a from-scratch recompute over the whole track.   ──
-
     @Test
     fun incrementalPaceBucketsMatchTheReferenceFunctionAcrossBoundaryAndJitter() {
         // The pace buckets are folded in one leg at a time as fixes arrive (O(1)
@@ -758,7 +747,7 @@ class RunTrackingUnitTest {
         // a run that exercises every path: normal legs, a pause boundary (dropped), a
         // jitter spike (capped), multiple completed slices + a partial tail.
         RunSession.reset()
-        RunSession.setPaceBucketMinutes(1) // 1-min slices from the default 4
+        RunSession.setPaceBucketMinutes(1)
         val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
@@ -823,12 +812,10 @@ class RunTrackingUnitTest {
             lon += 3.0 * degPerM
             feed(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L, true) // 52..101
         }
-        // The published track is exactly the surviving fixes.
         assertEquals("points expose the surviving fixes", expected, RunSession.points.value)
         // Decimation with a cap above the size is the identity, so it equals the
         // oracle list, confirming the of-record path reads the same content.
         assertEquals(expected, RunSession.decimatedTrackForCore(10_000))
-        // The pause boundary is reported at the true index.
         assertEquals("boundary reported at index 51", listOf(51), RunSession.segmentStartIndices())
         RunSession.reset()
     }
@@ -848,7 +835,6 @@ class RunTrackingUnitTest {
         assertEquals(small, ActiveRunStore.thinForRecovery(small, 5400))
     }
 
-    // ── TrackSnapshot.equals honours the List contract ──────────────────────────
     @Test
     fun trackSnapshotEqualsHonoursTheListContract() {
         // Equal content compares equal whether the other side is a snapshot on a
@@ -868,23 +854,18 @@ class RunTrackingUnitTest {
         val snapB = RunSession.points.value
         val plain = listOf(p1, p2)
 
-        // Equal content on distinct arrays ⇒ equal.
         assertEquals(snapA, snapB)
         assertEquals(snapB, snapA)
-        // Symmetric with a plain List, both directions.
         assertEquals(plain, snapA)
         assertEquals(snapA, plain)
         // hashCode consistent with equals, and with a plain List's element-wise hash.
         assertEquals(snapA.hashCode(), snapB.hashCode())
         assertEquals(plain.hashCode(), snapA.hashCode())
-        // Different content stays unequal.
         RunSession.reset()
         RunSession.add(p1, 0L)
         val snapShort = RunSession.points.value
         assertNotEquals(snapA, snapShort)
     }
-
-    // ── locate-failure latch ─────────────────────────────────────────────────────
 
     @Test
     fun resetClearsTheLocateFailureLatch() {
@@ -895,8 +876,6 @@ class RunTrackingUnitTest {
         RunSession.reset()
         assertFalse(RunSession.locationFailed.value)
     }
-
-    // ── live pace vs the plan's range ────────────────────────────────────────────
 
     @Test
     fun paceCueComparesTheRollingPaceWithThePlanRange() {
@@ -912,8 +891,6 @@ class RunTrackingUnitTest {
         assertEquals(null, paceCue(Double.NaN, 300, 360))
         assertEquals(null, paceCue(5.5, 0, 0))
     }
-
-    // ── "X to go" on a single-step planned run ──────────────────────────────────
 
     @Test
     fun singleStepPlanDistanceComesFromTheRunHead() {
@@ -990,8 +967,6 @@ class RunTrackingUnitTest {
     }
 }
 
-// ── Test-only reference oracles (kept out of the APK) ───────────────────────────
-
 /** Path length over the raw fixes, km (an unclamped, ungated haversine sum): the
  *  reference the live accumulators are pinned against. */
 private fun haversineKm(points: List<GpsPoint>): Double {
@@ -1014,8 +989,8 @@ private fun RunSession.pauseAndResume() {
  * From-scratch per-N-minute pace slices over the whole track: the spec the
  * incremental [RunSession.paceBucketsFlow] must equal after any sequence. A slice is
  * [bucketMinutes] of MOVING time; pause-bridge legs are dropped whole, standing-still
- * legs (below [MIN_MOVING_SPEED_MPS]) accrue nothing, jitter legs are capped at
- * [MAX_PLAUSIBLE_SPEED_MPS]·dt, and a leg straddling a slice edge is split by time.
+ * legs (below [CoreConstants.MIN_MOVING_SPEED_MPS]) accrue nothing, jitter legs are capped at
+ * [CoreConstants.MAX_PLAUSIBLE_SPEED_MPS]·dt, and a leg straddling a slice edge is split by time.
  */
 private fun RunSession.paceBuckets(bucketMinutes: Int): List<PaceBucket> {
     val pts = points.value

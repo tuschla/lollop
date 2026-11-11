@@ -96,7 +96,6 @@ internal fun LogSheetContent(
     // [onDismiss]; the host also returns Today to its top.
     onFinishSession: () -> Unit,
 ) {
-    // Weight-unit choice for the set editor's keypad + load faces.
     val weightUnit = model.weightUnit()
     // Run import: pick one or MANY GPX/TCX/FIT files (history backfill is one round
     // trip, not one per run). The shared [RunImport] pipeline parses shell-side and
@@ -109,13 +108,11 @@ internal fun LogSheetContent(
     val distanceUnit = rememberDistanceUnit()
     val scroll = rememberScrollState()
     // A calisthenics rung picked in the chooser: the Set editor opens on it.
-    // Cleared by the plain "Log set" row so a blank entry stays blank.
     var ladderPick by rememberSaveable { mutableStateOf<String?>(null) }
     // The chooser's "More" group (rarer entries); closed at every sheet open.
     var moreOpen by rememberSaveable { mutableStateOf(false) }
     // The chooser's calisthenics movements: every main ladder, plus a skill or
-    // power ladder once the coach has placed the athlete on it. Each shows its
-    // current rung; core order keeps one movement pattern together.
+    // power ladder once the coach has placed the athlete on it.
     val ladderRows = remember(model.calisthenics_ladders) {
         model.calisthenics_ladders
             .filter { (!it.skill && !it.power) || it.current_rung != null }
@@ -251,10 +248,9 @@ internal fun LogSheetContent(
                             stringResource(Res.string.main_session_review_sub),
                         ) { onMode(LogMode.Review) }
                         if (runVisible) {
-                            // Run import: a run recorded on another device/app.
-                            // Mime is "*/*": providers commonly report .gpx/.tcx/.fit as
-                            // octet-stream; the content sniffer rejects anything else with a
-                            // clear message.
+                            // Android's picker ([rememberRunImport]) asks for "*/*": providers
+                            // commonly report .gpx/.tcx/.fit as octet-stream; the content sniffer
+                            // rejects anything else with a clear message.
                             ChooserTextRow(
                                 stringResource(Res.string.main_import_run_title),
                                 stringResource(Res.string.main_import_run_sub),
@@ -379,11 +375,11 @@ internal fun LogSheetContent(
 private enum class LogRowTone { Plain, Plan, Danger }
 
 /**
- * One log-chooser row (05-log §1): 38dp icon tile, a title over a one-line
- * subtitle, trailing chevron. Full-width ≥48dp tap target; every tone shares
- * the same layout so all rows have one height. Icons are Accent on plain rows,
- * the row's text colour on the Accent fill, and the [StatusTone.Danger] colours
- * on the danger row, so it matches a Danger [StatusCard] in both modes.
+ * One log-chooser row (05-log §1): icon tile, a title over a one-line subtitle,
+ * trailing chevron. Every tone shares the same layout so all rows have one
+ * height. Icons are Accent on plain rows, the row's text colour on the Accent
+ * fill, and the [StatusTone.Danger] colours on the danger row, so it matches a
+ * Danger [StatusCard] in both modes.
  */
 @Composable
 private fun LogOptionRow(
@@ -447,12 +443,10 @@ private fun LogOptionRow(
 
 /** The plan fast-path's subline: the first open item's name and its headline
  *  prescription ("Back Squat: 4×3 @ 117.5 kg"), without the " · " qualifiers
- *  the Today card already shows, so it stays one short line. Pure. */
+ *  the Today card already shows, so it stays one short line. */
 private fun planRowSubtitle(item: PrescriptionView): String =
     if (item.face_name.isNotBlank()) "${item.face_name}: ${item.face_lead}" else item.face_lead
 
-/** A compact chooser entry inside a [ChooserGroup]: a bold title over a
- *  one-line subtitle and a trailing chevron, no icon tile. */
 @Composable
 private fun ChooserTextRow(title: String, subtitle: String, onClick: () -> Unit) =
     TitleSubtitleRow(title, subtitle, onClick, contentPadding = PaddingValues(horizontal = Space.Card.dp, vertical = Space.Sm.dp))

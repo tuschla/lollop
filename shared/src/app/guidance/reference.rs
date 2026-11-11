@@ -35,8 +35,6 @@ fn build_reference_impl(reds_present: bool) -> Vec<GuidanceView> {
     rows
 }
 
-/// Concurrent-training scheduling and dosing rows, plus the two Safety rows
-/// the hybrid claims carry.
 fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     let sp = hybrid::session_spacing();
     push_guidance(
@@ -145,7 +143,6 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 }
 
-/// Peaking, progression and autoregulation rules for strength work.
 fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
     let tr = strength::taper_rx();
     push_guidance(
@@ -253,7 +250,6 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
     );
 }
 
-/// Deload, minimum-exposure and joint-pain rules for hypertrophy work.
 fn push_hypertrophy_reference(rows: &mut Vec<GuidanceView>) {
     let hd = hypertrophy::deload_rx();
     push_guidance(
@@ -292,7 +288,6 @@ fn push_hypertrophy_reference(rows: &mut Vec<GuidanceView>) {
     );
 }
 
-/// Protein targets; the deficit row is gated on RED-S.
 fn push_nutrition_reference(reds_present: bool, rows: &mut Vec<GuidanceView>) {
     let mp = individualization::masters_protein_target();
     push_guidance(
@@ -336,7 +331,6 @@ fn push_nutrition_reference(reds_present: bool, rows: &mut Vec<GuidanceView>) {
     );
 }
 
-/// "70% easy, 20% moderate, 10% hard".
 fn fmt_split(d: &running::IntensityDistribution) -> String {
     format!(
         "{}% easy, {}% moderate, {}% hard",
@@ -344,7 +338,6 @@ fn fmt_split(d: &running::IntensityDistribution) -> String {
     )
 }
 
-/// Couch-to-5K structure and the intensity-distribution models.
 fn push_running_reference(rows: &mut Vec<GuidanceView>) {
     let c25k = running::c25k_plan();
     push_guidance(
@@ -380,7 +373,6 @@ fn push_running_reference(rows: &mut Vec<GuidanceView>) {
     );
 }
 
-/// Scaling order, substitutions and the feedback framing.
 fn push_coaching_reference(rows: &mut Vec<GuidanceView>) {
     let join_levers = |levers: &[individualization::ScaleLever]| -> String {
         levers

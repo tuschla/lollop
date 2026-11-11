@@ -45,11 +45,7 @@ internal enum class TileFace(
 
 /**
  * The tile for today's widget snapshot [today] (null when there is none for today,
- * or it is stale) while a GPS run records in this process ([recording]) or not. A
- * recording run wins. Start run needs an open run item today
- * ([WidgetSnapshot.trackable]); Log set needs today's lift session still open. A
- * finished session, a hold ([WidgetDayKind.Paused]), a rest day and no plan all
- * fall back to Log.
+ * or it is stale) while a GPS run records in this process ([recording]) or not.
  */
 internal fun tileFace(today: WidgetSnapshot?, recording: Boolean = false): TileFace = when {
     recording -> TileFace.Recording

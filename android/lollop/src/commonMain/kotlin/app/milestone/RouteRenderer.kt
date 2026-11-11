@@ -28,7 +28,6 @@ internal const val LoopCoincidenceM = 30.0
 /** Cap on coloured track chunks across the whole route, so a long track draws few paths. */
 internal const val MaxTrackChunks = 64
 
-/** Steps of the precomputed progression ramp. */
 internal const val RouteRampSteps = 32
 
 /** Framing never zooms past street level, so a short route keeps its surroundings. */
@@ -133,7 +132,6 @@ internal fun interface RouteProjector {
     fun project(lat: Double, lon: Double, out: FloatArray)
 }
 
-/** What to draw on top of the geometry. */
 internal class RouteDrawOptions(
     /** Number every whole unit ([unitM] metres) along the route. */
     val distanceMarkers: Boolean = true,
@@ -181,7 +179,7 @@ internal interface RouteTextMetrics {
     val descent: Float
 }
 
-/** Draws a [RouteTrack] into a Compose [DrawScope] through [project], keeping its
+/** Draws a [RouteTrack] into a Compose [DrawScope] through [projector], keeping its
  *  labels inside [bounds]: the platform's route renderer behind the shared layout. */
 internal interface RoutePainter {
     fun draw(scope: DrawScope, track: RouteTrack, projector: RouteProjector, bounds: RouteRect, options: RouteDrawOptions)
@@ -192,8 +190,8 @@ internal interface RoutePainter {
  * ([xs], [ys]), the kept window (whole track unless trimming) with its first/last
  * kept fix and the distances the progression ramp runs between, the start and
  * finish (one combined marker on a [loop]), the numbered distance markers thinned so
- * no two centres sit closer than 28dp ([marks]: x, y, label; -1 the finish, 0 the
- * start, n the whole unit), and the "Start" / "Finish" label pills ([pillA] the
+ * no two centres sit closer than [MarkerSpacingDp] ([marks]: x, y, label; -1 the
+ * finish, 0 the start, n the whole unit), and the "Start" / "Finish" label pills ([pillA] the
  * finish or loop label, [pillB] the start label) placed inside the bounds and off
  * each other and the markers. Holds its own buffers; one per surface.
  */
@@ -245,7 +243,6 @@ internal class RouteLayout(
     /** Whether any fix is kept: without one there are no markers or labels. */
     val hasKept: Boolean get() = firstS >= 0
 
-    /** The label of [pillA]: the loop's combined label or the finish label. */
     val pillALabel: String get() = if (loop) loopLabel else finishLabel
     val pillBLabel: String get() = startLabel
 
@@ -287,8 +284,6 @@ internal class RouteLayout(
         placed = 0
         if (firstS < 0) return
 
-        // Markers: finish first, then start, then the numbers in order; a later one
-        // whose centre falls within MarkerSpacingDp of a placed one is dropped.
         val d = density
         fx = xs[lastS][lastI]
         fy = ys[lastS][lastI]
@@ -317,7 +312,6 @@ internal class RouteLayout(
             k += step
         }
 
-        // Label pills: finish (or the one loop label) first, then start avoiding it.
         val halo = RouteMarker.Halo.value * d
         val finishR = RouteMarker.FinishSize.value * d / 2
         val startR = (if (loop) finishR + LoopRingGapDp * d + RouteMarker.StartRing.value * d else RouteMarker.StartSize.value * d / 2) + halo
@@ -366,7 +360,6 @@ internal class RouteLayout(
         }
     }
 
-    /** Whether [rect] covers any numbered distance marker placed in this layout. */
     private fun hitsNumbered(rect: RouteRect): Boolean {
         val r = (RouteMarker.DistanceSize.value / 2 + RouteMarker.Halo.value) * density
         for (m in 0 until placed) {
@@ -389,7 +382,6 @@ internal class RouteLayout(
         val w = text.width(label) + PillPadXDp * d * 2
         val h = (text.descent - text.ascent) + PillPadYDp * d * 2
         val gap = LabelGapDp * d
-        // Slide a pill along its side so it stays inside the bounds when it can.
         fun slideX(cx: Float) = cx.coerceIn(bounds.left + w / 2, (bounds.right - w / 2).coerceAtLeast(bounds.left + w / 2))
         fun slideY(cy: Float) = cy.coerceIn(bounds.top + h / 2, (bounds.bottom - h / 2).coerceAtLeast(bounds.top + h / 2))
         var fallback = false
@@ -504,10 +496,10 @@ internal class MercatorFit : RouteProjector {
 internal data class LonBounds(val west: Double, val east: Double)
 
 /**
- * Antimeridian-safe longitude framing (pure, so it is unit-testable without a
- * map). Naive min/max is wrong for a track straddling ±180°: −179° and +179°
- * are one degree apart on the ground but look 358° apart, so a plain bounding box
- * stretches the "long way" around the globe and zooms out to the whole world.
+ * Antimeridian-safe longitude framing. Naive min/max is wrong for a track
+ * straddling ±180°: −179° and +179° are one degree apart on the ground but look
+ * 358° apart, so a plain bounding box stretches the "long way" around the globe
+ * and zooms out to the whole world.
  *
  * A run is a local effort, so its true longitude span is small. When the raw span
  * exceeds 180° the box has almost certainly wrapped the long way, so re-measure
@@ -523,16 +515,10 @@ internal fun frameLongitudes(lons: List<Double>): LonBounds {
     val maxRaw = lons.max()
     val rawSpan = maxRaw - minRaw
     if (rawSpan <= 180.0) return LonBounds(minRaw, maxRaw)
-    // Shift the western (negative) hemisphere up by 360 so a dateline-straddling
-    // track becomes contiguous, then re-measure.
     val shifted = lons.map { if (it < 0.0) it + 360.0 else it }
     val minShift = shifted.min()
     val maxShift = shifted.max()
-    // Shifting didn't tighten it → the run really is that wide; keep the honest box.
     if (maxShift - minShift >= rawSpan) return LonBounds(minRaw, maxRaw)
-    // Wrap each bound back into range. west = smaller normalized value, east =
-    // larger; the larger one is the one that can exceed 180 and wraps to negative,
-    // yielding the west>east pair osmdroid reads as a crossing box.
     fun wrap(v: Double) = if (v > 180.0) v - 360.0 else v
     return LonBounds(west = wrap(minShift), east = wrap(maxShift))
 }

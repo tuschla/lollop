@@ -65,15 +65,12 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** The tap scales, built once: 0–30 % in 0.5 steps (drift, second-half
- *  slowdown), 0–100 % in 5-point steps (time above the easy band) and 0–7
- *  sessions a week; the bar-speed drop a velocity device can plausibly report. */
 private val HalfPercentScale = (0..60).map { it * 0.5 }
 private val FivePercentScale = (0..100 step 5).toList()
 private val WeekSessionCounts = (0..7).toList()
+/** The bar-speed drop (m/s) a velocity device can plausibly report. */
 private val VelocityDropRange = 0.0..0.30
 
-/** Where the decoupling-drift scale opens once "drift recorded" is switched on. */
 private const val DriftSeedPct = 4.0
 
 /**
@@ -87,7 +84,6 @@ private const val DriftSeedPct = 4.0
 @Composable
 fun SessionReviewSheet(
     onClose: () -> Unit = {},
-    // Whether the run questions apply: a lift-only day never asks them.
     showRun: Boolean,
     onSubmit: (Event.SubmitReview) -> Unit,
 ) {
@@ -103,14 +99,7 @@ fun SessionReviewSheet(
     var positiveSplitPct by rememberSaveable { mutableStateOf(0.0) }
     val openedAt = rememberSaveable { AppClock.nowSec() }
     var observedAt by rememberSaveable { mutableStateOf(openedAt) }
-    // The date row is an edit only when it names another day than the sheet
-    // opened on (confirming the same day is no change); whether anything is
-    // answered is derived from the answers themselves, so switching something
-    // on and back off is unanswered again.
     val dateEdited = localDayStartSec(observedAt) != localDayStartSec(openedAt)
-    // What a Save would send beyond the blank form: an off day, or (when the run
-    // questions apply) a switched-on run detail. Scale values under a switch that
-    // is off are never sent, so they answer nothing.
     val answered = badDay || (showRun && (hasDecoupling || hasEasyIntensity || hasPositiveSplit))
     val dirty = answered || dateEdited
 
@@ -161,7 +150,7 @@ fun SessionReviewSheet(
             LabeledSwitchRow(stringResource(Res.string.log_switch_positive_split), hasPositiveSplit) { hasPositiveSplit = it }
             if (hasPositiveSplit) {
                 // Second half slower than the first, as a percent; the core flags
-                // pacing strictly beyond +3 %. Tap-scale over 0–30 % in 0.5 steps.
+                // pacing strictly beyond +3 %.
                 HalfPercentField(Res.string.log_field_second_half_slowdown, positiveSplitPct) { positiveSplitPct = it }
             }
         }
@@ -169,7 +158,6 @@ fun SessionReviewSheet(
     }
 }
 
-/** A labelled 0–30 % tap scale in half-percent steps, its value in the label. */
 @Composable
 private fun HalfPercentField(label: StringResource, value: Double, onPick: (Double) -> Unit) {
     val text = stringResource(label)
@@ -178,7 +166,7 @@ private fun HalfPercentField(label: StringResource, value: Double, onPick: (Doub
 }
 
 /** Whether today's session review asks the run details: today's plan has a run,
- *  or a run is logged today. Pure. */
+ *  or a run is logged today. */
 internal fun reviewAsksRun(model: ViewModel, zone: TimeZone = TimeZone.currentSystemDefault()): Boolean {
     val today = model.today()
     val plannedRun = model.week_plan.firstOrNull { it.epoch_day == today }?.let { s ->
@@ -196,14 +184,13 @@ private val OvertrainingWeeksMin = CoreConstants.OVERTRAINING_MIN_WEEKS
 private val OvertrainingWeeksNfor = CoreConstants.NFOR_DECLINE_WEEKS.toDouble()
 
 /** "How long?" answers, one value inside each band: below the minimum, between
- *  the two edges, past the NFOR edge (0.5, 1.5, 3.0 weeks). */
+ *  the two edges, past the NFOR edge. */
 internal val OvertrainingWeeks = listOf(
     OvertrainingWeeksMin / 2,
     (OvertrainingWeeksMin + OvertrainingWeeksNfor) / 2,
     2 * OvertrainingWeeksNfor - OvertrainingWeeksMin,
 )
 
-/** The band edges as the answer labels state them ("1", "2"). */
 internal fun overtrainingWeekEdgeLabels(): Pair<String, String> =
     trimDecimal(OvertrainingWeeksMin) to trimDecimal(OvertrainingWeeksNfor)
 
@@ -214,7 +201,7 @@ internal val OvertrainingWeeksMinQuantity: Int =
 
 /** The explicit "Nothing to report this week" check-in: every count stated as
  *  0, no sign ticked, every clinical screen answered no. Only ever sent by that
- *  button, never by Save on an untouched form. Pure. */
+ *  button, never by Save on an untouched form. */
 internal fun weeklyAllClear(observedAt: Long): Event.SubmitWeeklyCheckin = Event.SubmitWeeklyCheckin(
     bonePainRedFlag = false,
     compulsiveFlag = false,
@@ -261,14 +248,11 @@ fun WeeklyCheckinSheet(
     var velocityText by rememberSaveable { mutableStateOf("") }
     var velocityFresh by rememberSaveable { mutableStateOf(true) }
     var velocityKeypad by rememberSaveable { mutableStateOf(false) }
-    val velocityParsed = parseKeypadNumber(velocityText)
+    val velocityParsed = velocityText.toDoubleOrNull()
     val velocityValid = velocityText.isEmpty() || (velocityParsed != null && velocityParsed in VelocityDropRange)
     var moreDetails by rememberSaveable { mutableStateOf(false) }
     val openedAt = rememberSaveable { AppClock.nowSec() }
     var observedAt by rememberSaveable { mutableStateOf(openedAt) }
-    // The date row is an edit only when it names another day than the sheet
-    // opened on; everything else is derived from the answers themselves, so
-    // ticking a sign and unticking it is unanswered again.
     val dateEdited = localDayStartSec(observedAt) != localDayStartSec(openedAt)
     var confirmClear by remember { mutableStateOf(false) }
     // In-flight latch for the all-clear, like EditorScaffold's Save: the sheet
@@ -335,7 +319,6 @@ fun WeeklyCheckinSheet(
     ) {
         FormCard {
             // Week-level fatigue rollup: ≥2 of any one trigger prompts an easier week.
-            // Both counts start unanswered (nothing selected, nothing sent).
             WeekSessionCountScale(
                 label = stringResource(Res.string.log_weekly_failed_sessions),
                 selected = failedKeySessions,
@@ -380,7 +363,6 @@ fun WeeklyCheckinSheet(
             }
         }
 
-        // The four listed signs, then how long, instead of a bare count.
         FormCard {
             FieldLabel(stringResource(Res.string.log_weekly_signs_q))
             val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
@@ -408,8 +390,6 @@ fun WeeklyCheckinSheet(
             }
         }
 
-        // Clinical screens, humanely framed: medical-referral triggers get
-        // context, not a bare switch.
         SectionOverline(stringResource(Res.string.log_weekly_clinical_header))
         FormCard {
             ClinicalQuestion(
@@ -446,8 +426,7 @@ fun WeeklyCheckinSheet(
             )
         }
     }
-    ClearConfirmDialog(
-        visible = confirmClear,
+    if (confirmClear) ClearConfirmDialog(
         title = stringResource(Res.string.log_weekly_clear_title),
         message = stringResource(Res.string.log_weekly_clear_body),
         confirmLabel = stringResource(Res.string.log_weekly_clear_confirm),
@@ -456,7 +435,6 @@ fun WeeklyCheckinSheet(
     )
 }
 
-/** A 0–7 sessions-this-week [RatingScale]; a picked count cannot be cleared. */
 @Composable
 private fun WeekSessionCountScale(
     label: String,

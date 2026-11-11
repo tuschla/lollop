@@ -1,19 +1,12 @@
 //! Strength & power calculators (knowledge-base File 02, Strength & Power
 //! Resistance-Training Programming Rules).
 //!
-//! Pure, deterministic math: e1RM estimators, RPE/RIR mapping, reps→%1RM
-//! estimation, and Prilepin volume governance. No IO.
-//!
 //! All numbers transcribed verbatim from File 02 (rules strength-005,
 //! strength-007, strength-011 and the Prilepin's-chart verbatim table). Claim
 //! ids come from the canonical registry in `crate::evidence`.
 
 use crate::evidence::claims;
 use crate::schema::{DupDay, LiftIntensity, Recommended};
-
-// ---------------------------------------------------------------------------
-// 1. Estimated 1RM (File 02 strength-005)
-// ---------------------------------------------------------------------------
 
 /// Epley estimated 1RM: `weight * (1 + reps/30)` (File 02 strength-005).
 /// Domain: reps >= 1 (the e1RM formulas are undefined below one rep). A single
@@ -46,10 +39,6 @@ pub fn e1rm_epley_frac(weight: f64, effective_reps: f64) -> f64 {
 pub fn pct_1rm_at_effective_reps(effective_reps: f64) -> f64 {
     100.0 / e1rm_epley_frac(1.0, effective_reps)
 }
-
-// ---------------------------------------------------------------------------
-// 2. RPE ↔ RIR mapping (File 02 strength-007; registry AUTOREG-RIR-001)
-// ---------------------------------------------------------------------------
 
 /// Zourdos RPE↔RIR anchor: RPE 10 = 0 RIR, each RIR = −1 RPE (File 02
 /// strength-007). Single source for both directions of the mapping so they
@@ -148,10 +137,6 @@ pub fn effort_target_rir(pct_1rm: f64, reps: u32) -> u8 {
     expected_rir_at_pct(pct_1rm, reps).round().clamp(1.0, 4.0) as u8
 }
 
-// ---------------------------------------------------------------------------
-// 3. Prilepin's chart (File 02 strength-011, verbatim table)
-// ---------------------------------------------------------------------------
-
 /// One row of Prilepin's chart: an intensity band with its rep-per-set range,
 /// optimal total reps, and total-rep range (File 02 verbatim table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,8 +198,6 @@ pub fn prilepin_for(pct_1rm: f64) -> Option<&'static PrilepinRow> {
     if !pct_1rm.is_finite() || pct_1rm < 0.0 {
         return None;
     }
-    // Round to nearest whole percent for band membership; the ">90%" row is
-    // unbounded above in the source, so clamp supra-max intensities onto it.
     let pct = (pct_1rm.round() as i64).min(100);
     PRILEPIN
         .iter()
@@ -232,10 +215,6 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> Recommended<bool> {
     };
     Recommended::new(ok, claims::STR_PRILEPIN_001)
 }
-
-// ---------------------------------------------------------------------------
-// 4. Loading prescription bands (File 02 strength-001/002/003; STR-INTENT-001)
-// ---------------------------------------------------------------------------
 
 /// The training quality a loading prescription targets (File 02 §1).
 #[derive(
@@ -330,7 +309,6 @@ pub const HEAVY_PCT_1RM: u8 = 80;
 /// Most reps in reserve of the max-strength band (1–3 RIR, STR-INTENT-001).
 const HEAVY_MAX_RIR: u8 = 3;
 
-/// A load at or above [`HEAVY_PCT_1RM`].
 pub fn is_heavy_pct(pct_1rm: f64) -> bool {
     pct_1rm >= f64::from(HEAVY_PCT_1RM)
 }
@@ -353,10 +331,6 @@ pub fn is_heavy_dup_day(day: DupDay) -> bool {
     is_heavy_pct(f64::from(dup_day_rx(day).value.pct_1rm.0))
 }
 
-// ---------------------------------------------------------------------------
-// 5. Load progression (File 02 strength-014; STR-PCTPROG-001)
-// ---------------------------------------------------------------------------
-
 /// Percentage auto-progression per successful week (File 02 strength-014):
 /// lower-body +2.5-5%, upper-body +1-2.5% of load. Returns (min, max) fraction.
 /// STR-PCTPROG-001.
@@ -374,10 +348,6 @@ pub fn weekly_pct_increment(upper_body: bool) -> Recommended<(f64, f64)> {
 /// prescribed number"). A fixed plate step above this on a light load is more
 /// than the rule allows.
 pub const MAX_LOAD_STEP_FRAC: f64 = 0.10;
-
-// ---------------------------------------------------------------------------
-// 6b. Periodization model selection (File 02 strength-009/010; STR-MODEL-001)
-// ---------------------------------------------------------------------------
 
 /// A periodization model (File 02 strength-010/021-024).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,11 +378,7 @@ pub fn periodization_model(
     Recommended::new(model, claims::STR_MODEL_001)
 }
 
-// ---------------------------------------------------------------------------
-// 6. Taper (File 02 strength-026/027; TAPER-001)
-// ---------------------------------------------------------------------------
-
-/// Peaking taper prescription (File 02 strength-026; TAPER-001).
+/// Peaking taper prescription (File 02 strength-026/027; TAPER-001).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TaperRx {
     /// Exponential volume reduction (min, max) as fractions.
@@ -441,10 +407,6 @@ pub fn taper_rx() -> Recommended<TaperRx> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 7. Plyometric volume caps (File 02 strength-032; PLYO-001)
-// ---------------------------------------------------------------------------
-
 /// Foot-contact ceiling per plyometric session by training level (File 02
 /// strength-032; PLYO-001). Returns (min, max) foot contacts. Progress volume
 /// OR intensity, never both.
@@ -466,10 +428,6 @@ pub fn plyo_foot_contact_cap(
 pub fn plyo_low_dose_contacts() -> Recommended<(u16, u16)> {
     Recommended::new((40, 60), claims::PLYO_001)
 }
-
-// ---------------------------------------------------------------------------
-// 8. Power/peaking specifics (File 02 strength-029/031/034)
-// ---------------------------------------------------------------------------
 
 /// Days before a test/meet to schedule the last true near-max deadlift, given
 /// its high systemic fatigue cost (File 02 strength-029). Returns (min, max)
@@ -534,10 +492,6 @@ pub fn olympic_derivative_rx() -> Recommended<OlympicDerivativeRx> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 9. RPE-anchored top set + back-offs (File 02 strength-015; STR-BACKOFF-001)
-// ---------------------------------------------------------------------------
-
 /// An RPE-anchored top-set / back-off scheme (File 02 strength-015).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BackOffRx {
@@ -558,10 +512,6 @@ pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
         claims::STR_BACKOFF_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// 10. Velocity-loss set termination by goal (File 02 strength-018; AUTOREG-VL-001)
-// ---------------------------------------------------------------------------
 
 /// Velocity-loss fraction ending a power set (autoreg-010; AUTOREG-VL-001): the
 /// lowest goal threshold.
@@ -586,10 +536,6 @@ pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
     };
     Recommended::new(vl, claims::AUTOREG_VL_001)
 }
-
-// ---------------------------------------------------------------------------
-// 11. Periodization phase tables (File 02 strength-021 linear / 022 block)
-// ---------------------------------------------------------------------------
 
 /// A per-phase loading prescription. Fields the knowledge base leaves
 /// unspecified for a phase are `None` (e.g. block realization gives only reps;
@@ -702,10 +648,6 @@ pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
     Recommended::new(rx, claims::STR_BLOCK_001)
 }
 
-// ---------------------------------------------------------------------------
-// 12. Depth-jump readiness gate (File 02 strength-033; SAFETY, ExpertOpinion)
-// ---------------------------------------------------------------------------
-
 /// Back-squat 1RM, as a multiple of bodyweight, required before high-intensity
 /// depth jumps (File 02 strength-033; PLYO-PREREQ-001).
 pub const DEPTH_JUMP_SQUAT_BW_RATIO: f64 = 1.5;
@@ -720,10 +662,6 @@ pub fn depth_jump_ready(squat_1rm: f64, bodyweight: f64) -> Recommended<bool> {
     let ready = bodyweight > 0.0 && squat_1rm >= DEPTH_JUMP_SQUAT_BW_RATIO * bodyweight;
     Recommended::new(ready, claims::PLYO_PREREQ_001)
 }
-
-// ---------------------------------------------------------------------------
-// 13. e1RM reliability gate + cross-check (File 02 strength-006)
-// ---------------------------------------------------------------------------
 
 /// Rep count above which estimated 1RM is unreliable (File 02 strength-006).
 pub const E1RM_RELIABLE_REP_CAP: u32 = 10;
@@ -793,10 +731,6 @@ pub fn e1rm_cross_check(
 pub fn e1rm_test_set_reps() -> Recommended<(u8, u8)> {
     Recommended::new((3, 6), claims::STR_E1RM_CHECK_001)
 }
-
-// ---------------------------------------------------------------------------
-// 14. DUP day parameters (File 02 strength-023; contested CQ-03)
-// ---------------------------------------------------------------------------
 
 /// One DUP day's loading parameters (File 02 strength-023, verbatim example
 /// week).
@@ -914,10 +848,6 @@ pub fn lift_detrain_credit(days_since_trained: i64) -> Recommended<Option<f64>> 
     Recommended::new(re.load_frac, claims::DETRAIN_STR_001)
 }
 
-// ---------------------------------------------------------------------------
-// 15. Novice load-jump cap (File 02 strength-040; SAFETY)
-// ---------------------------------------------------------------------------
-
 /// Novice load-jump cap between 1RM-test attempts / progression steps, as a
 /// fraction of load (File 02 strength-040): upper-body 2.5-5%, lower-body
 /// 5-10%. Returns (min, max). STR-1RMTEST-001 (safety-critical).
@@ -930,13 +860,9 @@ pub fn novice_load_jump_cap_frac(upper_body: bool) -> Recommended<(f64, f64)> {
     Recommended::new(cap, claims::STR_1RMTEST_001)
 }
 
-// ---------------------------------------------------------------------------
-// 16. Warm-up ramp (STR-WARMUP-001)
-// ---------------------------------------------------------------------------
-
 /// The specific warm-up ramp after its first step (STR-WARMUP-001; the exact
-/// steps are expert opinion): 40 % × 5, 60 % × 3 and 80 % × 2 of the working
-/// load, ending on a high-load set.
+/// steps are expert opinion): (share of the working load, reps), ending on a
+/// high-load set.
 const WARM_UP_RAMP: [(f64, u32); 3] = [(0.4, 5), (0.6, 3), (0.8, 2)];
 
 /// One step of a warm-up ramp: its load (wire kg) and reps.

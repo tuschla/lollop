@@ -65,9 +65,7 @@ class EventDispatcherTest {
         EventDispatcher.send(Event.SetToday(1L, 0))
         advanceUntilIdle()
 
-        // Both events reached the consumer: the throw did not stop the loop.
         assertEquals(2, calls)
-        // The surviving second event's view landed in the model.
         assertSame(goodView, EventDispatcher.model.value)
     }
 

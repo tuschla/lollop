@@ -4,12 +4,13 @@
 # REAL Android runtime, so it catches what the JVM shadow can't — actual rendering,
 # the packaged arm64/x86_64 libshared.so, and process-level crashes/ANRs.
 #
-#   scripts/qa-emulator.sh                 # full run: boot AVD, build + install,
-#                                          # seed, screenshot, set flow, monkey, stop
-#   scripts/qa-emulator.sh <avd-name>      # use a specific AVD (default: e34)
+#   scripts/qa-emulator.sh [--avd e34] [--port 5580]
 #
-# QA_SKIP_BUILD=1 installs the existing debug APK without rebuilding it
-# (scripts/build.sh --qa sets it after its own build).
+# Boots the AVD headless on the port unless emulator-<port> is already online
+# (CI's emulator: --port 5554), builds + installs the debug APK, seeds a log,
+# screenshots, logs a set, runs monkey. QA_SKIP_BUILD=1 installs the existing
+# debug APK without rebuilding it (scripts/build.sh --qa sets it after its own
+# build).
 # Requires: an Android SDK with an emulator + a created AVD, KVM (/dev/kvm) for
 # acceptable speed, and the JDK/cargo toolchain the Gradle build needs. Outputs
 # in android/app/build/qa/ (REPORT.md, checks.tsv, shots/, monkey/, logcat.txt).
@@ -17,10 +18,11 @@ set -uo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=emu-scenarios/lib.sh
 source "$(dirname "$0")/emu-scenarios/lib.sh"
-for arg in "$@"; do
-  case "$arg" in
-    --*) echo "unknown flag: $arg" >&2; exit 2 ;;
-    *) AVD="$arg" ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --avd) AVD="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 SERIAL="emulator-$PORT"

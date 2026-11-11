@@ -11,10 +11,6 @@
 use crate::evidence::{ClaimId, ContestedId, EvidenceEntry, EvidenceGrade};
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Evidence & confidence layer (knowledge-base File 09)
-// ---------------------------------------------------------------------------
-
 /// Wrapper forcing evidence + confidence onto any recommendation-bearing value.
 ///
 /// The backing claim is private and set only by [`Recommended::new`], which
@@ -49,7 +45,6 @@ impl<T> Recommended<T> {
         }
     }
 
-    /// The same recommendation tagged with its typed kind.
     pub fn with_kind<K>(self, kind: K) -> Recommended<T, K> {
         Recommended {
             value: self.value,
@@ -68,12 +63,10 @@ fn assert_not_myth(claim: ClaimId) {
 }
 
 impl<T, K> Recommended<T, K> {
-    /// The claim backing this recommendation.
     pub fn claim_id(&self) -> ClaimId {
         self.claim
     }
 
-    /// The registry row backing this recommendation.
     pub fn evidence(&self) -> &'static EvidenceEntry {
         self.claim.entry()
     }
@@ -82,7 +75,6 @@ impl<T, K> Recommended<T, K> {
         self.evidence().grade
     }
 
-    /// The citation line shown for the backing claim.
     pub fn reference(&self) -> &'static str {
         self.evidence().reference()
     }
@@ -145,11 +137,6 @@ impl<T, K: Copy> Recommended<T, K> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Program hierarchy: Program → Mesocycle → Session → Prescription
-// ---------------------------------------------------------------------------
-
-/// Top-level training goal.
 #[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq)]
 pub enum Goal {
     Strength,
@@ -287,7 +274,6 @@ impl SessionType {
         }
     }
 
-    /// The session type whose [`wire_name`](Self::wire_name) is `name`.
     pub fn from_wire_name(name: &str) -> Option<SessionType> {
         Self::ALL.into_iter().find(|t| t.wire_name() == name)
     }
@@ -325,10 +311,6 @@ pub struct Session {
     pub dup_day: Option<DupDay>,
 }
 
-// ---------------------------------------------------------------------------
-// Prescriptions
-// ---------------------------------------------------------------------------
-
 /// Proximity-to-failure / load anchor for a lift set (File 02).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LiftIntensity {
@@ -344,7 +326,6 @@ pub enum LiftIntensity {
     MaxIntent,
 }
 
-/// A prescribed lift: the set/rep/load/rest contract for one exercise.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiftPrescription {
     pub exercise: String,
@@ -489,7 +470,7 @@ pub enum RepRecovery {
 
 /// Identifies one calisthenics leverage ladder (see `crate::calisthenics`
 /// `LADDERS`). A plain data enum: `schema` owns the shared wire types so it need
-/// not depend on `evidence`/`calisthenics`; `calisthenics.rs` re-exports this.
+/// not depend on `calisthenics`; `calisthenics.rs` re-exports this.
 #[derive(
     Serialize,
     Deserialize,
@@ -642,15 +623,10 @@ pub enum RxBasis {
 }
 
 impl RxBasis {
-    /// `value` sized by this rule, cited to `claim`.
     pub fn rx(self, value: Prescription, claim: ClaimId) -> Rx {
         Recommended::new(value, claim).with_kind(self)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Autoregulation hooks: readiness inputs → adjustments (File 06)
-// ---------------------------------------------------------------------------
 
 /// Normalized readiness signals the engine consumes (File 06 §2).
 #[derive(
@@ -1191,7 +1167,6 @@ impl HealthScreen {
         self.parq_yes & q.bit() != 0 || (q == ParqQuestion::BoneOrJoint && self.injury_or_rehab)
     }
 
-    /// The screen after `answer`.
     pub fn answered(&self, answer: HealthAnswer) -> HealthScreen {
         match answer {
             HealthAnswer::Parq { question, yes } => self.with_parq_answer(question, yes),
@@ -1446,7 +1421,6 @@ pub enum ScreenGate {
 }
 
 impl AdjustmentKind {
-    /// `value` raised by this rule, cited to `claim`.
     pub fn call(self, value: Adjustment, claim: ClaimId) -> AdjustmentCall {
         Recommended::new(value, claim).with_kind(self)
     }
@@ -1573,7 +1547,6 @@ mod tests {
     fn illness_severity_decodes_neck_check_convention() {
         assert_eq!(IllnessSeverity::from_value(0.0), IllnessSeverity::None);
         assert_eq!(IllnessSeverity::from_value(1.0), IllnessSeverity::AboveNeck);
-        // Intermediate rounds down to the milder tier.
         assert_eq!(IllnessSeverity::from_value(1.5), IllnessSeverity::AboveNeck);
         assert_eq!(
             IllnessSeverity::from_value(2.0),

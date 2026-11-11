@@ -30,7 +30,6 @@ fn single(mut chars: impl Iterator<Item = char>) -> Option<char> {
     chars.next().is_none().then_some(c)
 }
 
-/// `s` folded character by character ([`push_folded`]).
 pub(crate) fn fold(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_lowercase();
@@ -42,8 +41,7 @@ pub(crate) fn fold(s: &str) -> String {
     out
 }
 
-/// Whether `a` and `b` fold to the same text: `eq_ignore_ascii_case` (a length
-/// check first), then [`fold`] on both only when either is not ASCII.
+/// Whether `a` and `b` fold to the same text.
 pub(crate) fn fold_eq(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b) || (!(a.is_ascii() && b.is_ascii()) && fold(a) == fold(b))
 }

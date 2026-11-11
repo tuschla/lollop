@@ -63,14 +63,12 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
-/** Text-layout helpers shared by the review proofs (same rules as SmallScreenLargeFontTest). */
 private fun SemanticsNode.textLayout(): TextLayoutResult? {
     val get = config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action ?: return null
     val out = mutableListOf<TextLayoutResult>()
     return if (get(out)) out.firstOrNull() else null
 }
 
-/** The text re-laid out at the width the node really has. */
 private fun TextLayoutResult.paragraphAt(widthPx: Int) = Paragraph(
     text = layoutInput.text.text,
     style = layoutInput.style,
@@ -79,7 +77,7 @@ private fun TextLayoutResult.paragraphAt(widthPx: Int) = Paragraph(
     fontFamilyResolver = layoutInput.fontFamilyResolver,
 )
 
-/** A soft line break INSIDE a word at the node's real width ("Maratho/n"). */
+/** Same rule as SmallScreenLargeFontTest.splitsAWord, at the node's real width. */
 private fun SemanticsNode.splitsAWord(): Boolean {
     val l = textLayout() ?: return false
     if (size.width <= 0) return false
@@ -91,7 +89,6 @@ private fun SemanticsNode.splitsAWord(): Boolean {
     }
 }
 
-/** Lines the node's text needs at its real width. */
 private fun SemanticsNode.linesNeeded(): Int {
     val l = textLayout() ?: return 0
     return l.paragraphAt(size.width).lineCount
@@ -128,8 +125,6 @@ class ReviewShellTest {
     }
 
     private fun dp(px: Float) = with(rule.density) { px.toDp().value }
-
-    // ═══════════ RTL: the restacked Layouts mirror ═══════════════════════════
 
     /** In RTL the hero's title sits at the start (right) and its trailing "Move" /
      *  "?" at the end (left): the hero's Layout places by layout direction. */
@@ -195,8 +190,6 @@ class ReviewShellTest {
         )
     }
 
-    // ═══════════ The pinned DO-NOT-TRAIN banner under its half-screen cap ═════
-
     private fun painHoldBannerWhole(scale: Float) {
         RuntimeEnvironment.setFontScale(scale)
         val morning = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
@@ -246,7 +239,6 @@ class ReviewShellTest {
     @Config(qualifiers = "w640dp-h360dp-xhdpi")
     fun painBanner_landscape_font150_headlineAndActionsWhole() = painHoldBannerWhole(1.5f)
 
-    /** A 411dp-wide phone in landscape (411dp tall → 205dp cap). */
     @Test
     @Config(qualifiers = "w731dp-h411dp-xhdpi")
     fun painBanner_landscape411_font100_headlineAndActionsWhole() = painHoldBannerWhole(1.0f)
@@ -255,18 +247,14 @@ class ReviewShellTest {
     @Config(qualifiers = "w731dp-h411dp-xhdpi")
     fun painBanner_landscape411_font130_headlineAndActionsWhole() = painHoldBannerWhole(1.3f)
 
-    /** Split-screen / a short window: 320dp wide, 480dp tall (240dp cap) at 130 %. */
     @Test
     @Config(qualifiers = "w320dp-h480dp-xhdpi")
     fun painBanner_320x480_font130_headlineAndActionsWhole() = painHoldBannerWhole(1.3f)
 
-    /** Portrait on the 320dp phone at 175 %: the claim "Its actions always show whole". */
+    /** SafetyBanner.kt: the hold's actions always show whole. */
     @Test
     fun painBanner_320x640_font175_headlineAndActionsWhole() = painHoldBannerWhole(1.75f)
 
-    // ═══════════ In-between font scales: words kept whole ═══════════════════
-
-    /** Unmerged text nodes under [root] tagged by [where] that break inside a word. */
     private fun wordSplits(nodes: List<SemanticsNode>): List<String> =
         nodes.filter { it.boundsInRoot.width > 0f && it.splitsAWord() }.map { "\"${it.text()}\" @ ${dp(it.size.width.toFloat())}dp" }
 
@@ -282,7 +270,6 @@ class ReviewShellTest {
         rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("calc-result")).fetchSemanticsNodes().isNotEmpty() }
         rule.waitForIdle()
         val bands = EventDispatcher.model.value!!.hr_zone_bands.map { it.name }.toSet()
-        // The zone rows: every unmerged text node in the result card.
         val card = rule.onNode(hasTestTag("calc-result"), useUnmergedTree = true).fetchSemanticsNode()
         val texts = card.allDescendants().filter { it.text().isNotEmpty() }
         assertTrue("found the zone names in the card", texts.any { it.text() in bands })
@@ -302,8 +289,6 @@ class ReviewShellTest {
     @Config(qualifiers = "w360dp-h640dp-xhdpi")
     fun hrZones_font115_360dp_noWordSplit() = hrZones(1.15f)
 
-    /** Today at an in-between scale: the week strip's day labels whole (one line
-     *  each, no cut) and the hero title never split inside a word. */
     private fun todayWhole(scale: Float) {
         RuntimeEnvironment.setFontScale(scale)
         QaHarness.seedStrengthHistory(ctx)
@@ -334,15 +319,12 @@ class ReviewShellTest {
     @Config(qualifiers = "w360dp-h640dp-xhdpi")
     fun today_360dp_font150() = todayWhole(1.5f)
 
-    /** Every visible unmerged text node on screen that breaks inside a word. */
     private fun screenWordSplits(): List<String> = wordSplits(
         rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
             .flatMap { listOf(it) + it.allDescendants() }
             .filter { it.text().isNotEmpty() && it.boundsInRoot.height > 0f },
     )
 
-    /** The weekly check-in (FieldLabels over its questions, the bar-speed field)
-     *  at an in-between scale: no word broken anywhere on the sheet, scrolled through. */
     private fun weeklyWhole(scale: Float) {
         RuntimeEnvironment.setFontScale(scale)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -373,15 +355,13 @@ class ReviewShellTest {
     fun today_411dp_font175() = todayWhole(1.75f)
 }
 
-/** Component-level proofs (no core): FieldLabel in RTL, the dispatcher reset. */
+/** Component-level proofs (no core). */
 @RunWith(RobolectricTestRunner::class)
 class ReviewShellComponentTest {
 
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
-    /** In RTL a FieldLabel's label belongs at the start (right edge) and its hint
-     *  at the end (left edge), as the Row it replaced did. */
     @Test
     fun fieldLabel_rtl_labelAtStart_hintAtEnd() {
         rule.setContent {
@@ -455,7 +435,6 @@ class ReviewShellComponentTest {
                 Box(Modifier.width(288.dp)) { app.milestone.RunStatColumns(stats, compact = false) }
             }
         }
-        // Control: the stat is on screen (merged: its spoken description).
         assertTrue(rule.onAllNodes(hasContentDescription("Moving time 29:57")).fetchSemanticsNodes().isNotEmpty())
         val withLayout = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
             .flatMap { listOf(it) + it.allDescendants() }
@@ -467,7 +446,6 @@ class ReviewShellComponentTest {
         }
     }
 
-    /** RunStatColumns at [scale] in [widthDp]: every value on one line, no word split. */
     private fun runStatsWhole(scale: Float, widthDp: Int) {
         val stats = listOf(
             app.milestone.RunStat("Distance", "13.72", "km", "Distance 13.72 kilometres"),
@@ -531,7 +509,7 @@ class ReviewShellComponentTest {
             }
             shadowOf(Looper.getMainLooper()).idle()
             QaHarness.freshProcess()
-            gate.complete(Unit) // the in-flight unit finishes after the reset
+            gate.complete(Unit)
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
             var notice: app.milestone.CoreNotice? = null
             val noticeJob = AppProcess.scope.launch { EventDispatcher.notices.collect { notice = it } }
@@ -549,9 +527,6 @@ class ReviewShellComponentTest {
         }
     }
 
-    /** An exclusive body in flight across the reset (non-cancellable, like the
-     *  restore) still hands its awaiter its result, but publishes nothing; the block
-     *  queued behind it is settled. */
     @Test
     fun resetForTest_exclusiveInFlightAnswersItsAwaiterButPublishesNothing() {
         val gate = CompletableDeferred<Unit>()
@@ -631,9 +606,9 @@ class ReviewShellComponentTest {
         }
     }
 
-    /** resetForTest gives "the process-scoped state of a freshly started process":
-     *  a notice a previous test left uncollected must not survive into the next,
-     *  nor a fake send path it installed. */
+    /** resetForTest gives a fresh process for the next test: a notice a previous
+     *  test left uncollected must not survive into the next, nor a fake send path
+     *  it installed. */
     @Test
     fun resetForTest_dropsBufferedNoticesAndFakeSendPaths() {
         QaHarness.freshProcess()
@@ -701,7 +676,6 @@ class ReviewShellComponentTest {
         assertTrue("another day picked is an edit", dirty)
     }
 
-    /** The weekly check-in: the same day confirmed is no edit, another day is. */
     @Test
     fun weeklyCheckin_sameDateConfirmed_isNotAnEdit() = pinnedClock {
         val guard = app.milestone.EditorGuard()
@@ -719,8 +693,6 @@ class ReviewShellComponentTest {
         assertTrue("another day picked is an edit", dirty)
     }
 
-    /** Claim check (VERIFIED if green): after resetForTest a fresh send is consumed
-     *  and published by the new consumer. */
     @Test
     fun resetForTest_newConsumerPublishes() {
         val real = TestSink.sender

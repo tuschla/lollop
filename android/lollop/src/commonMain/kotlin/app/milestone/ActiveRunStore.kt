@@ -187,7 +187,7 @@ internal object ActiveRunStore : AppFeature {
      * the core's): a uniform stride plus the last fix and every fix that opened a
      * segment ([segmentStarts], remapped into the result). Dropping fixes only widens
      * gaps; a widened gap opens a new segment only once stride × fix cadence exceeds
-     * [CoreConstants.MAX_FIX_GAP_SEC] (at the 4 s screen-off cadence, past ~37,800 fixes, ≈42 h).
+     * [CoreConstants.MAX_FIX_GAP_SEC].
      * No-op at or below the cap.
      */
     internal fun thinForRecovery(

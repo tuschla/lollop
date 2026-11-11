@@ -68,7 +68,6 @@ class TodayCoachingTest {
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
     }
 
-    /** Wait until at least one node matches, then return how many do. */
     private fun waitForAny(matcher: SemanticsMatcher, timeoutMs: Long = 10_000): Int {
         runCatching { rule.waitForNode(matcher, timeoutMs) }
         return rule.countOf(matcher)
@@ -78,7 +77,6 @@ class TodayCoachingTest {
         it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith(prefix) == true
     }
 
-    // ── plates per side + effort target on a strength item's face ───────────
     @Test
     fun strengthPlan_itemFaceShowsPlatesPerSideAndEffortTarget() {
         QaHarness.seedLog(
@@ -104,15 +102,12 @@ class TodayCoachingTest {
         assertNoViolations()
     }
 
-    // ── every planned set logged → the session-done card ─────────────────────
     @Test
     fun allSetsLogged_showsSessionDoneCard() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val session = EventDispatcher.model.value?.next_session
         assertTrue("today's session is planned", session != null && session.items.isNotEmpty())
-        // Log every prescribed set as the user would from the loop (same weight per
-        // exercise, the top of the rep band), through the real core.
         val now = AppClock.nowSec()
         var id = now * 1_000
         session!!.items.filter { it.exercise.isNotEmpty() }.forEachIndexed { i, item ->
@@ -124,7 +119,6 @@ class TodayCoachingTest {
             }
         }
         assertTrue("the session-done card appears", waitForAny(hasTestTag("session-done")) == 1)
-        // The next session below is a preview: no log targets, no empty set slots.
         val next = EventDispatcher.model.value?.next_session
         assertTrue(
             "the next session is a later day's",
@@ -142,7 +136,6 @@ class TodayCoachingTest {
         assertNoViolations()
     }
 
-    // ── today's session: the current item carries the controls, one "?" ──────
     @Test
     fun todaysSession_onlyTheCurrentItemCarriesControls_andTheCardHasOneQuestionMark() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -151,11 +144,9 @@ class TodayCoachingTest {
         val session = EventDispatcher.model.value!!.next_session!!
         val open = session.items.filter { it.exercise.isNotEmpty() && !it.done }
         assertTrue("scenario: several open lift items", open.size >= 2)
-        // One filled "do this next" action, one Skip, one slot row: the current item's.
         assertTrue(waitForAny(hasTestTag("plan-action-filled")) == 1)
         rule.onAllNodesWithText(str(R.string.plan_skip_exercise)).assertCountEquals(1)
         assertTrue(rule.onAllNodes(tagStartsWith("set-slots:")).fetchSemanticsNodes().size == 1)
-        // Every other open item is still one tap from its loop.
         open.drop(1).forEach { item ->
             assertTrue(
                 "${item.exercise} is one tap from its first set",
@@ -165,7 +156,6 @@ class TodayCoachingTest {
                 ).fetchSemanticsNodes().size == 1,
             )
         }
-        // No per-item "?": the card's single disclosure holds every item's evidence.
         open.forEach { item ->
             assertTrue(
                 "no per-item ? on ${item.exercise}",
@@ -187,7 +177,6 @@ class TodayCoachingTest {
         }
     }
 
-    // ── "Move session" moves today's session to another day ──────────────────
     @Test
     fun moveSession_movesTodaysSessionOffToday() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -199,7 +188,6 @@ class TodayCoachingTest {
         assertTrue("the picker offers at least one day", targets.fetchSemanticsNodes().isNotEmpty())
         val target = targets[0].fetchSemanticsNode().config[SemanticsProperties.TestTag].removePrefix("move-target:").toLong()
         targets[0].performClick()
-        // Today is now a rest day, folded into the card's overline; no set is due today.
         rule.assertTextCountEventually(str(R.string.main_rest_day_next_overline).uppercase(Locale.US), 1)
         rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 0)
         assertTrue(
@@ -208,13 +196,11 @@ class TodayCoachingTest {
                 it.epoch_day == EventDispatcher.model.value?.today_epoch_day && it.status == SessionStatus.Rest
             } == true,
         )
-        // The move confirms with its day, and Undo puts the session back on today.
         rule.assertTextCountEventually(str(R.string.main_moved_to, planDateLabel(target)), 1)
         rule.onNodeWithText(str(R.string.log_undo)).performClick()
         rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
     }
 
-    // ── Skip exercise confirms with an Undo that reopens it ──────────────────
     @Test
     fun skipExercise_confirmsWithUndo() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -232,7 +218,6 @@ class TodayCoachingTest {
         )
     }
 
-    // ── the undo message sits above the Log FAB, never on it ────────────────
     @Test
     fun skipExercise_undoMessageSitsAboveTheLogFab() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -246,10 +231,8 @@ class TodayCoachingTest {
         assertTrue("the message ($shown) sits above the Log FAB ($fab)", shown.bottom <= fab.top)
     }
 
-    /** The floating Log button (Today only). */
     private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
-    // ── the Log FAB lives on Today only ─────────────────────────────────────
     @Test
     fun logFab_isOnTodayOnly() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(7))))
@@ -263,7 +246,6 @@ class TodayCoachingTest {
         }
     }
 
-    // ── Today's last row scrolls fully clear of the floating Log button ────
     @Test
     fun todayLastRow_scrollsClearOfTheLogFab() {
         QaHarness.seedLog(
@@ -280,7 +262,6 @@ class TodayCoachingTest {
         assertTrue("the last row ($lastBottom px) ends above the Log FAB ($fabTop px)", lastBottom <= fabTop + 1f)
     }
 
-    // ── the hero's do-this action runs the prescription card's full width ───
     @Test
     fun heroAction_spansThePrescriptionCard() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -294,7 +275,6 @@ class TodayCoachingTest {
         assertTrue("end inset ${card.right - action.right}", (card.right - action.right - inset).value in -1f..1f)
     }
 
-    // ── calisthenics items offer Easier / Harder and Harder changes the rung ─
     @Test
     fun calisthenicsItem_offersEasierHarderAndHarderSwapsTheExercise() {
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
@@ -310,14 +290,12 @@ class TodayCoachingTest {
         val harderName = desc.substringAfter(harderLead).trimStart().substringBefore(", ")
         assertTrue("the chip names the harder rung: $desc", harderName.isNotBlank())
         chip.performClick()
-        // SetCalisthenicsRung: the item now prescribes the harder rung.
         assertTrue(
             "the plan item became $harderName",
             waitForAny(hasTestTag("plan-item:$harderName")) >= 1,
         )
     }
 
-    // ── THIS WEEK: one count line, at most one note, no unlabeled bars ───────
     @Test
     fun thisWeek_showsCountLineAndAtMostOneNote_noUnlabeledBars() {
         // A plan started on the Monday two weeks back with nothing logged: last
@@ -372,7 +350,6 @@ class TodayCoachingTest {
         assertNoViolations()
     }
 
-    // ── a non-blocking hold: the call + one line + the action, no engine meta ─
     @Test
     fun headColdHold_cardShowsCallOneLineAndAction_noProvisionalLine() {
         val morning = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
@@ -397,7 +374,6 @@ class TodayCoachingTest {
             "no \"stay at plan\" line while the hold is active",
             rule.onAllNodes(hasText("stay at plan", substring = true)).fetchSemanticsNodes().isEmpty(),
         )
-        // The hold's follow-up safety rows sit behind the "?", never stacked on the face.
         val call = m.today_headline?.summary
         val followUps = m.adjustments.filter { it.safety_critical && it.summary != call }
         assertTrue("scenario: the hold has follow-up safety rows", followUps.isNotEmpty())

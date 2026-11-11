@@ -377,7 +377,10 @@ pub(in crate::app) fn build_plan_views(
     let planned_run_km = if run_walk {
         0.0
     } else {
-        round_tenths(crate::plan::prescribed_run_km(cur_program, cur_anchors))
+        round_tenths(crate::plan::prescribed_run_km(
+            &cur_program.mesocycle.sessions,
+            cur_anchors,
+        ))
     };
     PlanViews {
         hero_day,
@@ -612,7 +615,6 @@ fn resolve_hero(
     Some(hero.epoch_day)
 }
 
-/// Hold a row: blocked, with no items, adjustment or move options.
 fn blank_row(row: &mut PlanRow) {
     row.status = SessionStatus::Blocked;
     row.items.clear();

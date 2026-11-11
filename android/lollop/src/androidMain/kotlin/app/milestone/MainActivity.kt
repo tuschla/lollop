@@ -109,7 +109,6 @@ class MainActivity : ComponentActivity() {
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
         cancelTappedNotification(this, intent)
-        // A share/open into an already-running Activity imports too.
         RunImport.importRuns(this, RunImport.urisFrom(intent))
     }
 
@@ -120,9 +119,6 @@ class MainActivity : ComponentActivity() {
         private val NAV_SCRIM_DARK = android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }
-
-// The open intents ([OpenDest] as an explicit activity intent): built by the widget,
-// the Quick Settings tile and the notifications, read by [MainActivity].
 
 internal const val ACTION_OPEN = "app.milestone.action.OPEN"
 internal const val EXTRA_DEST = "dest"

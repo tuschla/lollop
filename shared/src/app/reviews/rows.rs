@@ -141,7 +141,7 @@ fn week_trigger_rows(r: &SessionReview, ctx: &ReviewCtx) -> Rows {
             .collect(),
     );
     if let Some(weeks) = r.pace_at_hr_improved_weeks {
-        let retest = autoreg::threshold_retest_due(true, weeks);
+        let retest = autoreg::threshold_retest_due(weeks);
         if retest.value {
             let row = to_view_with(
                 format!(
@@ -230,11 +230,10 @@ fn push_execution_rows(out: &mut Rows, r: &SessionReview, ctx: &ReviewCtx) {
 
     // autoreg-013 via the lift execution the review already carries: reserve
     // at/below target means the target effort is reached, cut remaining sets.
-    // strength::rir_to_rpe supplies the RIR→RPE mapping.
     if same_day && let Some(l) = &r.lift {
         let rpe_actual = strength::rir_to_rpe(f64::from(l.rir_actual));
         let rpe_target = strength::rir_to_rpe(f64::from(l.rir_target));
-        if autoreg::rpe_stop_reached(rpe_actual, rpe_target) && !l.reps_met {
+        if rpe_actual >= rpe_target && !l.reps_met {
             let mut row = to_view_with(
                 "Target effort reached before the planned reps: stop here and tap End exercise"
                     .to_string(),
@@ -515,8 +514,6 @@ pub(in crate::app) fn remaining_sets_call_spent(r: &AdjustmentCall, today: &Plan
 mod tests {
     use super::*;
 
-    /// The threshold rows format the engine's thresholds in and read as they
-    /// did when the numbers were literals (rev4 P27).
     #[test]
     fn threshold_rows_state_the_engine_thresholds() {
         let r = SessionReview {

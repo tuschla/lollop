@@ -102,8 +102,6 @@ class CopyToneTest {
         assertTrue("${bad.size} tone violations:\n" + bad.joinToString("\n"), bad.isEmpty())
     }
 
-    // ── Rules ───────────────────────────────────────────────────────────────
-
     private fun violations(s: String): List<String> {
         val v = mutableListOf<String>()
         val straight = s.replace('\u2019', '\'')
@@ -177,8 +175,6 @@ class CopyToneTest {
         "research shows" to listOf("research shows", "research backs", "research suggests", "research has shown"),
         "experts say" to listOf("experts say", "experts agree", "experts recommend"),
     )
-
-    // ── Resources ───────────────────────────────────────────────────────────
 
     /** The unit-test working directory is the lollop module. */
     private fun resources(): List<Res> {

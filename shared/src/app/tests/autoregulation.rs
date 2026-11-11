@@ -162,7 +162,6 @@ fn knee_pain_stops_leg_work_and_keeps_upper_body_work() {
     assert!(!ns.items[1].done);
     assert!(ns.items[2].summary.contains("skip"), "runs load the knee");
 
-    // Through the view: not train-blocked, banner action present.
     let (app, mut model) = planned_strength_model(true);
     app.update(Event::SubmitReadiness(inputs[0].clone()), &mut model)
         .expect_only_render();
@@ -303,7 +302,6 @@ fn a_sustained_hrv_drop_is_a_signal_not_an_artifact() {
 
 #[test]
 fn pain_scoping_keeps_only_movements_that_cannot_load_the_painful_part() {
-    // Conservative allow-lists per region.
     use crate::autoreg::item_spared_by_pain;
     for lift in [
         "Back Squat",

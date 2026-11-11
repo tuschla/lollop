@@ -1,13 +1,13 @@
-//! File 04, Running engine core: pure, deterministic run-training math.
+//! File 04, Running engine core: run-training math.
 //!
-//! No IO, no clock, no randomness. Every function is either a pure calculation
+//! Every function is either a pure calculation
 //! (HRmax, zone classification, band table lookup) returning a plain value, or a
 //! prescriptive recommendation (spike gate, volume caps, taper) returning a
 //! [`Recommended<T>`] whose [`ClaimId`](crate::evidence::ClaimId) names the
 //! backing evidence row in the claim registry.
 //!
 //! Rule ids and table values are transcribed verbatim from
-//! `knowledge-base/extracted/04-running.md`.
+//! `planning/knowledge-base/extracted/04-running.md`.
 //!
 //! ACWR is not implemented: `LOAD-ACWR-001` is a blocked `MarketingMyth`;
 //! the single-session spike gate (`RUN-SPIKE-001`) is the gate instead.
@@ -16,10 +16,6 @@ use crate::evidence::claims;
 use crate::schema::{
     MesoPhase, Recommended, RunSegment, RunSessionType, RunVolume, ThreeZone, VdotBand, WorkoutType,
 };
-
-// ---------------------------------------------------------------------------
-// 1. HRmax (pure calculation)
-// ---------------------------------------------------------------------------
 
 /// Estimate maximal heart rate via Tanaka (208 − 0.7·age). Rule RUN-HRMAX-001.
 ///
@@ -75,10 +71,6 @@ pub const RESTING_HR_MAX_BPM: f64 = 120.0;
 /// The highest average heart rate a logged run states, % of HRmax.
 pub const HR_PCT_MAX_CEILING: f64 = 100.0;
 
-// ---------------------------------------------------------------------------
-// 2. Three-zone classification (pure calculation)
-// ---------------------------------------------------------------------------
-
 /// Upper bound of zone 1 (below LT1), %HRmax (File 04 running-003 table).
 const ZONE1_CEILING_PCT_HRMAX: f64 = 82.0;
 /// Floor of zone 3 and of threshold (T) work, %HRmax (running-003 / running-018).
@@ -90,7 +82,7 @@ const INTERVAL_FLOOR_PCT_HRMAX: f64 = 95.0;
 ///
 /// Boundaries per File 04 table: Z1 < ~82 %HRmax, Z2 ~82–<88 %, Z3 ≥ ~88 %.
 /// The 88 % boundary is inclusive to the hard zone so a run held exactly at the
-/// prescribed Tempo/Threshold floor (0.88, `tempo_rx`) counts as threshold work
+/// prescribed Tempo/Threshold floor (0.88, `workout_rx`) counts as threshold work
 /// rather than bucketing as moderate. These are engine defaults; File 04
 /// stresses LT1/LT2 should be field-measured (LT1 45–70 %HRmax, LT2 55–93
 /// %HRmax) rather than hardcoded when data exist.
@@ -134,10 +126,6 @@ pub fn classify_hard_run(pct_hr_max: f64, workout_type: Option<&WorkoutType>) ->
     }
 }
 
-// ---------------------------------------------------------------------------
-// 3. VDOT band → physiological ranges (pure table lookup)
-// ---------------------------------------------------------------------------
-
 /// %HRmax range (low, high) for a VDOT band. Rule running-007 / table verbatim.
 ///
 /// R (Repetition) uses pace not HR; its HR row is a nominal placeholder and
@@ -178,13 +166,10 @@ pub fn vdot_band_uses_hr(band: VdotBand) -> bool {
     )
 }
 
-/// The marathon distance in metres (42.195 km).
 pub const MARATHON_M: f64 = 42_195.0;
 
-/// The 5K race distance in metres.
 pub const FIVE_K_M: f64 = 5_000.0;
 
-/// The 10K race distance in metres.
 pub const TEN_K_M: f64 = 10_000.0;
 
 /// Pace band (fast, slow) in seconds per km for a workout row that states its
@@ -224,10 +209,6 @@ pub fn vdot_band_pace_sec_per_km(vdot: f64, band: VdotBand) -> Option<(f64, f64)
     Some((fast, slow))
 }
 
-// ---------------------------------------------------------------------------
-// 4. Volume caps (prescriptive validators)
-// ---------------------------------------------------------------------------
-
 /// Which weekly-share caps a week exceeds (File 04 "Volume caps"; running-016/018/019).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapViolations {
@@ -255,8 +236,6 @@ pub const INTERVAL_WEEKLY_CAP_FRAC: f64 = 0.08;
 /// RUN-REPETITION-002).
 pub const REPETITION_WEEKLY_CAP_FRAC: f64 = 0.05;
 
-/// `km` is at most `cap` (a fraction) of `weekly_km`. A non-positive weekly
-/// total cannot satisfy a share cap.
 fn within_share(km: f64, weekly_km: f64, cap: f64) -> bool {
     weekly_km > 0.0 && km / weekly_km <= cap
 }
@@ -278,10 +257,6 @@ pub fn check_volume_caps(
     };
     Recommended::new(violations, claims::RUN_VOLCAP_001)
 }
-
-// ---------------------------------------------------------------------------
-// 5. Single-session distance spike (prescriptive gate)
-// ---------------------------------------------------------------------------
 
 /// RUN-SPIKE-001 / running-029: a single session more than this fraction over
 /// the longest run of the trailing [`SPIKE_WINDOW_DAYS`] is a spike.
@@ -316,10 +291,6 @@ pub fn single_session_spike_flag(session_km: f64, longest_30d_km: f64) -> Recomm
         claims::RUN_SPIKE_BLOCK_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// 6. Intensity distribution (prescriptive): File 04 §"distribution" table
-// ---------------------------------------------------------------------------
 
 /// Which easy/moderate/hard split model to run (File 04 running-011/013).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,10 +341,6 @@ pub fn distribution_for_phase(phase: MesoPhase) -> Recommended<IntensityDistribu
     };
     intensity_distribution(model)
 }
-
-// ---------------------------------------------------------------------------
-// 7. Quality-session spacing (prescriptive validator): File 04 running-023
-// ---------------------------------------------------------------------------
 
 /// Quality-session governance limits (File 04 running-023 / §"Volume caps").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,10 +401,6 @@ pub fn is_hard_or_long_session(kind: RunSessionType) -> bool {
     kind == RunSessionType::LongRun || is_quality_session(kind)
 }
 
-// ---------------------------------------------------------------------------
-// 8. Weekly mileage progression (prescriptive): File 04 running-031/028
-// ---------------------------------------------------------------------------
-
 /// Safe single-week volume-increase cap as a fraction, by training age
 /// (File 04 running-031). Novice (<1 yr) tolerates up to +10 %; experienced
 /// runners are held to ~+5 %. NOT the discredited hard "10 % rule", a ceiling.
@@ -485,10 +448,6 @@ pub fn two_week_increase_flag(baseline_km: f64, current_km: f64) -> Recommended<
     Recommended::new(flag, claims::RUN_PROGRESS_001)
 }
 
-// ---------------------------------------------------------------------------
-// 9. Deload cadence (prescriptive): File 04 running-033
-// ---------------------------------------------------------------------------
-
 /// Load:recovery cycle prescription (File 04 running-033; RUN-DELOAD-001).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeloadCadence {
@@ -515,10 +474,6 @@ pub fn deload_cadence(conservative: bool) -> Recommended<DeloadCadence> {
         claims::RUN_DELOAD_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Workout-type prescription table (running-014 … running-022)
-// ---------------------------------------------------------------------------
 
 /// Prescription band for a single run workout. Rules running-014 … running-022.
 ///
@@ -694,10 +649,6 @@ pub fn workout_rx(kind: RunSessionType) -> Recommended<RunWorkoutRx> {
     Recommended::new(rx, claim_id)
 }
 
-// ---------------------------------------------------------------------------
-// Cruise intervals & VO2max interval structure (running-018/019)
-// ---------------------------------------------------------------------------
-
 /// Cruise-interval structure for threshold work (running-018 → RUN-TEMPO-001).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CruiseIntervalRx {
@@ -754,10 +705,6 @@ pub fn vo2max_interval_rx() -> Recommended<Vo2maxIntervalRx> {
         claims::RUN_INTERVAL_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Strides & hill sprints (running-020/021)
-// ---------------------------------------------------------------------------
 
 /// Strides prescription (running-020 → RUN-STRIDES-001, ExpertOpinion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -833,10 +780,6 @@ pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Long-run guardrails (running-016)
-// ---------------------------------------------------------------------------
-
 /// The low-mileage guardrail's multiple (running-016): no run longer than this
 /// many times the average run-day distance.
 pub const DAILY_AVG_RUN_MULTIPLE: f64 = 2.0;
@@ -887,11 +830,6 @@ pub fn long_run_share_default() -> Recommended<(f64, f64)> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Run/walk extension, single-variable progression, recovery-week depth
-// (running-026/032/033)
-// ---------------------------------------------------------------------------
-
 /// Mileage band for recovery-week depth (running-033). The KB gives NO numeric
 /// threshold separating higher- from lower-mileage runners, the caller
 /// supplies the judgement; `Unspecified` uses the general 20–40 % band.
@@ -934,10 +872,6 @@ pub fn recovery_week_rx(band: MileageBand) -> Recommended<RecoveryWeekRx> {
         claims::RUN_DELOAD_DEPTH_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Distance-specific taper defaults (running-038)
-// ---------------------------------------------------------------------------
 
 /// Distance-specific taper prescription (running-038 → RUN-TAPER-001, Strong,
 /// SAFETY-CRITICAL: intensity and frequency are always held; only volume
@@ -998,11 +932,6 @@ pub fn distance_taper(goal: GoalDistance) -> Option<Recommended<DistanceTaperRx>
     };
     Some(Recommended::new(rx, claims::RUN_TAPER_001))
 }
-
-// ---------------------------------------------------------------------------
-// Race-date periodization (running-035/042/043/052) and the per-goal,
-// per-phase quality mix (running-024)
-// ---------------------------------------------------------------------------
 
 /// Race-specific Peak weeks placed right before the taper (running-052,
 /// ExpertOpinion parameter: Daniels' final phase / Casado 2022's competitive
@@ -1117,10 +1046,6 @@ pub fn long_run_share(weekly_km: f64) -> Recommended<f64> {
 /// Daniels' longest-steady-run time cap (running-016/046), minutes.
 pub const LONG_RUN_MAX_MIN: f64 = 150.0;
 
-// ---------------------------------------------------------------------------
-// Warm-up / cool-down and repetition-session structure (running-050/051)
-// ---------------------------------------------------------------------------
-
 /// Warm-up / cool-down around a hard run (running-050 → RUN-WARMUP-001).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WarmupRx {
@@ -1210,10 +1135,6 @@ pub fn race_pace_rx() -> Recommended<RacePaceRx> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Pace re-testing & environment correction triggers (running-041)
-// ---------------------------------------------------------------------------
-
 /// Weeks after which training paces / HR zones are due for re-testing: the low
 /// end of the KB's 4–6-week window (running-041 RUN-RETEST-001, running-006
 /// RUN-HRRECALC-001).
@@ -1288,10 +1209,6 @@ pub fn pace_correction_triggers(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Marathon realism gate (running-040)
-// ---------------------------------------------------------------------------
-
 /// Longest training run (km) under which a marathon goal-time prediction is
 /// optimistic (running-040; RUN-VDOT-001).
 pub const MARATHON_REALISM_LONG_RUN_KM: f64 = 30.0;
@@ -1307,10 +1224,6 @@ pub fn marathon_prediction_optimistic(longest_run_km: f64) -> Recommended<bool> 
         claims::RUN_VDOT_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// Race-time equivalency combine (running-039)
-// ---------------------------------------------------------------------------
 
 /// Result of combining two race-time predictions. Rule running-039.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1343,10 +1256,6 @@ pub fn race_equivalency(riegel_sec: f64, daniels_sec: f64) -> Recommended<Equiva
     // the VDOT-fitness estimate (RUN-VDOT-001).
     Recommended::new(out, claims::RUN_EQUIV_001)
 }
-
-// ---------------------------------------------------------------------------
-// HR-method preference & zone recalculation (running-005/006)
-// ---------------------------------------------------------------------------
 
 /// Which HR-anchoring method running-005 prefers at a given resting HR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1386,10 +1295,6 @@ pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
         claims::RUN_HRRECALC_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// VDOT derate & goal-distance session plan (running-008/024/025)
-// ---------------------------------------------------------------------------
 
 /// A training goal by target race distance (running-024 goal table).
 #[derive(
@@ -1689,10 +1594,6 @@ pub fn c25k_session_rx(week: u8, run_of_week: u8) -> Recommended<C25kSession> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Maffetone MAF aerobic cap (running-036)
-// ---------------------------------------------------------------------------
-
 /// Maffetone-cap adjustment bracket (running-036).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MafAdjustment {
@@ -1720,19 +1621,11 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
     Recommended::new(180.0 - age_years + delta, claims::RUN_MAF_001)
 }
 
-// ---------------------------------------------------------------------------
-// Distribution invariant & counting method (running-011/012)
-// ---------------------------------------------------------------------------
-
 /// Enforce the architectural invariant that ~80% of running time is easy
 /// (running-011): true when the easy (Z1) time share is at least 80%. RUN-DIST-001.
 pub fn easy_share_floor_ok(easy_frac_by_time: f64) -> Recommended<bool> {
     Recommended::new(easy_frac_by_time >= 0.80, claims::RUN_DIST_001)
 }
-
-// ---------------------------------------------------------------------------
-// Volume-bump hold (running-031)
-// ---------------------------------------------------------------------------
 
 /// Weeks to hold before the next volume bump for novices (running-031):
 /// `Some((2, 3))` under one year of training age; `None` for experienced runners
@@ -1745,10 +1638,6 @@ pub fn novice_volume_bump_hold_weeks(training_age_years: f64) -> Recommended<Opt
     };
     Recommended::new(hold, claims::RUN_PROGRESS_001)
 }
-
-// ---------------------------------------------------------------------------
-// Split units and the interval verdict on a track's variability index
-// ---------------------------------------------------------------------------
 
 /// One kilometre in metres, the per-km split unit.
 pub const KM_M: f64 = 1000.0;

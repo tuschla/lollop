@@ -87,7 +87,6 @@ internal class ScriptedCore : CoreBridge {
     }
 }
 
-/** A new, empty temporary directory. */
 expect fun newTempDir(): AppPath
 
 /**

@@ -15,22 +15,6 @@ plugins {
 
 val repoRoot: File = rootDir.parentFile
 
-/** The repo root as a test constant, so the tests read the core's fixture logs. */
-val generateTestPaths = tasks.register("generateTestPaths") {
-    val out = layout.buildDirectory.dir("generated/testPaths")
-    val root = repoRoot.absolutePath
-    inputs.property("root", root)
-    outputs.dir(out)
-    doLast {
-        val file = out.get().file("app/milestone/core/TestPaths.kt").asFile
-        file.parentFile.mkdirs()
-        file.writeText(
-            "package app.milestone.core\n\ninternal const val REPO_ROOT = \"" +
-                root.replace("\\", "\\\\").replace("\"", "\\\"") + "\"\n",
-        )
-    }
-}
-
 kotlin {
     jvm {
         compilerOptions { jvmTarget.set(JvmTarget.fromTarget(libs.versions.jvm.target.get())) }
@@ -52,7 +36,7 @@ kotlin {
 
     sourceSets {
         commonTest {
-            kotlin.srcDir(generateTestPaths)
+            kotlin.srcDir(repoRootConstant("app.milestone.core"))
             dependencies {
                 implementation(kotlin("test"))
                 implementation(libs.kotlinx.serialization.json)

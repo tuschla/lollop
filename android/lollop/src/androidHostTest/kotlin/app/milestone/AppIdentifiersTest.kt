@@ -18,10 +18,8 @@ import org.xml.sax.InputSource
  */
 class AppIdentifiersTest {
 
-    private val repo = File("../..")
+    private val repo = File(REPO_ROOT)
     private val ios = File(repo, "iosApp")
-
-    // ── Android Auto Backup ─────────────────────────────────────────────────
 
     /** Every file and store backup and device transfer leave out, as (domain, path). */
     private val backupExcluded: Set<Pair<String, String>> = buildSet {
@@ -53,8 +51,6 @@ class AppIdentifiersTest {
         return kids.map { it.getAttribute("domain") to it.getAttribute("path") }.toSet()
     }
 
-    // ── Run file types ──────────────────────────────────────────────────────
-
     @Test
     fun androidImportFiltersAcceptTheRunFileTypes() {
         val manifest = xml(File("src/androidMain/AndroidManifest.xml"))
@@ -84,8 +80,6 @@ class AppIdentifiersTest {
         assertEquals(RunFileType.entries.associate { it.uti to (listOf(it.extension) to it.mimeTypes) }, declared)
     }
 
-    // ── Open URLs ───────────────────────────────────────────────────────────
-
     @Test
     fun iosOpenUrlsAreOpenDests() {
         val info = plist(File(ios, "iosApp/Info.plist"))
@@ -103,8 +97,6 @@ class AppIdentifiersTest {
         val spelled = swiftSources().filter { it.readText().contains("\"$OPEN_URL_SCHEME://") }
         assertEquals(listOf(File(ios, "Shared/LollopIntents.swift").canonicalFile), spelled)
     }
-
-    // ── iOS App Group and bundle ids ────────────────────────────────────────
 
     @Test
     fun iosIdentifiersComeFromTheProjectSpec() {
@@ -134,8 +126,6 @@ class AppIdentifiersTest {
             File(ios, dir).walkTopDown().filter { it.isFile && it.extension == "swift" }.map { it.canonicalFile }.toList()
         }.sorted()
 
-    // ── XML and property lists ──────────────────────────────────────────────
-
     private fun xml(f: File): Element {
         val builder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
         // A property list names Apple's DTD by URL; don't fetch it.
@@ -146,7 +136,6 @@ class AppIdentifiersTest {
     private fun children(e: Element): List<Element> =
         (0 until e.childNodes.length).mapNotNull { e.childNodes.item(it) as? Element }
 
-    /** The top-level dictionary of the property list [f]. */
     private fun plist(f: File): Map<String, Any> = dict(value(children(xml(f)).single()))
 
     private fun value(e: Element): Any = when (e.tagName) {

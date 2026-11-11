@@ -70,11 +70,8 @@ impl Op {
     }
 }
 
-/// Serialise the envelope. An enum and two strings cannot fail to serialise;
-/// the literal only keeps this path free of `unwrap`.
 fn error_envelope(err: &CoreError) -> Vec<u8> {
-    serde_json::to_vec(&ErrorEnvelope { error: err })
-        .unwrap_or_else(|_| br#"{"error":"error envelope unavailable"}"#.to_vec())
+    serde_json::to_vec(&ErrorEnvelope { error: err }).unwrap_or_default()
 }
 
 /// The bytes an op answers: its payload, or the envelope of its error.
@@ -251,7 +248,6 @@ impl CoreBridge {
         }
     }
 
-    /// Op `code`'s answer to `input`.
     pub(crate) fn call(&self, code: u32, input: Input<'_>) -> Vec<u8> {
         match Op::from_code(code) {
             Some(op) => answer(self.dispatch(op, input)),
@@ -354,12 +350,10 @@ impl CoreBridge {
 
 static BRIDGE: LazyLock<CoreBridge> = LazyLock::new(CoreBridge::new);
 
-/// [`CoreBridge::call`] on the process's core, the one the entry points drive.
 pub(crate) fn call(code: u32, input: Input<'_>) -> Vec<u8> {
     BRIDGE.call(code, input)
 }
 
-/// The [`crate::import::ImportVerdict`] JSON on a run file's bytes.
 fn parse_run_file(bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
     serde_json::to_vec(&crate::import::import_run_file(bytes))
         .map_err(|err| CoreError::unserializable(Op::ParseRunFile, &err))
@@ -401,7 +395,6 @@ fn compact_log(
         .map_err(|err| CoreError::unserializable(Op::CompactLog, &err))
 }
 
-/// [`crate::names::exercise_key`] of each name, in order.
 fn exercise_keys(
     names: &mut dyn Iterator<Item = Result<Cow<'_, str>, String>>,
 ) -> Result<Vec<u8>, CoreError> {
@@ -413,7 +406,6 @@ fn exercise_keys(
     serde_json::to_vec(&keys).map_err(|err| CoreError::unserializable(OP, &err))
 }
 
-/// [`crate::strength::warm_up_ramp`] for a [`WarmUpQuery`].
 fn warm_up_ramp(query: &[u8]) -> Result<Vec<u8>, CoreError> {
     const OP: Op = Op::WarmUpRamp;
     let q = serde_json::from_slice::<WarmUpQuery>(query)
@@ -422,7 +414,6 @@ fn warm_up_ramp(query: &[u8]) -> Result<Vec<u8>, CoreError> {
     serde_json::to_vec(&steps).map_err(|err| CoreError::unserializable(OP, &err))
 }
 
-/// [`crate::app::draft_facts`] for a [`ProfileDraft`].
 fn draft_facts(draft: &[u8]) -> Result<Vec<u8>, CoreError> {
     const OP: Op = Op::DraftFacts;
     let draft = serde_json::from_slice::<ProfileDraft>(draft)
@@ -431,7 +422,6 @@ fn draft_facts(draft: &[u8]) -> Result<Vec<u8>, CoreError> {
         .map_err(|err| CoreError::unserializable(OP, &err))
 }
 
-/// [`crate::gps::thin_track`] for a [`TrackThinning`].
 fn thin_track(track: &[u8]) -> Result<Vec<u8>, CoreError> {
     const OP: Op = Op::ThinTrack;
     let track = serde_json::from_slice::<TrackThinning>(track)
@@ -448,7 +438,6 @@ fn thin_track(track: &[u8]) -> Result<Vec<u8>, CoreError> {
     .map_err(|err| CoreError::unserializable(OP, &err))
 }
 
-/// [`crate::import::imported_hr_pct_max`] for an [`ImportedHr`].
 fn imported_hr_pct(hr: &[u8]) -> Result<Vec<u8>, CoreError> {
     const OP: Op = Op::ImportedHrPct;
     let hr = serde_json::from_slice::<ImportedHr>(hr)

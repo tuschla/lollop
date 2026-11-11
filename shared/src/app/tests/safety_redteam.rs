@@ -18,8 +18,8 @@
 //! (ready-upd-002/003/004/005/008).
 
 use super::*;
-use crate::compact_event_log;
 use crate::evidence::all_claims;
+use crate::log::compact_event_log;
 
 /// A Monday (`mon0_weekday(TODAY) == 0`).
 const TODAY: i64 = 20_752;
@@ -132,8 +132,6 @@ fn request_calculators(s: &mut Sim) {
         deficit: true,
     });
 }
-
-// ── Invariants ─────────────────────────────────────────────────────────────
 
 /// HARD RULE 3 on a rendered day: training is blocked for `reason`, the
 /// headline is the safety hold and says why with safety-critical evidence,
@@ -352,8 +350,6 @@ fn assert_claims_registered(vm: &ViewModel) {
     }
 }
 
-// ── The ladder ─────────────────────────────────────────────────────────────
-
 #[test]
 fn safety_tier_order_is_the_hard_rule_3_ladder() {
     use SafetyTier::*;
@@ -434,8 +430,6 @@ fn every_rung_pair_resolves_to_the_higher_rung() {
         }
     }
 }
-
-// ── Conflicting signals ────────────────────────────────────────────────────
 
 #[test]
 fn sharp_joint_pain_holds_even_when_everything_else_says_go() {
@@ -604,8 +598,6 @@ fn compulsive_exercise_refuses_the_deficit_like_every_reds_channel() {
     assert_calculators_held(&vm, "compulsive exercise");
 }
 
-// ── Stale, backdated and future-dated signals ──────────────────────────────
-
 #[test]
 fn red_flags_never_go_stale() {
     // Fever, a cardiac red flag, bone-stress signs and RED-S have no expiry:
@@ -707,8 +699,6 @@ fn a_future_dated_reds_retraction_keeps_the_deficit_refused_today() {
     assert_calculators_held(&vm, "RED-S retracted tomorrow");
 }
 
-// ── Report → delete → Undo, compaction ─────────────────────────────────────
-
 #[test]
 fn report_delete_undo_restores_the_exact_hold_and_compaction_keeps_it() {
     // The shell's "Report removed · Undo": RemoveReadiness (undated) then the
@@ -775,8 +765,6 @@ fn undoing_the_pain_resolution_restores_the_hold() {
     let undone = Sim::replayed(&log);
     assert_held(&undone.vm(), HoldReason::Pain, "pain resolve undone");
 }
-
-// ── Resolution and return to play ──────────────────────────────────────────
 
 #[test]
 fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
@@ -852,8 +840,6 @@ fn a_new_fever_right_after_recovery_holds_again() {
     assert_upcoming_days_blank(&vm, "relapse");
 }
 
-// ── Midnight, time zones ───────────────────────────────────────────────────
-
 #[test]
 fn a_fever_hold_survives_midnight_and_a_time_zone_change() {
     // Fever at 23:30 local in UTC+2; the next morning the user has flown to
@@ -886,8 +872,6 @@ fn a_west_bound_flight_cannot_move_a_fever_into_the_future() {
     s.today(day_minus10, -10 * 3_600);
     assert_held(&s.vm(), HoldReason::Illness, "flown to UTC-10");
 }
-
-// ── Plan edits during a hold ───────────────────────────────────────────────
 
 #[test]
 fn regenerating_moving_or_clearing_the_plan_cannot_escape_a_fever() {
@@ -1046,8 +1030,6 @@ fn a_scoped_knee_stop_spares_no_leg_or_run_item_today() {
     }
 }
 
-// ── Calculators and readiness-channel deferrals ────────────────────────────
-
 #[test]
 fn readiness_deferrals_hold_the_plan_calculators_like_profile_gates() {
     // safety-043 "STOP and DEFER for medical clearance before prescribing";
@@ -1111,8 +1093,6 @@ fn profile_symptom_gates_hold_the_plan_calculators() {
     assert_held(&vm, HoldReason::Symptomatic, "symptomatic + cleared");
     assert_calculators_held(&vm, "symptomatic + cleared");
 }
-
-// ── Profile edits that try to dodge a gate ─────────────────────────────────
 
 #[test]
 fn editing_a_gate_away_never_rewrites_the_days_it_held() {
@@ -1213,8 +1193,6 @@ fn a_new_parq_yes_after_clearance_gates_again() {
     assert_held(&s.vm(), HoldReason::Parq, "uncovered PAR-Q Yes");
 }
 
-// ── Resting HR × HRV ───────────────────────────────────────────────────────
-
 #[test]
 fn rhr_spike_and_low_hrv_on_one_morning() {
     // ready-upd-002: one stop-level RHR morning is noise → downgrade + the
@@ -1268,8 +1246,6 @@ fn rhr_plus_ten_on_two_mornings_is_a_rest_day() {
     assert_eq!(vm.safety_tier, Some(SafetyTier::Illness));
 }
 
-// ── Weekly referral + green readiness ──────────────────────────────────────
-
 #[test]
 fn an_overtraining_referral_holds_through_a_great_morning() {
     // safety-042: ≥2 weeks unexplained decline despite a deload → REST and
@@ -1292,8 +1268,6 @@ fn an_overtraining_referral_holds_through_a_great_morning() {
     s.today(TODAY + 8, OFFSET);
     assert!(s.vm().hold_reason.is_some(), "a deferral does not age out");
 }
-
-// ── More dodges ────────────────────────────────────────────────────────────
 
 #[test]
 fn an_unresolved_sharp_pain_still_holds_tomorrow() {

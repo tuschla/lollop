@@ -23,7 +23,6 @@ pub(super) fn parse_tcx_activities(text: &str) -> Result<Vec<RawRun>, Malformed>
     // next `<Track>` opens one, as the reader always has.
     let mut pool: Vec<Vec<RawFix>> = vec![Vec::new()];
     let mut segment = 0;
-    // The current `<Activity>`'s tracks, merged at its end.
     let mut tracks: Vec<usize> = Vec::new();
     // Track/Trackpoint handling is gated on being INSIDE an `<Activity>`: a TCX
     // can carry a `<Courses><Course><Track>` block after `</Activities>`, whose

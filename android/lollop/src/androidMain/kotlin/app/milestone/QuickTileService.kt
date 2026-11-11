@@ -102,7 +102,6 @@ class QuickTileService : TileService() {
     }
 
     companion object {
-        /** The face for the current state. */
         internal fun currentFace(context: Context): TileFace =
             tileFace(WidgetSnapshotStore.today(context), RunSession.tracking.value)
     }

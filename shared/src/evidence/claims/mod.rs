@@ -1,6 +1,4 @@
-//! Claim ids by name, so a call site reads `claims::RUN_SPIKE_001`. The
-//! registry rows live in one file per discipline; each file's
-//! `claim_group!` re-exports here as `claims::<ROW>` constants.
+//! Claim ids by name, so a call site reads `claims::RUN_SPIKE_001`.
 
 mod calisthenics;
 mod canonical;

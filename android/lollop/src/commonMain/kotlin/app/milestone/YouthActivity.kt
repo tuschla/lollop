@@ -60,10 +60,8 @@ import app.milestone.resources.main_delete
 import kotlinx.datetime.TimeZone
 import org.jetbrains.compose.resources.stringResource
 
-/** Height of the weekly-minutes bar on the activity card. */
 private val ActivityBarHeight = 6.dp
 
-/** Opacity of the bar's track behind the accent fill (OnBgFaint). */
 private const val ActivityBarTrackAlpha = 0.4f
 
 /** The Log activity editor's whole-minute floor; the core stores any minutes above
@@ -201,7 +199,7 @@ fun LogActivityEditor(
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     var dirty by rememberSaveable { mutableStateOf(false) }
 
-    val minutes = parseKeypadNumber(minutesText)
+    val minutes = minutesText.toDoubleOrNull()
     val minutesValid = minutes != null && minutes in ActivityMinutesMin..CoreConstants.ACTIVITY_MAX_MINUTES
     val savedText = stringResource(Res.string.activity_saved)
 
@@ -240,7 +238,6 @@ fun LogActivityEditor(
                 },
                 hintColor = if (minutesText.isNotEmpty() && !minutesValid) DangerText else OnBgMuted,
             )
-            // Opens below the minutes field, often past the sheet's fold.
             KeypadPanel(keypadOpen) {
                 NumericKeypad(minutesText, fresh, { minutesText = it; fresh = false; dirty = true }, allowDecimal = false)
             }

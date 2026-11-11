@@ -15,13 +15,12 @@ val appVersion: Map<String, String> =
 // armeabi-v7a/x86 slices that install on those devices and crash at the first
 // JNI call. Release ships phones only (arm64-v8a, ~3 MB smaller); debug adds
 // x86_64 so it runs on the emulator.
-// QA only: `-PqaX86Release` (or `=true`) adds x86_64 to release so the minified
-// APK runs on the x86_64 emulator (scripts/emulator-scenarios.sh --apk); `=false`
-// leaves it out.
+// QA only: `-PqaX86Release=true` adds x86_64 to release so the minified APK runs
+// on the x86_64 emulator (scripts/emulator-scenarios.sh --apk).
 val abis: Map<String, List<String>> = mapOf(
     "debug" to listOf("arm64-v8a", "x86_64"),
     "release" to listOf("arm64-v8a") +
-        if (providers.gradleProperty("qaX86Release").map { it != "false" }.getOrElse(false)) listOf("x86_64") else emptyList(),
+        if (providers.gradleProperty("qaX86Release").map(String::toBoolean).getOrElse(false)) listOf("x86_64") else emptyList(),
 )
 
 android {

@@ -77,9 +77,6 @@ class RedesignFlowsTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    // ── Shared drivers ──────────────────────────────────────────────────────
-
-    /** The floating "+ Log" button (Today only). */
     private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
     private fun row(@StringRes title: Int) = hasText(str(title)) and hasClickAction()
@@ -98,7 +95,6 @@ class RedesignFlowsTest {
     /** The event log's variant names, oldest first. */
     private fun loggedVariants(): List<String> = journeyLog().map { it.variant }
 
-    /** Wait for model/log state; on timeout name what the screen shows. */
     private fun waitForState(timeoutMs: Long = 10_000, cond: () -> Boolean) {
         try {
             rule.waitForState(timeoutMs, cond)
@@ -132,7 +128,6 @@ class RedesignFlowsTest {
         rule.launchApp()
     }
 
-    /** Scroll Today's list to its true end: the last item, then fling past it. */
     private fun scrollTodayToEnd() {
         val list = rule.onAllNodes(hasScrollToIndexAction())[0]
         val info = list.fetchSemanticsNode().config.getOrNull(SemanticsProperties.CollectionInfo)
@@ -141,11 +136,6 @@ class RedesignFlowsTest {
         rule.waitForIdle()
     }
 
-    /**
-     * After scrolling Today to its end, the floating Log button covers nothing:
-     * every list row ends above the button's top edge, and no tappable control
-     * of the list sits under it.
-     */
     private fun assertLastRowClearOfFab(state: String) {
         waitForAny(logFab)
         scrollTodayToEnd()
@@ -168,7 +158,6 @@ class RedesignFlowsTest {
     private fun Rect.overlapsStrictly(o: Rect): Boolean =
         left < o.right - 1f && o.left < right - 1f && top < o.bottom - 1f && o.top < bottom - 1f
 
-    /** Tap the FAB and wait for the chooser; the always-offered rows are there. */
     private fun openChooserFromFab(state: String) {
         rule.onNode(logFab).performClick()
         waitForAny(row(R.string.main_report_pain))
@@ -180,8 +169,6 @@ class RedesignFlowsTest {
     }
 
     private val todaysPlanRow get() = hasText(strPrefix(R.string.main_todays_plan), substring = true) and hasClickAction()
-
-    // ═══════════════ Today: the "+ Log" FAB from every state ═══════════════
 
     @Test
     fun fab_liftDay_opensChooserWithTodaysPlan_andLastRowClears() {
@@ -236,7 +223,7 @@ class RedesignFlowsTest {
         waitForAny(hasText(str(R.string.log_set_header_n_of_n, 1, first.sets)))
         rule.onNode(hasTestTag("editor-primary")).performClick()
         waitForAny(hasText(str(R.string.log_set_header_n_of_n, 2, first.sets)))
-        // Leave the loop with its X: the session stays in progress.
+        // The X leaves the session in progress.
         rule.onNode(hasContentDescription(str(R.string.main_close)) and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.waitUntil(10_000) { rule.countOf(hasText(str(R.string.log_set_header_n_of_n, 2, first.sets))) == 0 }
@@ -281,7 +268,6 @@ class RedesignFlowsTest {
         waitForAny(row(R.string.main_setup_prompt_cta))
         assertLastRowClearOfFab("new user")
         openChooserFromFab("new user")
-        // No profile: every modality is offered, no plan row.
         for (title in listOf(R.string.main_track_run_title, R.string.main_log_set_title, R.string.main_log_run_title)) {
             assertEquals("new user chooser row ${str(title)}", 1, rule.countOf(row(title)))
         }
@@ -301,14 +287,9 @@ class RedesignFlowsTest {
         assertEquals("no plan fast-path while the plan is paused", 0, rule.countOf(todaysPlanRow))
     }
 
-    // ═══════════════ StatusCard / banner actions ═══════════════════════════
-
     private fun painReports(): List<kotlinx.serialization.json.JsonObject> =
         journeyLog().filter { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Pain") }.map { it.payload }
 
-    /** A tolerable tendon ache reported through the real triage sheet; its
-     *  "Delete report" asks first, Cancel keeps it, Delete removes it, and the
-     *  snackbar's Undo puts the same report (area, kind, severity) back. */
     @Test
     fun painReport_deleteAsksFirst_cancelKeepsIt_undoRestoresTheSameReport() = reportPainThenDeleteAndUndo()
 
@@ -320,7 +301,6 @@ class RedesignFlowsTest {
     @Test
     fun painReport_deleteFlow_waitsForTheModel_whenTheViewLagsTheLog() {
         val real = TestSink.sender
-        // Each pain report's view is held back this long after its log append.
         val lagMs = 2_000L
         try {
             TestSink.sender = { e ->
@@ -356,7 +336,6 @@ class RedesignFlowsTest {
         val vm = EventDispatcher.model.value!!
         assertFalse("a 3/10 tendon ache lets training go on: ${vm.hold_reason}", vm.train_blocked)
 
-        // The card's quiet "Delete report", confirm-gated.
         val delete = hasText(str(R.string.main_remove_report)) and hasClickAction()
         rule.onAllNodes(hasScrollToIndexAction())[0].performScrollToNode(delete)
         rule.onNode(delete).performClick()
@@ -378,8 +357,6 @@ class RedesignFlowsTest {
         assertFalse(EventDispatcher.model.value!!.train_blocked)
     }
 
-    /** A bare pain report holds training: the banner's delete asks first, Cancel
-     *  keeps the hold, Delete lifts it and leaves the banner gone. */
     @Test
     fun painHoldBanner_deleteReport_cancelKeepsHold_confirmLiftsIt() {
         QaHarness.seedLog(
@@ -402,13 +379,10 @@ class RedesignFlowsTest {
         waitForState { !EventDispatcher.model.value!!.train_blocked }
         rule.assertTextCountEventually(str(R.string.main_do_not_train), 0)
         waitForAny(hasText(str(R.string.main_report_removed)))
-        // The training fast-path is back on Today's FAB.
         openChooserFromFab("after delete")
         assertEquals(1, rule.countOf(todaysPlanRow))
     }
 
-    /** "I'm pain-free now": Cancel keeps the hold; confirming lifts it with a
-     *  DATED ResolveHold that keeps the report in the history it shaped. */
     @Test
     fun painHoldBanner_resolve_cancelKeepsHold_confirmKeepsTheReportInHistory() {
         QaHarness.seedLog(
@@ -450,10 +424,8 @@ class RedesignFlowsTest {
         assertTrue(loggedVariants().contains("ResolveHold"))
     }
 
-    // ═══════════════ Run detail sheet ══════════════════════════════════════
-
-    /** A GPS run recorded the way the tracker saves it: [fixes] fixes 3 s and
-     *  10 m apart heading north, stamped (observed_at) at the LAST fix. */
+    /** A GPS run recorded the way the tracker saves it: stamped (observed_at) at
+     *  the LAST fix. */
     private fun trackedRun(endAt: Long, fixes: Int = 400): Event.LogRunTrack {
         val start = endAt - (fixes - 1) * 3L
         val points = (0 until fixes).map { i ->
@@ -484,7 +456,6 @@ class RedesignFlowsTest {
         rule.launchApp()
         openYesterdaysRun(gps = false)
 
-        // Pick 7 + Tempo, then leave with Back: nothing is sent, nothing sticks.
         rule.onNodeWithTagScrolled("run-log-effort").performClick()
         waitForAny(hasTestTag("run-rate-save"))
         rule.pickRating("effort-scale", 7)
@@ -499,7 +470,6 @@ class RedesignFlowsTest {
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.rating_unrated)),
         )
 
-        // Save 7 + Tempo: one AmendRunMeta, both fields.
         rule.pickRating("effort-scale", 7)
         rule.onNode(hasTestTag("run-type-Tempo")).performScrollTo().performClick()
         rule.onNode(hasTestTag("run-rate-save")).performScrollTo().performClick()
@@ -509,7 +479,6 @@ class RedesignFlowsTest {
         rule.onNodeWithTagScrolled("run-log-effort")
             .assert(hasText(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7)), substring = true))
 
-        // Reopen: 7 is picked; a re-tap clears it; Save sends a null effort, the type stays.
         rule.onNodeWithTagScrolled("run-log-effort").performClick()
         waitForAny(hasTestTag("run-rate-save"))
         rule.onNode(hasTestTag("effort-scale")).assert(
@@ -534,7 +503,7 @@ class RedesignFlowsTest {
      *  it already loaded), so its height never changes while it slides in. A body
      *  that grew as the sheet finished opening left Material3's sheet resting at the
      *  shorter height for good, Trim below the screen (the flaky route trim
-     *  captures). Stepped frame by frame. */
+     *  captures). */
     @Test
     fun trimSheet_opensOnItsFinalBody_andRestsWhole() {
         val end = QaHarness.daysAgoAtMidday(1)
@@ -571,7 +540,7 @@ class RedesignFlowsTest {
      *  screen, the sheet opens only once the run's route has loaded, so its body (map,
      *  Trim) is final in its first frame and it rests whole. A body that grew as the
      *  sheet finished opening left Material3's sheet resting at the shorter height,
-     *  Delete run below the screen (stepped frame by frame). */
+     *  Delete run below the screen. */
     @Test
     @org.robolectric.annotation.Config(qualifiers = "w411dp-h1300dp-xxhdpi")
     fun runDetail_gpsRun_opensOnceItsRouteLoaded_andRestsWhole() {
@@ -610,7 +579,6 @@ class RedesignFlowsTest {
         // The sheet's Trim; once the confirm is up, its own "Trim" is the newer window's.
         val trimButton = hasText(str(R.string.main_trim_confirm)) and hasClickAction()
 
-        // Open, untouched: Trim is off and says how; Cancel goes back to the detail.
         rule.onNodeWithTagScrolled("run-trim").performClick()
         waitForAny(hasText(str(R.string.trim_hint)))
         rule.onAllNodes(trimButton)[0].performScrollTo().assertIsNotEnabled()
@@ -618,7 +586,6 @@ class RedesignFlowsTest {
         waitForAny(hasTestTag("run-trim"))
         assertFalse(loggedVariants().contains("TrimRunTrack"))
 
-        // Move the start thumb (its adjustable action) a fifth in: Trim turns on.
         rule.onNodeWithTagScrolled("run-trim").performClick()
         waitForAny(hasText(str(R.string.trim_hint)))
         val thumbs = rule.onAllNodes(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.SetProgress))
@@ -646,7 +613,6 @@ class RedesignFlowsTest {
         waitForState { ratedRun().distance_km < before }
         val after = ratedRun().distance_km
         assertTrue("a fifth off the start keeps ~80% ($before → $after km)", after in before * 0.7..before * 0.9)
-        // Back on the (refreshed) detail.
         waitForAny(hasTestTag("run-delete"))
     }
 
@@ -743,11 +709,8 @@ class RedesignFlowsTest {
     private fun androidx.compose.ui.test.junit4.ComposeTestRule.onNodeWithTagScrolled(tag: String) =
         onNode(hasTestTag(tag)).performScrollTo()
 
-    // ═══════════════ RatingScale: tap, re-tap, clear, set progress ═════════
-
     private val setProgressKey = androidx.compose.ui.semantics.SemanticsActions.SetProgress
 
-    /** The spoken state of the RatingScale track tagged [tag]. */
     private fun trackState(tag: String): String? =
         rule.onNode(hasTestTag(tag)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
 
@@ -769,9 +732,6 @@ class RedesignFlowsTest {
         ),
     )
 
-    /** Log run's effort: tap picks, re-tap clears, and the adjustable action
-     *  moves it, clamping out-of-range targets to the ends (never a crash, never
-     *  a value outside 0–10), while the range it reports follows the pick. */
     @Test
     fun logRunEffort_tapReTapClear_andSetProgressClampsToTheEnds() {
         QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile()))
@@ -795,14 +755,10 @@ class RedesignFlowsTest {
         assertEquals("above the range clamps to 10", effortSpoken(10), trackState("effort-scale"))
         setTrackProgress("effort-scale", -3f)
         assertEquals("below the range clamps to 0", effortSpoken(0), trackState("effort-scale"))
-        // A tap after an accessibility pick still clears it.
         rule.pickRating("effort-scale", 0)
         assertEquals(str(R.string.rating_unrated), trackState("effort-scale"))
     }
 
-    /** Morning check-in: the scales are NOT clearable (a re-tap keeps the
-     *  answer), a reversed scale's leftmost step is its worst value, an
-     *  accessibility pick alone enables Save, and only the answered rows are sent. */
     @Test
     fun morningCheckin_reTapKeeps_reversedScaleLeftIsWorst_onlyAnswersAreSent() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -830,8 +786,7 @@ class RedesignFlowsTest {
         assertFalse("no illness answer, no illness report", loggedVariants().contains("SubmitReadiness"))
     }
 
-    /** Pain severity is optional: picked then re-tapped it goes back to
-     *  unrated and the report carries no severity at all. */
+    /** Pain severity is optional. */
     @Test
     fun painSeverity_reTapClears_andTheReportIsSentUnrated() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -854,8 +809,6 @@ class RedesignFlowsTest {
         // An undescribed report is the conservative stop.
         waitForState { EventDispatcher.model.value!!.train_blocked }
     }
-
-    // ═══════════════ Weekly check-in: the Save gate ════════════════════════
 
     private fun openWeekly() {
         openChooserFromFab("weekly")
@@ -938,8 +891,6 @@ class RedesignFlowsTest {
         assertEquals("the explicit all-clear is offered again", 1, rule.countOf(nothingToReport))
     }
 
-    // ═══════════════ Session review: the Save gate ════════════════════════
-
     /** Switching "Off day" on and back off answers nothing: Save goes off again
      *  (it would send a fabricated "fine" review); a real answer turns it on and
      *  is what gets sent. */
@@ -975,8 +926,6 @@ class RedesignFlowsTest {
         ).performScrollTo().performClick()
         rule.waitForIdle()
     }
-
-    // ═══════════════ Calculators + glossary ════════════════════════════════
 
     private val calcResult = hasTestTag("calc-result")
 
@@ -1015,11 +964,10 @@ class RedesignFlowsTest {
             .performScrollTo().performClick()
         rule.assertCountEventually(calcResult, 0)
         assertTrue(loggedVariants().contains("ClearHrZones"))
-        // The form stays, seeded: computing again brings the same answer back.
         rule.onNode(computeHr).performScrollTo().performClick()
         waitForAny(calcResult)
         assertEquals("187", headline())
-        // A new age replaces the result in place: one card, Tanaka 208 − 0.7 × 40.
+        // Tanaka 208 − 0.7 × 40.
         typeAge("40")
         rule.onNode(computeHr).performScrollTo().performClick()
         waitForState { headline() == "180" }
@@ -1037,7 +985,6 @@ class RedesignFlowsTest {
             rule.onNode(computeHr).performScrollTo().assertIsNotEnabled()
             assertEquals("age $bad names the range", 1, rule.countOf(range))
         }
-        // Emptied: no "0", no compute.
         repeat(4) {
             rule.onNode(hasClickAction() and hasContentDescription(str(R.string.ui_cd_delete_digit)) and hasAnyAncestor(hasTestTag("numeric-keypad")))
                 .performScrollTo().performClick()
@@ -1067,7 +1014,6 @@ class RedesignFlowsTest {
         rule.waitForIdle()
         assertEquals(0, rule.countOf(hasText(str(R.string.main_glossary_no_match, "zzqx"))))
         rule.onNode(hasTestTag("glossary-list")).performScrollToNode(hasText(hrmax))
-        // Back closes the glossary and leaves the calculator (and its result) open.
         androidx.test.espresso.Espresso.pressBack()
         rule.waitUntil(10_000) { rule.countOf(hasTestTag("glossary-search")) == 0 }
         assertEquals(1, rule.countOf(calcResult))
@@ -1076,9 +1022,6 @@ class RedesignFlowsTest {
         assertEquals("the Profile tab is still there", 1, rule.countOf(hasText(str(R.string.main_dest_profile))))
     }
 
-    // ═══════════════ Log set editor: free set vs plan item ═════════════════
-
-    /** Every text in the window (dialog/sheet root) that holds [tag]'s node. */
     private fun textsInWindowOf(tag: String): List<String> {
         var root = rule.onNode(hasTestTag(tag)).fetchSemanticsNode()
         while (root.parent != null) root = root.parent!!
@@ -1108,7 +1051,6 @@ class RedesignFlowsTest {
         rule.onNode(hasContentDescription(str(R.string.main_close)) and hasClickAction()).performClick()
         rule.waitUntil(10_000) { rule.countOf(hasTestTag("editor-primary")) == 0 }
 
-        // A free set from the chooser: no header, the exercise first.
         openChooserFromFab("free set")
         rule.onNode(row(R.string.main_log_set_title)).performScrollTo().performClick()
         waitForAny(hasTestTag("exercise-search"))

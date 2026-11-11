@@ -71,11 +71,8 @@ class ScreenshotTodayTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    // ── Capture + wait helpers ──────────────────────────────────────────────
-
     private fun waitForText(text: String, substring: Boolean = false) = rule.waitForNode(hasText(text, substring = substring))
 
-    /** Scroll Today's lazy list until a node matching [matcher] is on screen. */
     private fun scrollTodayTo(matcher: SemanticsMatcher) {
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(matcher)
         rule.waitForIdle()
@@ -108,8 +105,6 @@ class ScreenshotTodayTest {
         waitForText(str(R.string.main_log_set_title))
     }
 
-    // ── Seeds ───────────────────────────────────────────────────────────────
-
     /** Anchored squat plus prior accessory sets, so the item faces carry plates,
      *  an effort line and "Last:" lines. */
     private fun seedStrengthWithHistory() {
@@ -141,9 +136,6 @@ class ScreenshotTodayTest {
 
     private val thisMorning get() = todayStartSec + 8 * 3_600L
 
-    // ═════════════════════════════ TODAY ════════════════════════════════════
-
-    // ── Strength plan item faces: plates per side, effort, Last, Move session ─
     private fun plan(mode: DarkMode, fontScale: Float? = null) {
         useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
@@ -153,7 +145,6 @@ class ScreenshotTodayTest {
         val tag = if (fontScale != null) "fs130-" else ""
         rule.shot("today-plan-top-$tag${mode.suffix}")
         if (fontScale != null) return
-        // The session card's ONE "?": every item's evidence in a single panel.
         val details = hasClickAction() and
             hasContentDescription(str(R.string.main_details_subject, EventDispatcher.model.value!!.next_session!!.title))
         rule.onNode(details).performClick()
@@ -170,7 +161,6 @@ class ScreenshotTodayTest {
 
     @Test fun planFontScale130Light() = plan(DarkMode.Light, fontScale = 1.3f)
 
-    // ── Session done (every planned set logged), with a new best on the squat ─
     private fun sessionDone(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(2))))
@@ -181,7 +171,7 @@ class ScreenshotTodayTest {
         var sent = 0
         session.items.filter { it.exercise.isNotEmpty() }.forEachIndexed { i, item ->
             val reps = maxOf(item.reps_low, item.reps_high, 1)
-            // The squat goes 5 kg over its prescription: heavier than the prior best.
+            // Over its prescription: heavier than the prior best.
             val kg = (item.load_kg ?: item.suggested_load_kg ?: 60.0) + if (item.exercise == SQUAT) 5.0 else 0.0
             repeat(maxOf(item.sets, 1)) { k ->
                 EventDispatcher.send(
@@ -190,7 +180,6 @@ class ScreenshotTodayTest {
                 sent++
             }
         }
-        // Every sent set applied (nothing left queued), and the card is up.
         rule.waitForState { EventDispatcher.model.value!!.lifts.count { it.observed_at >= todayStartSec } == sent }
         rule.waitForNode(hasTestTag("session-done"))
         rule.shot("today-sessiondone-top-${mode.suffix}")
@@ -202,7 +191,6 @@ class ScreenshotTodayTest {
 
     @Test fun sessionDoneDark() = sessionDone(DarkMode.Dark)
 
-    // ── Weekly consistency: four finished plan weeks + this week ─────────────
     private fun consistency(mode: DarkMode) {
         useDarkMode(mode)
         val start = app.milestone.todayEpochDay() - 28
@@ -228,7 +216,6 @@ class ScreenshotTodayTest {
 
     @Test fun consistencyDark() = consistency(DarkMode.Dark)
 
-    // ── Pain hold: the banner's "I'm pain-free now" and its confirm ──────────
     private fun painHold(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(
@@ -248,7 +235,7 @@ class ScreenshotTodayTest {
 
     @Test fun painHoldDark() = painHold(DarkMode.Dark)
 
-    // ── A non-blocking hold (above-the-neck cold): the "I've recovered" card ─
+    /** A head cold is a non-blocking hold: a card, not the banner. */
     private fun holdCard(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(
@@ -266,8 +253,6 @@ class ScreenshotTodayTest {
 
     @Test fun holdCardDark() = holdCard(DarkMode.Dark)
 
-    // ── Calisthenics day: Easier / Harder chips + the first-time invite, then
-    //    the session after the athlete taps Harder on the invited item ─────────
     private fun calisthenics(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
@@ -284,7 +269,6 @@ class ScreenshotTodayTest {
 
     @Test fun calisthenicsDark() = calisthenics(DarkMode.Dark)
 
-    // ── Run day: pace / heart rate / effort / structure lines on the hero ────
     /**
      * The runner's plan is anchored on the pinned Monday; the quality day (reps,
      * else tempo/threshold, else strides) is found in this week's plan, and the
@@ -320,7 +304,6 @@ class ScreenshotTodayTest {
 
     @Test fun runDayDark() = runDay(DarkMode.Dark)
 
-    // ── Hypertrophy plan: rep ranges + "Planned sets per muscle" expanded ────
     private fun hypertrophy(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(hypertrophyProfile()))
@@ -331,8 +314,8 @@ class ScreenshotTodayTest {
         scrollTodayTo(section)
         rule.onNode(section).performClick()
         rule.waitForIdle()
-        // Scroll to the end of Today (calculators now live on Profile) so the
-        // whole expanded table, its last rows included, sits clear of the Log button.
+        // To the end of Today so the whole expanded table, its last rows included,
+        // sits clear of the Log button.
         scrollTodayToEnd()
         rule.shot("today-hypertrophy-volume-${mode.suffix}")
     }
@@ -341,7 +324,6 @@ class ScreenshotTodayTest {
 
     @Test fun hypertrophyDark() = hypertrophy(DarkMode.Dark)
 
-    // ── Move session dialog ──────────────────────────────────────────────────
     private fun moveDialog(mode: DarkMode) {
         useDarkMode(mode)
         seedStrengthWithHistory()
@@ -357,7 +339,6 @@ class ScreenshotTodayTest {
 
     @Test fun moveDialogDark() = moveDialog(DarkMode.Dark)
 
-    // ── Rest day today: folded into the overline, then the next session ──────
     private fun restDay(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -376,12 +357,11 @@ class ScreenshotTodayTest {
 
     @Test fun restDayDark() = restDay(DarkMode.Dark)
 
-    // ── Suspended HRV baseline: the "baseline paused" caption + restart action ─
-    /** Eight steady mornings around 60 ms, then two isolated spikes far off it
-     *  (120 ms, 25 ms), each refuted by the reading after it, and a normal reading
-     *  today: 2 of the last 3 are unreliable artifacts, so the core suspends HRV
-     *  gating. (A shift the next reading reproduces is a real change, not an
-     *  artifact, and would not suspend anything.) */
+    /** Eight steady mornings, then two isolated spikes far off them, each refuted
+     *  by the reading after it, and a normal reading today: 2 of the last 3 are
+     *  unreliable artifacts, so the core suspends HRV gating. (A shift the next
+     *  reading reproduces is a real change, not an artifact, and would not suspend
+     *  anything.) */
     private fun hrvSuspended(mode: DarkMode) {
         useDarkMode(mode)
         val steady = listOf(60.0, 62.0, 58.0, 61.0, 59.0, 60.0, 63.0, 61.0)
@@ -400,8 +380,6 @@ class ScreenshotTodayTest {
     @Test fun hrvSuspendedLight() = hrvSuspended(DarkMode.Light)
 
     @Test fun hrvSuspendedDark() = hrvSuspended(DarkMode.Dark)
-
-    // ═════════════════════════════ LOGGING ══════════════════════════════════
 
     /**
      * Freeze the loop's rest readout at [secondsAfterSet] into the running rest
@@ -424,7 +402,6 @@ class ScreenshotTodayTest {
         rule.waitForIdle()
     }
 
-    // ── Set loop after a save: rest countdown + the undo row ─────────────────
     private fun setLoopRest(mode: DarkMode, fontScale: Float? = null) {
         useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
@@ -447,7 +424,6 @@ class ScreenshotTodayTest {
 
     @Test fun setLoopRestFontScale130Light() = setLoopRest(DarkMode.Light, fontScale = 1.3f)
 
-    // ── Finish with an unsaved change: the confirm ───────────────────────────
     /** "Done for now" shows once a set is logged; editing after that save marks
      *  the editor dirty, which is what makes it ask. */
     private fun finishConfirm(mode: DarkMode) {
@@ -463,7 +439,7 @@ class ScreenshotTodayTest {
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
         waitForText(str(R.string.log_finish_unsaved_title))
         // The loop's rest readout shows under the dialog: pin it to the rest's first
-        // second ("Rest left 3:00"), whatever time the steps above took.
+        // second, whatever time the steps above took.
         pinRestReadout(0)
         rule.waitForNode(hasContentDescription(str(R.string.log_rest_left_cd, "3:00")))
         rule.shot("log-finish-unsaved-${mode.suffix}")
@@ -473,7 +449,6 @@ class ScreenshotTodayTest {
 
     @Test fun finishConfirmDark() = finishConfirm(DarkMode.Dark)
 
-    // ── Weekly check-in: signs + how long + the RED-S question ───────────────
     private fun weeklyCheckin(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -496,7 +471,6 @@ class ScreenshotTodayTest {
 
     @Test fun weeklyCheckinDark() = weeklyCheckin(DarkMode.Dark)
 
-    // ── Morning check-in with the illness question asked first ───────────────
     /** An active head cold puts the check-in's Illness item at the top. */
     private fun morningCheckin(mode: DarkMode) {
         useDarkMode(mode)
@@ -516,7 +490,6 @@ class ScreenshotTodayTest {
 
     @Test fun morningCheckinDark() = morningCheckin(DarkMode.Dark)
 
-    // ── Log chooser for a calisthenics athlete: "Your bodyweight movements" ──
     /** The chooser scrolls only a few dp past the viewport, so it has a top and a
      *  true-end capture, no separate mid. */
     private fun chooserCalis(mode: DarkMode) {

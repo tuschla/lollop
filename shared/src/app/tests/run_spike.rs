@@ -63,7 +63,7 @@ fn manual_run_spike_baseline_is_derived_from_prior_runs() {
 fn manual_run_spike_baseline_reads_a_prior_gps_runs_derived_distance() {
     // Cross-type baseline: a GPS run stores distance_km = 0.0 (it derives from
     // the track), so a later manual run's spike gate only sees a real baseline
-    // if `ingest_spike_baseline_km` reconstructs the GPS run's distance from its fixes.
+    // if `run_metrics::spike_km` reconstructs the GPS run's distance from its fixes.
     // If that derivation regressed to the stored 0.0, the baseline would be 0,
     // the safe-with-no-history gate would fire, and this 1 km run would flag -
     // so asserting NO spike pins the GPS branch of the fold.
@@ -194,7 +194,6 @@ fn a_first_run_with_no_baseline_does_not_trip_the_spike_safety_gate() {
     assert_ne!(fb.category, FeedbackCategory::DangerousProgression);
 }
 
-// ── Deleting the baseline run re-arms the derived spike gate ──
 #[test]
 fn deleting_the_baseline_run_re_arms_the_spike_gate() {
     let app = Engine;
@@ -236,7 +235,7 @@ fn deleting_the_baseline_run_re_arms_the_spike_gate() {
     );
 }
 
-// ── The run-spike baseline is a trailing 30-day window, not all-time ──
+// The run-spike baseline is a trailing 30-day window, not all-time.
 #[test]
 fn old_long_run_does_not_suppress_a_current_spike() {
     let app = Engine;

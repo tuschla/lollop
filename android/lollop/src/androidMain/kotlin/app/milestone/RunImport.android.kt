@@ -9,7 +9,6 @@ import androidx.core.content.IntentCompat
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
-/** Chunk size of the bounded import read. */
 private const val READ_BUFFER_BYTES = 64 * 1024
 
 /**

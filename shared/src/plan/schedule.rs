@@ -17,7 +17,6 @@ use crate::strength;
 /// One lift day of the week's template before it is placed on a weekday.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LiftSpec {
-    /// Body region the day trains (Full / Upper / Lower).
     pub(super) region: DayRegion,
     /// The DUP emphasis index handed to `lift_session` (`dup_emphasis(.., i)`).
     pub(super) emphasis_index: usize,
@@ -166,7 +165,8 @@ fn week_cost(loads: &[DayLoad; 7], long_day: Option<u16>) -> i32 {
     c
 }
 
-/// All `k`-subsets of `items`, in lexicographic order.
+/// Lexicographic order: the first of equally cheap arrangements wins
+/// [`search_week`]'s tie-break.
 fn combinations(items: &[u16], k: usize) -> Vec<Vec<u16>> {
     let n = items.len();
     if k > n {
@@ -312,7 +312,6 @@ fn search_week(
     let n_lift = lifts.len().min(days.len());
     let lifts = &lifts[..n_lift];
 
-    // Distinct rotations of the lift template.
     let mut rotations: Vec<Vec<LiftSpec>> = Vec::new();
     for r in 0..n_lift.max(1) {
         let rot: Vec<LiftSpec> = (0..n_lift).map(|k| lifts[(k + r) % n_lift]).collect();

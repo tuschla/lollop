@@ -66,11 +66,11 @@ class OwnerProfileJourneysTest {
 
     private val doNotTrain get() = str(R.string.main_do_not_train)
 
-    /** 12 Mar 1991: 35 on the pinned Monday 2026-09-21. */
+    /** 35 on the pinned Monday 2026-09-21. */
     private val adultBirthday = LocalDate.of(1991, 3, 12).toEpochDay()
     private val adultDigits = "03121991"
 
-    /** 15 Mar 2011: 15 on the pinned Monday. */
+    /** 15 on the pinned Monday. */
     private val youthBirthday = LocalDate.of(2011, 3, 15).toEpochDay()
     private val youthDigits = "03152011"
 
@@ -80,7 +80,6 @@ class OwnerProfileJourneysTest {
     private fun profileWith(health: HealthScreen = HealthScreen(), birthDay: Long? = null, age: Double = 30.0): Event =
         QaHarness.strengthProfile().copy(health = health, birthEpochDay = birthDay, ageYears = age)
 
-    // ── 7a. Everyday sections first, "Your plan answers" folded ──────────────
     @Test
     fun profile_everydaySectionsComeFirst_andThePlanAnswersAreFolded() {
         QaHarness.seedLog(ctx, listOf(profileWith(birthDay = adultBirthday, age = 35.0)))
@@ -92,9 +91,7 @@ class OwnerProfileJourneysTest {
             R.string.main_overline_during_training, R.string.main_overline_your_data, R.string.main_overline_evidence,
         ).map(::header)
         val planAnswers = header(R.string.main_overline_plan_answers)
-        // Profile opens on an everyday section, not on the setup answers.
         rule.onNode(hasText(everyday.first())).assertIsDisplayed()
-        // Walk the list top to bottom, noting each section header in the order it shows.
         val seen = mutableListOf<String>()
         val headers = everyday + planAnswers + header(R.string.main_overline_danger_zone)
         val list = rule.onAllNodes(hasScrollToNodeAction())[0]
@@ -122,7 +119,6 @@ class OwnerProfileJourneysTest {
         rule.openPlanAnswers()
         rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(profileRow(str(R.string.setup_row_age)))
         rule.onNode(profileRow(str(R.string.setup_row_age))).assertIsDisplayed()
-        // Leaving the tab and coming back finds the answers still unfolded.
         rule.selectTab(str(R.string.main_dest_today))
         rule.selectTab(str(R.string.main_dest_profile))
         rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(tile)
@@ -133,7 +129,6 @@ class OwnerProfileJourneysTest {
         rule.onNode(profileRow(str(R.string.setup_row_age))).assertIsDisplayed()
     }
 
-    // ── 7b. "Check age" opens Profile at the birthday ────────────────────────
     @Test
     fun under18Card_checkAgeOpensProfileWithTheBirthdayRevealed() {
         QaHarness.seedLog(ctx, listOf(profileWith(birthDay = youthBirthday, age = 15.0)))
@@ -162,7 +157,6 @@ class OwnerProfileJourneysTest {
     private fun birthdayPill() = hasText(str(R.string.setup_birthday_change)) and hasClickAction() and
         SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
 
-    // ── 7c. "Review health answers" (PAR-Q) lands on the answer behind it ─────
     @Test
     fun parqHold_reviewHealthAnswersRevealsTheQuestionsAndTheirClearance() {
         reviewHealthLands(draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.HeartOrBloodPressure, true))).health)
@@ -176,7 +170,6 @@ class OwnerProfileJourneysTest {
         rule.onNode(toggleRow(str(R.string.setup_parq_q1))).assertIsOn()
     }
 
-    // ── 7d. … and for a pregnancy hold, the pregnancy toggle, high on screen ──
     @Test
     fun pregnancyHold_reviewHealthAnswersRevealsThePregnancyToggle() {
         reviewHealthLands(HealthScreen(pregnant = true))
@@ -195,7 +188,6 @@ class OwnerProfileJourneysTest {
         rule.onNode(toggleRow(str(R.string.setup_health_pregnancy_warning_label))).assertIsDisplayed()
     }
 
-    // ── 7e. A pregnancy hold's Today card adds to the banner, never repeats it ─
     @Test
     fun pregnancyHold_todayCardCarriesOnlyWhatTheBannerLeavesOut() {
         QaHarness.seedLog(ctx, listOf(profileWith(health = HealthScreen(pregnant = true), birthDay = adultBirthday, age = 35.0)))
@@ -232,22 +224,18 @@ class OwnerProfileJourneysTest {
         rule.onNode(hasText(str(R.string.main_hold_review_health)) and hasClickAction()).performClick()
     }
 
-    // ── 8a. Setup: the birthday needs an answer, future dates are refused ────
     @Test
     fun setupAbout_requiresABirthdayFromThePicker_refusesAFutureDate_andProfileShowsTheAge() {
         rule.launchAppExpectingSetup()
         rule.walkLiftSetup(birthdayDigits = null)
         val next = hasText(str(R.string.setup_btn_next)) and hasClickAction()
-        // No birthday yet: Next is off and says what is missing.
         rule.onNode(next).assertIsNotEnabled()
         rule.assertTextCountEventually(str(R.string.setup_about_pick_hint), 1)
 
-        // A future date is not taken.
         rule.pickBirthday(str(R.string.setup_birthday_pick), "01012030")
         rule.assertTextCountEventually(str(R.string.setup_birthday_pick), 1)
         rule.onNode(next).assertIsNotEnabled()
 
-        // A real birthday shows with the age it gives today and opens Next.
         assertTrue("the picker took the date", rule.pickBirthday(str(R.string.setup_birthday_pick), adultDigits))
         rule.assertTextCountEventually(born(adultBirthday, 35), 1)
         rule.onNode(next).assertIsEnabled()
@@ -256,13 +244,11 @@ class OwnerProfileJourneysTest {
         rule.finishSetup()
         assertEquals(adultBirthday, EventDispatcher.model.value!!.profile!!.birth_epoch_day)
 
-        // Profile › Age states the same birthday and age.
         val age = str(R.string.setup_row_age)
         rule.openProfileAnswersAt(profileRow(age))
         rule.onNode(profileRow(age) and hasText(born(adultBirthday, 35), substring = true)).assertIsDisplayed()
     }
 
-    // ── 8b. Profile: a birthday making the user 15 holds; an adult one clears ─
     @Test
     fun profileBirthday_age15HoldsTraining_andAnAdultBirthdayClearsIt() {
         QaHarness.seedLog(ctx, listOf(profileWith(birthDay = adultBirthday, age = 35.0)))
@@ -285,7 +271,6 @@ class OwnerProfileJourneysTest {
         rule.onAllNodesWithText(born(youthBirthday, 15), substring = true).fetchSemanticsNodes()
             .let { assertTrue("the Age row shows the new birthday", it.isNotEmpty()) }
 
-        // Back to the real birthday in the same row: the hold lifts at once.
         rule.waitUntilDisplayed(birthdayPill())
         assertTrue("the picker took the date", rule.pickBirthday(change, adultDigits))
 

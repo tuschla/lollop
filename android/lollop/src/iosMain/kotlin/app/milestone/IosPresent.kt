@@ -27,10 +27,6 @@ import platform.UniformTypeIdentifiers.UTTypeItem
 import platform.darwin.NSObject
 import platform.posix.memcpy
 
-// UIKit presentation and file plumbing the iOS actuals share: the topmost screen,
-// the share sheet, the document picker, and NSData <-> ByteArray.
-
-/** The view controller on top: the key window's root, then whatever it presents. */
 internal fun topViewController(): UIViewController? {
     val window = UIApplication.sharedApplication.connectedScenes
         .filterIsInstance<UIWindowScene>()

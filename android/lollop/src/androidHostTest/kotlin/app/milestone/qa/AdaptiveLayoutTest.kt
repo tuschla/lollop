@@ -109,8 +109,6 @@ class AdaptiveLayoutTest {
         const val SQUAT = "Back squat"
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
-
     private fun window(qualifiers: String, font: Float = 1f) {
         RuntimeEnvironment.setQualifiers(qualifiers)
         RuntimeEnvironment.setFontScale(font)
@@ -131,7 +129,6 @@ class AdaptiveLayoutTest {
 
     private fun node(matcher: SemanticsMatcher): SemanticsNode = rule.onAllNodes(matcher).onFirst().fetchSemanticsNode()
 
-    /** [n] is drawn whole (nothing clipped by a scroller or the window) on screen. */
     private fun assertWhollyOnScreen(what: String, n: SemanticsNode) {
         val b = n.boundsInRoot
         val s = screen
@@ -168,19 +165,17 @@ class AdaptiveLayoutTest {
         return UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }.map { it.toString() }
     }
 
-    // ── Window size classes ─────────────────────────────────────────────────
-
     @Test
     fun windowLayout_followsTheSizeClassAndAspect() {
         fun of(w: Float, h: Float) = windowLayoutFor(WindowSizeClass.compute(w, h), landscape = w > h)
-        // A portrait phone keeps the bottom bar, one column, controls under the content.
+        // A portrait phone.
         assertEquals(WindowLayout.Compact, of(411f, 891f))
         assertEquals(WindowLayout.Compact, of(320f, 640f))
-        // A phone in landscape: rail, no wordmark bar, two panes, controls beside.
+        // A phone in landscape.
         assertEquals(WindowLayout(navRail = true, shortHeight = true, twoPane = true, sideControls = true), of(891f, 411f))
         // A small phone in landscape: too narrow for two panes.
         assertEquals(WindowLayout(navRail = true, shortHeight = true, twoPane = false, sideControls = true), of(640f, 360f))
-        // A tablet / unfolded foldable in portrait: rail and one capped column.
+        // A tablet / unfolded foldable in portrait.
         assertEquals(WindowLayout(navRail = true, shortHeight = false, twoPane = false, sideControls = false), of(800f, 1280f))
         assertEquals(WindowLayout(navRail = true, shortHeight = false, twoPane = false, sideControls = false), of(673f, 841f))
         // A tablet in landscape.
@@ -188,8 +183,6 @@ class AdaptiveLayoutTest {
         // A portrait phone in split screen (half height): the rail gives the height back.
         assertEquals(WindowLayout(navRail = true, shortHeight = true, twoPane = false, sideControls = false), of(411f, 430f))
     }
-
-    // ── Chrome ──────────────────────────────────────────────────────────────
 
     @Test
     fun portraitPhone_keepsBottomBarFabAndWordmark() {
@@ -211,9 +204,7 @@ class AdaptiveLayoutTest {
         assertEquals(1, rule.countOf(hasTestTag("nav-rail")))
         assertEquals("the wordmark bar gives its height back", 0, rule.countOf(hasText(str(R.string.app_name))))
         assertEquals(1, rule.countOf(hasTestTag("rail-brand")))
-        // Log is the rail's header, not a floating button over the list.
         assertEquals(1, rule.countOf(hasTestTag("log-fab") and hasAnyAncestor(hasTestTag("nav-rail"))))
-        // The session at the start, the week beside it, both starting at the top.
         val session = node(hasTestTag("today-session-pane")).boundsInRoot
         val week = node(hasTestTag("today-week-pane")).boundsInRoot
         assertTrue("session pane $session before week pane $week", session.right <= week.left + 1f)
@@ -222,7 +213,6 @@ class AdaptiveLayoutTest {
             1,
             rule.countOf(hasText(str(R.string.main_overline_this_week).uppercase(java.util.Locale.US)) and hasAnyAncestor(hasTestTag("today-week-pane"))),
         )
-        // The hero's primary action is on screen without a scroll.
         assertWhollyOnScreen(
             "Log set 1 of 4",
             node(hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true)),
@@ -246,8 +236,6 @@ class AdaptiveLayoutTest {
         assertTrue("column not centred: ${dp(leftGap)}dp | ${dp(rightGap)}dp", kotlin.math.abs(leftGap - rightGap) < with(rule.density) { 40.0f * density })
     }
 
-    // ── Set logger ──────────────────────────────────────────────────────────
-
     /** Bug: in landscape the set logger showed the set header and the effort row;
      *  the weight field and its keypad sat below the sheet's fold, and an open
      *  keypad covered the whole form. Now the keypad stands beside the form, whole,
@@ -267,7 +255,6 @@ class AdaptiveLayoutTest {
         assertWhollyOnScreen("Done", node(hasClickAction() and hasText(str(R.string.log_keypad_done))))
         assertWhollyOnScreen("Log set", node(hasTestTag("editor-primary")))
         assertTrue("the weight well is off screen: ${well.boundsInRoot}", well.boundsInRoot.height > 0f)
-        // Typing lands in the well beside it.
         listOf('1', '2', '5').forEach(::key)
         rule.onNode(hasContentDescription("${str(R.string.log_field_weight)}, 125 kg")).assertExists()
         assertEquals(emptyList<String>(), violations())
@@ -292,7 +279,6 @@ class AdaptiveLayoutTest {
         assertWhollyOnScreen("Log set", node(hasTestTag("editor-primary")))
         listOf('1', '2', '5').forEach(::key)
         rule.onNode(hasContentDescription("${str(R.string.log_field_weight)}, 125 kg")).assertExists()
-        // Done folds the keypad; Save stays put.
         rule.onNode(hasClickAction() and hasText(str(R.string.log_keypad_done))).performClick()
         rule.waitForIdle()
         assertEquals(0, rule.countOf(hasTestTag("numeric-keypad")))
@@ -364,8 +350,6 @@ class AdaptiveLayoutTest {
         assertTrue(node(hasTestTag("numeric-keypad")).boundsInRoot.top >= node(weightWell).boundsInRoot.bottom - 1f)
     }
 
-    // ── Setup ───────────────────────────────────────────────────────────────
-
     /** Bug: in a 640×360 landscape window the race step's keypad band filled the
      *  screen: the question, the time field and Back/Next were laid out off screen
      *  (Next 0×0) and the keypad's last row was cut, so the setup could not go on.
@@ -381,7 +365,6 @@ class AdaptiveLayoutTest {
         assertWhollyOnScreen("the question", node(hasText(str(R.string.setup_step_race_q))))
         rule.onNode(hasText(str(R.string.setup_btn_next)) and hasClickAction()).performClick()
         rule.waitForIdle()
-        // On from the lead question to the review, each screen answered and Next tapped.
         GuidedSetupWalk.bothPath.dropWhile { it.name != "lead" }.takeWhile { it.name != "review" }.forEach { s ->
             s.answer(rule)
             rule.waitForIdle()
@@ -419,19 +402,14 @@ class AdaptiveLayoutTest {
         fun near(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color) =
             maxOf(kotlin.math.abs(a.red - b.red), kotlin.math.abs(a.green - b.green), kotlin.math.abs(a.blue - b.blue)) < 0.02f
         val ground = image[(question.right + 4f).toInt(), answers.top.toInt()]
-        // The gutter between the columns and the margin after the answers stay ground
-        // along the answers column and a step below it.
         val xs = ((question.right + 1f).toInt() until (answers.left - 1f).toInt()) + ((answers.right + 1f).toInt() until image.width)
         val ys = answers.top.toInt() until minOf(image.height, (answers.bottom + 24 * rule.density.density).toInt())
         val off = xs.flatMap { x -> ys.filter { y -> !near(image[x, y], ground) }.map { y -> x to y } }
         assertTrue("drawn outside the answers column at ${off.take(4)} (${off.size} px)", off.isEmpty())
-        // More answers lie below: the card fades into the ground at the column's foot.
         val x = (answers.left + 4f).toInt()
         assertTrue("the card under the fade", !near(image[x, (answers.bottom - 40 * rule.density.density).toInt()], ground))
         assertTrue("the column's foot is the ground", near(image[x, answers.bottom.toInt() - 1], ground))
     }
-
-    // ── Primary actions at 200 % font in landscape ──────────────────────────
 
     private fun primaryActionsOnScreenAt200(qualifiers: String) {
         window(qualifiers, font = 2f)
@@ -453,8 +431,6 @@ class AdaptiveLayoutTest {
     @Test
     fun font200_smallLandscape_primaryActionsOnScreen() = primaryActionsOnScreenAt200(SMALL_LANDSCAPE)
 
-    // ── History ─────────────────────────────────────────────────────────────
-
     private fun gpsTenK() = QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(0) - 5 * 3600 - 1010 * 3L)
 
     private fun seedRuns(run: Event.LogRunTrack) {
@@ -471,7 +447,6 @@ class AdaptiveLayoutTest {
         assertEquals(1, rule.countOf(hasTestTag("history-list-pane")))
         assertEquals(1, rule.countOf(hasTestTag("history-overview-pane")))
         val windows = rule.countOf(isRoot())
-        // The newest run's card, in the list pane.
         rule.onAllNodes(hasAnyAncestor(hasTestTag("history-list-pane")) and hasClickAction() and hasText(str(R.string.history_run_weekday, ""), substring = true))
             .onFirst().performClick()
         rule.waitForNode(hasTestTag("run-trim"))
@@ -495,7 +470,6 @@ class AdaptiveLayoutTest {
     private val runCard get() = inList and hasText(str(R.string.history_run_weekday, ""), substring = true)
     private val liftCard get() = inList and hasText(SQUAT, substring = true, ignoreCase = true)
 
-    /** Two runs, a squat session and a set in landscape History. */
     private fun openLandscapeHistoryWithLiftsAndRuns() {
         window(LANDSCAPE)
         val older = QaHarness.daysAgoAtMidday(3)
@@ -532,7 +506,6 @@ class AdaptiveLayoutTest {
         rule.waitForNode(hasTestTag("detail-pane"))
         rule.assertCountEventually(runCard and selected, 1)
         assertEquals(1, rule.countOf(inList and selected))
-        // What TalkBack gets for the open card and for another one.
         val open = a11yInfo(node(runCard and selected).id)
         assertTrue("open card: checked ${open.isChecked}, state \"${open.stateDescription}\"", open.isChecked && open.stateDescription?.toString() == "Selected")
         val other = a11yInfo(rule.onAllNodes(runCard and !selected).onFirst().fetchSemanticsNode().id)
@@ -552,7 +525,6 @@ class AdaptiveLayoutTest {
         assertEquals(1, rule.countOf(liftCard and selected))
     }
 
-    /** The accessibility node TalkBack reads for semantics node [id] in the app window. */
     private fun a11yInfo(id: Int): android.view.accessibility.AccessibilityNodeInfo {
         var info: android.view.accessibility.AccessibilityNodeInfo? = null
         checkNotNull(lastScenario).onActivity { a ->
@@ -565,7 +537,6 @@ class AdaptiveLayoutTest {
         return checkNotNull(info) { "no accessibility node for $id" }
     }
 
-    /** The ground of the open detail pane, sampled in its start gutter. */
     private fun paneGround(): androidx.compose.ui.graphics.Color {
         rule.waitForIdle()
         val pane = node(hasTestTag("detail-pane")).boundsInRoot
@@ -595,8 +566,6 @@ class AdaptiveLayoutTest {
         assertEquals("session pane vs run pane", run, session)
         assertEquals("set pane vs run pane", run, set)
     }
-
-    // ── Rotation keeps what was open or typed ───────────────────────────────
 
     @Test
     fun rotation_halfTypedSet_keepsTheSheetTheLoopAndTheWeight() {
@@ -706,7 +675,6 @@ class AdaptiveLayoutTest {
         assertEquals("the battery notice is shown", 1, rule.countOf(hasText(str(R.string.track_battery_caption))))
         assertWhollyOnScreen("Start", node(start))
         assertWhollyOnScreen("✕", node(hasClickAction() and hasContentDescription(str(R.string.track_cd_back))))
-        // The notice and the plan scroll into view above the control row.
         rule.onNode(hasText(str(R.string.track_battery_caption))).performScrollTo()
         assertWhollyOnScreen("battery notice", node(hasText(str(R.string.track_battery_caption))))
         rule.onNode(follow).performScrollTo()
@@ -714,8 +682,6 @@ class AdaptiveLayoutTest {
         assertWhollyOnScreen("Start after a scroll", node(start))
     }
 
-    /** Stop on a recording run with route maps on, in [qualifiers] at [font];
-     *  returns once the Finish review is up. */
     private fun openFinishReview(qualifiers: String, font: Float = 1f) {
         AppSettings.setShowRouteMaps(ctx, true)
         window(qualifiers, font)
@@ -740,7 +706,6 @@ class AdaptiveLayoutTest {
         openFinishReview(LANDSCAPE)
         val review = node(hasTestTag("tracker-finish-review")).boundsInRoot
         val route = node(hasTestTag("finish-route")).boundsInRoot
-        // The review's column: every labelled node inside the sheet, the route aside.
         val parts = rule.onAllNodes(
             hasAnyAncestor(hasTestTag("tracker-finish-review")) and !hasAnyAncestor(hasTestTag("finish-route")) and
                 (hasText("", substring = true) or hasClickAction()),
@@ -768,15 +733,12 @@ class AdaptiveLayoutTest {
         assertWhollyOnScreen("Save run", node(hasText(str(R.string.track_btn_save_run)) and hasClickAction()))
     }
 
-    /** The single text layout of the unmerged text node [n]. */
     private fun textLayout(n: SemanticsNode): TextLayoutResult {
         val layout = mutableListOf<TextLayoutResult>()
         n.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layout)
         return layout.single()
     }
 
-    /** The layout dropped text: a height clip, an ellipsis, or an unwrapped line
-     *  wider than its box (as in `UxInvariantTest`). */
     private val TextLayoutResult.cutsOffText: Boolean
         get() = didOverflowHeight ||
             (0 until lineCount).any { isLineEllipsized(it) } ||
@@ -865,7 +827,6 @@ class AdaptiveLayoutTest {
             assertTrue("key ${k.boundsInRoot} is ${dp(k.size.height.toFloat())}dp tall", dp(k.size.height.toFloat()) >= 47.5f)
         }
         assertWhollyOnScreen("Next", node(hasText(str(R.string.setup_btn_next)) and hasClickAction()))
-        // Typing lands in the field; the keypad's Next moves on to the second one.
         key('2'); key('5')
         rule.onNode(hasContentDescription("${str(R.string.setup_runnow_weekly_label)}, 25", substring = true)).assertExists()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.setup_keypad_next_cd, str(R.string.setup_runnow_longest_label)))).performClick()

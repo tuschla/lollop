@@ -6,8 +6,6 @@
 //! GNSS dropouts, plausible pace, the keep threshold) before it becomes the
 //! fixes of a `LogRunTrack`, decimated like a live save. The verdict is the
 //! runs to log or the one reason the file gave none ([`ImportVerdict`]).
-//!
-//! Pure: bytes in, verdict out; no clock, no model.
 
 use serde::Serialize;
 
@@ -119,7 +117,6 @@ impl From<ImportRefusal> for Refused {
     }
 }
 
-/// The verdict on one import file's bytes.
 pub fn import_run_file(bytes: &[u8]) -> ImportVerdict {
     let result = read_runs(bytes).and_then(|runs| {
         let mut first_refusal = None;
@@ -221,7 +218,6 @@ fn read_runs(bytes: &[u8]) -> Result<Vec<RawRun>, Refused> {
     runs.map_err(|_| ImportRefusal::Damaged.into())
 }
 
-/// A FIT file's one run, through FIT's own gates.
 fn read_fit(bytes: &[u8]) -> Result<RawRun, Refused> {
     let track = fit::parse_fit(bytes).and_then(|track| fit::import_gate(&track).map(|()| track));
     let track = track.map_err(|err| match err {
@@ -479,7 +475,6 @@ impl LegTotals {
             && (self.moving_sec as f64) / self.km < FASTEST_PLAUSIBLE_SEC_PER_KM
     }
 
-    /// Under the keep threshold ([`gps::MIN_RUN_KM`], [`gps::MIN_RUN_SEC`]).
     fn too_short(&self) -> bool {
         self.km < gps::MIN_RUN_KM || self.sec < gps::MIN_RUN_SEC
     }
@@ -550,7 +545,6 @@ fn kt_is_whitespace(c: char) -> bool {
     ) || (c.is_whitespace() && c != '\u{85}')
 }
 
-/// `s` without leading and trailing [`kt_is_whitespace`] characters.
 fn kt_trim(s: &str) -> &str {
     s.trim_matches(kt_is_whitespace)
 }

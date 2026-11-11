@@ -18,7 +18,7 @@ import app.milestone.resources.log_value_with_unit
 /** The plan item a set of [exercise] belongs to: a lift or calisthenics item of
  *  that name (by [sameExercise]). Never a run item, whose exercise is blank, so a
  *  free set opened from the Log chooser on a run day carries no run prescription.
- *  Null while no exercise is named. Pure. */
+ *  Null while no exercise is named. */
 internal fun planItemFor(items: List<PrescriptionView>, exercise: String): PrescriptionView? {
     if (exercise.isBlank()) return null
     val named = items.filter { it.exercise.isNotBlank() }
@@ -28,7 +28,7 @@ internal fun planItemFor(items: List<PrescriptionView>, exercise: String): Presc
 /** Whether the set editor's exercise is settled, so its weight, reps and effort
  *  fields show: an edited set, a name the app knows (plan item, own history), the
  *  exercise the editor opened on ([preset]) or one confirmed with "+ Add"
- *  ([added]). A half-typed search term is not. Pure. */
+ *  ([added]). A half-typed search term is not. */
 internal fun exerciseChosen(exercise: String, known: List<String>, added: String?, preset: String?, editing: Boolean): Boolean {
     if (exercise.isBlank()) return false
     if (editing) return true
@@ -38,7 +38,7 @@ internal fun exerciseChosen(exercise: String, known: List<String>, added: String
 /** The sets logged today (since [dayStartSec]) for the loop's exercise, oldest
  *  first: the plan item's own logged sets (matched by entry id, so a free-typed
  *  name variant the core attributed to the item still counts) plus any set with
- *  the same name (by [sameExercise]). Pure. */
+ *  the same name (by [sameExercise]). */
 internal fun todaySetsFor(
     exercise: String,
     item: PrescriptionView?,
@@ -53,8 +53,7 @@ internal fun todaySetsFor(
     }.sortedBy { it.observed_at }
 }
 
-/** Reps left in reserve at effort [rpe] on the RIR-based scale (10 − RPE, never
- *  negative). Pure. */
+/** Reps left in reserve at effort [rpe] on the RIR-based scale. */
 internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
 
 /** What the set loop's pinned primary action does. */
@@ -65,7 +64,7 @@ internal enum class LoopPrimary { Save, LogPlannedSet, LogOffPlanSet, LogBlank, 
  *  big button moves on: "Next: <exercise>", or "Finish session" after the last
  *  open item, so a habitual extra tap never logs a junk set; only a set the user
  *  has started changing ([dirty]) makes it "Log extra set". An off-plan exercise
- *  logs "Set k"; nothing named yet reads as the sheet's "Log set". Pure. */
+ *  logs "Set k"; nothing named yet reads as the sheet's "Log set". */
 internal fun loopPrimaryAction(
     loop: Boolean,
     liveItem: PrescriptionView?,
@@ -86,7 +85,7 @@ internal fun loopPrimaryAction(
  *  adjustment for it that changes the load or suggests ending the exercise, else
  *  today's session-review verdict to stop here (it names no exercise, so it
  *  applies to the lift in progress). Adjustments that change nothing in this
- *  session ("next time", a new best) stay on Today. Pure. */
+ *  session ("next time", a new best) stay on Today. */
 internal fun inSessionCue(
     exercise: String,
     adjustments: List<AdjustmentView>,
@@ -112,21 +111,18 @@ private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill((kgToLb(kg)
 /** A load figure for the weight field, set lines and snackbars: lb in whole or
  *  half pounds, kg to at most two decimals, never a trailing ".0" ("135",
  *  "101.25"). The weight field shows exactly this, so a load the core derived
- *  from pounds (`230.0 / LB_PER_KG`) reads "104.33", never every digit. Pure. */
+ *  from pounds (`230.0 / LB_PER_KG`) reads "104.33", never every digit. */
 internal fun loadFigure(kg: Double, unit: WeightUnit): String =
     if (unit == WeightUnit.Lb) halfPoundFigure(kg) else plateFigure(kg)
 
 /** A plate / load figure with up to two decimals and no trailing zeros
- *  ("20", "2.5", "1.25"). Pure. */
+ *  ("20", "2.5", "1.25"). */
 internal fun plateFigure(v: Double): String =
     if (v % 1.0 == 0.0) "${v.toLong()}"
     else formatFixed(v, 2).trimEnd('0').trimEnd('.')
 
-/** A keypad buffer as a number; null while it is empty or incomplete. */
-internal fun parseKeypadNumber(text: String): Double? = text.toDoubleOrNull()
-
 /** A ± chip's fixed-decimal result without trailing zeros ("295.0" → "295",
- *  "103.80" → "103.8"). Pure. */
+ *  "103.80" → "103.8"). */
 internal fun trimWeightText(text: String): String =
     text.toDoubleOrNull()?.let { fmtLosslessPrefill(it) } ?: text
 
@@ -143,8 +139,8 @@ private const val UnbandedHoldSeed = 20
  *  bound for a typed set load, well above any real lift. */
 internal const val SetWeightMaxKg = 400.0
 
-/** The ± chips on a load field, in its display unit: a plate pair (±2.5 kg)
- *  and a bigger jump in kg, the natural ±5/10 lb steps in lb. */
+/** The ± chips on a load field, in its display unit: a plate pair and a bigger
+ *  jump in kg, the natural lb steps in lb. */
 internal fun plateSteps(unit: WeightUnit): List<Double> =
     if (unit == WeightUnit.Lb) PlateStepsLb else PlateStepsKg
 
@@ -178,7 +174,6 @@ internal object AppliedCueLoads {
 
     private val today by ProcessLocal { Today(Long.MIN_VALUE) }
 
-    /** Today's cues, the earlier day's dropped once the day changed. */
     private fun current(): HashMap<String, AppliedCue> {
         val t = today
         val day = localDayStartSec(AppClock.nowSec())
@@ -215,7 +210,6 @@ internal fun prescriptionPrefill(p: PrescriptionView, weightUnit: WeightUnit, ap
         exercise = p.exercise,
         weightText = text,
         weightKgVerbatim = kg,
-        // Band midpoints.
         reps = if (p.reps_low > 0) ((p.reps_low + maxOf(p.reps_low, p.reps_high)) / 2.0).roundOrZero().toInt() else UnbandedRepsSeed,
         holdSec = if (p.hold_low_sec > 0) {
             ((p.hold_low_sec + maxOf(p.hold_low_sec, p.hold_high_sec)) / 2.0).roundOrZero().toInt()
@@ -231,8 +225,7 @@ internal fun prescriptionPrefill(p: PrescriptionView, weightUnit: WeightUnit, ap
  *  ([initial]) or a coach prescription ([rx]); with neither, exercise and weight
  *  seed EMPTY and reps/RPE stay unset (null) so the editor fabricates nothing
  *  (HARD RULE 1). RPE seeds ONLY from an edited row that recorded one: a
- *  prescription's target is never an answer. Pure (no Compose/Android state) so
- *  it is unit-testable. */
+ *  prescription's target is never an answer. */
 internal data class FreshSetSeed(
     val exercise: String,
     val weightText: String,
@@ -319,7 +312,7 @@ internal data class SetEditorState(
  *  its last logged set (in [recentLifts]), else just renamed, so a chip switch
  *  never carries one exercise's load into another. Effort is never seeded (it is
  *  rated fresh) and the buffer is fresh again. [cueFor] is the cue load the
- *  lifter applied to an item ([AppliedCueLoads.forItem]). Pure. */
+ *  lifter applied to an item ([AppliedCueLoads.forItem]). */
 internal fun SetEditorState.reseededTo(
     name: String,
     items: List<PrescriptionView>,
@@ -364,7 +357,7 @@ internal fun SetEditorState.reseededTo(
 /** The fields after the loop logged [kg] under [name]: the load carries over
  *  (an untouched Save repeats the load actually logged), effort resets to
  *  unrated, and the reps (or hold seconds) go back to [liveItem]'s target so one
- *  short set never silently repeats as the next set's count. Pure. */
+ *  short set never silently repeats as the next set's count. */
 internal fun SetEditorState.afterLoggedSet(
     name: String,
     kg: Double,
@@ -383,7 +376,7 @@ internal fun SetEditorState.afterLoggedSet(
 }
 
 /** The fields with [item]'s working load restored after a warm-up, when the plan
- *  prescribes one (else unchanged); a hold keeps its seconds. Pure. */
+ *  prescribes one (else unchanged); a hold keeps its seconds. */
 internal fun SetEditorState.withWorkingLoad(
     item: PrescriptionView,
     holdMode: Boolean,
@@ -425,8 +418,7 @@ private fun onKgWireGrid(kg: Double): Boolean = (kg * 100.0).roundOrZero() / 100
  *  100 kg set shown as "220.5" lb stays 100 kg) and a loop repeat re-emits the
  *  load actually saved; otherwise the displayed buffer, converting lb→kg, so an
  *  off-grid seed (102.05828… kg shown as "102.06" or "225" lb) stores what the
- *  field shows. Null when the buffer parses to nothing. Pure so the
- *  repeat-last-set invariant is unit-testable. */
+ *  field shows. Null when the buffer parses to nothing. */
 internal fun resolveSaveWeightKg(
     bodyweightMode: Boolean,
     weightFresh: Boolean,
@@ -436,7 +428,7 @@ internal fun resolveSaveWeightKg(
 ): Double? = when {
     bodyweightMode -> 0.0
     weightFresh && weightVerbatim != null && onKgWireGrid(weightVerbatim) -> weightVerbatim
-    else -> parseKeypadNumber(weightText)
+    else -> weightText.toDoubleOrNull()
         ?.let { if (weightUnit == WeightUnit.Lb) lbToKgWire(it) else it }
 }
 

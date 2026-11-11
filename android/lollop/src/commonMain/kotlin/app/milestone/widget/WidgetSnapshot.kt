@@ -30,7 +30,6 @@ internal enum class WidgetDayKind {
     /** Today's plan session is a lifting (or calisthenics) session. */
     Lift,
 
-    /** Today's plan session is a run. */
     Run,
 
     /** A plan exists but has no session today ([WidgetSnapshot.restDay] says if it is a plan rest day). */
@@ -97,7 +96,6 @@ internal data class WidgetSnapshot(
     /** Today's session title (Lift / Run), else empty. */
     val title: String = "",
     val items: List<WidgetItem> = emptyList(),
-    /** Today's plan session is complete. */
     val sessionDone: Boolean = false,
     /** Today's session has an open run item: the widget offers Track run. */
     val trackable: Boolean = false,
@@ -186,8 +184,6 @@ internal fun widgetSnapshotOf(
     )
 }
 
-/** The planned (not yet trained) lift and run days after [today] in this and
- *  next week's plan and [ns], by day. */
 private fun aheadDays(model: ViewModel, ns: SessionPlanView, today: Long, unit: DistanceUnit): List<WidgetAheadDay> =
     (model.week_plan + model.next_week_plan + ns)
         .filter { it.epoch_day > today && it.items.isNotEmpty() && (it.actionable || it.status == SessionStatus.Planned) }

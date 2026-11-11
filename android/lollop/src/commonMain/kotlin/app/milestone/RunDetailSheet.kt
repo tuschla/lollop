@@ -147,7 +147,6 @@ internal fun RunDetailContent(
         modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
-        // 2.1 Header: name + top record badge on one baseline, then the start date.
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 SheetTitle(title, Modifier.weight(1f).alignByBaseline())
@@ -163,7 +162,6 @@ internal fun RunDetailContent(
                 }
             }
         }
-        // 2.2 Headline stats (+ the HR row only when HR was measured).
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             if (stats.isNotEmpty()) {
                 RunStatColumns(stats, compact = false)
@@ -172,10 +170,7 @@ internal fun RunDetailContent(
             }
             RunHrRow(run, explain = true)
         }
-        // Spike / baseline / interval findings (the split verdict sits under SPLITS).
         RunFindings(run, face = false, showSplit = splits.isEmpty())
-        // 2.3 Route map card (the sheet opens once a GPS run's route has loaded);
-        // nothing for a manual run.
         val segments = route?.segments.orEmpty()
         if (run.has_gpx && segments.isNotEmpty()) {
             RouteMapCard(
@@ -184,11 +179,8 @@ internal fun RunDetailContent(
                 recordKm = run.distance_km,
             )
         }
-        // 2.5 Splits.
         if (splits.isNotEmpty()) RunSplitsSection(run, splits, unit)
-        // 2.6 Your log.
         RunLogSection(run, srpeLoad, editable = !run.has_gpx && run.distance_km > 0.0, onRate = { rating = true }, onEdit = onEdit)
-        // 2.7 Actions.
         RunActions(run, route, onTrim, onDelete)
     }
     if (rating) {

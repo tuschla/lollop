@@ -1,9 +1,9 @@
 //! Concurrent / hybrid training interference logic (knowledge-base File 10 -
 //! Resistance + Running, Evidence-Graded Knowledge Base).
 //!
-//! Pure, deterministic scheduling rules: intra-session ordering, inter-session
+//! Scheduling rules: intra-session ordering, inter-session
 //! spacing, the Section-D override caps (CAP-1/3/5), and the reciprocal
-//! running-economy lifting dose. No IO, no clocks, no randomness.
+//! running-economy lifting dose.
 //!
 //! Interference is quality-specific and modest (Schumann 2022): explosive power
 //! is attenuated most, maximal lower-body strength lightly (in men, HYB-SEX-001),
@@ -11,10 +11,6 @@
 
 use crate::evidence::claims;
 use crate::schema::Recommended;
-
-// ---------------------------------------------------------------------------
-// 1. Intra-session ordering (File 10 hybrid-005/006/008; CONC-ORDER-001)
-// ---------------------------------------------------------------------------
 
 /// The co-primary goal governing a concurrent day's ordering.
 #[derive(
@@ -58,10 +54,6 @@ pub fn same_session_order(goal: ConcurrentGoal) -> Recommended<SessionOrder> {
     Recommended::new(order, claims::CONC_ORDER_001)
 }
 
-// ---------------------------------------------------------------------------
-// 2. Inter-session spacing (File 10 hybrid-007/012; CONC-SEP-001 / HYB-CAP-001)
-// ---------------------------------------------------------------------------
-
 /// Acute same-day separation targets between opposing qualities (hours).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSpacing {
@@ -95,10 +87,6 @@ pub const HEAVY_LEG_RUN_GAP_H: f64 = 24.0;
 pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
     Recommended::new(hours_between >= HEAVY_LEG_RUN_GAP_H, claims::HYB_CAP_001)
 }
-
-// ---------------------------------------------------------------------------
-// 3. Override caps (File 10 Section D; HYB-CAP-001)
-// ---------------------------------------------------------------------------
 
 /// Default endurance-day ceiling when strength/hypertrophy/power is co-primary:
 /// 3 d/wk (File 10 CAP-5 / hybrid-013, re-graded by 13-hybrid-update hyb-upd-003).
@@ -158,10 +146,6 @@ pub fn capped_lower_weekly_sets(weekly_sets: u32, cap: &LowerLiftCap, min_sets: 
     let mid = (cap.volume_reduction_frac.0 + cap.volume_reduction_frac.1) / 2.0;
     ((weekly_sets as f64 * (1.0 - mid)).round() as u32).max(min_sets)
 }
-
-// ---------------------------------------------------------------------------
-// 4. Reciprocal lifting dose + interference expectations
-// ---------------------------------------------------------------------------
 
 /// Weekly lifting-session dose to retain in a running-priority plan (File 10
 /// hybrid-010; CONC-RE-001). Strength training improves running economy 2–8 %
@@ -361,13 +345,10 @@ mod tests {
 
     #[test]
     fn lower_lift_cap_triggers_on_high_running() {
-        // 4 d/wk triggers.
         let by_days = lower_lift_cap(4, 20.0).expect("4 d/wk triggers");
         assert_eq!(by_days.value.max_lower_sessions, 2);
         assert_eq!(by_days.value.volume_reduction_frac, (0.20, 0.33));
-        // 40 km/wk triggers even at 3 days.
         assert!(lower_lift_cap(3, 40.0).is_some());
-        // Below both triggers: no cap.
         assert!(lower_lift_cap(3, 30.0).is_none());
     }
 
@@ -414,10 +395,8 @@ mod tests {
 
     #[test]
     fn interference_expected_on_high_freq_or_intensity() {
-        // Frequency edge: >3 d/wk trips it.
         assert!(interference_expected(4, 60.0).value);
         assert!(!interference_expected(3, 60.0).value);
-        // Intensity edge: >80 %VO2max trips it even at low frequency.
         assert!(interference_expected(2, 85.0).value);
         assert!(!interference_expected(2, 80.0).value);
     }

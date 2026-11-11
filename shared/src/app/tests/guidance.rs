@@ -60,7 +60,8 @@ fn power_guidance_row_states_kb_language_not_the_rir_number() {
     // "never to failure" instruction instead.
     let mut p = sample_profile();
     p.lift_goal = LiftGoal::Power;
-    let rows = build_guidance(&p);
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     let loading = rows
         .iter()
         .find(|r| r.summary.contains("Weights for power:"))
@@ -92,7 +93,8 @@ fn c25k_running_guidance_row_has_no_long_run_fragment() {
     // the raw Debug enum name "C25k".
     let mut p = sample_profile();
     p.goal_distance = GoalDistance::C25k;
-    let rows = build_guidance(&p);
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     let running = rows
         .iter()
         .find(|r| r.summary.starts_with("Couch to 5K:"))
@@ -120,7 +122,8 @@ fn guidance_copy_uses_human_labels_not_debug_enums() {
     // human labels, never the raw Debug enum names ("Dup"/"FiveK"/"RunFirst").
     let mut p = sample_profile(); // WeekToWeek cadence → DUP; EndurancePriority.
     p.goal_distance = GoalDistance::FiveK;
-    let rows = build_guidance(&p);
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     let any = |needle: &str| rows.iter().any(|r| r.summary.contains(needle));
     assert!(
         any("Periodization model: daily undulating (heavy, medium and light days each week)"),
@@ -166,7 +169,8 @@ fn novice_load_jump_shown_only_for_novices() {
     let has_jump = |cadence: ProgressionCadence| -> bool {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        build_guidance(&p)
+        let (km, basis) = stated_or_measured_weekly_km(&p, None);
+        build_guidance_measured(&p, km, basis, None)
             .iter()
             .any(|g| g.summary.contains("Adding weight as a beginner"))
     };
@@ -183,7 +187,8 @@ fn weekly_pct_increment_shown_only_past_novice() {
     let row = |cadence: ProgressionCadence| -> Option<GuidanceView> {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        build_guidance(&p)
+        let (km, basis) = stated_or_measured_weekly_km(&p, None);
+        build_guidance_measured(&p, km, basis, None)
             .into_iter()
             .find(|g| g.summary.starts_with("Adding weight: "))
     };
@@ -218,7 +223,9 @@ fn hypertrophy_rep_load_prescription_is_surfaced_and_cited() {
     // The rep/load row answers "how many reps and what load": absent before
     // this wire. Profile-independent (applies to all lifting), so any profile
     // shows it, evidence-cited and non-myth, with the heavy-compound band.
-    let r = build_guidance(&sample_profile())
+    let p = sample_profile();
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let r = build_guidance_measured(&p, km, basis, None)
         .into_iter()
         .find(|g| g.summary.starts_with("Reps and weight:"))
         .expect("rep/load prescription row must be present");
@@ -242,7 +249,8 @@ fn lift_only_profile_omits_running_and_hybrid_guidance() {
     let mut p = sample_profile();
     p.running_days_per_week = 0;
     p.running_km_per_week = 0.0;
-    let rows = build_guidance(&p);
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     assert!(
         !rows.iter().any(|g| g.section == "Hybrid"),
         "pure lifter must not see any Hybrid-section row"
@@ -271,7 +279,8 @@ fn run_only_profile_omits_strength_and_hybrid_guidance() {
     // concurrent-training block.
     let mut p = sample_profile();
     p.weekly_sets = 0;
-    let rows = build_guidance(&p);
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     assert!(
         !rows.iter().any(|g| g.section == "Strength"),
         "pure runner must not see any Strength-section row"
@@ -291,7 +300,9 @@ fn run_only_profile_omits_strength_and_hybrid_guidance() {
 fn hybrid_profile_keeps_all_modality_sections() {
     // Guard against over-gating: the hybrid sample_profile (lifts and runs)
     // must retain Strength, Running and Hybrid rows all at once.
-    let rows = build_guidance(&sample_profile());
+    let p = sample_profile();
+    let (km, basis) = stated_or_measured_weekly_km(&p, None);
+    let rows = build_guidance_measured(&p, km, basis, None);
     assert!(
         rows.iter().any(|g| g.section == "Strength"),
         "hybrid profile must keep Strength rows"
@@ -356,7 +367,7 @@ fn bsi_surveillance_reads_measured_not_stated_mileage() {
 
 #[test]
 fn build_guidance_never_panics_across_the_profile_domain() {
-    // Smoke test: build_guidance branches heavily on the profile and does
+    // Smoke test: build_guidance_measured branches heavily on the profile and does
     // arithmetic on its integer fields (weekly_sets, running days, km). Sweep
     // every enum combination against the floor, the step above it and the
     // ceiling the Android profile editor can emit (weekly_sets 0/1/30, days
@@ -420,7 +431,8 @@ fn build_guidance_never_panics_across_the_profile_domain() {
     });
     profiles = cross(profiles, &[false, true], |p, v| p.advanced = v);
     for p in &profiles {
-        let rows = build_guidance(p);
+        let (km, basis) = stated_or_measured_weekly_km(p, None);
+        let rows = build_guidance_measured(p, km, basis, None);
         assert_cited_non_myth(&rows, p);
         assert_sections_contiguous(&rows, p);
     }
@@ -505,7 +517,8 @@ fn quality_caps_shown_only_when_the_athlete_runs() {
     let has_caps = |run_days: u8| -> bool {
         let mut p = sample_profile();
         p.running_days_per_week = run_days;
-        build_guidance(&p)
+        let (km, basis) = stated_or_measured_weekly_km(&p, None);
+        build_guidance_measured(&p, km, basis, None)
             .iter()
             .any(|g| g.summary.contains("Hard runs: at most"))
     };
@@ -521,7 +534,11 @@ fn periodization_phase_plan_tracks_the_model_by_training_age() {
     let summaries = |cadence: ProgressionCadence| -> Vec<String> {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        build_guidance(&p).into_iter().map(|g| g.summary).collect()
+        let (km, basis) = stated_or_measured_weekly_km(&p, None);
+        build_guidance_measured(&p, km, basis, None)
+            .into_iter()
+            .map(|g| g.summary)
+            .collect()
     };
 
     let linear = summaries(ProgressionCadence::EverySession);

@@ -49,7 +49,6 @@ class RunRecorderTest {
         accuracyM = accuracyM,
     )
 
-    /** One second on, then fix [i] alone. */
     private fun deliver(vararg indices: Int) {
         for (i in indices) {
             host.now += 1000L
@@ -277,7 +276,6 @@ private class ScriptedHost : RecorderHost {
             dueAt = null
         }
 
-        /** Run the action when the deadline has come. */
         fun fire() {
             val at = dueAt ?: return
             if (now < at) return

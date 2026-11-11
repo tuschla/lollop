@@ -57,9 +57,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The real app over the real core against a LONG history: two years (three with
- * `LOLLOP_LONG_UI=1`, plus the tracker's 3-s GPS cadence) of a hybrid athlete's
- * lifting sessions, tracked / hand-logged / imported runs, morning check-ins, a
+ * The real app over the real core against a LONG history (years of it; longer
+ * with `LOLLOP_LONG_UI=1`) of a hybrid athlete's lifting sessions, tracked /
+ * hand-logged / imported runs, morning check-ins, a
  * pain and two illness holds, profile edits and a plan, seeded as the exact wire
  * events the app sends ([LongHistorySeed]).
  *
@@ -94,8 +94,6 @@ class LongHistoryUiTest {
         QaHarness.teardown()
         QaHarness.freshProcess()
     }
-
-    // ── 1. Replay + core view: complete, consistent, sane numbers, linear cost ─
 
     @Test
     fun replay_keepsEveryEntryWithSaneNumbers_andViewCostScalesLinearly() {
@@ -148,8 +146,6 @@ class LongHistoryUiTest {
         assertTrue("one view of the long history takes ${fullView}ms", fullView < 15_000)
     }
 
-    // ── 2. History · Runs: tiles, heatmap, charts, records, the whole list ────
-
     @Test
     fun runs_tilesChartsRecordsAndEveryRunOnceNewestFirstToTheEnd() {
         val h = metric
@@ -157,7 +153,6 @@ class LongHistoryUiTest {
         timed("History tab") { rule.selectTab(str(R.string.main_dest_history)) }
         val m = model()
 
-        // Last 7 days: sessions, tonnage and running equal the data.
         val window = AppClock.nowSec() - 7L * 86_400L
         val weekSets = h.sets.filter { it.observedAt >= window }
         val weekRuns = h.runs.filter { it.observedAt >= window }
@@ -170,7 +165,6 @@ class LongHistoryUiTest {
         assertEquals("running tile = model", String.format(Locale.US, "%.1f", modelKm), shownKm)
         assertEquals("running tile = seeded km", weekRuns.sumOf { it.km }, shownKm.toDouble(), 0.01 * modelKm + 0.11)
 
-        // 12-week heatmap, spoken: active days and the busiest week from the data.
         val heat = heatmapOracle(h, weeks = 12)
         val heatDesc = contentDescription(hasContentDescription(strPrefix(R.string.history_heatmap_desc, 12), substring = true))
         assertEquals(
@@ -180,7 +174,6 @@ class LongHistoryUiTest {
 
         // The segment opens on whichever type was logged last; pick Runs explicitly.
         timed("Runs segment") { rule.selectHistoryFilter(str(R.string.main_segment_runs)) }
-        // 16-week chart: total and this week from the data.
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         historyList().performScrollToNode(weekly)
         val spoken = contentDescription(weekly)
@@ -196,7 +189,6 @@ class LongHistoryUiTest {
         assertTrue("the 16-week series covers 16 Monday weeks", m.run_progress!!.weekly.size == 16 &&
             m.run_progress!!.weekly.zipWithNext().all { (a, b) -> b.week_start_epoch_day - a.week_start_epoch_day == 7L })
 
-        // 14-day chart: its total from the data.
         timed("14-day range") {
             rule.onNode(hasText(str(R.string.history_progress_days, 14)) and hasClickAction()).performClick()
             rule.waitForIdle()
@@ -230,7 +222,6 @@ class LongHistoryUiTest {
         assertTrue("best efforts get slower per km as they get longer",
             p.best_efforts.zipWithNext().all { (a, b) -> b.time_sec * a.distance_m >= a.time_sec * b.distance_m })
 
-        // The whole Runs list, top to bottom.
         val walk = walkHistoryList()
         val expectedRuns = h.runs.sortedByDescending { it.observedAt }
         val now = AppClock.nowMillis()
@@ -250,7 +241,6 @@ class LongHistoryUiTest {
         assertTrue("UX invariants along the Runs list:\n" + walk.violations.joinToString("\n"), walk.violations.isEmpty())
         assertTrue("text cut off / overlapping along the Runs list:\n" + walk.textProblems.joinToString("\n"), walk.textProblems.isEmpty())
 
-        // Jump to month: the picker lists every month, and a pick lands on its header.
         val months = monthsNewestFirst(expectedRuns.map { it.observedAt })
         jumpTo(months.last(), months)
         assertTrue("the oldest month's header is on screen after the jump",
@@ -267,8 +257,6 @@ class LongHistoryUiTest {
         assertTrue("the first card under $middle belongs to it: ${firstBelow?.texts}", firstBelow != null && middleChips.first() in firstBelow.texts)
         assertBudget()
     }
-
-    // ── 3. The longest run: splits, Show all, full-screen map, trim ───────────
 
     @Test
     fun longestRun_showAllSplits_fullScreenMap_andTrimUpdatesTheRecords() {
@@ -301,7 +289,6 @@ class LongHistoryUiTest {
         rule.onNodeWithTag("run-delete").performScrollTo()
         sheetChecks("run sheet, all splits, bottom")
 
-        // Full-screen route map, then back to the sheet.
         rule.onNode(hasContentDescription(str(R.string.runmap_open_full)) and hasClickAction()).performScrollTo()
         timed("full-screen map") {
             rule.onNode(hasContentDescription(str(R.string.runmap_open_full)) and hasClickAction()).performClick()
@@ -311,7 +298,6 @@ class LongHistoryUiTest {
         rule.onNode(hasContentDescription(str(R.string.runmap_close)) and hasClickAction()).performClick()
         rule.waitForIdle()
 
-        // Trim the first ~20 % off the start: the run shrinks, the records follow.
         timed("open trim") {
             rule.onNodeWithTag("run-trim").performScrollTo().performClick()
             rule.waitUntil(15_000) { rule.onAllNodes(hasText(str(R.string.trim_hint))).fetchSemanticsNodes().isNotEmpty() }
@@ -349,7 +335,6 @@ class LongHistoryUiTest {
         assertEquals("records follow the trim: the longest is now the longest remaining run", newLongest.distance_km, p.longest_run_km, 0.05)
         assertEquals(newLongest.observed_at, p.longest_run_observed_at)
         assertTrue("the trimmed run lost its record", p.longest_run_observed_at != h.longestRun.observedAt)
-        // The Records grid on screen follows too.
         dismissSheet()
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
@@ -358,8 +343,6 @@ class LongHistoryUiTest {
         assertTrue("longest cell after the trim: $longestCell", "${trimDecimal(p.longest_run_km)} km" in longestCell)
         assertBudget()
     }
-
-    // ── 4. History · Lifts: every session once, the big session sheet, a set ──
 
     @Test
     fun lifts_everySessionOnceToTheEnd_bigSessionSheet_setDetail_andGlossary() {
@@ -385,7 +368,7 @@ class LongHistoryUiTest {
         assertTrue("UX invariants along the Lifts list:\n" + walk.violations.joinToString("\n"), walk.violations.isEmpty())
         assertTrue("text cut off / overlapping along the Lifts list:\n" + walk.textProblems.joinToString("\n"), walk.textProblems.isEmpty())
 
-        // The newest session is the big one: 8 exercises, every set, the day's volume.
+        // The newest session is the seed's big one: every set, the day's volume.
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
         val bigSets = h.sets.filter { Math.floorDiv(it.observedAt, 86_400L) == h.bigSessionDay }
@@ -412,7 +395,6 @@ class LongHistoryUiTest {
         }
         scrollSheetChecking("session sheet")
 
-        // One set: the sheet shows it large, with its share of the estimated max.
         val first = bigSets.first()
         rule.onAllNodesWithTag("lift-set-row")[0].performScrollTo()
         timed("open set detail") {
@@ -426,7 +408,6 @@ class LongHistoryUiTest {
         closeTopSheet()
         closeTopSheet()
 
-        // The glossary, from the tonnage tile's "?", scrolled to its last term.
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
         timed("open glossary") {
@@ -436,8 +417,6 @@ class LongHistoryUiTest {
         scrollSheetChecking("glossary")
         assertBudget()
     }
-
-    // ── 5. Today and Profile (calculators, references) over the long history ──
 
     @Test
     fun todayAndProfile_calculatorsAndReferences_meetEveryInvariant() {
@@ -472,8 +451,6 @@ class LongHistoryUiTest {
         assertBudget()
     }
 
-    // ── 6. Miles + pounds: the same history in the other units ───────────────
-
     @Test
     fun milesAndPounds_tilesChartsRecordsListAndSheetsNeverShowKmOrKg() {
         QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
@@ -501,7 +478,6 @@ class LongHistoryUiTest {
         val longest = recordCells().first { it.any { t -> t.equals(str(R.string.history_longest_run), ignoreCase = true) } }
         assertTrue("longest run in miles: $longest", "${trimDecimal(m.run_progress!!.longest_run_km / 1.609344)} mi" in longest)
 
-        // The whole Runs list in miles: every run once, no km anywhere.
         val walk = walkHistoryList()
         assertTrue(walk.duplicates.toString(), walk.duplicates.isEmpty())
         val cards = walk.items.filter { it.kind == Kind.Run }
@@ -510,7 +486,6 @@ class LongHistoryUiTest {
         assertTrue("km on a miles user's History: ${kmText.take(5)}", kmText.isEmpty())
         assertTrue(walk.violations.joinToString("\n"), walk.violations.isEmpty())
 
-        // The longest run folds its 22 mile splits; Show all lists them.
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
         historyList().performScrollToNode(hasTestTag("history-record"))
@@ -528,7 +503,6 @@ class LongHistoryUiTest {
         assertNoUnitLeak("run sheet", "km", "kilomet")
         closeTopSheet()
 
-        // Lifts in pounds: the big session's volume and its set loads.
         rule.selectHistoryFilter(str(R.string.main_segment_lifts))
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
@@ -547,8 +521,6 @@ class LongHistoryUiTest {
         assertNoUnitLeak("session sheet", "kg")
         assertBudget()
     }
-
-    // ── Helpers: boot, model, timing ──────────────────────────────────────────
 
     private fun boot(h: LongHistory) {
         QaHarness.seedLog(ctx, h.events)
@@ -613,7 +585,6 @@ class LongHistoryUiTest {
         return Triple(restoreMs, views[1], last!!)
     }
 
-    /** The private Boolean [field] of [target], declared by its class or a superclass. */
     private fun privateBool(target: Any, field: String): Boolean {
         val f = generateSequence<Class<*>>(target.javaClass) { it.superclass }
             .firstNotNullOf { runCatching { it.getDeclaredField(field) }.getOrNull() }
@@ -626,7 +597,6 @@ class LongHistoryUiTest {
         return v!!
     }
 
-    /** Splits are cumulative, end at the run's distance, and every pace is a running pace. */
     private fun assertSplitsSane(v: RunResultView) {
         val s = v.splits
         assertEquals("km splits at ${v.observed_at}", Math.ceil(v.distance_km - 1e-6).toInt(), s.size)
@@ -639,8 +609,6 @@ class LongHistoryUiTest {
         assertTrue("only the last split may be partial", s.dropLast(1).none { it.partial })
     }
 
-    // ── Helpers: History list walking ─────────────────────────────────────────
-
     private enum class Kind { Month, Run, Lift, Other }
 
     private data class Item(val kind: Kind, val key: String, val texts: List<String>, val top: Float, val bottom: Float)
@@ -652,7 +620,6 @@ class LongHistoryUiTest {
         val textProblems: List<String>,
     )
 
-    /** The screen's main (tallest) lazy list. */
     private fun screenList(): SemanticsNodeInteraction {
         val all = rule.onAllNodes(hasScrollToIndexAction())
         val nodes = all.fetchSemanticsNodes()
@@ -739,7 +706,6 @@ class LongHistoryUiTest {
         return Walk(seen.values.toList(), dups, violations.distinctBy { it.toString() }, textProblems.distinct())
     }
 
-    /** Month headers: one per month, newest first, each card under its own month. */
     private fun assertMonthHeaders(walk: Walk, stamps: List<Long>) {
         val expected = monthsNewestFirst(stamps).map { it.uppercase(Locale.US) }
         val headers = walk.items.filter { it.kind == Kind.Month }.map { it.key }
@@ -757,7 +723,6 @@ class LongHistoryUiTest {
     private fun monthsNewestFirst(stamps: List<Long>): List<String> =
         stamps.sortedDescending().map { monthOf(it) }.distinct()
 
-    /** Open the jump-to-month list on the first month header and pick [month]. */
     private fun jumpTo(month: String, all: List<String>) {
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
@@ -813,9 +778,6 @@ class LongHistoryUiTest {
         return inWindow.size to busiest
     }
 
-    // ── Helpers: whole-screen and sheet checks ────────────────────────────────
-
-    /** UX invariants + cut-off/overlapping text on whatever is on screen now. */
     private fun sheetChecks(where: String) {
         val v = UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
         assertTrue("[$where] UX invariants:\n" + v.joinToString("\n"), v.isEmpty())
@@ -823,7 +785,6 @@ class LongHistoryUiTest {
         assertTrue("[$where] text cut off / overlapping:\n" + t.joinToString("\n"), t.isEmpty())
     }
 
-    /** Scroll the main screen list from top to end, checking every screen. */
     private fun scrollScreenChecking(where: String) {
         val list = screenList()
         list.performScrollToIndex(0)
@@ -840,7 +801,6 @@ class LongHistoryUiTest {
         }
     }
 
-    /** Scroll the topmost sheet's scroller to its end, checking every screen on the way. */
     private fun scrollSheetChecking(where: String) {
         rule.waitForIdle()
         for (step in 0 until 300) {
@@ -891,7 +851,6 @@ class LongHistoryUiTest {
         "root$i=" + out.take(60)
     }.joinToString("\n")
 
-    /** Close every open sheet. */
     private fun dismissSheet() {
         while (rule.onAllNodes(isRoot()).fetchSemanticsNodes().size > 1) closeTopSheet()
     }
@@ -916,7 +875,7 @@ class LongHistoryUiTest {
     /**
      * Visible text the layout cut off (ellipsis, lines past maxLines, an unwrapped
      * line wider than its box) or that overlaps another visible text in the same
-     * window by more than 2dp each way.
+     * window.
      */
     private fun textProblems(): List<String> {
         val out = ArrayList<String>()
@@ -952,7 +911,7 @@ class LongHistoryUiTest {
             (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
 
     companion object {
-        /** `LOLLOP_LONG_UI=1`: three years at the tracker's 3-s cadence. */
+        /** `LOLLOP_LONG_UI=1`: a longer history at the tracker's own fix cadence. */
         private val LONG = System.getenv("LOLLOP_LONG_UI") == "1"
         private val DAYS = if (LONG) 1_095 else 730
         private val FIX_SEC = if (LONG) 3L else 15L

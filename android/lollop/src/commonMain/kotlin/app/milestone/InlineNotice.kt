@@ -15,10 +15,9 @@ import app.milestone.resources.ic_safety_warning_triangle
 import org.jetbrains.compose.resources.painterResource
 
 /**
- * A small in-form caution (ui-sweep §0.6): a 20dp warning glyph in
- * [StatusColors.warnMark] and a `Type.Caption` `OnBgBody` line on the bare
- * ground, with a trailing [TextAction] when there is an action. No card, no
- * fill, no stripe.
+ * A small in-form caution (ui-sweep §0.6): a warning glyph and a caption line on
+ * the bare ground, with a trailing [TextAction] when there is an action. No card,
+ * no fill, no stripe.
  */
 @Composable
 internal fun InlineNotice(

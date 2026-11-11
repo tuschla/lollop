@@ -72,7 +72,6 @@ class UxInvariantTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    /** Fail with the offending node paths if any violation of [kinds] is present. */
     private fun assertNoViolations(all: List<UxInvariants.Violation>, vararg kinds: String) {
         val hits = all.filter { it.kind in kinds }
         assertTrue(
@@ -80,8 +79,6 @@ class UxInvariantTest {
             hits.isEmpty(),
         )
     }
-
-    // ── Today and History ───────────────────────────────────────────────────
 
     private val allKinds = UxInvariants.KINDS.toTypedArray()
 
@@ -124,8 +121,6 @@ class UxInvariantTest {
         val v = UxInvariants.check(rule, rule.density)
         assertNoViolations(v, "forbidden-text")
     }
-
-    // ── Every other key screen: all rules at once ───────────────────────────
 
     private fun seedAnchoredLifter() = QaHarness.seedLog(
         ctx,
@@ -227,7 +222,6 @@ class UxInvariantTest {
         }
         // The danger-styled safety path is on screen at open too.
         rule.onNode(hasText(str(R.string.main_report_pain)) and hasClickAction()).assertIsDisplayed()
-        // The rarer entries stay out of the everyday list until "More" opens them.
         val rarer = listOf(
             R.string.main_session_review_title, R.string.main_import_run_title, R.string.main_advanced_signal_title,
         ).map { str(it) }
@@ -259,8 +253,6 @@ class UxInvariantTest {
         rule.openPlanAnswers()
         assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
     }
-
-    // ── Today hero: engine meta placement + one render per adjustment ───────
 
     /** An hour before the pinned "now", so a seeded readiness input is today's. */
     private val earlierToday get() = QaHarness.PINNED_NOW_MILLIS / 1000 - 3_600
@@ -307,21 +299,12 @@ class UxInvariantTest {
         assertNoViolations(UxInvariants.check(rule, rule.density), "duplicate-summary-on-screen", "forbidden-text")
     }
 
-    // ── Guided setup (fresh install) at large font scales ───────────────────
-
     @Test
     fun guidedSetup_fontScale130_meetsEveryInvariant() = walkGuidedSetupChecking(1.3f)
 
     @Test
     fun guidedSetup_fontScale200_meetsEveryInvariant() = walkGuidedSetupChecking(2.0f)
 
-    /**
-     * Walk the whole Both path with calisthenics and a race goal (the longest:
-     * lifting goal, placement, running goal, race details, which leads, days and
-     * weekdays, both levels, running now, then a review) and on EVERY screen check all
-     * invariants, that no action spills off the edge, that no option label is cut
-     * off, and that a gated screen says what is missing while Next is disabled.
-     */
     private fun walkGuidedSetupChecking(fontScale: Float) {
         RuntimeEnvironment.setFontScale(fontScale)
         rule.launchAppExpectingSetup()
@@ -369,7 +352,7 @@ class UxInvariantTest {
     }
 
     @Test
-    // The spot-check phone (w411dp-h660dp). The youth card's "Check age" opens
+    // The spot-check phone. The youth card's "Check age" opens
     // Profile, unfolds the plan answers and opens the Age row: its birthday
     // picker shows whole, above the navigation bar, and the legacy stated age
     // asks for the birthday.
@@ -445,7 +428,6 @@ class UxInvariantTest {
      *  would hide exactly the spill being checked for). */
     private val SemanticsNode.unclippedBounds: Rect get() = Rect(positionInRoot, size.toSize())
 
-    /** [inner] lies within this rect, allowing 1px of layout rounding. */
     private fun Rect.encloses(inner: Rect): Boolean =
         inner.left >= left - 1f && inner.top >= top - 1f && inner.right <= right + 1f && inner.bottom <= bottom + 1f
 
@@ -460,7 +442,6 @@ class UxInvariantTest {
 
 /**
  * Drives the guided setup along the Both path with real taps, screen by screen.
- * Shared by the invariant walk and the setup screenshots.
  */
 internal object GuidedSetupWalk {
     /** One wizard screen: its caption while Next is disabled (null = never gated)
@@ -523,7 +504,6 @@ internal object GuidedSetupWalk {
 
     private fun choose(rule: ComposeTestRule, @StringRes label: Int) = choose(rule, str(label))
 
-    /** The [n]th of several same-labelled options (e.g. the running level group). */
     private fun chooseNth(rule: ComposeTestRule, @StringRes label: Int, n: Int) {
         rule.onAllNodes(hasText(str(label)) and hasClickAction())[n].performScrollTo().performClick()
         rule.waitForIdle()
@@ -539,7 +519,6 @@ internal object GuidedSetupWalk {
         rule.waitForIdle()
     }
 
-    /** A key on a pinned number keypad. */
     private fun key(rule: ComposeTestRule, k: Char) {
         rule.onNode(hasText(k.toString()) and hasClickAction()).performClick()
         rule.waitForIdle()

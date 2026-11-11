@@ -49,7 +49,6 @@ class MutationGuardsTest {
     private fun logLines(): List<String> =
         File(ctx.filesDir, AppFileNames.EVENT_LOG).readLines().filter { it.isNotBlank() }
 
-    /** The legacy `plan_cleared` pref is still stored. */
     private fun legacyMarker() = ctx.setupPrefs().contains(KEY_PLAN_CLEARED)
 
     /** The variant of the last `GeneratePlan` / `ClearPlan` line, or null when none. */
@@ -85,7 +84,6 @@ class MutationGuardsTest {
         val lines = backup.readLines().filter { it.isNotBlank() }
         assertEquals("the backup records the removal", "ClearPlan", lastPlanEvent(lines))
 
-        // Restored onto a fresh install: still no plan.
         QaHarness.teardown()
         QaHarness.reset(ctx)
         rule.launchAppExpectingSetup()
@@ -104,7 +102,6 @@ class MutationGuardsTest {
      */
     @Test
     fun restoringALogThatNeverRemovedAPlanPlansDespiteALegacyMarker() {
-        // The backup: a set-up profile and a set, never a plan line.
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2))))
         val backup = logLines()
         assertNull(lastPlanEvent(backup))

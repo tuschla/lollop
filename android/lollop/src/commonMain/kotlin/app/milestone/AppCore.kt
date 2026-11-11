@@ -11,7 +11,6 @@ internal interface EventSink {
     suspend fun sendAll(events: List<Event>): SendResult
 }
 
-/** [AppCore.engine] on [CoreDispatcher]. */
 internal object EngineSink : EventSink {
     override suspend fun send(e: Event): SendResult = withContext(CoreDispatcher) { AppCore.engine.send(e) }
 
@@ -36,7 +35,6 @@ internal object AppCore {
      *  first touch belongs on [CoreDispatcher] (Android loads the library then). */
     val engine: DurableCore get() = slot.engine.value
 
-    /** Where the event queue sends: [engine] on its thread. */
     internal val sink: EventSink get() = slot.sink ?: EngineSink
 
     /** Run on [engine] and [sink] from now on. An engine the process used starts

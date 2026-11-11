@@ -78,7 +78,6 @@ pub(in crate::app) fn apply_first_set_autoreg(
         ns.status = SessionStatus::Adjusted;
         ns.adjustment.get_or_insert(adj);
     }
-    // Keep each item's status in step with the re-judged sets.
     refresh_item_statuses(&mut ns.items, &[]);
     cues
 }

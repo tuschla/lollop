@@ -104,7 +104,6 @@ impl Anchors {
         }
     }
 
-    /// The derived anchor for a ladder, if one exists.
     pub fn calis_for(&self, ladder: LadderId) -> Option<&CalisAnchor> {
         self.calisthenics.iter().find(|a| a.ladder == ladder)
     }

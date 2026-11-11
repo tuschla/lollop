@@ -106,15 +106,12 @@ import app.milestone.resources.ui_cd_expanded
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-// --- Selectable-control vocabulary (one look for every "pick one" control) ---
-// Scale cells and choice chips ([ChoiceChip]) share: a Space.Md
-// (8dp) corner; unselected = a 4% OnBgBody tint inside a 1dp OnBgFaint @30%
-// hairline with OnBgBody text, so the target has visible bounds on ANY ground
-// (sheet, card, screen) in light and dark; selected = solid Accent with OnAccent
-// text, never an outline ring. Scale cells are 48dp tall; text chips are 40dp
-// visual with a ≥48dp touch target. Segmented controls ([SegmentedEnumRow],
-// [TwoSegmentRow]) are one borderless track ([SegmentTrack]) with the same solid
-// Accent selected segment.
+// Every "pick one" control shares one look. Scale cells and choice chips
+// ([ChoiceChip]): unselected = a tint inside a hairline with OnBgBody text, so
+// the target has visible bounds on ANY ground (sheet, card, screen) in light and
+// dark; selected = solid Accent with OnAccent text, never an outline ring.
+// Segmented controls ([SegmentedEnumRow], [TwoSegmentRow]) are one borderless
+// track ([SegmentTrack]) with the same solid Accent selected segment.
 
 /** Corner shape of every selectable cell / chip / segment. */
 val ChoiceCellShape = RoundedCornerShape(Space.Md.dp)
@@ -125,7 +122,7 @@ val ChipVisualHeight = 40.dp
 /** Opacity of the OnBgBody wash inside an unselected cell (ThemeContrastTest). */
 internal const val ChoiceCellFillAlpha = 0.04f
 
-/** Tint inside an unselected cell (and a disabled action): a 4% OnBgBody wash. */
+/** Tint inside an unselected cell (and a disabled action). */
 val ChoiceCellFill: Color @Composable get() = OnBgBody.copy(alpha = ChoiceCellFillAlpha)
 
 /** Hairline that bounds an unselected cell, an idle input field and a disabled action. */
@@ -143,8 +140,8 @@ fun Modifier.choiceCell(selected: Boolean): Modifier {
     }
 }
 
-/** Text/icon tone on a [choiceCell] or [choiceCard]: OnAccent on the accent fill,
- *  OnBgBody otherwise (OnBgMuted on the 4% tint dips under AA on the light grounds). */
+/** Text/icon tone on a [choiceCell] or [choiceCard]. Not OnBgMuted: on the cell
+ *  tint it dips under AA on the light grounds. */
 @Composable
 fun choiceCellContent(selected: Boolean): Color = if (selected) OnAccent else OnBgBody
 
@@ -153,14 +150,13 @@ fun choiceCellContent(selected: Boolean): Color = if (selected) OnAccent else On
 @Composable
 fun choiceCellSecondaryContent(selected: Boolean): Color = if (selected) OnAccent else OnBgMuted
 
-/** Corner shape of a selectable card ([choiceCard]). */
 val ChoiceCardShape = RoundedCornerShape(Space.Card.dp)
 
 /**
  * Clip + fill for a selectable CARD (a multi-line option such as a setup goal or a
  * theme swatch): the same selected look as every chip, cell and segment, solid
  * `Accent` with no outline ring; unselected = the `BgElevated` card ground inside a
- * 1dp [ChoiceCellBorder] hairline. Chain `.selectable(...)` and inner padding after
+ * [ChoiceCellBorder] hairline. Chain `.selectable(...)` and inner padding after
  * it; colour the title with [choiceCellContent] and any second line with
  * [choiceCellSecondaryContent].
  */
@@ -178,7 +174,6 @@ fun Modifier.choiceCard(selected: Boolean): Modifier {
  *  as an entry. */
 const val EmptyValuePlaceholder = "—"
 
-/** Width of the edge fade on a horizontally scrolling row. */
 private val EdgeFadeWidth = 16.dp
 
 /**
@@ -236,9 +231,9 @@ fun <T> OptionList(
             .selectableGroup(),
     ) {
         options.forEachIndexed { i, value ->
-            // A subgroup fence (divideBefore) is the stronger OnBgFaint @30% rule;
-            // every other row boundary gets a faint hairline so an unanswered list
-            // reads as separate choices, not one grey paragraph.
+            // A subgroup fence (divideBefore) is the stronger rule; every other row
+            // boundary gets a faint hairline so an unanswered list reads as
+            // separate choices, not one grey paragraph.
             if (divideBefore(value)) {
                 HorizontalDivider(color = HairlineStrong)
             } else if (i > 0) {
@@ -346,7 +341,6 @@ fun <T> SegmentedEnumRow(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        // Null = the caller labels the row itself (e.g. a FieldLabel above it).
         if (label != null) Text(label, color = OnBgBody, style = Type.Body)
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val measurer = rememberTextMeasurer()
@@ -358,7 +352,6 @@ fun <T> SegmentedEnumRow(
                 measurer.measure(display(v), style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
             }
             if (fits) {
-                // The same borderless track as TwoSegmentRow: one segmented look app-wide.
                 SegmentTrack(
                     labels = values.map(display),
                     selectedIndex = values.indexOf(current),
@@ -366,17 +359,16 @@ fun <T> SegmentedEnumRow(
                     onSelect = { onSelect(values[it]) },
                 )
             } else {
-                // Same rows and selection look as every other option list.
                 OptionList(values, current, display, onSelect = onSelect)
             }
         }
     }
 }
 
-// --- Entry primitives: no dropdowns, no −/+ steppers ---
-// Recognition over recall for the logging forms: every choice is visible and one
-// tap picks it. These carry no coaching logic: they only gather the raw inputs the
-// core derives e1RM / RIR / zone from.
+// Entry primitives: no dropdowns, no −/+ steppers. Recognition over recall for
+// the logging forms: every choice is visible and one tap picks it. These carry no
+// coaching logic: they only gather the raw inputs the core derives e1RM / RIR /
+// zone from.
 
 /**
  * The one field / sub-question label: sentence case, `Type.Body` Bold, `OnBgMuted`.
@@ -440,10 +432,6 @@ fun FieldLabel(
         val labelMeasurable = labelM.single()
         val hintMeasurable = hintM.singleOrNull()
         val hintWidth = hintMeasurable?.maxIntrinsicWidth(Constraints.Infinity) ?: 0
-        // Side by side while the whole label fits beside the whole hint; a label too
-        // long for one line anyway wraps beside it while its longest word fits (a
-        // narrower column would break the label inside a word). A label that fits
-        // its own line but not beside the hint keeps it: the hint goes below.
         val besideRoom = width - gap - hintWidth
         val beside = hintMeasurable != null && run {
             val whole = labelMeasurable.maxIntrinsicWidth(Constraints.Infinity)
@@ -455,7 +443,6 @@ fun FieldLabel(
         } else if (beside) {
             val h = hintMeasurable.measure(loose)
             val l = labelMeasurable.measure(Constraints(maxWidth = width - gap - h.width))
-            // Both on the label's first baseline.
             val lBase = l[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
             val hBase = h[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
             val base = maxOf(lBase, hBase)
@@ -477,7 +464,7 @@ fun FieldLabel(
     }
 }
 
-/** The 1dp hairline between grouped rows inside a card (04-profile §1). */
+/** The hairline between grouped rows inside a card (04-profile §1). */
 @Composable
 internal fun RowHairline(modifier: Modifier = Modifier) {
     HorizontalDivider(modifier = modifier, thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
@@ -585,10 +572,9 @@ fun <T> ScrollableScaleRow(
 ) {
     val scrollState = rememberScrollState()
     // Open with the current value (else [initialCenter]) in view, roughly centred,
-    // instead of pinned to the left edge, so a long scale (bodyweight = 111
-    // options, running km/wk = 150) doesn't hide the selection off-screen.
-    // Layout-measured, not an item-width guess: the anchor cell reports its own
-    // centre and the row reports its viewport, so the target is exact. Runs once
+    // instead of pinned to the left edge, so a long scale doesn't hide the
+    // selection off-screen. Layout-measured, not an item-width guess: the anchor
+    // cell reports its own centre and the row reports its viewport. Runs once
     // (guarded) so it never fights the user's manual scroll, and seeded
     // already-done when there is no anchor in the list, so the first pick never
     // scrolls the row under the finger.
@@ -664,7 +650,6 @@ private fun ScaleCell(
     }
 }
 
-/** "label, value" spoken for one scale cell; no-op when the row has no label. */
 private fun scaleCellDescription(label: String?, value: String): Modifier =
     if (label == null) Modifier else Modifier.semantics { contentDescription = "$label, $value" }
 
@@ -673,8 +658,8 @@ val ChoiceChipGap = Space.Sm.dp
 
 /**
  * The ONE text choice chip (workout type, run type, start gates, pain areas): the
- * shared [choiceCell] look, 40dp visual inside a ≥48dp touch target, `Type.Chip`
- * label. [role] RadioButton = one option of a pick-one group (`selectable`);
+ * shared [choiceCell] look, [ChipVisualHeight] visual inside a ≥48dp touch
+ * target, `Type.Chip` label. [role] RadioButton = one option of a pick-one group (`selectable`);
  * Checkbox = an independent toggle (`toggleable`) that also shows a leading
  * check when on, so two gates side by side never read as an unpicked radio
  * pair. [description] replaces the spoken label when the visible one is terse.
@@ -722,10 +707,9 @@ fun ChoiceChip(
     }
 }
 
-/** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`), pointing to the
- *  end edge; turned to point down when the row is expanded. One shared affordance
- *  for every tappable row; a [TextAction] that opens something tints it with its
- *  label tone. */
+/** Row-disclosure chevron, pointing to the end edge; turned to point down when
+ *  the row is expanded. One shared affordance for every tappable row; a
+ *  [TextAction] that opens something tints it with its label tone. */
 @Composable
 fun RowChevron(expanded: Boolean = false, tint: Color = OnBgFaint) {
     // The drawable mirrors under RTL ("‹"), so it turns the other way to point down.
@@ -771,7 +755,6 @@ internal fun ChevronRow(
     }
 }
 
-/** A [ChevronRow] reading a bold [title] over a faint one-line [subtitle]. */
 @Composable
 internal fun TitleSubtitleRow(
     title: String,
@@ -819,7 +802,7 @@ internal fun BesideOrStacked(
     }
 }
 
-// --- Action buttons: ONE system, three tiers ---
+// Action buttons: ONE system, three tiers.
 // * PrimaryButton: the one "do this next" of a screen or card. Solid Accent fill,
 //   ExtraBold OnAccent label.
 // * SecondaryButton: any other button-weight action (Edit, Export GPX, Trim run,
@@ -840,9 +823,9 @@ internal fun BesideOrStacked(
 val ActionShape = RoundedCornerShape(Space.Card.dp)
 
 /**
- * The primary action: solid `Accent` fill, ExtraBold `OnAccent` label, [ActionShape],
- * ≥[minHeight] (a pinned editor action passes 56dp). Width is the caller's
- * (`Modifier.fillMaxWidth()` or a `weight` in a row). The label wraps rather than
+ * The primary action, ≥[minHeight] tall (a pinned editor action passes
+ * [LargeControlHeight]). Width is the caller's (`Modifier.fillMaxWidth()` or a
+ * `weight` in a row). The label wraps rather than
  * clipping at a large font scale. [description] replaces the spoken label when the
  * same label repeats on one screen ("Log set 1 of 4: Back Squat"). [danger] fills
  * it with the danger red for a safety commit ("Report pain").
@@ -861,8 +844,6 @@ fun PrimaryButton(
     ActionButton(label, onClick, modifier, enabled, description, minHeight, fill, labelColor, FontWeight.ExtraBold)
 }
 
-/** The secondary action: tonal [AccentTint] fill, no border, Bold `OnBgBody`
- *  label; otherwise identical to [PrimaryButton]. */
 @Composable
 fun SecondaryButton(
     label: String,
@@ -965,15 +946,13 @@ internal fun textActionWidthPx(measurer: TextMeasurer, density: Density, label: 
     maxOf(ActionMinHeight.roundToPx(), text + TextActionInset.roundToPx() * 2)
 }
 
-/** The ONE tile/card overline (chrome §3): 12sp Bold UPPERCASE, `OnBgFaint`,
- *  top-left. Every data tile and card label goes through this. */
+/** The ONE tile/card overline (chrome §3). Every data tile and card label goes
+ *  through this. */
 @Composable
 fun TileOverline(text: String, color: Color = OnBgFaint) {
     Text(text.uppercase(), color = color, style = Type.Overline)
 }
 
-/** Section overline: the top-left accent UPPERCASE label over a screen section,
- *  a TalkBack heading. */
 @Composable
 fun SectionOverline(text: String) {
     Text(
@@ -984,14 +963,14 @@ fun SectionOverline(text: String) {
     )
 }
 
-/** A sheet, dialog or card title: [Type.Title] in `OnBgBody`, a TalkBack heading. */
+/** A sheet, dialog or card title. */
 @Composable
 fun SheetTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAlign? = null) {
     Text(text, color = OnBgBody, style = Type.Title, modifier = modifier.semantics { heading() }, textAlign = textAlign)
 }
 
-/** A rounded icon ground ([size], 36dp by default) holding a tinted 20dp symbol:
- *  the leading tile of a chooser or activity row. */
+/** A rounded icon ground holding a tinted symbol: the leading tile of a chooser
+ *  or activity row. */
 @Composable
 fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp) {
     Box(
@@ -1011,7 +990,7 @@ fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp) {
  * No third option, no counts in the labels. [compact] is for a secondary toggle
  * that refines a section rather than switching the page (a chart's range on its
  * overline row): same solid Accent selection, but the track wraps its labels and
- * draws 32dp tall (touch targets stay ≥48dp), so it never weighs as much as a
+ * draws shorter (touch targets stay ≥48dp), so it never weighs as much as a
  * full-width page filter above it.
  */
 @Composable
@@ -1021,12 +1000,12 @@ fun TwoSegmentRow(left: String, right: String, selectedIndex: Int, compact: Bool
 
 /**
  * The ONE segmented-control look, shared by [TwoSegmentRow] and [SegmentedEnumRow]:
- * a borderless track in the [ChoiceCellFill] wash (40dp visual, so it reads on any
- * ground; each segment keeps a ≥48dp touch target). Selected = a solid `Accent`
- * segment with bold `OnAccent` text and no outline ring; unselected = plain
- * `OnBgBody` text on the track (`OnBgMuted` on the wash dips under AA on the light
- * grounds). No check glyph: the fill is the selection. [compact]: the track wraps
- * its content and draws 32dp tall inside the same 48dp touch row.
+ * a borderless track in the [ChoiceCellFill] wash (so it reads on any ground;
+ * each segment keeps a ≥48dp touch target). Selected = a solid `Accent` segment
+ * with bold `OnAccent` text and no outline ring; unselected = plain `OnBgBody`
+ * text on the track (`OnBgMuted` on the wash dips under AA on the light grounds).
+ * No check glyph: the fill is the selection. [compact]: the track wraps its
+ * content and draws shorter inside the same touch row.
  */
 @Composable
 private fun SegmentTrack(
@@ -1037,9 +1016,6 @@ private fun SegmentTrack(
     onSelect: (Int) -> Unit,
 ) {
     val trackFill = ChoiceCellFill
-    // The visible track is inset top and bottom inside the 48dp touch row, so the
-    // control reads 40dp (compact: 32dp) tall while each segment's tap target spans
-    // the full 48dp.
     val touchInset = if (compact) CompactSegmentTouchInset else SegmentTouchInset
     Row(
         modifier = Modifier
@@ -1062,7 +1038,6 @@ private fun SegmentTrack(
                         role = role,
                         onClick = { onSelect(i) },
                     )
-                    // Track inset + its 2dp inner gap.
                     .padding(vertical = touchInset + SegmentTrackPadding),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1087,10 +1062,10 @@ private fun SegmentTrack(
     }
 }
 
-/** Vertical gap between a 48dp touch row and a compact track's 32dp visual. */
+/** Vertical gap between the touch row and a compact track's visual. */
 private val CompactSegmentTouchInset = 8.dp
 
-/** Vertical gap between a 48dp touch row and its 40dp visible track. */
+/** Vertical gap between the touch row and its visible track. */
 internal val SegmentTouchInset = 4.dp
 
 /** Track inner padding and the gap between segments. */
@@ -1100,7 +1075,7 @@ internal val SegmentTrackPadding = Space.Xs.dp
 internal val SegmentShape = RoundedCornerShape(Space.Md.dp - Space.Xs.dp)
 
 /** The segmented track's ground: a [fill] round rect inset [inset] top and bottom
- *  inside the 48dp touch row, shared by [SegmentTrack] and [RatingScale]. */
+ *  inside the touch row, shared by [SegmentTrack] and [RatingScale]. */
 internal fun Modifier.segmentTrackGround(fill: Color, inset: Dp): Modifier = drawBehind {
     val px = inset.toPx()
     drawRoundRect(
@@ -1111,7 +1086,6 @@ internal fun Modifier.segmentTrackGround(fill: Color, inset: Dp): Modifier = dra
     )
 }
 
-/** Horizontal padding between a segment's edge and its label. */
 private val SegmentLabelInset = Space.Sm.dp
 
 /** Width one segment's label may take inside a [SegmentTrack] of [count] segments
@@ -1121,7 +1095,7 @@ private fun segmentLabelRoom(trackWidth: Dp, count: Int): Dp =
     (trackWidth - SegmentTrackPadding * 2 - SegmentTrackPadding * (count - 1)) / count -
         SegmentLabelInset * 2 - 1.dp
 
-/** Small date badge for history cards: `OnBgFaint` on `BgTop`, chip radius. */
+/** Small date badge for history cards. */
 @Composable
 fun DateBadge(text: String) {
     if (text.isEmpty()) return
@@ -1137,11 +1111,10 @@ fun DateBadge(text: String) {
 }
 
 /**
- * A one-line search field: a `BgSunken` well in a 1dp [ChoiceCellBorder] hairline
- * (1.5dp `Accent` while focused), a leading 18dp search glyph and a faint [hint]
- * placeholder. The field names itself with [hint], so it keeps an accessible name
- * once it holds text; the placeholder is hidden from accessibility so the name is
- * read once. The keyboard's [imeAction] key folds it.
+ * A one-line search field with a faint [hint] placeholder. The field names itself
+ * with [hint], so it keeps an accessible name once it holds text; the placeholder
+ * is hidden from accessibility so the name is read once. The keyboard's
+ * [imeAction] key folds it.
  */
 @Composable
 internal fun SearchWell(

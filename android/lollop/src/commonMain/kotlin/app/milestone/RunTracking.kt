@@ -77,7 +77,6 @@ private const val STOP_CONFIRM_TIMEOUT_MS = 2_000L
 private val SheetElevation = 16.dp
 private val SheetBottomPadding = 20.dp
 
-// The stat sheet's drag handle.
 private val DragHandleWidth = 38.dp
 private val DragHandleHeight = 5.dp
 private const val DRAG_HANDLE_ALPHA = 0.22f
@@ -140,7 +139,6 @@ fun RunTrackingScreen(
     var permaDenied by rememberSaveable {
         mutableStateOf(permAsked && !tracker.hasLocationPermission(ctx) && tracker.locationPromptBlocked(ctx))
     }
-    // Notifications are asked once, at Start, after location is granted.
     var notifAsked by rememberSaveable { mutableStateOf(false) }
     val requestLocation = tracker.rememberLocationPrompt { granted ->
         hasPermission = granted
@@ -200,13 +198,10 @@ fun RunTrackingScreen(
     // text stay consistent with what the just-tapped Start requested.
     var preciseGate by remember { mutableStateOf(setupPrefs.getBoolean(KEY_START_PRECISE, false)) }
     var movingGate by remember { mutableStateOf(setupPrefs.getBoolean(KEY_START_MOVING, false)) }
-    // Live-reactive display prefs (shell chrome, not coaching state): the pace-bucket
-    // size and the distance/pace unit. Both drive the readouts below and update the
-    // moment the user changes them in Profile.
     val paceBucketN by AppSettings.paceBucketMinutes.collectAsStateWithLifecycle()
     val unit = rememberDistanceUnit()
-    // The armed → recording confirmation buzz lives in the platform's recording service
-    // (beginRecording): it must reach a runner whose screen is already off, which a
+    // The armed → recording confirmation buzz is [RunRecorder]'s cue at its
+    // beginRecording: it must reach a runner whose screen is already off, which a
     // View-bound haptic from this composable cannot.
     // Set the moment the user leaves (Discard / Back / after save) so the
     // locate-restart effect can't re-launch the service into a disposing screen.
@@ -287,7 +282,6 @@ fun RunTrackingScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        // Live detection of the system location toggle changing mid-run.
         val stopObservingLocation = tracker.observeLocationSettings(ctx) {
             locationOn = tracker.isLocationEnabled(ctx)
             hasPermission = tracker.hasLocationPermission(ctx)
@@ -345,21 +339,21 @@ fun RunTrackingScreen(
             requestPermissions()
             return
         }
-        // Refuse-guard (defense in depth), two EXPLICIT cases. The service's
+        // Refuse-guard (defense in depth), two EXPLICIT cases. [RunRecorder]'s
         // beginRecording() opens the sidecar and this fn deliberately doesn't
         // reset(), so arming onto a live run OR an earlier stopped track would risk
         // merging two runs. The derived `unsavedCapture` already keeps Start off the
         // control row; these backstop a future UI regression so it can still never
         // happen. Two checks, not one `isNotEmpty() && !tracking`: that would pass
         // while tracking, so a one-frame-stale click could demote a live run.
-        if (RunSession.tracking.value) return          // never arm over a live recording
-        if (RunSession.points.value.isNotEmpty()) return // never arm over an unsaved capture
+        if (RunSession.tracking.value) return
+        if (RunSession.points.value.isNotEmpty()) return
         locationOn = tracker.isLocationEnabled(ctx)
         // A user Start is a fresh attempt even after a failed locate preview.
         RunSession.clearLocationFailed()
         // Armed start: Start is tappable before a lock. Recording begins automatically
-        // at the first fix clearing the chosen gates; the SIDECAR is opened by the
-        // service's beginRecording() at that first real fix (NOT here), so a crash while
+        // at the first fix clearing the chosen gates; the SIDECAR is opened by
+        // [RunRecorder]'s beginRecording() at that first real fix (NOT here), so a crash while
         // merely armed leaves no sidecar and no false recovery prompt. Clear any stale
         // pause and publish `armed` now so the control row flips instantly.
         RunSession.followPlan(if (followPlan) planItem else null)
@@ -654,11 +648,8 @@ fun RunTrackingScreen(
                 )
             }
         }
-        // Stat sheet, pinned bottom, BgTop, rounded top corners. navigationBarsPadding
-        // keeps the control row clear of the system gesture strip (edge-to-edge window).
-        // It takes the leftover height whenever the map frame doesn't (Finish review,
-        // route maps off); the control row then sits at its bottom edge. Beside the
-        // map it is a full-height panel with rounded start corners.
+        // The stat sheet's navigationBarsPadding keeps the control row clear of the
+        // system gesture strip (edge-to-edge window).
         val sheetFills = reviewing || !showRouteMaps || besideMap
         val sheetShape = if (besideMap) {
             RoundedCornerShape(topStart = SheetCornerRadius, bottomStart = SheetCornerRadius)
@@ -765,8 +756,6 @@ fun RunTrackingScreen(
                             onAction = { grants?.openNotificationSettings(ctx) },
                         )
                     }
-                    // Today's plan + optional start gates, ONLY in the locate-preview
-                    // state (not while armed/recording or with an unsaved capture).
                     if (!tracking && !armed && !unsavedCapture) {
                         TrackerStartOptions(
                             planItem = planItem,
@@ -793,8 +782,6 @@ fun RunTrackingScreen(
                             modifier = Modifier.fillMaxWidth().verticalScroll(scroll).testTag("tracker-sheet-scroll"),
                             verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
                         ) { aboveControls() }
-                        // While more lies below, it fades into the sheet ground above
-                        // the control row instead of being cut hard (as in the editors).
                         if (scroll.canScrollForward) {
                             Box(
                                 Modifier
@@ -879,7 +866,6 @@ fun RunTrackingScreen(
     }
 }
 
-/** The stat sheet's drag handle. */
 @Composable
 private fun ColumnScope.DragHandle() {
     Box(

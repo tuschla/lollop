@@ -4,7 +4,7 @@ package app.milestone
  * Durable stash of one side's answers while that side is switched OFF, so a later
  * Focus switch back resumes (or seeds the guided setup with) the user's prior
  * goal, days and weekdays instead of a blank. Shell chrome (not coaching state) →
- * SharedPreferences, not the crux event log.
+ * the key-value store, not the crux event log.
  */
 internal object ModalityStash {
     private const val PREFS = "milestone_modality"
@@ -209,8 +209,7 @@ internal fun Event.SetProfile.Companion.from(p: Profile) = Event.SetProfile(
  * Weekly running-volume SCALE in the user's distance unit (ProfileEditor
  * "Running km/wk" / "Running mi/wk"). The core stores canonical km; the scale's
  * options, highlight and row value are whole display units, and a pick converts
- * back to km for the wire (km exact, mi via [miToKmWire]). Range 1–150 km, i.e.
- * 1–93 mi. Pure.
+ * back to km for the wire (km exact, mi via [miToKmWire]).
  */
 const val WEEKLY_VOLUME_MAX_KM: Double = 150.0
 

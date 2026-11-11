@@ -138,7 +138,6 @@ fn a_stale_e1rm_decline_stays_protective_while_a_stale_increase_expires() {
     );
 }
 
-// ── A review-channel deload folds into the rendered next session ──
 #[test]
 fn a_review_deload_reduces_the_rendered_next_session_load() {
     let (app, mut model) = planned_strength_model(true);
@@ -226,7 +225,6 @@ fn a_stale_review_deload_expires() {
     );
 }
 
-// ── An active review deload outranks a readiness load increase ──
 #[test]
 fn an_active_review_deload_outranks_a_readiness_load_increase() {
     // A readiness RPE undershoot recommends "Increase load"; the session review

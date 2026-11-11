@@ -112,7 +112,6 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
     // A negative figure is no reading, like the 0 sentinel; the core clamps
     // regardless of the shell's import clamp.
     let hr_pct_max = r.hr_pct_max.clamp(0.0, crate::running::HR_PCT_MAX_CEILING);
-    // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,
     // jitter, non-advancing time).
@@ -271,14 +270,12 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         avg_hr_bpm: r.avg_hr_bpm,
         utc_offset_sec: r.logged_utc_offset_sec,
         session_rpe: r.session_rpe,
-        // No measurable time → no session-RPE load.
         srpe_load_au: None,
         best_effort_labels: Vec::new(),
         started_at: run_started_at(r, None),
     }
 }
 
-/// The zone the card shows for the run's average %HRmax, if any.
 fn displayed_zone(hr_pct_max: f64, session_rpe: Option<u8>) -> Option<ThreeZone> {
     // Zone is a heart-rate classification (File 04). With no HR sample we do not
     // fabricate one, report it as unknown rather than defaulting to Z1.
@@ -297,7 +294,6 @@ fn displayed_zone(hr_pct_max: f64, session_rpe: Option<u8>) -> Option<ThreeZone>
     (has_hr && !effort_contradicts_z1).then_some(zone)
 }
 
-/// The card's average pace, `m:ss/km`; "-" when the run has no distance or time.
 fn run_pace_label(distance_km: f64, duration_min: f64) -> String {
     if distance_km > 0.0 && duration_min > 0.0 {
         format!("{}/km", fmt_mss((duration_min * 60.0) / distance_km))
@@ -306,7 +302,6 @@ fn run_pace_label(distance_km: f64, duration_min: f64) -> String {
     }
 }
 
-/// The summary's pacing suffix after the zone; empty for an even split.
 fn split_note_suffix(split_pct: Option<f64>) -> String {
     // A positive split is a second-half slowdown; a negative value is a faster
     // second half. Thresholds are strict (>3 %, <-3 %) to match
@@ -323,7 +318,6 @@ fn split_note_suffix(split_pct: Option<f64>) -> String {
     }
 }
 
-/// Why the card carries a SPIKE chip; empty when the spike gate did not trip.
 fn spike_note_text(spike: bool, has_baseline: bool) -> &'static str {
     // The spike gate errs safe with no history (see single_session_spike), so a
     // first run trips it; the note says why.
@@ -338,12 +332,8 @@ fn spike_note_text(spike: bool, has_baseline: bool) -> &'static str {
     }
 }
 
-/// Fewest full km splits a GPS run needs before it gets a pacing verdict.
 const MIN_FULL_SPLITS_FOR_PACING_VERDICT: usize = 2;
 
-/// The run card's heart-rate line: the bpm the athlete entered when known,
-/// else the whole-percent %HRmax, followed by the zone when one is shown.
-/// Empty when the run carries no heart-rate figure at all.
 fn hr_card_label(avg_hr_bpm: Option<f64>, hr_pct_max: f64, zone: Option<ThreeZone>) -> String {
     let figure = match avg_hr_bpm {
         Some(bpm) => format!("{bpm:.0} bpm"),

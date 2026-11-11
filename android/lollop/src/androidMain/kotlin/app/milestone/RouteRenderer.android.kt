@@ -89,13 +89,10 @@ internal class RouteRenderer(private val s: RouteStyle) : RoutePainter {
         l.layout(track, projector, bounds, o)
         val segs = track.segs
 
-        // Casing under every kept leg.
         line.color = s.casing
         line.strokeWidth = CasingWidthDp * d
         for (si in segs.indices) strokeLegs(c, si, segs[si], o, keptLegs = true, paint = line)
-        // Trimmed legs: dashed, no casing.
         if (o.trim) for (si in segs.indices) strokeLegs(c, si, segs[si], o, keptLegs = false, paint = cutPaint)
-        // The progression ramp, in chunks of consecutive kept legs.
         line.strokeWidth = TrackWidthDp * d
         val xs = l.xs
         val ys = l.ys

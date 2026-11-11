@@ -13,13 +13,14 @@ use crate::app::format::{
     fmt_clock, fmt_km_or_mi, fmt_mi_of_km, fmt_mss, fmt_u8_range, fmt_weight, fmt_weight_num,
     mon0_weekday, race_distance_label, race_distance_title, weekday_name,
 };
-use crate::app::guidance::build_guidance;
+use crate::app::guidance::{build_guidance_measured, stated_or_measured_weekly_km};
 use crate::app::lift_audit::to_lift_view;
 use crate::app::logged_days::{DeloadDays, lift_deload_days};
 use crate::app::model::{LoggedRun, LoggedSet, RaceQuery};
 use crate::app::plan_views::{
-    BasisPiece, BasisRx, PlanItem, PlanRow, RunAmount, apply_adjustments_to_session,
-    apply_last_sets, flatten_prescription, plan_session_title, program_name, refresh_item_statuses,
+    BasisPiece, BasisRx, PlanItem, PlanRow, RunAmount, annotate_and_rejudge, apply_last_sets,
+    flatten_prescription, fold_completion_adjustments, fold_item_numbers, plan_session_title,
+    program_name, refresh_item_statuses,
 };
 use crate::app::profile_age::whole_years_between;
 use crate::app::readiness::return_step_on;
@@ -115,7 +116,6 @@ mod view_wire;
 mod why_disclosure;
 mod youth_activity;
 
-// ── Run-event constructor helpers ────────────────────────────────────────
 // The `LogRun`/`LogRunTrack`/`AmendRun` struct-enum variants have no
 // `Default`, so every literal construction site breaks when a field is
 // added. Routing all test construction through these helpers isolates that
@@ -201,8 +201,6 @@ fn trim(
     }
 }
 
-// ── GPS and logged-run fixtures ────────────────────────────────────────────
-
 /// A 5 m-accuracy fix on the equator at longitude `lon`, unix-seconds `t`.
 fn gps(lon: f64, t: i64) -> GpsPoint {
     GpsPoint {
@@ -252,8 +250,6 @@ pub(in crate::app) fn logged_run(km: f64, minutes: f64, hr: f64, at: i64) -> Log
         avg_hr_bpm: None,
     }
 }
-
-// ── Set and profile fixtures ───────────────────────────────────────────────
 
 /// A `LogSet` of `weight_kg` × `reps` @ `rpe` at unix-seconds `at`, with no
 /// entry id and no timed hold. Test sets go through here (or the wrappers
@@ -437,8 +433,6 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-// ── Coach-as-planner ────────────────────────
-
 /// A pure-strength profile with no running (guided-setup shape).
 fn strength_profile() -> Profile {
     Profile {
@@ -517,8 +511,6 @@ fn complete_plan_weeks(app: &Engine, model: &mut Model, first_mon: i64, weeks: i
     }
 }
 
-// ── Run planning reactive to logged run history ──
-
 /// A pure-running half-marathon profile whose STATED weekly volume is the low
 /// guided-setup heuristic (16 km/wk) that never updates on its own.
 fn running_profile() -> Profile {
@@ -556,7 +548,6 @@ fn planned_long_run_item(model: &Model) -> PlanItem {
         .swap_remove(0)
 }
 
-// ── Calisthenics modality ────────────────────────────────────────────────
 use crate::schema::LadderId as Lad;
 
 fn calisthenics_profile() -> Profile {
@@ -599,8 +590,6 @@ fn snapshot_fixture_model(ndjson: &str) -> Model {
     model
 }
 
-// ── Rendered-session fixtures ──────────────────────────────────────────────
-
 /// A 3 × 5 @ RIR 2 lift item at `load` kg.
 fn lift_item(name: &str, load: f64) -> PlanItem {
     PlanItem {
@@ -625,6 +614,20 @@ fn session(items: Vec<PlanItem>) -> PlanRow {
         status: SessionStatus::Next,
         items,
         ..PlanRow::default()
+    }
+}
+
+/// The production fold over a hand-built session, in view order: the numeric
+/// fold `flatten_session` gives every row, the hero's `annotate_and_rejudge`,
+/// then `render_basis`; no first-set step.
+fn apply_adjustments_to_session(ns: &mut PlanRow, recommended: &[AdjustmentCall], weight_lb: bool) {
+    let fold = fold_completion_adjustments(recommended);
+    for it in ns.items.iter_mut() {
+        fold_item_numbers(it, fold, weight_lb);
+    }
+    annotate_and_rejudge(ns, recommended, None, weight_lb);
+    for it in ns.items.iter_mut() {
+        render_basis(it, weight_lb);
     }
 }
 
@@ -698,8 +701,6 @@ fn pain_row(value: f64, kind: Option<crate::schema::PainKind>, observed_at: i64)
     }
 }
 
-// ── Guidance-list contracts ────────────────────────────────────────────────
-
 /// HARD RULE 2 on a rendered list: every row cites evidence and none is
 /// graded MarketingMyth. `ctx` names the input in a failure.
 fn assert_cited_non_myth(rows: &[GuidanceView], ctx: &dyn std::fmt::Debug) {
@@ -734,8 +735,6 @@ fn assert_sections_contiguous(rows: &[GuidanceView], ctx: &dyn std::fmt::Debug) 
         }
     }
 }
-
-// ── Seeded generators ──────────────────────────────────────────────────────
 
 /// Deterministic 0..1 sequence (64-bit LCG, Knuth MMIX constants): the same
 /// stream on every run and platform, so the `view_equivalence` pins hold.
@@ -848,8 +847,6 @@ impl SplitMix {
         xs[self.below(xs.len() as u64) as usize].clone()
     }
 }
-
-// ── Replay and view diffs ──────────────────────────────────────────────────
 
 /// `events` replayed on a fresh model.
 fn replay(events: &[Event]) -> (Engine, Model) {
@@ -982,15 +979,13 @@ fn json_diff(a: &str, b: &str) -> String {
 /// replays after a relaunch) render the same view on cold threads.
 fn assert_compaction_equivalent(name: &str, events: Vec<Event>) {
     let full = replay_cold(events.clone()).expect("full replay");
-    let compacted = replay_cold(crate::compact_event_log(events)).expect("compacted replay");
+    let compacted = replay_cold(crate::log::compact_event_log(events)).expect("compacted replay");
     assert!(
         full == compacted,
         "{name}: the compacted log renders a different view: {}",
         json_diff(&full, &compacted)
     );
 }
-
-// ── Clock, lifter, GPS and run-stamp fixtures ──────────────────────────────
 
 /// `SetToday` to `epoch_day` at UTC offset `utc_offset_sec`.
 fn set_today_off_ev(epoch_day: i64, utc_offset_sec: i64) -> Event {

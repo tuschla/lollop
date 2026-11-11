@@ -25,7 +25,6 @@ class EventJsonTest {
 
     private fun obj(e: Event) = (e.toJson() as JsonObject)
 
-    /** A SetProfile with only the eight required fields; tests `copy` in the rest. */
     private fun profile() = Event.SetProfile(
         ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
         ConcurrentGoal.Strength, 12, 4, 45.0, false,
@@ -151,7 +150,6 @@ class EventJsonTest {
             )
         )["SetProfile"]!!.jsonObject
         assertTrue(fields["high_load_block"]!!.jsonPrimitive.content.toBoolean())
-        // Environment crosses as the bare Rust variant name.
         assertEquals("Heat", fields["environment"]!!.jsonPrimitive.content)
         assertEquals(28.0, fields["env_temp_c"]!!.jsonPrimitive.content.toDouble(), 1e-9)
         assertEquals(1800.0, fields["env_altitude_m"]!!.jsonPrimitive.content.toDouble(), 1e-9)
@@ -390,8 +388,6 @@ class EventJsonTest {
 
     @Test
     fun viewModelDecodesWhyDisclosureAndGradeDefinitions() {
-        // The three-part why? block on action cards and the
-        // core-provided evidence-grade legend decode from the wire.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,
@@ -421,14 +417,12 @@ class EventJsonTest {
                   {"grade":"Weak",
                    "definition":"Mechanistic or observational evidence only.","confidence":0.4}]}"""
         )
-        // why? triad decodes on adjustment, guidance, and headline.
         assertEquals(listOf("Your 7-day HRV average is below your normal band."), vm.adjustments[0].why.basis)
         assertTrue(vm.adjustments[0].why.improves.contains("check-ins"))
         assertTrue(vm.guidance[0].why.basis.single().contains("Tanaka"))
         assertTrue(vm.guidance[0].why.improves.contains("measured max HR"))
         assertEquals(HeadlineKind.Adjustment, vm.today_headline.kind)
         assertTrue(vm.today_headline.why.grade_note.contains("Moderate"))
-        // Grade legend from core data.
         assertEquals(2, vm.grade_definitions.size)
         val strong = vm.grade_definitions.first { it.grade == EvidenceGrade.Strong }
         assertTrue(strong.definition.contains("meta-analyses"))
@@ -521,7 +515,6 @@ class EventJsonTest {
 
     @Test
     fun viewModelDecodesCheckinEchoAndBaselineStatus() {
-        // The echoed check-in (rehydration) and the "collecting baseline" rows decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"adjustments":[],
@@ -596,8 +589,6 @@ class EventJsonTest {
         )
     }
 
-    // ── user-declared workout-type tag (USER DATA, no evidence) ─────────
-
     @Test
     fun workoutTypeIsOmittedWhenUntaggedAndEmittedAsBareVariantWhenSet() {
         // Untagged (null) → the key is ABSENT on the wire, so the event matches
@@ -614,7 +605,6 @@ class EventJsonTest {
         )["LogRun"]!!.jsonObject
         assertEquals("Interval", tagged["workout_type"]!!.jsonPrimitive.content)
 
-        // Same contract on the GPS + amend events.
         val track = obj(
             Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), 0.0, observedAt = 0L, workoutType = WorkoutType.LongRun)
         )["LogRunTrack"]!!.jsonObject
@@ -653,8 +643,6 @@ class EventJsonTest {
         assertEquals(JsonNull, f["workout_type"])
     }
 
-    // ── Coach-as-planner events ─────────────────────────────────────────
-
     @Test
     fun generatePlanHasSnakeCaseStartDay() {
         val fields = obj(Event.GeneratePlan(20_300L))["GeneratePlan"]!!.jsonObject
@@ -679,12 +667,8 @@ class EventJsonTest {
         assertEquals(1_759_700_000L, restart["observed_at"]!!.jsonPrimitive.content.toLong())
     }
 
-    // ── Structured HRmax / protein / spike-baseline fields ──────────────
-
     @Test
     fun viewModelDecodesHrMaxProteinFiguresAndSpikeBaseline() {
-        // The structured HRmax, protein and spike-baseline fields decode with the
-        // core's serde names.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"adjustments":[],

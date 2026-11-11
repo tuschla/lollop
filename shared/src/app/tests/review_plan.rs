@@ -102,8 +102,7 @@ fn squat_frac(a: &crate::plan::LiftAnchors) -> f64 {
     a.load_frac_for("Back Squat").map_or(1.0, |d| d.frac)
 }
 
-// ── Lifting re-entry: more days off never restart heavier (Table 3.4b, REENTRY-001) ──
-
+// Lifting re-entry: more days off never restart heavier (Table 3.4b, REENTRY-001).
 #[test]
 fn lifting_break_derate_is_monotone_in_days_off() {
     let sets = squat_block(42);
@@ -129,8 +128,7 @@ fn lifting_break_derate_is_monotone_in_days_off() {
     }
 }
 
-// ── Carried isolation load: the re-entry derate past 30 days (Table 3.4b) ──
-
+// Carried isolation load: the re-entry derate past 30 days (Table 3.4b).
 #[test]
 fn carried_isolation_load_derate_is_monotone_in_days_off() {
     assert!(crate::exercise::is_isolation_lift("Lateral raise"));
@@ -165,8 +163,6 @@ fn carried_isolation_load_derate_is_monotone_in_days_off() {
     }
 }
 
-// ── An ended declared layoff never shadows a later lifting break ──
-
 #[test]
 fn an_old_declared_layoff_does_not_disable_later_lifting_reentry() {
     // Declared 3 wk off, returned on day 0; trained regularly for 20 weeks,
@@ -190,7 +186,7 @@ fn an_old_declared_layoff_does_not_disable_later_lifting_reentry() {
     );
 }
 
-// ── An ended declared layoff never shadows a later run break (RUN-REENTRY-001) ──
+// An ended declared layoff never shadows a later run break (RUN-REENTRY-001).
 
 /// Total km of the run items on days after `from` (the rest of the week).
 fn week_run_km(vm: &ViewModel, from: i64) -> f64 {
@@ -232,7 +228,7 @@ fn an_old_declared_layoff_does_not_disable_run_reentry() {
     );
 }
 
-// ── A run break ends with its re-entry ramp (RUN-REENTRY-001) ──
+// A run break ends with its re-entry ramp (RUN-REENTRY-001).
 
 /// 3 runs/wk (Mon/Wed/Sat) for `weeks`, skipping days in `gap`; the last
 /// 5 weeks: one 18 km long run 40 days before today, else 8 km.
@@ -347,7 +343,7 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     );
 }
 
-// ── More stated volume never prescribes a smaller week (RUN-LONGRUN-001) ──
+// More stated volume never prescribes a smaller week (RUN-LONGRUN-001).
 
 /// Every step up of the stated weekly km in `kms` keeps or grows both the
 /// long run and the week's shown run km.
@@ -408,12 +404,10 @@ struct SweepWeek {
 fn sweep_week(prog: &crate::schema::Program, anchors: &crate::plan::Anchors) -> SweepWeek {
     use crate::schema::RunSessionType as K;
     let session_km = |s: &crate::schema::Session| {
-        let mut one = prog.clone();
-        one.mesocycle.sessions = vec![s.clone()];
-        crate::plan::prescribed_run_km(&one, anchors)
+        crate::plan::prescribed_run_km(std::slice::from_ref(s), anchors)
     };
     let mut w = SweepWeek {
-        km: crate::plan::prescribed_run_km(prog, anchors),
+        km: crate::plan::prescribed_run_km(&prog.mesocycle.sessions, anchors),
         runs: 0,
         quality: 0,
         shortest_quality_km: f64::INFINITY,
@@ -619,8 +613,6 @@ fn the_shown_weekly_target_is_the_week_the_days_hold() {
     assert_eq!(vm.run_progress.expect("progress").planned_weekly_km, 50.8);
 }
 
-// ── Stated rules of the run plan and the re-entry brackets ─────────────────
-
 /// The 3-day long run: 16 km/wk gives 5 km and 40 km/wk 13; 60 km/wk is more
 /// than three runs hold under the 90-min easy-run ceiling (running-015), so
 /// the long run is sized on the week they hold: 13.5. At 4+ days the 30 %
@@ -709,8 +701,6 @@ fn claim_plan_rest_days_and_no_history_are_no_break() {
     );
 }
 
-// ── A long run over the 25–30 % share does not cite the share rule ─────────
-
 #[test]
 fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
     let (_, m) = setup(runner(3, 40.0), MON);
@@ -797,8 +787,6 @@ fn claim_carried_load_is_not_derated_twice() {
     );
 }
 
-// ── 4–8 wk off: near-novice spike caps (Table 3.4b running) ─────────────────
-
 /// Table 3.4b running: 2–4 wk off → rebuild the long run (only runs since the
 /// return count as long-run capacity, but a run from before the break inside
 /// the 30-day window is still RUN-SPIKE-001's baseline); 4–8 wk off → treat
@@ -855,8 +843,6 @@ fn four_to_eight_weeks_off_judges_single_runs_differently_from_two_to_four() {
     let long3 = three.iter().copied().fold(0.0, f64::max);
     assert!(long3 > 6.5 && long3 < 14.0, "{three:?}");
 }
-
-// ── The running re-entry ramps back and ends (RUN-REENTRY-001) ─────────────
 
 /// Table 3.4b is a re-entry RAMP (load-036): the bracket's start climbs
 /// linearly back to the prior volume over the row's window (1, 2, 4, 6+

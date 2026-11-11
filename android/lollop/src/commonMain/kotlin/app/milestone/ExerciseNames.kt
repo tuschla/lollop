@@ -6,10 +6,8 @@ package app.milestone
 internal fun nameKeys(names: List<String>): List<String> =
     if (names.isEmpty()) emptyList() else checkNotNull(AppCore.engine.exerciseKeys(names)) { "the core answered no exercise keys" }
 
-/** One exercise name as a match key ([nameKeys]). */
 internal fun nameKey(name: String): String = nameKeys(listOf(name)).single()
 
-/** Whether two exercise names name the same exercise (by [nameKeys]). */
 internal fun sameExercise(a: String, b: String): Boolean {
     if (a == b) return true
     val (ka, kb) = nameKeys(listOf(a, b))
@@ -55,8 +53,7 @@ internal fun quickPickCandidates(
 
 /** A typed exercise name as it is saved: trimmed, inner runs of spaces collapsed,
  *  and an all-lower-case entry in sentence case ("dumbbell curl" → "Dumbbell
- *  curl"); a name the user cased themselves ("RDL", "McGill curl-up") is kept.
- *  Pure. */
+ *  curl"); a name the user cased themselves ("RDL", "McGill curl-up") is kept. */
 internal fun exerciseDisplayName(typed: String): String {
     val t = typed.trim().replace(Regex("""\s+"""), " ")
     if (t.isEmpty() || t.any { it.isUpperCase() }) return t

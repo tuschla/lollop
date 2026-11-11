@@ -35,7 +35,7 @@ import org.robolectric.RuntimeEnvironment
  * seeded start states, settling the UI onto the core's model, node lookup, the
  * crash guard, a relaunch after Back left the app, cut-off and overlapping text,
  * small touch targets, the hold banner's chrome overlaps, and screen dumps. Each
- * test restores the qualifiers, the font scale and the app settings it changed.
+ * test restores the qualifiers and the font scale it changed.
  */
 abstract class UiProbeTest {
 
@@ -59,8 +59,6 @@ abstract class UiProbeTest {
         QaHarness.freshProcess()
     }
 
-    /** A fresh install within one test: the activity closed, the qualifiers and
-     *  font scale restored, then [QaHarness.reset]. */
     protected fun freshProcess() {
         QaHarness.teardown()
         RuntimeEnvironment.setQualifiers(originalQualifiers)
@@ -68,10 +66,8 @@ abstract class UiProbeTest {
         QaHarness.reset(ctx)
     }
 
-    /** Thrown by [fail]; [guard] passes it on. */
     protected class ProbeFailure(msg: String) : AssertionError(msg)
 
-    /** Fail with [msg] and what is on screen. */
     protected open fun fail(msg: String): Nothing =
         throw ProbeFailure("$msg\nscreen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" })
 
@@ -91,7 +87,6 @@ abstract class UiProbeTest {
         false
     }
 
-    /** A [guard]ed action the test framework refused. */
     protected open fun onSkipped(what: String, e: Throwable) {}
 
     /** Back on the root screen left the app: open it again (warm start). True when it did. */
@@ -104,8 +99,6 @@ abstract class UiProbeTest {
         guard("relaunch") { lastScenario = launchMain() }
         return true
     }
-
-    // ── Seeds ───────────────────────────────────────────────────────────────
 
     protected val morning get() = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
 
@@ -148,11 +141,8 @@ abstract class UiProbeTest {
         Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, observedAt = at, entryId = at * 1000)
     }
 
-    // ── Starting states ─────────────────────────────────────────────────────
-
     enum class Start { FreshInstall, Runner, Lifter, Hybrid, Calisthenics, Under18, PainHold, Illness, Pregnancy, LongHistory, MilesLb }
 
-    /** The log [start] boots from; null for a fresh install. */
     protected fun seedEvents(start: Start): List<Event>? = when (start) {
         Start.FreshInstall -> null
         Start.Runner -> listOf(QaHarness.tenKRunnerProfile()) + runs(1, 3, 6, 9, 40)
@@ -167,11 +157,9 @@ abstract class UiProbeTest {
         Start.MilesLb -> listOf(QaHarness.strengthProfileLb()) + liftDays(1, 4) + runs(2, 6)
     }
 
-    // ── Settling ────────────────────────────────────────────────────────────
-
     /** Idle the UI, then wait until the published model agrees with the core (a
      *  tap's event reaches the core on its JNI thread and the view comes back on a
-     *  later main-looper turn). Diverging for 15 s is a failure. */
+     *  later main-looper turn). */
     protected fun settle() {
         val t0 = System.currentTimeMillis()
         while (true) {
@@ -187,7 +175,6 @@ abstract class UiProbeTest {
         }
     }
 
-    /** One idle pass of [settle]. */
     protected open fun idle() {
         rule.waitForIdle()
         roots()
@@ -208,8 +195,6 @@ abstract class UiProbeTest {
         }
         settle()
     }
-
-    // ── Screen ──────────────────────────────────────────────────────────────
 
     protected fun roots(): List<SemanticsNode> = rule.onAllNodes(isRoot()).fetchSemanticsNodes()
 
@@ -274,7 +259,7 @@ abstract class UiProbeTest {
 
     /** Visible text the layout cut off (ellipsis, lines past maxLines, an unwrapped
      *  line wider than its box) or that overlaps another visible text in the same
-     *  window by more than 2dp each way (same rules as LongHistoryUiTest). A text
+     *  window (same rules as LongHistoryUiTest). A text
      *  containing one of [typed] (what a user typed) is not judged for cut-off. */
     protected fun textProblems(typed: Collection<String> = emptyList()): List<String> {
         val out = ArrayList<String>()
@@ -343,7 +328,7 @@ abstract class UiProbeTest {
     }
 
     /** Every intersection of the safety banner (its card, and each of its nodes'
-     *  bounds and touch bounds) with [chromeNodes], beyond half a dp. */
+     *  bounds and touch bounds) with [chromeNodes]. */
     protected fun chromeOverBanner(): List<String> {
         val all = allUnmerged(roots().first())
         val banner = all.firstOrNull { it.layoutInfo.isPlaced && it.config.getOrNull(SemanticsProperties.TestTag) == "safety-banner" }

@@ -158,7 +158,6 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformRes
     // past midnight (before the midnight tick lands) still reads true.
     val overline = res.getString(Res.string.widget_overline_day, todayLabel, planDateLabel(current.epochDay))
     val next = current.next?.let { res.getString(Res.string.widget_next, it.title, planDateLabel(it.epochDay)) }
-    // The next session as a tall card's hero: its name, its date, then its open items.
     val nextHero = current.next?.takeIf { it.title.isNotBlank() }?.let { n ->
         WidgetHero(n.title, res.getString(Res.string.widget_next_day, planDateLabel(n.epochDay)), figure = false)
     }

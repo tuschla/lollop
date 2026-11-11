@@ -53,7 +53,6 @@ internal fun ComposeTestRule.waitForState(timeoutMs: Long = 15_000, cond: () -> 
         cond()
     }
 
-/** Wait until [matcher] is on screen (within the visible window), then assert it. */
 internal fun ComposeTestRule.waitUntilDisplayed(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
     try {
         waitUntil(timeoutMs) { runCatching { onNode(matcher).assertIsDisplayed() }.isSuccess }
@@ -65,14 +64,12 @@ internal fun ComposeTestRule.waitUntilDisplayed(matcher: SemanticsMatcher, timeo
     }
 }
 
-/** The durable event log, one wire event per line, as [app.milestone.Core] wrote it. */
 internal fun journeyLog(): List<JsonElement> =
     File(ApplicationProvider.getApplicationContext<Context>().filesDir, AppFileNames.EVENT_LOG)
         .takeIf { it.exists() }?.readLines().orEmpty()
         .filter { it.isNotBlank() }
         .map { Json.parseToJsonElement(it) }
 
-/** A wire event's variant name ("SetProfile", "ClearPlan"). */
 internal val JsonElement.variant: String
     get() = when (this) {
         is JsonObject -> keys.first()
@@ -80,13 +77,11 @@ internal val JsonElement.variant: String
         else -> ""
     }
 
-/** A single-key wire event's payload. */
 internal val JsonElement.payload: JsonObject get() = jsonObject[variant]!!.jsonObject
 
 /** The health toggle row for [label] (the whole row is the switch). */
 internal fun toggleRow(label: String): SemanticsMatcher = hasText(label) and isToggleable()
 
-/** The profile's "I'm ill right now" toggle row. */
 internal fun illToggle(): SemanticsMatcher = toggleRow(str(R.string.setup_health_ill_label))
 
 /** A Profile answer row (label + value in one tappable row) by its label. */
@@ -105,13 +100,11 @@ internal fun sessionShown(): SemanticsMatcher =
         hasText(str(R.string.main_next_session_overline).uppercase(Locale.US)) or
         hasText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US))
 
-/** A tappable node showing [text] (scrolled into view first). */
 internal fun ComposeTestRule.tapText(text: String) {
     onNode(hasText(text) and hasClickAction()).performScrollTo().performClick()
     waitForIdle()
 }
 
-/** The wizard's Next (or, on the review, Finish) button. */
 internal fun ComposeTestRule.setupNext() {
     onNode(hasText(str(R.string.setup_btn_next)) and hasClickAction()).performClick()
     waitForIdle()
@@ -210,7 +203,6 @@ internal fun ComposeTestRule.checkInIll(illnessAnswer: Int) {
 internal fun resolveLabels(): List<String> =
     EventDispatcher.model.value?.hold_resolutions.orEmpty().map { it.action_label }.filter { it.isNotBlank() }
 
-/** Tap the core's one illness action, then confirm it. */
 internal fun ComposeTestRule.tapResolveAndConfirm(label: String) {
     // The banner is pinned (not in a scroll), and a Today card's action is in view.
     onNode(hasText(label) and hasClickAction()).performClick()

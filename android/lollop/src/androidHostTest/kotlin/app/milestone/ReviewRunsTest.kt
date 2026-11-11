@@ -32,8 +32,6 @@ class ReviewRunsTest {
     private fun utc(y: Int, mo: Int, d: Int, h: Int, mi: Int): Long =
         LocalDateTime.of(y, mo, d, h, mi).toEpochSecond(ZoneOffset.UTC)
 
-    // ── started_at vs observed_at on one label ────────────────────────────────
-
     @Test
     fun aRunAcrossMidnightIsNotTitledWithADifferentDayThanItsDate() {
         Locale.setDefault(Locale.US)
@@ -63,8 +61,6 @@ class ReviewRunsTest {
         assertTrue("chip \"$chip\" dates the start day", "18" in chip)
         assertEquals("Sunday run", title)
     }
-
-    // ── crash sidecar: an old (pre-"seg") sidecar still recovers ────────────────
 
     @Test
     fun anOldSidecarWithoutSegmentMarkersStillRecoversByGapRule() {

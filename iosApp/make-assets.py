@@ -159,7 +159,7 @@ def main():
             })
     write_set("LaunchLogo.imageset", {"images": entries, "info": {"author": "xcode", "version": 1}}, images)
 
-    # The launch ground: the splash's white, black in dark mode (values/colors.xml splash_bg_*).
+    # The launch ground: the splash's white, black in dark mode (values/colors_launch.xml splash_bg_*).
     color = lambda v, appearance=None: {
         "idiom": "universal",
         "color": {"color-space": "srgb", "components": {"red": v, "green": v, "blue": v, "alpha": "1.000"}},

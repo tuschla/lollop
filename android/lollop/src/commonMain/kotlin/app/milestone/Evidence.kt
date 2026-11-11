@@ -129,9 +129,9 @@ import org.jetbrains.compose.resources.stringResource
  *  that has one (EvidenceCard, RunCard, prescription/adjustment/calculator/
  *  reference cards), so the collapsed face never leads with evidence chrome; only
  *  the summary and the SAFETY chip sit on the face (SAFETY stays, HARD RULE).
- *  Filled when open. The "?" is the app's ONE "explain this" glyph: the glossary
- *  affordance ([GlossaryInfo]) and the grading-legend link ([GradeChip]) draw the
- *  same [DisclosureDisc], so there is one symbol at one size everywhere.
+ *  The "?" is the app's ONE "explain this" glyph: the glossary affordance
+ *  ([GlossaryInfo]) draws the same [DisclosureDisc], so there is one symbol at
+ *  one size everywhere.
  *  `tint`/`onTint` recolor the SAME affordance for non-default surfaces (the
  *  danger SafetyBanner uses white-on-danger: mid-tone Accent fails on red);
  *  shape/behaviour never vary per call site. `subject` names what the details
@@ -156,8 +156,7 @@ internal fun DisclosureButton(
     } else {
         stringResource(Res.string.main_details_subject, subject)
     }
-    // ≥48dp touch target (accessibility) around the visual disc: an outer box
-    // carries the clickable.
+    // ≥48dp touch target (accessibility) around the visual disc.
     Box(
         modifier = Modifier
             .size(ActionMinHeight)
@@ -175,14 +174,11 @@ internal fun DisclosureButton(
 }
 
 /**
- * The drawing of the app's one "explain this" glyph: a [DisclosureDiscSize] disc
- * holding a Bold `Type.Chip` "?" in `tint` inside a 1dp `tint` ring on the host
- * ground, or `onTint` on a solid `tint` fill when [filled] (an open panel). The
- * glyph sits on the bare ground, never on an accent wash: Accent text on its own
- * tint dips under AA (Rose-light, Meadow-light), Accent on every ground clears
- * it (ThemeContrastTest). Purely visual; the caller owns the ≥48dp touch target
- * and the spoken label. The disc is a minimum size, so the glyph grows it into a
- * pill at a large font scale instead of clipping.
+ * The glyph sits on the bare ground, never on an accent wash: Accent text on its
+ * own tint dips under AA (Rose-light, Meadow-light), Accent on every ground
+ * clears it (ThemeContrastTest). Purely visual; the caller owns the ≥48dp touch
+ * target and the spoken label. The disc is a minimum size, so the glyph grows it
+ * into a pill at a large font scale instead of clipping.
  */
 @Composable
 private fun DisclosureDisc(filled: Boolean = false, tint: Color = Accent, onTint: Color = OnAccent) {
@@ -232,7 +228,7 @@ private fun InlineDisclosureLink(description: String, onClick: () -> Unit) {
  *
  * [confidenceInWhy] gates the confidence figure inside the "?" panel. A safety
  * hold passes false: safety is a rule, not a probability.
- * `container`/`border` let a caller tint the card. [status] draws the card as a
+ * [status] draws the card as a
  * [StatusCard] of that tone (Today's adjustment, hold and coach-note cards):
  * ring + mark tile + [statusOverline] header, SAFETY chip and "?" on that row,
  * and the actions in a [StatusCardFooter] ([actionLabel] as its button,
@@ -284,8 +280,6 @@ internal fun EvidenceCard(
     spokenSubject: String? = null,
 ) {
     val statusColors = LocalStatusColors.current
-    // Every "?" names what it explains ("Details: <subject>"): the caller's
-    // subject, else the card's overline, else the core's subject of the summary.
     val disclosureSubject = subject ?: section ?: statusOverline ?: spokenSubject
     // Keyed on the card's identity (summary+citation), not composition position:
     // in an unkeyed/reordered list a positional saveable can re-attach an open
@@ -309,16 +303,12 @@ internal fun EvidenceCard(
     val disclosure: @Composable () -> Unit = {
         DisclosureButton(expanded, subject = disclosureSubject) { expanded = !expanded }
     }
-    // Everything under the face: the do-this numbers, the "?" panel, the card's
-    // own footer detail.
     val details: @Composable () -> Unit = {
         subline?.invoke()
         if (expanded) {
             WhyDetail(
                 why = why,
                 evidence = evidence,
-                // Confidence appears inside the "?" for every card except a
-                // safety hold (safety is a rule, not a probability).
                 showConfidence = confidenceInWhy,
                 extraDetail = extraDetail,
                 glossaryKeys = panelGlossaryKeys,
@@ -403,7 +393,6 @@ internal fun EvidenceCard(
                         // signal), grade badge, confidence, citation and grade note
                         // live behind the "?".
                         if (safetyCritical) Chip(stringResource(Res.string.main_chip_safety), statusColors.danger)
-                        // The card's category label uses the one overline grammar.
                         section?.let { TileOverline(it, color = Accent) }
                         Spacer(Modifier.weight(1f))
                         // The 48dp target overflows this compact box unbounded and stays
@@ -422,11 +411,6 @@ internal fun EvidenceCard(
             }
             details()
             if (actionLabel != null && onAction != null) {
-                // Full-width action (Log / Track) from the one button system: the
-                // "do this next" is a PrimaryButton, any other is a SecondaryButton
-                // (same 48dp size so out-of-order logging stays one tap, quieter
-                // fill). Still bounded to its own ripple: the card body stays
-                // non-clickable (see the rationale above).
                 val actionDesc = subject?.takeIf { it.isNotBlank() }?.let {
                     stringResource(Res.string.main_action_subject, actionLabel, it)
                 }
@@ -450,18 +434,13 @@ internal fun EvidenceCard(
     }
 }
 
-/** Height of the chip/section header row on a two-row EvidenceCard face. */
 private val CompactHeaderHeight = 28.dp
 
 /**
- * The three-part "why?" disclosure body. Renders the core-provided [WhyView] as:
- * basis (what it's based on) → why THIS grade → what data would improve it, then
- * the citation. A card with no why block falls back to a one-line grade (+
- * confidence) restatement so the panel is never empty. The confidence figure
- * only appears when [showConfidence] (never on a safety hold, safety is a rule).
- * A block that speaks for several items passes their highest confidence as
- * [confidenceHigh] (and the lowest as [confidence]): the figure is then stated
- * once, as a range when they differ.
+ * The "?" panel body. The confidence figure only appears when [showConfidence]
+ * (never on a safety hold, safety is a rule). A block that speaks for several
+ * items passes their highest confidence as [confidenceHigh] (and the lowest in
+ * [evidence]): the figure is then stated once, as a range when they differ.
  */
 @Composable
 internal fun WhyDetail(
@@ -475,7 +454,6 @@ internal fun WhyDetail(
     val hasWhy = why != null &&
         (why.basis.isNotEmpty() || why.grade_note.isNotBlank() || why.improves.isNotBlank())
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-        // Grade badge (it opens the grading legend) + the CONTESTED marker.
         // SAFETY stays on the card face (HARD RULE), never here.
         Row(
             horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
@@ -487,11 +465,9 @@ internal fun WhyDetail(
             if (evidence.contested) OutlinedChip(stringResource(Res.string.main_chip_contested), WarnText)
         }
         if (hasWhy) {
-            // 1. What this is based on.
             if (why.basis.isNotEmpty()) {
                 WhyLine(stringResource(Res.string.main_why_based_on), why.basis.joinToString(" "))
             }
-            // 2. Why THIS grade (+ confidence figure when the card shows one).
             val gradeLine = why.grade_note
             if (gradeLine.isNotBlank()) {
                 val low = (evidence.confidence * 100).roundOrZero()
@@ -503,15 +479,13 @@ internal fun WhyDetail(
                 }
                 WhyLine(stringResource(Res.string.main_why_this_grade), gradeLineFull)
             }
-            // 3. What would improve it, the engagement loop. Skipped when the
-            //    core reports nothing would ("-").
+            // The core reports "-" when nothing would improve it.
             val improves = why.improves.trim()
             if (improves.isNotBlank() && improves != "-") {
                 WhyLine(stringResource(Res.string.main_why_to_improve), improves)
             }
         } else {
-            // No why block: the one-line grade restatement. Hidden for an
-            // unmapped grade rather than leaking a raw Debug string.
+            // Hidden for an unmapped grade rather than leaking a raw Debug string.
             gradeLabel(evidence.grade)?.let { label ->
                 Text(
                     if (showConfidence) {
@@ -542,7 +516,6 @@ internal fun WhyDetail(
     }
 }
 
-/** One labelled line of the why? disclosure: a small accent label + body copy. */
 @Composable
 private fun WhyLine(label: String, body: String) {
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -555,11 +528,9 @@ private fun WhyLine(label: String, body: String) {
 val LocalEvidenceLegend = staticCompositionLocalOf<() -> Unit> { {} }
 
 /**
- * Grade badge that opens the "How evidence grading works" legend when tapped. The
- * badge IS the link (a trailing chevron inside it says "opens something"), so the
- * "?" panel never nests a second "?" bubble. The badge color/label still key off
- * the raw wire grade. Compact visual; the overlay carries the ≥48dp target and the
- * spoken label ("Moderate. How evidence grading works").
+ * The badge IS the link to the grading legend (a trailing chevron inside it says
+ * "opens something"), so the "?" panel never nests a second "?" bubble. Compact
+ * visual; the overlay carries the ≥48dp target and the spoken label.
  */
 @Composable
 internal fun GradeChip(grade: EvidenceGrade?) {
@@ -591,10 +562,9 @@ internal fun GradeChip(grade: EvidenceGrade?) {
     }
 }
 
-/** Outlined variant of [Chip]: same footprint but a border and transparent
- *  fill, for the CONTESTED evidence-quality marker. An outline reads as
- *  "flagged, not asserted", so it never competes visually with a filled SAFETY
- *  chip; the filled grade badge keeps its solid style. */
+/** For the CONTESTED evidence-quality marker. An outline reads as "flagged, not
+ *  asserted", so it never competes visually with a filled SAFETY chip; the
+ *  filled grade badge keeps its solid style. */
 @Composable
 private fun OutlinedChip(text: String, border: Color) {
     Text(
@@ -621,11 +591,7 @@ internal fun ClaimMarkers(grades: List<EvidenceGrade>, contested: Boolean, citat
     citations.forEach { Text(citationLabel(it), color = OnBgFaint, style = Type.Caption) }
 }
 
-/**
- * Static "How evidence grading works" reference sheet: the core's five grade
- * definitions ([definitions]), then the SAFETY / CONTESTED markers. No coaching
- * logic.
- */
+/** The grade definitions come from the core; no coaching logic here. */
 @Composable
 internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
     val status = LocalStatusColors.current
@@ -650,23 +616,16 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
             }
         }
         HorizontalDivider(color = Hairline)
-        // The two markers share the grade rows' chip column so every body line
-        // starts at the same edge.
         LegendRow(stringResource(Res.string.main_chip_safety), status.danger, stringResource(Res.string.main_legend_safety))
         LegendRow(stringResource(Res.string.main_chip_contested), status.warn, stringResource(Res.string.main_legend_contested))
     }
 }
 
-// ── Glossary ─────────────────────────────────────────────────────────────────
-// One app-wide bottom sheet defining the app's jargon, reachable from tappable
-// term chips wherever those terms appear. These are UI copy, plain-language
+// The glossary defines the app's jargon. These are UI copy, plain-language
 // definitions of terminology, NOT knowledge-base training claims, so they live
 // as a static shell resource (HARD RULE 1 concerns training claims; a
 // definition of "RPE" asserts none).
 
-/** One glossary entry: the core's term (its wire name is the key the sheet
- *  opens at) and the string resources for its display term and plain
- *  definition (resolved at the @Composable call sites). */
 private data class GlossaryEntry(val term: GlossaryTerm, val termRes: StringResource, val defRes: StringResource) {
     val key: String get() = term.wire
 }
@@ -694,18 +653,14 @@ private val GLOSSARY: List<GlossaryEntry> = listOf(
     GlossaryEntry(GlossaryTerm.RedS, Res.string.main_glossary_reds_term, Res.string.main_glossary_reds_def),
 )
 
-/** The terms the core marked in a text, each once, in glossary order: the term
- *  links inside a card's "?" panel, so a bare "RIR 3" / "85% e1RM" on the face
- *  always has a path to its meaning. */
 internal fun List<GlossarySpan>.terms(): List<GlossaryTerm> = map { it.term }.distinct().sortedBy { it.ordinal }
 
 /** Opens the glossary sheet at a given term key. Provided by the app scaffold. */
 val LocalGlossary = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /**
- * The glossary affordance: the app's one "?" glyph, compact, for placing
- * next to an already-labelled value (the e1RM line, the tonnage tile) without
- * repeating the term. Opens the glossary at `key`; spoken as "Explain <term>".
+ * The glossary affordance, compact, for placing next to an already-labelled
+ * value (the e1RM line, the tonnage tile) without repeating the term.
  * One per term per card or screen: a term that repeats down a list carries it on
  * its first occurrence only, and inside an [EvidenceCard] the term moves into the
  * "?" panel instead (one "?" per card).
@@ -715,15 +670,10 @@ internal fun GlossaryInfo(key: String) {
     val open = LocalGlossary.current
     val term = GLOSSARY.firstOrNull { it.key == key }?.let { stringResource(it.termRes) } ?: key
     val explainDesc = stringResource(Res.string.main_explain, term)
-    // A built-in gap so the disc never touches the value it follows.
     Box(Modifier.padding(start = Space.Xs.dp)) { InlineDisclosureLink(explainDesc) { open(key) } }
 }
 
-/**
- * The "Terms" row inside a "?" panel: one [TextAction] per jargon term the card
- * uses, each opening the glossary at that term (≥48dp targets; spoken "Explain
- * RIR"). Text actions, not outlined pills: one action style app-wide.
- */
+/** Text actions, not outlined pills: one action style app-wide. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GlossaryTermLinks(terms: List<GlossaryTerm>) {
@@ -747,20 +697,12 @@ private fun GlossaryTermLinks(terms: List<GlossaryTerm>) {
     }
 }
 
-/** One resolved glossary row: its key, display term and definition. */
 private data class GlossaryRow(val key: String, val term: String, val definition: String)
 
-/** Section letter of a term: its first letter, uppercased; "#" for a term that
- *  opens on a digit or symbol ("1RM / %1RM"). */
 private fun glossaryLetter(term: String): String =
     term.firstOrNull()?.takeIf { it.isLetter() }?.uppercaseChar()?.toString() ?: "#"
 
-/**
- * The glossary bottom sheet: the title and a search well pinned
- * above an alphabetical list, one [SectionOverline] per first letter, each term in
- * Bold over its definition. Typing filters on the term and the definition; a query
- * that matches nothing says so. Opens scrolled to `initialKey`, which keeps a ring.
- */
+/** Opens scrolled to `initialKey`, which keeps a ring. */
 @Composable
 internal fun GlossarySheet(initialKey: String) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -775,7 +717,6 @@ internal fun GlossarySheet(initialKey: String) {
     val groups = shown.groupBy { glossaryLetter(it.term) }
     val listState = rememberLazyListState()
     LaunchedEffect(initialKey) {
-        // Flattened position of the term: every group before it adds its header.
         var index = 0
         for ((_, entries) in groups) {
             val at = entries.indexOfFirst { it.key == initialKey }
@@ -826,8 +767,6 @@ internal fun GlossarySheet(initialKey: String) {
     }
 }
 
-/** One glossary term: the term in Bold over its plain definition. The term the
- *  sheet was opened for keeps a quiet accent ring (no fill). */
 @Composable
 private fun GlossaryTerm(row: GlossaryRow, highlighted: Boolean) {
     val shape = RoundedCornerShape(Space.Card.dp)
@@ -844,7 +783,6 @@ private fun GlossaryTerm(row: GlossaryRow, highlighted: Boolean) {
     }
 }
 
-/** One legend row: the chip in a fixed-width column, then its plain definition. */
 @Composable
 private fun LegendRow(label: String, chipColor: Color, body: String) {
     Row(
@@ -863,7 +801,6 @@ private fun LegendRow(label: String, chipColor: Color, body: String) {
 @Composable
 internal fun gradeLabel(grade: EvidenceGrade?): String? = gradeLabelRes(grade)?.let { stringResource(it) }
 
-/** String resource of [gradeLabel]: the same labels the legend rows use. */
 private fun gradeLabelRes(grade: EvidenceGrade?): StringResource? = when (grade) {
     EvidenceGrade.Strong -> Res.string.main_grade_strong
     EvidenceGrade.Moderate -> Res.string.main_grade_moderate

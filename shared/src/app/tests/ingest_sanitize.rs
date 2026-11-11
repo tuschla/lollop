@@ -3,7 +3,6 @@
 
 use super::*;
 
-// ── SetProfile sanitizes poison floats on ingest ──
 #[test]
 fn set_profile_sanitizes_poison_floats() {
     let app = Engine;
@@ -40,7 +39,6 @@ fn set_profile_sanitizes_poison_floats() {
     );
 }
 
-// ── A negative LogRun distance is clamped at ingest ──
 #[test]
 fn negative_log_run_distance_is_clamped() {
     let app = Engine;
@@ -60,7 +58,6 @@ fn negative_log_run_distance_is_clamped() {
     );
 }
 
-// ── Overflow-safe epoch math + non-finite/huge float clamp on ingest ──
 #[test]
 fn extreme_wire_values_do_not_panic_or_poison_the_view() {
     let app = Engine;
@@ -87,17 +84,15 @@ fn extreme_wire_values_do_not_panic_or_poison_the_view() {
     .expect_only_render();
     set_today(&app, &mut model, i64::MAX);
     let vm = app.view(&model); // must not panic
-    // A finite serializable view is produced.
     assert!(serde_json::to_string(&vm).is_ok());
     // mon0_weekday itself is overflow-safe at the extremes.
     let _ = mon0_weekday(i64::MAX);
     let _ = mon0_weekday(i64::MIN);
 }
 
-// ── Calculator/predict events sanitize floats → no `inf`→`null` brick ──
 #[test]
 fn calculator_events_1e300_inputs_never_serialize_to_null() {
-    // The threat sanitize_f64 guards: a huge FINITE wire float (serde_json
+    // The threat `crate::sanitize` guards: a huge FINITE wire float (serde_json
     // accepts 1e300) overflows a downstream product to `inf`, which
     // serializes to JSON `null`, which a non-null Kotlin `Double` decode
     // rejects → a persisted-singleton view-brick. Feeding 1e300-scale
@@ -128,7 +123,6 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
     .expect_only_render();
 
     let vm = app.view(&model); // must not panic
-    // Whole view round-trips through JSON.
     assert!(serde_json::to_string(&vm).is_ok());
 
     // Every numeric field of the race prediction is a finite JSON number,
@@ -182,7 +176,6 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
     }
 }
 
-// ── Submit* events sanitize floats → no out-of-domain magnitude on the wire ──
 #[test]
 fn submit_events_1e300_inputs_never_serialize_to_null() {
     // Same threat as the calculator path, and reachable by replaying any
@@ -335,8 +328,7 @@ fn infinite_gps_accuracy_fails_the_accuracy_gate() {
 #[test]
 fn a_wire_negative_zero_is_echoed_as_zero() {
     // Every wire float goes through one rule (`crate::sanitize`), which turns
-    // -0.0 into 0.0. The calculator echo used to clamp without it, so a
-    // "-0.0" age came back to the shell's form as "-0.0".
+    // -0.0 into 0.0, so a "-0.0" age never comes back to the shell's form.
     let app = Engine;
     let mut model = Model::default();
     app.update(

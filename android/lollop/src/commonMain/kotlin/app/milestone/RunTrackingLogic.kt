@@ -12,9 +12,6 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 
-// The run tracker's pure logic: the finish flow's state machine, short-run and
-// pace rules, the plan a run follows, and the recorded track as route segments.
-
 /**
  * A captured run awaits save when the service no longer records yet fixes are still
  * held (a failed save or an unconfirmed stop); the locate preview records none.
@@ -79,8 +76,8 @@ internal fun isShortRun(km: Double, movingSec: Long): Boolean =
 internal fun shortRunThresholdLabel(unit: DistanceUnit): String =
     "${trimDecimal(metersToDisplay(CoreConstants.MIN_RUN_KM * 1000.0, unit))} ${unit.distanceLabel}"
 
-/** The keep threshold's time half as the short-run note states it, in minutes
- *  ("3"): [CoreConstants.MIN_RUN_SEC], [trimDecimal]-trimmed. */
+/** The keep threshold's time half ([CoreConstants.MIN_RUN_SEC]) as the short-run
+ *  note states it, in minutes. */
 internal fun shortRunMinutesLabel(): String = trimDecimal(CoreConstants.MIN_RUN_SEC / 60.0)
 
 /** Where the Finish review is: not shown, reviewing the paused run, or confirming a
@@ -126,8 +123,7 @@ internal fun finishTransition(step: FinishStep, action: FinishAction): FinishTra
 
 /**
  * Today's open planned run, or null: the next session is dated today, still
- * trainable (next/adjusted), and its run item ([runItem]) is set. Pure so the
- * tracker's plan hand-off is testable.
+ * trainable (next/adjusted), and its run item ([runItem]) is set.
  */
 internal fun plannedRunToday(model: ViewModel): PrescriptionView? {
     val ns = model.next_session ?: return null
@@ -266,7 +262,7 @@ internal fun averagePaceMinPerKm(elapsedSec: Long, km: Double): Double =
 
 /** The recorded fixes as route segments (each [segmentStarts] index opens a new
  *  one, so a pause never draws a bridging line), for the Finish review's route
- *  thumbnail. Pure. */
+ *  thumbnail. */
 internal fun trackSegments(points: List<GpsPoint>, segmentStarts: Collection<Int>): List<List<GpsPoint>> {
     val starts = segmentStarts as? Set<Int> ?: segmentStarts.toHashSet()
     val out = ArrayList<List<GpsPoint>>()

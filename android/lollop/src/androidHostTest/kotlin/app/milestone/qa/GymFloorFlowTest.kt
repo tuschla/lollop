@@ -83,7 +83,6 @@ class GymFloorFlowTest {
     /** The weight well, spoken with its value ("Weight, 100 kg"). */
     private fun weightWell(shown: String) = hasContentDescription("${str(R.string.log_field_weight)}, $shown kg")
 
-    /** The loop's pinned primary action ("Log set k of N"). */
     private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()
 
     /** The lifter rests before the next set (also clears the double-tap guard). */
@@ -286,7 +285,6 @@ class GymFloorFlowTest {
         rule.onAllNodesWithText(str(R.string.plan_set_not_counted), substring = true).assertCountEquals(1)
         assertTrue(UxInvariants.check(rule, rule.density).none { it.kind == "forbidden-text" })
         rule.selectTab(str(R.string.main_dest_history))
-        // The seeded 40 kg set's line.
         rule.scrollToText("40 kg")
         val history = UxInvariants.check(rule, rule.density).filter { it.kind == "forbidden-text" }
         assertTrue("History shows no fabricated RPE: $history", history.isEmpty())
@@ -300,7 +298,6 @@ class GymFloorFlowTest {
         // The compact header states the seconds target beside the set count
         // ("Set 1 of 3 · 30 s").
         rule.onAllNodesWithText("\u00b7 " + str(R.string.log_band_hold, 30), substring = true).assertCountEquals(1)
-        // A hold rung asks for seconds, not reps.
         rule.onAllNodesWithText(str(R.string.log_field_hold), substring = true).assertCountEquals(1)
         rule.onAllNodesWithText(str(R.string.log_field_reps)).assertCountEquals(0)
     }
@@ -411,7 +408,6 @@ class GymFloorFlowTest {
         rule.waitForState { EventDispatcher.model.value?.weekly_checkin_present == false }
     }
 
-    /** Open the morning check-in and answer sleep, soreness and mood with 3. */
     private fun openCheckinWithRequiredAnswers() {
         rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
         rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
@@ -423,7 +419,6 @@ class GymFloorFlowTest {
         }
     }
 
-    /** The value of the last Illness report the check-in wrote to the log. */
     private fun lastIllnessValue(): Double =
         journeyLog().last { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Illness") }
             .payload["value"]!!.jsonPrimitive.double

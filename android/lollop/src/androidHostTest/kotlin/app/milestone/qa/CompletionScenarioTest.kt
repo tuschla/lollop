@@ -73,13 +73,10 @@ class CompletionScenarioTest {
      *  "Log set 1 of 3, <exercise>"). */
     private fun logActions(label: String) = hasClickAction() and hasContentDescription(label, substring = true)
 
-    /** The plan item's "Log set k of N" action label. */
     private fun logSetOf(k: Int, n: Int) = str(R.string.plan_log_set_n_of_n, k, n)
 
-    /** The set slots' spoken "k of N sets done". */
     private fun setsDone(k: Int, n: Int) = plural(R.plurals.plan_sets_done_cd, n, k, n)
 
-    // ── (a) the current item carries the controls, every other item one tap ──
     @Test
     fun freshPlan_heroShowsLogSetPerItem() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -94,12 +91,11 @@ class CompletionScenarioTest {
         rule.onAllNodesWithContentDescription(setsDone(0, 3)).assertCountEquals(1)
     }
 
-    // ── (b)+(editor loop) log one as-prescribed set through the UI ───────────
     @Test
     fun logOneSetThroughUI_fillsFirstSlotAndAdvances() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        // The squat is the first plan item; open its loop editor.
+        // The squat is the first plan item.
         rule.onAllNodesWithText(logSetOf(1, 3))[0].performClick()
         rule.waitForIdle()
         rule.onAllNodesWithText(setHeader(1, 3)).assertCountEquals(1)
@@ -110,16 +106,14 @@ class CompletionScenarioTest {
         rule.onNodeWithTag("editor-primary").performClick()
         rule.assertTextCountEventually(setHeader(2, 3), 1)
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
-        // Back on Today: the squat's first slot is filled and its button advanced.
         rule.assertCountEventually(hasContentDescription(setsDone(1, 3)), 1)
         rule.assertTextCountEventually(logSetOf(2, 3), 1)
-        // History lists the set (only lifts exist, so it opens on the Lifts list).
+        // Only lifts exist, so History opens on the Lifts list.
         rule.selectTab(str(R.string.main_dest_history))
         rule.scrollToText("Back squat")
         rule.onNodeWithText("Back squat", substring = true).assertIsDisplayed()
     }
 
-    // ── (c) all N qualifying sets → item collapses to done ───────────────────
     @Test
     fun allSetsQualifying_itemCollapsesToDone() {
         QaHarness.seedLog(
@@ -140,7 +134,6 @@ class CompletionScenarioTest {
         rule.onAllNodes(logActions(logSetOf(1, 3))).assertCountEquals(3)
     }
 
-    // ── (d) a warm-up (bar weight) set does NOT fill a slot ──────────────────
     @Test
     fun warmupSet_belowTarget_doesNotFillSlot() {
         QaHarness.seedLog(
@@ -160,7 +153,6 @@ class CompletionScenarioTest {
         rule.onAllNodesWithText(str(R.string.plan_set_not_counted), substring = true).assertCountEquals(1)
     }
 
-    // ── the Log chooser's "Today's plan" tile opens the first OPEN exercise ──
     @Test
     fun todaysPlanTile_opensFirstUnfinishedExercise() {
         QaHarness.seedLog(
@@ -183,7 +175,6 @@ class CompletionScenarioTest {
         rule.onAllNodesWithText(setHeader(1, 3)).assertCountEquals(1)
     }
 
-    // ── an lb profile sees loadable plate-grid loads on the hero ─────────────
     @Test
     fun poundsProfile_heroLoadsSitOnThePlateGrid() {
         QaHarness.seedLog(
@@ -204,7 +195,6 @@ class CompletionScenarioTest {
         assertTrue("every shown load is a whole 5 lb step: $loads", loads.all { it % 5.0 == 0.0 })
     }
 
-    // ── (e)+(f) Skip exercise → done "Skipped" (no ✓), Reopen → open again ───
     @Test
     fun endExercise_thenReopen() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))

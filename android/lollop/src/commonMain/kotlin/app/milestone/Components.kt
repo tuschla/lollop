@@ -129,7 +129,6 @@ internal fun Chip(text: String, bg: Color) {
     )
 }
 
-/** Inner padding of a [Chip] or an outlined chip. */
 internal fun Modifier.chipPadding(): Modifier = padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp - 1.dp)
 
 /**
@@ -177,9 +176,8 @@ internal fun AppDialog(
     )
 }
 
-/** A [DatePicker] on [state] in an [AppDialog]-styled window: OK (enabled while
- *  [confirmEnabled]) runs [onConfirm], Cancel runs [onDismiss]. On a short window
- *  (a phone in landscape, [WindowLayout.shortHeight]) see [ShortDatePickerDialog]. */
+/** A [DatePicker] on [state] in an [AppDialog]-styled window; a short window (a
+ *  phone in landscape, [WindowLayout.shortHeight]) gets [ShortDatePickerDialog]. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppDatePickerDialog(
@@ -318,7 +316,6 @@ internal fun ConfirmDialog(
  *  [confirmColor] is `DangerText` unless the confirm is not destructive. */
 @Composable
 internal fun ClearConfirmDialog(
-    visible: Boolean,
     title: String,
     message: String,
     confirmLabel: String = stringResource(Res.string.main_clear),
@@ -326,19 +323,17 @@ internal fun ClearConfirmDialog(
     onDismiss: () -> Unit,
     onClear: () -> Unit,
 ) {
-    if (visible) {
-        ConfirmDialog(
-            title = title,
-            body = message,
-            confirmLabel = confirmLabel,
-            onDismiss = onDismiss,
-            onConfirm = {
-                onDismiss()
-                onClear()
-            },
-            confirmColor = confirmColor,
-        )
-    }
+    ConfirmDialog(
+        title = title,
+        body = message,
+        confirmLabel = confirmLabel,
+        onDismiss = onDismiss,
+        onConfirm = {
+            onDismiss()
+            onClear()
+        },
+        confirmColor = confirmColor,
+    )
 }
 
 /** One ≥48dp key/value row (set detail facts, calculator results): the label

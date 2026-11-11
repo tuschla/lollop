@@ -88,11 +88,8 @@ class RunFixGuardsTest {
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
 
-    /** A fix [northM] metres north of (52.52, 13.405) at [t], 5 m accuracy. */
     private fun fix(northM: Double, t: Long, accuracyM: Double = 5.0) =
         GpsPoint(52.52 + northM / 111_195.0, 13.405, t, accuracyM)
-
-    // ── The Finish review shows the core's figures ───────────────────────────
 
     @Test
     fun theFinishReviewShowsTheCoresFiguresNotTheLiveCounters() {
@@ -114,8 +111,6 @@ class RunFixGuardsTest {
         assertEquals(0, rule.onAllNodes(hasContentDescription(spokenRunDistance(ctx.resources, 9.99, DistanceUnit.Km), substring = true)).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodes(hasContentDescription(spokenDuration(ctx.resources, 4_321L), substring = true)).fetchSemanticsNodes().size)
     }
-
-    // ── A recovered run keeps its pauses ─────────────────────────────────────
 
     @Test
     fun recoveryThinningKeepsEverySegmentsFirstFix() {
@@ -160,9 +155,6 @@ class RunFixGuardsTest {
         assertEquals("the walk during the pause is not distance", liveKm, RunSession.distanceKm.value, 1e-9)
     }
 
-    // ── A pause breaks the segment without an accepted fix ───────────────────
-
-    /** A platform fix [eastM] metres east of (0, 0) at [tSec], [accuracyM] accuracy. */
     private fun location(eastM: Double, tSec: Long, accuracyM: Float): Location =
         Location(LocationManager.GPS_PROVIDER).apply {
             latitude = 0.0
@@ -183,11 +175,11 @@ class RunFixGuardsTest {
             shadowOf(Looper.getMainLooper()).idle()
         }
         deliver(location(0.0, 0, 5f))
-        deliver(location(15.0, 5, 5f)) // a 3 m/s run leg
+        deliver(location(15.0, 5, 5f))
         assertEquals(5L, RunSession.elapsedSec.value)
 
         RunSession.setPaused(true)
-        // Paused indoors: the only fix is too coarse (50 m > 30 m) for the live gate.
+        // Paused indoors: the only fix is too coarse for the live accuracy gate.
         deliver(location(25.0, 15, 50f))
         RunSession.setPaused(false)
         // First fix after Resume: 20 m from the pre-pause fix, 20 s later (1 m/s).
@@ -198,12 +190,10 @@ class RunFixGuardsTest {
         controller.destroy()
     }
 
-    // ── Undo of an unmeasurable GPS run ──────────────────────────────────────
-
     @Test
     fun anUnmeasurableGpsRunComesBackWithItsFixesAfterDeleteAndUndo() {
         val end = QaHarness.daysAgoAtMidday(1)
-        // Five fixes, every one past the 30 m accuracy gate: QC leaves nothing to
+        // Five fixes, every one past the accuracy gate: QC leaves nothing to
         // measure, but the run and its recorded fixes are the runner's data.
         val points = (0 until 5).map { fix(3.0 * it, end - 4 + it, accuracyM = 50.0) }
         val run = Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000)

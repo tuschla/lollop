@@ -19,7 +19,6 @@ internal fun coreErrorOf(text: String): CoreError? {
     return runCatching { coreJson.decodeFromString(ErrorEnvelope.serializer(), text).error }.getOrNull()
 }
 
-/** Whether [text] is an [ErrorEnvelope]. */
 internal fun isCoreErrorEnvelope(text: String): Boolean = coreErrorOf(text) != null
 
 /** Whether [text] is a [ErrorKind.PanicReset] envelope: the core panicked AND was
@@ -59,7 +58,7 @@ internal fun replayLog(lines: List<String>, maxResets: Int, apply: (String) -> B
 }
 
 /**
- * The outcome of [Core.send]: the fresh [view]; whether the core [accepted] the
+ * The outcome of [CoreEngine.send]: the fresh [view]; whether the core [accepted] the
  * event (false for a serde-rejected event or a panic-firewall envelope); whether
  * an accepted event reached the durable log ([persisted] false: applied in memory
  * but the append failed, so it is gone after the next restart); and whether [view]

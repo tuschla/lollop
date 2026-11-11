@@ -1,12 +1,6 @@
-//! The run import: format sniff, the GPX/TCX/FIT readers, the per-run gates
-//! and the file verdict. Ported from the shell's import tests (the Kotlin
-//! readers they covered were replaced by this module).
-
 use super::*;
 use crate::import::time::parse_import_time_sec;
 use crate::import::xml::{declares_dtd, decode_utf16};
-
-// ── Builders ──────────────────────────────────────────────────────────────────
 
 /// Metres → degrees of latitude (1° ≈ 111.2 km).
 fn deg(metres: f64) -> f64 {
@@ -255,8 +249,6 @@ fn built(segments: Vec<Vec<RawFix>>) -> Result<ImportedRun, ImportRefusal> {
     build_run(&raw_run(segments)).map_err(|Refused(reason, _)| reason)
 }
 
-// ── TCX lap merge ─────────────────────────────────────────────────────────────
-
 fn fix_at(t: i64) -> RawFix {
     raw(0.0, 0.0, t, None)
 }
@@ -302,11 +294,8 @@ fn empty_tracks_are_skipped() {
     assert_eq!(merged.iter().map(Vec::len).collect::<Vec<_>>(), [2]);
 }
 
-// ── Field values ──────────────────────────────────────────────────────────────
-
 #[test]
 fn hr_is_kept_only_as_a_finite_plausible_bpm() {
-    // Finite 20..=250 bpm, truncated toward the bpm.
     let cases: &[(&str, Option<i32>)] = &[
         ("120", Some(120)),
         (" 155 ", Some(155)),
@@ -396,8 +385,6 @@ fn trimming_is_the_jvm_kotlin_whitespace_set() {
     assert_eq!(kt_trim("\u{85}run"), "\u{85}run");
 }
 
-// ── Time stamps ───────────────────────────────────────────────────────────────
-
 #[test]
 fn spec_utc_timestamps_parse_to_their_instant() {
     assert_eq!(parse_import_time_sec("2026-08-30T10:00:00Z"), 1_788_084_000);
@@ -454,8 +441,6 @@ fn import_times_read_exactly_as_java_time_read_them() {
     );
 }
 
-// ── Text decoding ─────────────────────────────────────────────────────────────
-
 #[test]
 fn utf16_decodes_exactly_as_the_jdk() {
     // `fixtures/import/utf16.json`: byte strings and the JDK's decoding of them
@@ -491,8 +476,6 @@ fn a_dtd_in_the_prolog_is_found_past_declarations_and_comments() {
     assert!(!declares_dtd("<!-- <!DOCTYPE gpx> --><gpx/>"));
     assert!(!declares_dtd("<?xml version=\"1.0\""));
 }
-
-// ── Per-run gates ─────────────────────────────────────────────────────────────
 
 fn fix_lon(t: i64, lon: f64, accuracy_m: Option<f64>) -> RawFix {
     RawFix {
@@ -566,15 +549,12 @@ fn evenly_spaced_hr_samples_match_the_plain_mean() {
 
 #[test]
 fn the_heart_rate_is_a_share_of_a_measured_hr_max_only_capped_at_100() {
-    // The file's 152 bpm against a measured 190: 80 %.
     assert!((imported_hr_pct_max(Some(152.0), Some(190.0)) - 80.0).abs() < 1e-9);
     // No measured HRmax: no figure (never the Tanaka estimate).
     assert_eq!(imported_hr_pct_max(Some(152.0), None), 0.0);
     assert_eq!(imported_hr_pct_max(Some(152.0), Some(0.0)), 0.0);
     assert_eq!(imported_hr_pct_max(Some(152.0), Some(-190.0)), 0.0);
-    // A stale low HRmax never states more than 100 %.
     assert_eq!(imported_hr_pct_max(Some(152.0), Some(140.0)), 100.0);
-    // No samples: no figure.
     assert_eq!(imported_hr_pct_max(None, Some(190.0)), 0.0);
 }
 
@@ -814,8 +794,6 @@ fn a_huge_track_is_decimated_with_its_boundaries_and_ends() {
     assert_eq!(start.observed_at, T0 + 12_345 + 600);
 }
 
-// ── Whole files ───────────────────────────────────────────────────────────────
-
 #[test]
 fn each_gpx_track_is_its_own_run_with_its_own_sport() {
     // A 10 km run and a 5 km ride in one GPX: the run imports, the ride is refused.
@@ -1041,8 +1019,6 @@ fn lollops_own_gpx_reads_back_with_its_stamp_times_segments_and_accuracy() {
     assert!(doc.contains("<time>+10000-"));
     assert_eq!(one_run(doc.as_bytes()).points, far);
 }
-
-// ── Malformed and hostile input ───────────────────────────────────────────────
 
 /// Offsets to cut `doc` at, as a download cut off mid-file: about 150 evenly
 /// spaced plus about 150 tag ends (a cut right after a tag is the case a pull
@@ -1567,8 +1543,6 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
     }
     s
 }
-
-// ── The XML corners, against the reader the shell imported with ──────────────
 
 /// A [`read_runs`] outcome in the fixture's shape: `{"fail": reason}` or
 /// `{"runs": [{"sport", "logged_at", "segments": [[[lat, lon, t, hr, acc]]]}]}`.

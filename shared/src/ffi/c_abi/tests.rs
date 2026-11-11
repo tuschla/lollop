@@ -37,7 +37,6 @@ fn a_dropped_or_null_event_is_the_empty_answer() {
     assert!(dropped.data.is_null() && dropped.len == 0);
     let null = unsafe { lollop_call(Op::Update.code(), std::ptr::null(), 0) };
     assert!(null.data.is_null() && null.len == 0);
-    // Freeing the empty answer is a no-op.
     unsafe { lollop_bytes_free(null) };
 }
 
@@ -56,12 +55,10 @@ fn compact_log_reports_a_torn_tail_by_line_index() {
         lollop_call_lines(code, slices.as_ptr(), slices.len())
     }));
     assert_eq!(verdict["torn"], serde_json::json!([1]));
-    // An empty log still gets a verdict (nothing dropped).
     let empty = json(&take(unsafe {
         lollop_call_lines(code, std::ptr::null(), 0)
     }));
     assert_eq!(empty["dropped"], serde_json::json!([]));
-    // A line that is not UTF-8 fails the op.
     let bad = [LollopSlice {
         data: [0xff_u8].as_ptr(),
         len: 1,

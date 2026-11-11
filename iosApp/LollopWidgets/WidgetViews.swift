@@ -192,7 +192,6 @@ struct CardContent: View {
 
     private var statement: Bool { hero == nil && layout.week == .hidden && face.body.leadOnly }
 
-    /// The hero's own lines where it shows, else the face's.
     private var source: WidgetLines { hero?.body ?? face.body }
 
     private var lines: [String] { source.lines(layout.lines) }
@@ -229,7 +228,6 @@ struct CardContent: View {
                     Spacer(minLength: 0)
                     week
                     if layout.week != .hidden { Spacer().frame(height: WidgetSpace.md) }
-                    // The hero to the left of the buttons, both on the card's last row.
                     HStack(alignment: .bottom, spacing: WidgetSpace.md) {
                         heroColumn(hero).frame(maxWidth: .infinity, alignment: .leading)
                         ActionRow(actions: face.actions, colors: colors, wide: wide, buttons: buttons)
@@ -237,8 +235,6 @@ struct CardContent: View {
                     }
                 }
             } else {
-                // A list: the lines from the title down, the week block under them,
-                // the room left above the buttons.
                 title
                 Spacer().frame(height: WidgetSpace.sm)
                 bodyLines(lines, leadCount: leadCount)
@@ -273,7 +269,6 @@ struct CardContent: View {
         }
     }
 
-    /// The hero's lead lines ("Session done"), the hero, then its items.
     private func heroColumn(_ hero: WidgetHero) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             bodyLines(Array(lines.prefix(leadCount)), leadCount: leadCount)
@@ -330,17 +325,14 @@ struct StatementTitle: View {
 }
 
 /// A run's figure over its pace, or the next session's name over its date.
-/// [compact]: a small card's figure, one size down, so it fits with the title and
-/// the button.
 struct HeroBlock: View {
     let hero: WidgetHero
     let colors: WidgetColors
-    var compact = false
+    let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if hero.figure {
-                // A figure on one line, whole.
                 Text(hero.text)
                     .font(compact ? WidgetType.displaySmall : WidgetType.display)
                     .foregroundColor(colors.body)
@@ -494,8 +486,6 @@ struct ActionRow: View {
         }
     }
 }
-
-// MARK: Lock screen
 
 /// The rectangular lock screen widget: Android's one-row widget without its
 /// buttons: the title over the status line where it fits, else the short one.

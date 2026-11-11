@@ -118,8 +118,6 @@ import org.jetbrains.compose.resources.stringResource
 // The guided setup's widgets and copy, shared with the Profile editor (health
 // rows, answer chips, date and race-time answers): one chip set for both screens.
 
-// ── Health screen ───────────────────────────────────────────────────────────
-
 /** One PAR-Q+ question in plain language (onboard-051). */
 internal val ParqQuestion.questionRes: StringResource
     get() = when (this) {
@@ -256,8 +254,6 @@ internal fun healthSummary(
     else -> stringResource(Res.string.setup_parq_value_clear)
 }
 
-// ── Answer copy ─────────────────────────────────────────────────────────────
-
 /** A one-line, plain-language blurb for each race-distance goal (display only); a
  *  distance it names is shown in the user's [unit]. */
 @Composable
@@ -316,8 +312,6 @@ internal fun equipmentText(e: CalisEquipment): String =
     CalisPiece.entries.filter { it.has(e) }.map { stringResource(it.labelRes) }
         .ifEmpty { listOf(stringResource(Res.string.setup_equip_none)) }
         .joinToString(", ")
-
-// ── Headings and choice cards ───────────────────────────────────────────────
 
 /** The step's question (bold, a TalkBack heading, the screen's one title) and,
  *  where it helps answer, one short line under it. */
@@ -404,15 +398,11 @@ internal fun ChoiceRow(title: String, subtitle: String?, selected: Boolean, onCl
     }
 }
 
-// ── Answer chips ────────────────────────────────────────────────────────────
-
 /** Opacity of a disabled answer chip (Material's disabled-content alpha). */
 private const val DisabledChipAlpha = 0.38f
 
-/** Size of the glyph leading a date chip. */
 private val ChipIconSize = 18.dp
 
-/** Size of the corner check on a selected multi-select chip. */
 private val ChipCheckSize = 12.dp
 
 /** The tap semantics of one answer chip, by [role]: RadioButton = one option of a
@@ -545,8 +535,6 @@ internal fun EquipmentChips(equipment: CalisEquipment?, onChange: (CalisEquipmen
         AnswerChip(stringResource(Res.string.setup_equip_none), selected = equipment == CalisEquipment()) { onChange(CalisEquipment()) }
     }
 }
-
-// ── Date and race-time answers ──────────────────────────────────────────────
 
 /** DatePicker days are UTC-midnight stamps whose Y/M/D is the picked date, so a
  *  local epoch day maps to and from them exactly. */
@@ -712,8 +700,6 @@ internal fun RaceTimeField(digits: String, active: Boolean, invalid: Boolean, on
     }
 }
 
-// ── Review and frame ────────────────────────────────────────────────────────
-
 /** One review row: its label, what was answered, and the step it edits. */
 internal class ReviewEntry(val label: String, val value: String, val step: SetupStep)
 
@@ -782,10 +768,8 @@ internal fun Modifier.fullBleed(inset: Dp): Modifier = layout { measurable, cons
     layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
 }
 
-/** Height of the [SetupProgressBar]. */
 private val StepProgressHeight = 4.dp
 
-/** Opacity of the [SetupProgressBar] track behind the accent fill (OnBgBody). */
 private const val StepProgressTrackAlpha = 0.08f
 
 /** A thin full-width, fully rounded progress bar: the accent fill eases along the

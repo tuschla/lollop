@@ -35,15 +35,12 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal expect fun rememberNotificationPermissionRequest(ctx: PlatformContext, onResult: () -> Unit): () -> Unit
 
-/** Open the system screen where the app's notifications are turned on. */
 internal expect fun openNotificationSettings(ctx: PlatformContext)
 
 /**
- * Profile › During training: the "Session reminder" switch and, while it is on,
- * its time row (the Material 3 time picker in a dialog, as the log editors use)
- * and, when notifications are not allowed, a notice that opens the app's
- * notification settings. Switching on asks for the notification permission
- * when it is not granted ([rememberNotificationPermissionRequest]).
+ * The "Session reminder" switch and, while it is on, its time row and, when
+ * notifications are not allowed, a notice that opens the app's notification
+ * settings. Switching on asks for the notification permission when it is not granted.
  */
 @Composable
 internal fun SessionReminderRows(ctx: PlatformContext) {

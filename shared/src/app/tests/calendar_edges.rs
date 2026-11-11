@@ -499,7 +499,7 @@ fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
 
 /// The weekly running report (running-031 week-over-week cap, running-028
 /// two-week ramp) files a run in the week it STARTED, like plan completion
-/// (`completion.rs::run_session_day`) and the progress chart. A 10 km run
+/// (`RunFacts::started`) and the progress chart. A 10 km run
 /// Sunday 23:30 → Monday 00:30 after two 10 km weeks: last week is 20 km vs
 /// 10 km (+100%) and this week is empty, never this week's 10 km vs last
 /// week's 10 km (+0%, the week it ended).

@@ -48,7 +48,6 @@ internal fun newOsmMapView(context: Context): MapView = MapView(context).apply {
     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 }
 
-/** A round-capped, round-joined route line of [widthPx] in [argb]. */
 internal fun routeLine(argb: Int, widthPx: Float): Polyline = Polyline().apply {
     outlinePaint.color = argb
     outlinePaint.strokeWidth = widthPx
@@ -133,7 +132,6 @@ internal actual fun FullScreenMapDialog(onDismissRequest: () -> Unit, content: @
     }
 }
 
-/** The theme's route renderer (colours, label text), resolved once per palette and density. */
 @Composable
 private fun rememberRouteRenderer(): RouteRenderer {
     val palette = LocalPalette.current
@@ -223,7 +221,6 @@ private class TileMapState {
     var fits = 0
     var insetPx = 0f
 
-    /** Fits the route box into the free area (between the overlay's insets) with [insetPx]. */
     fun fit(map: MapView, animated: Boolean) {
         val t = overlay.track ?: return
         val w = map.width

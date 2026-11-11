@@ -102,7 +102,6 @@ internal object HistoryFocus {
 private const val ACTION_MESSAGE_MILLIS = 10_000L
 private const val LONG_ACTION_MESSAGE_MILLIS = 15_000L
 
-/** How long a message with an action stays up under [a11y]'s recommended timeout. */
 internal fun actionMessageMillis(long: Boolean, a11y: AccessibilityManager?): Long {
     val base = if (long) LONG_ACTION_MESSAGE_MILLIS else ACTION_MESSAGE_MILLIS
     return a11y?.calculateRecommendedTimeoutMillis(

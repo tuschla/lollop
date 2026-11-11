@@ -21,13 +21,11 @@ public interface IosSurfaceHost {
     /** Start or update the run's Live Activity ([IosRunLive] JSON). */
     public fun updateRunActivity(json: String)
 
-    /** End the run's Live Activity. */
     public fun endRunActivity()
 
     /** Start or update the rest's Live Activity ([IosRestLive] JSON). */
     public fun updateRestActivity(json: String)
 
-    /** End the rest's Live Activity. */
     public fun endRestActivity()
 }
 
@@ -35,8 +33,6 @@ public interface IosSurfaceHost {
 public object IosSurfaces {
     private var host: IosSurfaceHost? = null
 
-    // The last widget payload handed over, so an unchanged one is not sent again
-    // and a new host gets it at once.
     private class State {
         var widget: String? = null
     }

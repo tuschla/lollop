@@ -68,7 +68,7 @@ import androidx.compose.ui.text.TextStyle as ComposeTextStyle
 import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight
 import androidx.glance.color.ColorProvider as DayNightColorProvider
 
-// ── Size steps and metrics (visual-design-system §10, "Home screen widget") ──
+// Size steps and metrics: planning/design/visual-design-system.md §10, "Home screen widget".
 
 /**
  * From this width (three cells on any phone grid) the widget is "wide": the
@@ -100,7 +100,6 @@ private const val MaxBodyLines = 6
 private const val FontPaddingEm = 0.156f
 private const val LineEm = 1.171f
 
-/** The height of a text in this style on [lines] lines at [fontScale]. */
 private fun ComposeTextStyle.height(lines: Int, fontScale: Float): Dp =
     (fontSize.value * fontScale * (FontPaddingEm + LineEm * lines)).dp
 
@@ -263,15 +262,12 @@ internal data class WidgetLayout(
 private fun linesOf(text: String, style: ComposeTextStyle, width: Dp, fontScale: Float): Int =
     wrappedLines(text, style, width, fontScale).coerceIn(1, 2)
 
-/** How many lines [text] wraps to in [style] at [width], however many. */
 private fun wrappedLines(text: String, style: ComposeTextStyle, width: Dp, fontScale: Float): Int =
     ceil(textEm(text) * style.fontSize.value * fontScale / width.value.coerceAtLeast(1f)).toInt().coerceAtLeast(1)
 
-/** The width of a labelled button: its padding, icon and gap, and the label in its 14 sp. */
 private fun labelledWidth(label: String, fontScale: Float): Dp =
     (Space.Screen * 2 + LabelledIcon + Space.Md).dp + (textEm(label) * ButtonLabelSp * fontScale).dp
 
-/** Whether each weekday label of [days] fits a strip column of [column], with a [Space.Sm] margin each side. */
 private fun dayLabelsFit(days: List<WidgetWeekDay>, column: Dp, fontScale: Float): Boolean =
     days.all { (textEm(weekdayStripLabel(LocalDate.fromEpochDays(it.epochDay).dayOfWeek)) * Type.Overline.fontSize.value * fontScale).dp + (Space.Sm * 2).dp <= column }
 
@@ -305,7 +301,6 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
         return lineLayout(size, fontScale, face, one, labelled = wide)
     }
     val textWidth = size.width - Space.Screen.dp * 2
-    // The title, and the Space.Sm gap under it (the Today card's title gap).
     var avail = size.height - Space.Screen.dp * 2 - actionRow - titleH - Space.Sm.dp
     // A wrapped title keeps its second line before the overline: the title is the key fact.
     val titleLine = Type.Title.height(2, fontScale) - titleH
@@ -315,7 +310,6 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
     val overline = avail - overlineH >= caption
     if (overline) avail -= overlineH
     val todayOverline = wide && wrappedLines(face.overline.uppercase(), Type.Overline, textWidth, fontScale) == 1
-    // The hero: a figure on one line in Display, or a session name, then its note.
     val heroH = face.hero?.let { h ->
         val main = if (h.figure) {
             Type.Display.height(1, fontScale).takeIf { wrappedLines(h.text, Type.Display, textWidth, fontScale) == 1 }
@@ -326,7 +320,6 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
     }
     val hero = heroH != null && avail - heroH >= caption * face.heroLead.size
     if (hero && heroH != null) avail -= heroH
-    // The week block while the content keeps its hero, or two body lines.
     val weekText = face.week
     val weekLines = weekText?.let { linesOf(it, Type.Caption, textWidth, fontScale) } ?: 0
     val countH = Type.Caption.height(weekLines, fontScale) + Space.Md.dp
@@ -347,7 +340,6 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
         avail -= bigExtra
         titleLines = 1
     }
-    // The title's gap gives way before the lead line under it would be cut.
     val titleGap = !(sparse && avail < leadH && avail + Space.Sm.dp >= leadH)
     if (!titleGap) avail += Space.Sm.dp
     return WidgetLayout(
@@ -381,11 +373,8 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
 private fun stackRowFits(face: WidgetFace, width: Dp, fontScale: Float): Boolean =
     ActionMinHeight + Space.Md.dp + labelledWidth(face.actions.first().label, fontScale) <= width
 
-/** The one-row layout ([WidgetShape.Line]) at [size] with [actions] buttons, the primary [labelled] or round. */
 private fun lineLayout(size: DpSize, fontScale: Float, face: WidgetFace, actions: Int, labelled: Boolean): WidgetLayout {
     val wide = size.width >= WideFrom
-    // The text column: the row less its padding and the action(s), a round
-    // button each or the labelled primary, each after a Space.Md gap.
     val round = ActionMinHeight + Space.Md.dp
     val actionsWidth = when {
         actions == 0 -> 0.dp
@@ -459,7 +448,6 @@ internal fun bodyLines(face: WidgetFace, layout: WidgetLayout, res: Resources): 
         val lines = visibleLines(src.lead, src.items, n, res).map { BodyLine(it, linesOf(it, Type.Caption, layout.textWidth, fs)) }
         if (lines.height() <= layout.bodyHeight) return lines
     }
-    // A hero's lines show whole or not at all; a list keeps its first line, cut to one.
     return if (!layout.hero && all > 0 && Type.Caption.height(1, fs) <= layout.bodyHeight) {
         listOf(BodyLine(visibleLines(src.lead, src.items, 1, res).first(), 1))
     } else {
@@ -536,7 +524,6 @@ internal fun TodayWidgetContent(face: WidgetFace, colors: WidgetColors) {
     }
 }
 
-/** One row: title over its status line, then the action(s) at the end. */
 @Composable
 private fun LineLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLayout, modifier: GlanceModifier) {
     Row(
@@ -651,7 +638,6 @@ internal val SurfaceIcon.drawable: Int
         SurfaceIcon.Stop -> R.drawable.ic_track_stop
     }
 
-/** The button's icon: its tile face's. */
 private val WidgetAction.icon: Int get() = face.icon.drawable
 
 /**
@@ -665,7 +651,6 @@ private fun RowScope.Actions(face: WidgetFace, colors: WidgetColors, layout: Wid
     val actions = face.actions.take(layout.maxActions)
     if (actions.isEmpty()) return
     fun open(a: WidgetAction): Action = actionStartActivity(openIntent(ctx, a.dest))
-    // Space.Md from the text in the one-row layout, and between the two actions.
     if (layout.shape == WidgetShape.Line) Spacer(GlanceModifier.width(Space.Md.dp))
     actions.drop(1).forEach { a ->
         CircleIconButton(

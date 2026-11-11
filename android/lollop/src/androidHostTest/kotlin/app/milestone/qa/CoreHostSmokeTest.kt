@@ -15,7 +15,7 @@ import org.robolectric.annotation.Config
  * host JVM (the `jni-host` feature): `System.loadLibrary("shared")` resolves the
  * host `libshared.so` gradle put on `java.library.path`, and the core's reset
  * ([JniCore.reset]) works. If this fails, none of the Compose
- * scenario/screenshot tests below can run, so it is the canary.
+ * scenario/screenshot tests can run, so it is the canary.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])

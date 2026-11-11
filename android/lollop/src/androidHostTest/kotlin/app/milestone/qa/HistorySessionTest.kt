@@ -163,7 +163,6 @@ class HistorySessionTest {
         assertEquals(px48, jump[0].boundsInRoot.height, 1.5f)
         rule.onAllNodes(hasContentDescription(str(R.string.main_jump_to_month))).assertCountEquals(1)
         rule.onAllNodesWithText(str(R.string.main_jump_to_month)).assertCountEquals(0)
-        // It opens the month list in place.
         rule.onNodeWithTag("history-jump-to-month").performClick()
         rule.waitForIdle()
         val months = rule.onAllNodes(hasClickAction() and hasText(" 20", substring = true)).fetchSemanticsNodes()
@@ -195,7 +194,6 @@ class HistorySessionTest {
         assertTrue(spoken, spoken.contains("3.1 miles"))
         assertFalse(spoken, spoken.contains("km") || spoken.contains("kilometer"))
 
-        // Switched to "14 days", the daily chart totals in miles too.
         rule.onNode(hasText(str(R.string.history_progress_days, 14)) and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.onAllNodesWithText(str(R.string.history_bars_total, "3.1", "mi")).assertCountEquals(1)

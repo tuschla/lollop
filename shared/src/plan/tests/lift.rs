@@ -162,8 +162,6 @@ fn lift_prescriptions(prog: &Program) -> Vec<(LiftSessionType, LiftPrescription)
     out
 }
 
-// ── rest must match the day prescribed ──
-
 #[test]
 fn isolation_lift_rests_per_its_class_on_a_hypertrophy_emphasis_day() {
     // An isolation lift on a strength DUP hypertrophy-emphasis day takes the
@@ -328,8 +326,6 @@ fn plural_exercise_names_keep_their_movement_pattern() {
     );
     assert_eq!(movement_pattern("Pull ups"), Some(MovementPattern::Pull));
 }
-
-// ── weekly_sets → per-session sets (volume dose-response + expert-opinion split) ──
 
 /// (exercise, sets, claim_id) for every LIFT prescription in a program.
 fn lift_sets_and_claims(prog: &Program) -> Vec<(String, u8, Option<crate::evidence::ClaimId>)> {
@@ -1136,8 +1132,6 @@ fn hyp_vol_dose_claim_is_registered_moderate() {
     );
 }
 
-// ── STR-SESSION-BALANCE-001: movement-pattern coverage + ~3-4 exercises ──
-
 /// Exercise names on the first lift day of a synthesized program, in order.
 fn first_lift_day_exercises(prog: &Program) -> Vec<String> {
     prog.mesocycle
@@ -1157,7 +1151,7 @@ fn first_lift_day_exercises(prog: &Program) -> Vec<String> {
 }
 
 fn leg_only_anchors() -> Anchors {
-    // Three logged lifts, ALL squat-pattern (the on-device "all legs" defect).
+    // Three logged lifts, ALL squat-pattern.
     Anchors {
         lift: crate::plan::LiftAnchors {
             e1rm: vec![
@@ -1398,8 +1392,7 @@ fn a_log_less_hybrid_gets_a_balanced_default_day() {
 
 #[test]
 fn pure_lifting_day_is_no_longer_the_sparse_two_exercise_session() {
-    // A pure lifter's day carries 3-4 exercises, balanced (the 2-exercise
-    // sparsity hit pure lifting too).
+    // A pure lifter's day carries 3-4 exercises, balanced.
     let prog = synthesize(
         &PlanProfile::new(&base_profile()),
         &anchored("Back squat", 120.0),
@@ -1421,7 +1414,7 @@ fn pure_lifting_day_is_no_longer_the_sparse_two_exercise_session() {
 
 #[test]
 fn every_prescribed_lift_still_gets_sized_sets_in_a_balanced_day() {
-    // The 2→4-exercise change must not leave any exercise unsized: every lift
+    // No exercise is left unsized: every lift
     // prescription carries a sets count within [MIN, PER_SESSION_SET_CEILING],
     // and the anchored primary is still volume-sized (12/3 = 4) + dose-cited.
     let prog = synthesize(

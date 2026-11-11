@@ -49,15 +49,12 @@ class FinishSheetStateTest {
 
     @Test
     fun discardRequiresTheConfirmStep() {
-        // Discard on the review only ASKS: nothing is deleted yet.
         val ask = finishTransition(FinishStep.Review, FinishAction.Discard)
         assertEquals(FinishTransition(FinishStep.ConfirmDiscard, FinishEffect.None), ask)
-        // Cancel returns to the review with the run intact.
         assertEquals(
             FinishTransition(FinishStep.Review, FinishEffect.None),
             finishTransition(FinishStep.ConfirmDiscard, FinishAction.CancelDiscard),
         )
-        // Only confirming from the confirm step deletes the run.
         assertEquals(
             FinishTransition(FinishStep.Closed, FinishEffect.DiscardRun),
             finishTransition(FinishStep.ConfirmDiscard, FinishAction.ConfirmDiscard),

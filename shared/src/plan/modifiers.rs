@@ -265,7 +265,6 @@ pub(super) fn apply_meet_taper(sessions: &mut [Session], days_to_meet_from_week_
     let dl_cutoff = strength::deadlift_peak_days_out().value.0 as i64;
     const SQUAT_BENCH_CUTOFF: i64 = 4;
     const CESSATION_DAYS: i64 = 2;
-    // The taper's final week (3–7 days out) takes the deeper cut.
     const TAPER_DEEP_CUT_DAYS: i64 = 7;
     for s in sessions.iter_mut() {
         if !matches!(s.session_type, SessionType::Lift(_))

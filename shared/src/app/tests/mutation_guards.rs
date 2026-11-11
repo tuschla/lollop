@@ -117,7 +117,7 @@ fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
 /// `baseline2_km`, three weeks back) only feed `> 0.0` /
 /// `>= MIN_RATIO_BASE_KM` gates, which -0.0 and 0.0 fail alike; the current
 /// week holds a run by construction, and ingest stores
-/// `sanitize_f64(km).max(0.0)`, so a "-0.0 km" manual run reaches the sum as
+/// `sanitize::non_negative(km)`, so a "-0.0 km" manual run reaches the sum as
 /// +0.0 (-0.0 + 0.0 = +0.0). Two lives drive it: empty prior weeks, and a
 /// full prior week, so the "Week-over-week" row PRINTS the current week's
 /// km (a lone -0.0 km run). Both pass with and without the mutant
@@ -289,7 +289,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
     );
 }
 
-// ── Storage-order ties (BUGS.md 2026-10-23: "storage-order sums and ties").
+// Storage-order ties (BUGS.md 2026-10-23: "storage-order sums and ties").
 // An Undo is `DeleteEntry` + the original `Log*` event again: the row comes
 // back with its stamp and `entry_id`, at the END of storage. Every view must
 // read the same afterwards.

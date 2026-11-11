@@ -70,7 +70,7 @@ pub(super) fn main_lifts(anchors: &LiftAnchors, goal: LiftGoal) -> Vec<String> {
         match movement_pattern(name) {
             Some(pat) => {
                 if covered.contains(&pat) {
-                    continue; // don't stack a pattern - balance by default
+                    continue;
                 }
                 covered.push(pat);
                 out.push(name.clone());
@@ -538,7 +538,6 @@ impl<'a> DoseCtx<'a> {
         // floor / MRV ceiling); an exercise outside Table 4 falls back to the
         // training-age band inside `sized_sets`.
         let landmarks = hypertrophy::landmarks_for_exercise(self.exercise);
-        // Strength/power goals hold the week-1 set count across the block.
         let sizing_week = if self.strength_goal { 1 } else { week_in_block };
         let sized = sized_sets(
             self.weekly_sets,
@@ -633,7 +632,6 @@ impl<'a> DoseCtx<'a> {
         } else {
             load.pct_1rm.0
         };
-        // A completed session is never followed by a lighter one.
         let pct = match novice_hold_pct(self.anchors, self.exercise, reps) {
             Some(hold) if hold > pct => {
                 claim = Some(claims::STR_PCTPROG_001);

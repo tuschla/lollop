@@ -7,9 +7,6 @@ import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.MutableStateFlow
 import platform.Foundation.NSURL
 
-// The iOS app's entry points into the shared app: the root composable the
-// `ComposeUIViewController` hosts, and the URLs the system opens the app with.
-
 // The iOS host's deep-link state: a `lollop://open/<dest>` URL or a reminder tap.
 private val openRequests: OpenRequests = MutableStateFlow(null)
 

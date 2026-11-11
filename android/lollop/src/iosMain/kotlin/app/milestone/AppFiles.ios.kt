@@ -69,7 +69,7 @@ private fun closeWritten(fd: Int, path: String) {
     if (close(fd) != 0 && errno != EINTR) fail("close", path)
 }
 
-/** Read up to [buf].size bytes; 0 at the end of the file. */
+/** Read up to [count] bytes; 0 at the end of the file. */
 private fun readSome(fd: Int, buf: ByteArray, count: Int, path: String): Int {
     while (true) {
         val n = buf.usePinned { read(fd, it.addressOf(0), count.convert()) }

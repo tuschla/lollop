@@ -41,8 +41,6 @@ import platform.Foundation.timeZoneForSecondsFromGMT
 
 actual typealias PlatformLocale = NSLocale
 
-// [appLocaleOf] over the preferred languages, the English fallback taking the
-// device's region. Rebuilt only when the preferred languages or the region change.
 private var appLocaleCache: Pair<List<Any?>, NSLocale>? = null
 
 internal actual fun appLocale(): NSLocale {

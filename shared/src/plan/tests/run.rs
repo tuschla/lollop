@@ -12,8 +12,6 @@ use crate::schema::{
     MesoPhase, Program, RepRecovery, RunIntensity, RunPrescription, RunVolume, Session,
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-
 /// A run-only week request for `days` run days at `week_index`.
 fn req(week_index: u32, days: usize) -> RunWeekRequest {
     RunWeekRequest {
@@ -174,10 +172,8 @@ fn km_of(v: RunVolume) -> f64 {
 /// A week's prescribed km as the plan counts it, at the accounting easy pace
 /// of an athlete with no pace anchor.
 fn sessions_km(sessions: &[Session]) -> f64 {
-    crate::plan::run::prescribed_km(sessions, &Anchors::default())
+    crate::plan::prescribed_run_km(sessions, &Anchors::default())
 }
-
-// ── Basic week shape ─────────────────────────────────────────────────────
 
 #[test]
 fn running_profile_yields_a_long_run() {
@@ -258,8 +254,6 @@ fn tempo_needs_twenty_minutes_at_the_athletes_threshold_pace() {
     // 50 km/wk: 5 km at ~4:15/km is over 20 min.
     assert!(has_tempo(50.0, &vdot50));
 }
-
-// ── Periodization and taper ───────────────────────────────────────
 
 /// Monday epoch day the race tests count from.
 const MON0: i64 = 20_000 - (20_000_i64.rem_euclid(7) + 3).rem_euclid(7);
@@ -579,8 +573,6 @@ fn recovery_week_cuts_by_the_kb_midpoint_and_shrinks_the_long_run() {
     assert!(long_of(&sessions) < long_of(&load_sessions));
 }
 
-// ── Volume carries across cycles ──────────────────────────────────
-
 #[test]
 fn compliant_twelve_week_history_grows_cycle_start_volume() {
     let p = runner(GoalDistance::TenK, 5, 40.0); // 3:1 cycle, +5 %/wk
@@ -631,8 +623,6 @@ fn running_volume_progresses_across_load_weeks() {
     assert!(long1 > long0, "{long1} !> {long0}");
     assert!(long1 <= long0 * 1.10 + 0.01);
 }
-
-// ── Quality per goal ──────────────────────────────────────────────
 
 #[test]
 fn marathon_build_week_has_race_pace_session() {
@@ -838,8 +828,6 @@ fn quality_run_days_stay_spaced_across_goals_and_frequencies() {
     }
 }
 
-// ── Sub-10 km progression and the spike ceiling ───────────────────
-
 #[test]
 fn sub_10km_long_run_progresses_under_spike_ceiling() {
     let (km, bind) = long_run_decision(&ctx(40.0, Some(6.0), 4));
@@ -977,9 +965,7 @@ fn sub_1km_baseline_tempo_becomes_an_easy_duration() {
 
 /// A spike ceiling with no honest distance (a 0.05 km stated longest run)
 /// turns every quality slot into an easy run under RUN-SPIKE-001, race pace
-/// included. A marathoner's race-pace slot that the 90-min easy-run ceiling
-/// left without a block size used to stay cited as RUN-RACEPACE-001, with the
-/// warm-up and cool-down it no longer has still counted in the week.
+/// included.
 #[test]
 fn every_quality_slot_without_a_distance_cites_the_spike_rule() {
     let mut p = runner(GoalDistance::Marathon, 4, 40.0);
@@ -1006,8 +992,6 @@ fn every_quality_slot_without_a_distance_cites_the_spike_rule() {
     }
     assert!(race_pace > 0, "a race-pace slot is scheduled");
 }
-
-// ── Long-run share and goal targets ───────────────────────────────
 
 #[test]
 fn sub_64km_week_long_run_share_is_30pct() {
@@ -1202,8 +1186,6 @@ fn post_layoff_prefers_measured_over_a_stale_stated_volume() {
     assert_eq!(effective_weekly_km(&p, &Anchors::default()), 40.0);
 }
 
-// ── Detraining-adjusted anchors slope the long run, no cliff ─────────────
-
 fn detrained_anchor(km: f64) -> Anchors {
     Anchors {
         run: crate::plan::RunAnchors {
@@ -1255,8 +1237,6 @@ fn detrained_flag_does_not_relabel_a_pure_volume_long_run() {
     assert_eq!(long_run_km(&prog), Some(12.0));
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
-
-// ── Easy runs vs recovery runs ────────────────────────────────────
 
 #[test]
 fn easy_fill_uses_easy_band_not_recovery() {
@@ -1420,8 +1400,6 @@ fn no_stated_or_measured_volume_plans_the_kb_duration_floors() {
     }
 }
 
-// ── Warm-up/cool-down, rep structure, weekly accounting ───────────
-
 #[test]
 fn quality_week_with_wu_cd_sums_to_weekly_km() {
     let p = runner(GoalDistance::TenK, 5, 45.0);
@@ -1507,8 +1485,6 @@ fn strides_attached_to_easy_day_after_base_week_2() {
         assert!((45..=120).contains(&st.recovery_sec));
     }
 }
-
-// ── C25K ────────────────────────────────────────────────────────
 
 #[test]
 fn c25k_week_one_prescribes_8x60s_90s_run_walk_and_no_long_run() {

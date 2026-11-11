@@ -5,9 +5,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
-// What every platform's [RecorderHost] does alike: the cue patterns, the
-// screen-off-safe deadline, the app-removed rule and the pause refresh.
-
 /**
  * How a cue feels: buzzes of [pulseMs] with [gapMs] between them, plus a short
  * beep for [beep]. The counts tell the cues apart in a pocket: one firm pulse for
@@ -36,10 +33,8 @@ internal abstract class EarliestWinsTimer(private val action: () -> Unit) : Reco
     /** Set the platform's deadline [delayMs] from now; it calls [fire]. */
     protected abstract fun arm(delayMs: Long)
 
-    /** Take the pending deadline down. */
     protected abstract fun disarm()
 
-    /** The deadline came: run the action once. */
     protected fun fire() {
         cancel()
         action()
@@ -75,8 +70,8 @@ internal fun RunRecorder.onAppRemoved() {
 /**
  * Refresh the run's surface on every pause or resume from now on, until [scope]
  * ends: the in-app Pause and the surface's own Pause/Resume write the same flag, so
- * both show the same. drop(1) skips the current value; Main.immediate subscribes at
- * once on the calling main thread, so no later pause is missed.
+ * both show the same. Main.immediate subscribes at once on the calling main
+ * thread, so no later pause is missed.
  */
 internal fun refreshSurfaceOnPause(scope: CoroutineScope, refresh: () -> Unit) {
     scope.launch(Dispatchers.Main.immediate) {

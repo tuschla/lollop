@@ -107,19 +107,16 @@ class OwnerJourneysTest {
         rule.onNode(illToggle()).assertIsOff()
     }
 
-    // ── 1. Illness, profile path: setup "I'm ill" → one resolve on Today ──────
     @Test
     fun freshSetupIllNow_bannerResolveEndsTheHold_withoutAProfileTrip() {
         rule.launchAppExpectingSetup()
         rule.walkLiftSetup(birthdayDigits = "03121991", ill = true)
         rule.finishSetup()
 
-        // Today holds training for the profile's answer and offers its one way back.
         rule.assertTextCountEventually(doNotTrain, 1)
         assertEquals(HoldReason.AcuteIllnessProfile, EventDispatcher.model.value!!.hold_reason)
         val labels = resolveLabels()
         assertEquals("one illness action on the banner: $labels", 1, labels.size)
-        // No dead "Plan my training" while the hold stands.
         rule.onAllNodesWithText(str(R.string.main_plan_prompt_cta)).fetchSemanticsNodes()
             .let { assertTrue("no Plan my training during the hold", it.isEmpty()) }
 
@@ -131,13 +128,11 @@ class OwnerJourneysTest {
         rule.assertCountEventually(sessionShown(), 1)
         rule.onAllNodesWithText(str(R.string.main_plan_prompt_cta)).fetchSemanticsNodes()
             .let { assertTrue("the plan is back without a second tap", it.isEmpty()) }
-        // The one confirm sent ResolveHold and switched the profile answer off.
         assertEquals(1, countOf("ResolveHold"))
         assertTrue("the profile answer is off in the log", lastProfileIsWell())
         assertProfileIllnessOff()
     }
 
-    // ── 2. Illness, check-in path: flu → one resolve → return check, once ─────
     @Test
     fun checkinFlu_holdsTraining_oneResolveTapLeadsIntoTheReturnCheckShownOnce() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -164,7 +159,6 @@ class OwnerJourneysTest {
         assertTrue(resolveLabels().isEmpty())
     }
 
-    // ── 3. Both illness sources at once → ONE resolve tap ends both ──────────
     @Test
     fun illInProfileAndFluCheckin_oneResolveTapEndsBoth() {
         QaHarness.seedLog(ctx, listOf(illProfile()))
@@ -193,7 +187,6 @@ class OwnerJourneysTest {
         assertProfileIllnessOff()
     }
 
-    // ── 4a. Remove plan (This week › ?) → "Plan my training" builds it ───────
     @Test
     fun removePlanThenPlanMyTraining_buildsASession() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -225,7 +218,6 @@ class OwnerJourneysTest {
         assertTrue("the tap logged GeneratePlan after the ClearPlan: $log", log.lastIndexOf("GeneratePlan") > log.lastIndexOf("ClearPlan"))
     }
 
-    // ── 4b. A health hold: the plan card is hidden or explains and leads to the cause ─
     @Test
     fun illnessHold_planCardIsNeverADeadButton() {
         QaHarness.seedLog(ctx, listOf(illProfile()))
@@ -251,7 +243,6 @@ class OwnerJourneysTest {
         rule.waitForState { EventDispatcher.model.value?.next_session != null }
     }
 
-    // ── 4c. Nothing to plan: says why, never a no-op button ─────────────────
     @Test
     fun nothingToPlan_saysWhyAndItsActionLeadsThroughSetupToASession() {
         QaHarness.seedLog(
@@ -297,7 +288,6 @@ class OwnerJourneysTest {
         assertTrue("setup logged the plan request after the new profile: $log", log.lastIndexOf("GeneratePlan") > log.lastIndexOf("SetProfile"))
     }
 
-    // ── 6. Head cold: the SAFETY card on the theme's surface, its action works ─
     @Test
     fun headColdCheckin_safetyCardSitsOnTheThemeSurfaceAndItsResolveWorks() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -330,7 +320,6 @@ class OwnerJourneysTest {
             close(actual, expected),
         )
 
-        // Its resolve action ends the eased-illness hold.
         val label = resolveLabels().single()
         rule.tapResolveAndConfirm(label)
         rule.waitForState { resolveLabels().isEmpty() }

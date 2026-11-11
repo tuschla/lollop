@@ -16,7 +16,7 @@ import org.robolectric.RobolectricTestRunner
 /**
  * [EventLog]: reading, repairing and rewriting the durable log around the core's
  * compaction (its rules are tested in `shared/src/log/tests.rs`), plus
- * [readBounded]'s guard on the other end of the same log: a restore reads a
+ * [streamValidateImport]'s guard on the other end of the same log: a restore reads a
  * user-chosen document before it may replace the log, and that read must stay
  * bounded.
  *
@@ -48,8 +48,6 @@ class EventLogTest {
 
     private val DAY = 86_400L
     private val torn = """{"LogSet":{"exercise":"Bench","weigh"""
-
-    // ── compact(): the core's rules over wire lines ──
 
     @Test
     fun compactAppliesTheCoresRulesAndKeepsANonJsonLine() {
@@ -106,8 +104,6 @@ class EventLogTest {
         )
     }
 
-    // ── load(): fresh-install vs compacted-empty (Core.restore's seed decision) ──
-
     private fun tempLog(): File =
         File.createTempFile("event-log", ".ndjson").apply { deleteOnExit() }
 
@@ -156,16 +152,12 @@ class EventLogTest {
         val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(listOf(run(5.0)), restored.lines)
-        // The durable log was compacted in place (atomic rewrite).
         assertEquals(listOf(run(5.0)), file.readLines().filter { it.isNotBlank() })
     }
 
-    // ── load(): drop crash-truncated lines, but never a valid-JSON future event
-    //    this build doesn't recognize (forward-compat) ──
-
     @Test
     fun loadGarbageCollectsATornLineAndRewritesTheFile() {
-        // A crash mid-appendText left a truncated, non-JSON record. Replay would
+        // A crash mid-append left a truncated, non-JSON record. Replay would
         // reject it on every launch, so load() drops it from the durable log too.
         val file = tempLog()
         file.writeText(
@@ -226,19 +218,17 @@ class EventLogTest {
         file.writeText(original.joinToString("\n") + "\n")
 
         val restored = EventLog.load(file, Core)
-        // Compaction still drops the superseded SetTodays (and keeps the check-in)...
         assertFalse(restored.lines.contains(setToday(1)))
         assertFalse(restored.lines.contains(setToday(2)))
         assertTrue(restored.lines.contains(setToday(60)))
         assertTrue(restored.lines.contains(oldCheckin))
         assertEquals(original.size - drops, restored.lines.size)
-        // ...but the durable file is left exactly as written.
         assertEquals(original, file.readLines().filter { it.isNotBlank() })
     }
 
     @Test
     fun loadSelfHealsANewlinelessTornTailThenAcceptsAnAppend() {
-        // A process kill mid-appendText left a newline-less partial last line.
+        // A process kill mid-append left a newline-less partial last line.
         // load() drops it AND rewrites the durable log with a trailing newline, so
         // the next append starts a fresh line instead of gluing its JSON onto the
         // torn bytes (which would lose that event on the next boot).
@@ -248,7 +238,6 @@ class EventLogTest {
         assertFalse(restored.freshInstall)
         assertEquals(listOf(set("a")), restored.lines)
         assertEquals(listOf(set("a")).joinToString("\n", postfix = "\n"), file.readText())
-        // A subsequent append lands on its own line → the whole log reparses.
         file.appendText(run(5.0) + "\n")
         val reloaded = EventLog.load(file, Core)
         assertEquals(listOf(set("a"), run(5.0)), reloaded.lines)
@@ -268,11 +257,9 @@ class EventLogTest {
         assertEquals(original.joinToString("\n", postfix = "\n"), file.readText())
     }
 
-    // ── read(): the export's view of the log must never mutate it ──
-
     @Test
     fun readCompactsWithoutTouchingTheLogOrItsTemporaries() {
-        // Everything load() would act on: a compactable prefix (≥5% dropped), a
+        // Everything load() would act on: a compactable prefix, a
         // torn newline-less tail, and leftover swap temporaries. read() runs while
         // the core may be appending, so it must change none of it.
         val file = tempLog()
@@ -393,7 +380,7 @@ class EventLogTest {
         val src = CountingSource(MAX_IMPORT_BYTES + 1)
         assertEquals(ImportCheck.Invalid, streamValidateImport(src, MAX_IMPORT_BYTES))
         // ...and the reader stops there instead of buffering the whole file: at most
-        // one 64 KiB chunk past the cap is ever pulled (bounded memory).
+        // one chunk past the cap is ever pulled (bounded memory).
         assertTrue(
             "read ${src.bytesRead} bytes past the cap",
             src.bytesRead <= MAX_IMPORT_BYTES + 64 * 1024,

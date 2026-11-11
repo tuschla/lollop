@@ -26,7 +26,6 @@ pub(in crate::app) struct CallCtx<'a> {
     pub(in crate::app) items: &'a [PlanItem],
 }
 
-/// Whether any lift in `items` has work logged.
 pub(in crate::app) fn lift_work_logged(items: &[PlanItem]) -> bool {
     items.iter().any(|it| !it.is_run() && it.has_work())
 }
@@ -111,7 +110,6 @@ fn applied_rule(r: &AdjustmentCall) -> Option<&'static str> {
 const FIRST_SET_CLAUSE: &str =
     " Log your first work set: if it feels as expected, the rest of the session stays as planned.";
 
-/// "1 rep" / "2 reps".
 pub(super) fn reps_word(n: u8) -> String {
     if n == 1 {
         "1 rep".into()

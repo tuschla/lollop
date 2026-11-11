@@ -60,7 +60,6 @@ impl HoldState {
         self.illness > IllnessLevel::None || self.pain
     }
 
-    /// The episode's worst state so far.
     fn worst(self, other: HoldState) -> HoldState {
         HoldState {
             illness: self.illness.max(other.illness),
@@ -68,7 +67,6 @@ impl HoldState {
         }
     }
 
-    /// The episode's worst state decides the return (fever > head cold > pain).
     fn return_kind(self) -> ReturnKind {
         match self.illness {
             IllnessLevel::FeverOrBelowNeck => ReturnKind::AfterFever,

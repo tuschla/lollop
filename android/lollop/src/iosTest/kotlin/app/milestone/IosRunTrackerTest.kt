@@ -73,7 +73,6 @@ class IosRunTrackerTest {
         timestamp = at,
     )
 
-    /** Let the main run loop run (the main-queue flow collectors). */
     private fun spin(seconds: Double) = NSRunLoop.mainRunLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(seconds))
 
     private fun deliver(vararg fixes: CLLocation) =
@@ -85,7 +84,6 @@ class IosRunTrackerTest {
     fun anArmedRunRecordsADeferredBatchInTimeOrder() {
         tracker.recorder.start(record = false, arming = true)
         assertTrue(stream.running)
-        // Eleven fixes, one a second, the newest now; delivered out of order.
         val fixes = (0..10).map { location(it, ageSec = 10.0 - it) }
         deliver(*fixes.shuffled().toTypedArray())
         assertTrue(RunSession.tracking.value, "the first fix of a batch passes the armed age gate")

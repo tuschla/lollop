@@ -47,8 +47,6 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.stringResource
 
-// ── Run cards (History "Runs" stream) ───────────────────────────────────────
-
 /**
  * The run's title: the user's own run-type tag when set ("Tempo run"), so the title
  * always matches the RUN TYPE chip in its detail; else the local weekday it started
@@ -121,8 +119,6 @@ internal fun runFaceLine(r: RunResultView, unit: DistanceUnit): String {
     val base = "${runDistLabel(r.distance_km, unit)} · ${runPaceLabel(r.distance_km, r.duration_min, unit)}"
     return if (r.duration_min > 0.0) "$base · ${formatElapsed((r.duration_min * 60.0).roundOrZero())}" else base
 }
-
-// ── Records, run rating and run progress ────────────────────────────────────
 
 /** Filled Accent pill for a record ("Fastest 5K", "New best"): OnAccent text holds
  *  AA on every theme's accent. Not an action, so no touch target. A [description]
@@ -300,7 +296,6 @@ private data class RecordCell(
  *  record's own logged stamp [observedAt] when the run is not listed. */
 internal fun recordDaySec(run: RunResultView?, observedAt: Long): Long = run?.let(::runDaySec) ?: observedAt
 
-/** One record cell: overline name, tabular figure, the day it was set; opens its run. */
 @Composable
 private fun RecordGridCell(cell: RecordCell, modifier: Modifier, onClick: () -> Unit) {
     Column(

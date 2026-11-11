@@ -460,7 +460,7 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
         view.face_lead
     );
     let mut ns = session(vec![view.clone()]);
-    crate::app::plan_views::apply_adjustments_to_session(
+    apply_adjustments_to_session(
         &mut ns,
         &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
         false,

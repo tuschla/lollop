@@ -4,10 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * The captured-but-unsaved-run condition is derived from [RunSession]
- * (`hasUnsavedCapture`), not kept in a composition `remember`, so it survives
- * rotation and Back+reopen. It drives the tracker control row, the locate-restart
- * effect, the BackHandler keep-sidecar branch and the startTracking refuse-guard.
+ * The captured-but-unsaved-run condition ([hasUnsavedCapture]) is derived from
+ * [RunSession], not kept in a composition `remember`, so it survives rotation and
+ * Back+reopen.
  */
 class TrackerStateTest {
 

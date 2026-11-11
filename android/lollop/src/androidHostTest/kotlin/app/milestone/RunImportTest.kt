@@ -26,7 +26,6 @@ class RunImportTest {
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
 
-    /** Metres → degrees of latitude (1° ≈ 111.2 km). */
     private fun deg(metres: Double) = metres / 111_195.0
 
     /** A GPX with one `<trkseg>` per segment of (lat, unix second) fixes on the meridian,
@@ -46,17 +45,14 @@ class RunImportTest {
         append("</gpx>")
     }.toByteArray()
 
-    /** A track ending at [endSec]: [metresPerFix] apart, one fix per 10 s, heading
-     *  north from the equator. */
     private fun track(endSec: Long, metresPerFix: Double, fixes: Int = 61): List<List<Pair<Double, Long>>> {
         val start = endSec - (fixes - 1) * 10L
         return listOf(List(fixes) { i -> i * deg(metresPerFix) to start + i * 10L })
     }
 
-    /** An easy 6:00 /km run: 27.8 m every 10 s. */
+    /** An easy 6:00 /km run. */
     private fun easyRun(endSec: Long) = track(endSec, metresPerFix = 27.8)
 
-    /** What the import makes of [bytes], through the real core. */
     private fun read(bytes: ByteArray) = runCatching { parseRunFile(bytes, Core::parseRunFile) }
 
     private fun plan(files: List<ParsedRunFile>, existing: Set<Long> = emptySet()) =

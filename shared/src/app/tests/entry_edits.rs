@@ -275,7 +275,6 @@ fn backdated_set_slots_into_the_pr_chain_chronologically() {
     assert!(vm.lifts[1].e1rm_pr);
 }
 
-// ── A zero-rep set with no hold is rejected (no fabricated e1RM) ──
 #[test]
 fn a_zero_rep_set_with_no_hold_is_rejected() {
     // A zero-rep set carries no e1RM (the formulas require reps >= 1); the core
@@ -313,7 +312,6 @@ fn a_zero_rep_set_with_no_hold_is_rejected() {
     let _ = app.view(&model); // must not panic
 }
 
-// ── Amending a same-second set preserves display + PR-chain order ──
 #[test]
 fn amend_of_a_same_second_set_preserves_order() {
     // Two Bench sets at the SAME second, distinct entry ids. AmendSet
@@ -358,7 +356,6 @@ fn amend_of_a_same_second_set_preserves_order() {
     assert!(lifts[1].e1rm_pr, "chain intact after amend");
 }
 
-// ── Amending a legacy (id 0) row whose DATE changed does not duplicate ──
 #[test]
 fn amend_legacy_date_change_replaces_not_duplicates() {
     let app = Engine;

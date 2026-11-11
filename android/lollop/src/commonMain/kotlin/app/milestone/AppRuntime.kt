@@ -27,13 +27,12 @@ internal object AppRuntime : BootLedger {
 
     @Volatile private var process = Process()
 
-    /** Common features, in start order; [platformFeatures] follow. */
+    /** Common features, in start order. */
     private val commonFeatures: List<AppFeature> = listOf(ActiveRunStore, SessionReminder, WidgetSurfaces)
 
     private val features: List<AppFeature> get() = commonFeatures + platformFeatures()
 
-    /** Start the process once: settings (migrated, then loaded), then every
-     *  feature. Later calls do nothing. */
+    /** Start the process once; later calls do nothing. */
     fun start(ctx: PlatformContext) {
         val p = process
         synchronized(p) {
@@ -52,8 +51,6 @@ internal object AppRuntime : BootLedger {
         start(ctx)
         features.forEach { it.onTimeChanged(ctx, zoneChanged) }
     }
-
-    // ── Boot ledger ─────────────────────────────────────────────────────────
 
     override var bootHandled: Boolean
         get() = process.bootHandled
@@ -89,10 +86,8 @@ internal object AppRuntime : BootLedger {
     }
 
     /**
-     * A fresh process for the next test, as Robolectric runs every test in one JVM:
-     * [AppProcess.reset] (its scope, every [ProcessLocal]), [AppCore.reset], the boot
-     * ledger cleared, nothing started. A test may run the process on its own
-     * [engine], event [sink] or [clock].
+     * A fresh process for the next test, as Robolectric runs every test in one JVM.
+     * A test may run the process on its own [engine], event [sink] or [clock].
      */
     fun resetForTest(engine: DurableCore? = null, sink: EventSink? = null, clock: WallClock = DeviceClock) {
         AppProcess.reset(clock)

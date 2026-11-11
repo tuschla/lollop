@@ -26,7 +26,6 @@ pub(super) fn illness_downgrade(inputs: &[ReadinessInput]) -> bool {
         .is_some_and(|v| IllnessSeverity::from_value(v) == IllnessSeverity::AboveNeck)
 }
 
-/// Any active illness report (head cold or worse).
 pub fn illness_active(inputs: &[ReadinessInput]) -> bool {
     illness_stop(inputs) || illness_downgrade(inputs)
 }
@@ -86,8 +85,6 @@ pub(super) fn rhr_bands(sd_bpm: f64) -> (f64, f64) {
     )
 }
 
-/// [`rhr_bands`] for the derived noise in `ctx`; without an SD the fixed KB
-/// bands apply.
 pub(super) fn rhr_thresholds(ctx: &RuleContext) -> (f64, f64) {
     rhr_bands(ctx.rhr.map_or(0.0, |n| n.sd_bpm))
 }
@@ -127,10 +124,8 @@ pub(super) fn rhr_verdict(inputs: &[ReadinessInput], ctx: &RuleContext) -> RhrVe
     }
 }
 
-// ---------------------------------------------------------------------------
 // Medical-referral deferrals (File 08 §5). Absolute: override every training
 // adjustment, including training-pain. `value > 0` encodes "flag present".
-// ---------------------------------------------------------------------------
 
 /// RED-S / low-energy-availability red flag (safety-049; the KB's own
 /// "safety-035" cross-refs are a numbering bug: no such block exists): never a
@@ -178,7 +173,6 @@ pub fn reds_referral() -> AdjustmentCall {
 
 /// The dominant medical-referral deferral, if any red flag is present.
 /// Deterministic priority: cardiovascular (acute) > bone stress > RED-S.
-/// Returns the deferral cited to its safety claim.
 fn medical_referral(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     if cardiac_defer(inputs) {
         Some(
@@ -199,10 +193,6 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
         None
     }
 }
-
-// ---------------------------------------------------------------------------
-// Readiness-stream rules (thresholds verbatim from File 06)
-// ---------------------------------------------------------------------------
 
 /// RPE delta (actual − target) bands (autoreg-001/002/004/005).
 pub(crate) const RPE_DELTA_WELL_ABOVE: f64 = 2.0;
@@ -298,7 +288,6 @@ pub(super) fn vl_threshold_pct(lift_goal: Option<LiftGoal>) -> f64 {
     strength::vl_termination_threshold(lift_goal.unwrap_or(LiftGoal::MaxStrength)).value * 100.0
 }
 
-/// Velocity-loss set-termination stop.
 /// autoreg-010: within-set VL ≥ goal threshold → terminate set (volume cut).
 /// `VelocityLoss` carries the % drop; the threshold is goal-dependent.
 pub(super) fn vl_stop(
@@ -397,8 +386,6 @@ pub(super) fn wellness_verdict(input: &ReadinessInput, ctx: &RuleContext) -> Wel
     }
 }
 
-/// Subjective-wellness adjustment from [`wellness_verdict`]: Hold caps the top
-/// end, Lower lowers the session.
 pub(super) fn wellness_downgrade_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
@@ -650,7 +637,6 @@ pub fn increase_hold(
         || rhr_verdict(inputs, ctx) != RhrVerdict::Normal
         || pain_blocks_progression(inputs)
         || illness_active(inputs);
-    // An e1RM *increase* (ratio > 1.05) is not a decline and does not suppress.
     let objective_perf_down = vl_stop(inputs, lift_goal).is_some()
         || decoupling_downgrade(inputs).is_some()
         || perf_decline(&e1rm_gate(inputs))
@@ -698,7 +684,6 @@ pub fn adjustments_in(
         return out;
     }
 
-    // Non-stop rules accumulate (deterministic order).
     let mut out = pain_recs;
     out.extend(rpe_load_adjust(inputs));
     out.extend(e1rm_gate(inputs));

@@ -6,7 +6,6 @@
 
 use super::{EntryKind, Event};
 
-/// A row's identity: its id ([`row_id`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntryRef {
     pub(crate) id: u64,
@@ -26,7 +25,6 @@ pub(crate) fn row_id(entry_id: u64, observed_at: i64) -> u64 {
     }
 }
 
-/// A stored row an edit can name.
 pub(crate) trait LoggedEntry {
     fn entry(&self) -> EntryRef;
 }
@@ -39,7 +37,7 @@ pub(crate) fn find_entry<T: LoggedEntry>(rows: &[T], target: EntryRef) -> Option
 /// Longest single activity `LogActivity` accepts, minutes (10 h).
 pub(crate) const ACTIVITY_MAX_MINUTES: f64 = 600.0;
 
-/// Whether a `LogActivity` stores a row: minutes in (0, 600].
+/// Whether a `LogActivity` stores a row.
 pub(crate) fn activity_is_valid(minutes: f64) -> bool {
     minutes > 0.0 && minutes <= ACTIVITY_MAX_MINUTES
 }
@@ -63,7 +61,6 @@ pub(crate) enum EntryOp {
     Delete,
 }
 
-/// The row facts of one entry event.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EntryEvent {
     pub(crate) kind: EntryKind,

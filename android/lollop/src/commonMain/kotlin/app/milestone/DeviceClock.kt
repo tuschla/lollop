@@ -17,7 +17,6 @@ internal interface WallClock {
     fun monotonicMillis(): Long
 }
 
-/** The device's clocks. */
 internal object DeviceClock : WallClock {
     override fun nowMillis(): Long = wallClockMillis()
 

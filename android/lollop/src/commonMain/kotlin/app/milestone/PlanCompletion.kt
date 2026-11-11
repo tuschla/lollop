@@ -152,7 +152,7 @@ internal fun reopenExercise(item: PrescriptionView, epochDay: Long, send: (Event
 
 /** The prescribed target band for a plan item's set-editor header: a hold band
  *  ("20–45 s"), else a rep band + the effort as reps left ("5–8 reps · ~2 left"),
- *  else the intensity label. Unit-testable outside composition. */
+ *  else the intensity label. */
 internal fun setTargetBand(res: PlatformResources, item: PrescriptionView): String {
     if (item.timed_hold) {
         return if (item.hold_low_sec > 0) {
@@ -209,7 +209,6 @@ internal fun fmtClock(totalSec: Int): String {
  *  belongs to an earlier bout, not the one before the next set. */
 internal const val RestReadoutWindowSec = 30 * 60
 
-/** What the loop's rest readout shows. */
 internal sealed interface RestFace {
     /** A prescribed rest still running: [leftSec] remain. */
     data class Counting(val leftSec: Int) : RestFace
@@ -223,8 +222,8 @@ internal sealed interface RestFace {
  *  overtime readout) until cancelled or replaced. */
 internal data class RestRun(val startMillis: Long, val endAtMillis: Long, val exercise: String)
 
-/** The rest the set loop is running, from the platform's rest timer (Android:
- *  `RestAlarm.running`, provided at the activity root); none without one. */
+/** The rest the set loop is running, from the platform's rest timer
+ *  ([RestAlarm.running], provided by [CoachScaffold]); none outside it. */
 internal val LocalRestRunning = staticCompositionLocalOf<StateFlow<RestRun?>> { NoRestRunning }
 
 private val NoRestRunning: StateFlow<RestRun?> = MutableStateFlow(null)
@@ -238,7 +237,7 @@ private val NoRestRunning: StateFlow<RestRun?> = MutableStateFlow(null)
  * its [RestReadoutWindowSec] window. A [nowMillis] up to one 1 s tick before the
  * rest's start (the ticker last read the clock just before the set was logged)
  * reads as the start, so the full rest shows at once instead of nothing until
- * the next tick; an earlier clock (set back mid-rest) shows nothing. Pure.
+ * the next tick; an earlier clock (set back mid-rest) shows nothing.
  */
 internal fun restFace(
     restStartMillis: Long?,
@@ -360,7 +359,7 @@ private fun RestClock(label: String, clock: String, color: Color, modifier: Modi
 /** What each planned slot shows: null = still open, "" = a full set (✓), else
  *  what a short set that still counted reached: its reps ("4" of a 5-rep
  *  target) or its hold seconds. A set is short when the core flags it (`short`)
- *  or its reps sit under the rep target. Pure. */
+ *  or its reps sit under the rep target. */
 internal fun setSlotMarks(item: PrescriptionView): List<String?> {
     val counted = item.logged_sets.filter { it.qualifies }
     return (0 until plannedSetCount(item)).map { i ->
@@ -555,7 +554,6 @@ private fun runStructureLine(s: RunStructureView): String {
     return if (continuous) stringResource(Res.string.plan_run_plus, line) else line
 }
 
-/** One quiet face line under a plan item's summary. */
 @Composable
 private fun FaceLine(text: String, color: Color = OnBgMuted) {
     Text(text, color = color, style = Type.Caption.merge(TabularFigures))
@@ -575,7 +573,6 @@ private fun PlanItemFace(
     isRun: Boolean,
     runHead: String?,
     weightUnit: WeightUnit,
-    distanceUnit: DistanceUnit,
     lastOnFace: String?,
 ) {
     val lines = buildList<String> {
@@ -665,14 +662,12 @@ private fun CalisControls(
     }
 }
 
-/** The `plan-item:<exercise>` test tag (`plan-item:run`, `plan-item:check`). */
 private fun planItemTag(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
     isCheck -> "plan-item:check"
     isRun -> "plan-item:run"
     else -> "plan-item:${item.exercise}"
 }
 
-/** What a plan item is called on its face and to a screen reader. */
 @Composable
 private fun planItemName(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
     isCheck -> stringResource(Res.string.plan_check_title)
@@ -695,7 +690,6 @@ internal fun planItemActionLabel(item: PrescriptionView, isRun: Boolean, isCheck
     else -> stringResource(Res.string.plan_log_set_n_of_n, nextSetNumber(item), plannedSetCount(item))
 }
 
-/** The full-width filled "do this next" action of the current plan item. */
 @Composable
 private fun PlanActionPill(label: String, subject: String, onClick: () -> Unit) {
     PrimaryButton(
@@ -841,7 +835,7 @@ internal fun OpenPlanItemCard(
                 Text(summary, color = OnBgBody, style = Type.BodyBold)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, distanceUnit, lastOnFace)
+                if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, lastOnFace)
                 safetyReason?.let { FaceLine(it, color = OnBgBody) }
                 note?.let { FaceLine(it) }
                 guide.forEach { FaceLine(it) }
@@ -981,7 +975,7 @@ internal fun SessionItemsEvidence(
 }
 
 /** The basis sentences every one of [bases] states, in the first one's order:
- *  what a shared evidence block says once. For a single item, all of them. Pure. */
+ *  what a shared evidence block says once. For a single item, all of them. */
 internal fun sharedBasisSentences(bases: List<List<String>>): List<String> {
     val head = bases.firstOrNull() ?: return emptyList()
     return head.filter { s -> bases.all { s in it } }

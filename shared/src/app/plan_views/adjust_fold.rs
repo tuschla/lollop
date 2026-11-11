@@ -14,7 +14,7 @@ use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, PainRegion};
 /// hero display fold and the per-day completion judgement share this composition
 /// so a set logged today reads the same on tomorrow's strip.
 #[derive(Clone, Copy, Default)]
-pub(super) struct AdjustFold {
+pub(in crate::app) struct AdjustFold {
     pub(super) vol_frac: f64,
     pub(super) load_frac: f64,
     pub(super) load_dropped: bool,
@@ -37,7 +37,6 @@ impl AdjustFold {
     }
 }
 
-/// Whether `r` is the above-neck (head cold) easy-session call.
 pub(super) fn head_cold(r: &AdjustmentCall) -> bool {
     r.kind() == AdjustmentKind::HeadCold
 }
@@ -80,8 +79,7 @@ pub(super) fn lift_downgrade(r: &AdjustmentCall) -> LiftDowngrade {
     }
 }
 
-/// Compose the adjustments in force on a day into their [`AdjustFold`].
-pub(super) fn fold_completion_adjustments(recs: &[AdjustmentCall]) -> AdjustFold {
+pub(in crate::app) fn fold_completion_adjustments(recs: &[AdjustmentCall]) -> AdjustFold {
     let mut f = AdjustFold::default();
     for r in recs {
         match &r.value {
@@ -144,7 +142,7 @@ pub(super) fn reduce_percent_intensity(intensity: &mut PlanIntensity, frac: f64)
 /// label and summary are re-rendered from the folded numbers. An unadjusted
 /// fold leaves the item untouched. The single numeric fold shared by the hero
 /// and every judged week row.
-pub(super) fn fold_item_numbers(it: &mut PlanItem, fold: AdjustFold, weight_lb: bool) {
+pub(in crate::app) fn fold_item_numbers(it: &mut PlanItem, fold: AdjustFold, weight_lb: bool) {
     if it.is_run() {
         if fold.vol_frac > 0.0 {
             cut_run_volume(it, fold.vol_frac);

@@ -7,7 +7,6 @@ use crate::schema::Recommended;
 use crate::strength::{self, LiftGoal};
 use crate::{hypertrophy, individualization};
 
-/// Strength + Hypertrophy rows for a lifting profile.
 pub(super) fn build_strength_guidance(pp: &PlanProfile, rows: &mut Vec<GuidanceView>) {
     let (p, age) = (pp.profile(), pp.training_age());
     push_lift_week_layout(pp, rows);
@@ -137,7 +136,6 @@ fn push_loading_rows(
     lr
 }
 
-/// The 1RM-test gate and, for a novice, the load-jump caps between attempts.
 fn push_one_rm_rows(age: individualization::TrainingAge, rows: &mut Vec<GuidanceView>) {
     // strength-040 1RM-test conditions. The plan never programs a max attempt
     // (every %1RM leaves `strength::MIN_STRENGTH_RIR` in reserve) and caps a
@@ -177,7 +175,6 @@ fn push_one_rm_rows(age: individualization::TrainingAge, rows: &mut Vec<Guidance
     }
 }
 
-/// The periodization model and its phase-by-phase prescription.
 fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<GuidanceView>) {
     let pm = strength::periodization_model(age);
     // Human label, not the raw Debug enum name (e.g. "Dup").
@@ -258,8 +255,6 @@ fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<G
     }
 }
 
-/// How load progresses: a fixed per-session jump for a novice, a weekly
-/// percentage after that.
 fn push_load_progression_row(
     p: &Profile,
     age: individualization::TrainingAge,
@@ -348,8 +343,6 @@ fn push_power_row(p: &Profile, age: individualization::TrainingAge, rows: &mut V
     }
 }
 
-/// Weekly-set frequency, session split, rep/load bands, the growth-target cap
-/// and MEV.
 fn push_hypertrophy_rows(
     p: &Profile,
     age: individualization::TrainingAge,

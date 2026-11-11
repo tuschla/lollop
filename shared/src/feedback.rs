@@ -1,6 +1,6 @@
 //! Feedback & coaching-communication decision core (knowledge-base File 05).
 //!
-//! Pure, deterministic message-category selection. Given observed session
+//! Message-category selection. Given observed session
 //! signals it decides *which* feedback category to emit; the app renders the
 //! copy for it.
 //!
@@ -13,11 +13,8 @@
 use crate::evidence::claims;
 use crate::schema::Recommended;
 
-// ---------------------------------------------------------------------------
-// Category taxonomy (File 05 §6.1)
-// ---------------------------------------------------------------------------
-
-/// The message category the engine emits for a session (File 05 decision tree).
+/// The message category the engine emits for a session (File 05 decision tree,
+/// §6.1).
 #[derive(
     serde::Serialize, serde::Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq,
 )]
@@ -77,10 +74,6 @@ pub enum CorrectiveTrigger {
     /// Aerobic decoupling >10% on an intended-aerobic run (feedback-014).
     DecouplingHigh,
 }
-
-// ---------------------------------------------------------------------------
-// 1. Safety gate: runs first (feedback-042)
-// ---------------------------------------------------------------------------
 
 /// The safety screens of a weekly check-in, the part of the review wire
 /// payload the safety gate reads (`SessionReview` flattens it, so these are
@@ -257,10 +250,6 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// 2. Execution evaluation: lifting (feedback-019/020/021/022)
-// ---------------------------------------------------------------------------
-
 /// Categorize a completed lifting set from reps-met + RIR vs target
 /// (feedback-019/020/021/022; FB-RIR-001). Trust RIR most within 1-3 reps
 /// of failure and in experienced lifters.
@@ -323,10 +312,6 @@ pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
     Recommended::new(FeedbackCategory::ContextualBadDay, claims::FB_BADDAY_001)
 }
 
-// ---------------------------------------------------------------------------
-// 3. Execution evaluation: running decoupling (feedback-012/013/014/043)
-// ---------------------------------------------------------------------------
-
 /// Categorize aerobic decoupling (Pa:HR) on an intended-aerobic run
 /// (feedback-012/013/014; RUN-DECOUPLE-001). Gated to cool, steady sub-threshold
 /// efforts (feedback-043), `None` when the context is confounded (heat, surges,
@@ -353,10 +338,6 @@ pub fn decoupling_feedback(
     };
     Some((Recommended::new(cat, claims::RUN_DECOUPLE_001), trigger))
 }
-
-// ---------------------------------------------------------------------------
-// 3b. Running intensity discipline (feedback-011/016)
-// ---------------------------------------------------------------------------
 
 /// Share of an easy run's duration above the Zone-2/VT1 ceiling beyond which
 /// intensity discipline is flagged (feedback-011: "more than ~25%"; RUN-DIST-001).
@@ -400,10 +381,6 @@ pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<Fee
     }
 }
 
-// ---------------------------------------------------------------------------
-// 4. Top-level resolution: safety short-circuits execution (feedback-042)
-// ---------------------------------------------------------------------------
-
 /// Resolve the cycle's single feedback category from the [`safety_gate`]
 /// verdict: a concern wins (suppressing the supplied execution praise).
 /// Otherwise emit the execution category, defaulting to an informational,
@@ -416,10 +393,6 @@ pub fn resolve_feedback(
         Recommended::new(FeedbackCategory::InformationalNeutral, claims::FEEDBACK_001)
     })
 }
-
-// ---------------------------------------------------------------------------
-// 4b. Referral appendix & personalization (feedback-035/023/024/005)
-// ---------------------------------------------------------------------------
 
 /// Clinician-prompt copy appended to a female user's bone-stress referral
 /// (feedback-035). Gentle, no self-diagnosis, the referral itself stays the
@@ -474,14 +447,6 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
     };
     Recommended::new(v, claims::FB_VERBOSITY_001)
 }
-
-// ---------------------------------------------------------------------------
-// 5. Voice constraints & contested-metric guards
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// 6. Longitudinal trend summary (feedback-027/028/029)
-// ---------------------------------------------------------------------------
 
 /// Which way a measured change went: a rolling multi-week metric versus
 /// day-to-day noise, or one set's e1RM versus the previous (wire: lowercase).
@@ -548,10 +513,6 @@ pub fn trend_summary(
     };
     Recommended::new(summary, claims::FB_TREND_001)
 }
-
-// ---------------------------------------------------------------------------
-// 7. Tone-by-context & pre-baseline provisional framing (feedback-026/040)
-// ---------------------------------------------------------------------------
 
 /// Days of logged data after which a stable per-user baseline exists and the
 /// provisional framing ends. FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).

@@ -107,7 +107,6 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 import org.jetbrains.compose.resources.stringResource
 
-/** How long the "Logged … · Undo" row stays after a loop save. */
 private const val UndoWindowMs = 8_000L
 
 /** Snackbar-style "Logged … · Undo" row above the loop's primary action. The
@@ -155,7 +154,6 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
             .clip(RoundedCornerShape(Space.Card.dp))
             .background(OnBgBody)
             .padding(start = Space.Card.dp),
-        // Under the line, the row keeps the start inset at its end too.
         stackedEndInset = Space.Card.dp,
     ) { _, undoWidth, width ->
         measurer.measure(text, style, constraints = Constraints(maxWidth = (width - undoWidth).coerceAtLeast(0)), density = density)
@@ -163,7 +161,6 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
     }
 }
 
-/** Lines the "Logged …" text may take beside Undo before Undo moves under it. */
 private const val UndoRowMaxLinesBeside = 2
 
 /**
@@ -221,8 +218,6 @@ fun LogSetEditor(
     val focusManager = LocalFocusManager.current
     // Cue loads are applied in today's loop: a past day's entry never reads them.
     val cueFor: (PrescriptionView) -> AppliedCue? = if (initialObservedAt == null) AppliedCueLoads::forItem else { _ -> null }
-    // NEW-entry coach prefill (null in EDIT mode): seeds the fields below, all
-    // still user-editable. `initial` always wins so an EDIT is never clobbered.
     val rx = if (initial == null) prescription?.let { prescriptionPrefill(it, weightUnit, cueFor(it)) } else null
     // Field seeds: an edited row prefills from itself, a coach prescription seeds a
     // NEW entry, and a blank open seeds NOTHING (empty exercise/weight, no
@@ -234,7 +229,6 @@ fun LogSetEditor(
     // only a hint on the scale), an untouched Save logs it unrated (0.0, which the
     // core reads as "not recorded"), and it is never carried into the next set.
     var fields by rememberSaveable(stateSaver = SetEditorState.Saver) { mutableStateOf(SetEditorState.from(seed)) }
-    // The current exercise's match key, and those of the prescribed hold rungs.
     val exerciseKey = remember(fields.exercise) { nameKey(fields.exercise) }
     val holdSet = remember(inputs.holdExercises) { nameKeys(inputs.holdExercises.toList()).toHashSet() }
     // Hold mode follows the CURRENT exercise: a prescribed hold rung, OR editing an
@@ -371,7 +365,6 @@ fun LogSetEditor(
         KeepScreenOn()
         RestAlarmInAppScope()
     }
-    // The undo row expires on its own after a short window.
     LaunchedEffect(undoEntryId) {
         if (undoEntryId != null) {
             delay(UndoWindowMs)
@@ -385,8 +378,6 @@ fun LogSetEditor(
     // it dirty.
     fun reseedTo(name: String, markDirty: Boolean = true) {
         fields = fields.reseededTo(name, planSession?.items.orEmpty(), recentLifts, weightUnit, cueFor)
-        // A picked exercise closes the picker again (it stays open while the
-        // name matches no plan item).
         pickerOpen = false
         keypadOpen = false
         focusManager.clearFocus()
@@ -421,7 +412,7 @@ fun LogSetEditor(
         }
     }
 
-    val weightParsed = parseKeypadNumber(fields.weightText)
+    val weightParsed = fields.weightText.toDoubleOrNull()
     // Ranges/chips read in the displayed unit. The lb bound is the EXACT converted
     // kg ceiling (881.85 lb, not a rounded 880) so a wire-valid near-max kg value
     // stays editable in lb mode; the range hint rounds it for display but
@@ -455,7 +446,6 @@ fun LogSetEditor(
             undoIsWarmUp = false
             undoLine = "$name ${liftSetLine(res, setHold, kg, setReps, effort ?: 0.0, effort != null, weightUnit)}"
             pendingQualifyId = id
-            // A set with no prescribed rest leaves a running rest alone.
             val rest = liveItem?.rest_sec ?: 0
             undoRestScheduled = rest > 0
             if (rest > 0) RestAlarm.schedule(ctx, rest, name)
@@ -528,7 +518,6 @@ fun LogSetEditor(
     val cueLoadKg = cue?.suggested_load_kg?.takeIf { s ->
         !(fields.weightFresh && fields.weightVerbatim?.let { abs(it - s) < 1e-6 } == true)
     }
-    // "Use 140 kg": its label and the action that puts the load in the field.
     val cueLoad: Pair<String, () -> Unit>? = cueLoadKg?.let { kg ->
         stringResource(Res.string.log_cue_use_load, "${loadFigure(kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}") to {
             fields = fields.copy(weightText = loadFigure(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
@@ -823,8 +812,6 @@ fun LogSetEditor(
                             hint = notes.joinToString("\n").ifEmpty { null },
                         )
                     }
-                    // The keypad shows only while the weight is being typed (tap the
-                    // well), right under it; the ± chips cover a plate change.
                     KeypadPanel(keypadOpen) {
                         NumericKeypad(
                             fields.weightText,
@@ -834,9 +821,6 @@ fun LogSetEditor(
                         )
                     }
                 }
-                // Hold (calisthenics static rung): seconds instead of reps. Otherwise a
-                // reps tap-scale up to [SetRepsScaleMax]. Picking reps or effort hands
-                // focus away from the weight, so the keypad folds.
                 if (holdMode) {
                     val holdLabel = stringResource(Res.string.log_field_hold)
                     FieldLabel(holdLabel)
@@ -845,8 +829,7 @@ fun LogSetEditor(
                     }
                 } else {
                     // The picked cell is the readout; only a logged count past the tap
-                    // scale (which no cell can show) is spelled out. With no count yet
-                    // the row opens centred on the common 8–10 band, nothing picked.
+                    // scale (which no cell can show) is spelled out.
                     val repsLabel = stringResource(Res.string.log_field_reps)
                     FieldLabel(repsLabel, fields.reps?.takeIf { it > SetRepsScaleMax }?.let { "$it" })
                     Box(Modifier.testTag("reps-scale")) {
@@ -913,17 +896,16 @@ private fun Modifier.shownOnly(shown: Boolean): Modifier =
         }
     }
 
-/** A cell's reps-left figure: "4+", "3" … "0". */
 private fun repsLeftFigure(rpe: Double): String {
     val rir = repsLeft(rpe)
     return if (rir >= 4.0) "4+" else "${rir.toInt()}"
 }
 
-/** The effort scale as one row of five equal cells, reps left ("4+" … "0"),
- *  filled when picked; the coach's target is stated in the field label, never
- *  drawn on a cell. Tapping the picked cell clears it ([onPick] null). A stored
- *  half-point effort (from an older entry) matches no cell and is shown in the
- *  label instead. TalkBack reads "2 reps left". Tagged `effort-scale`. */
+/** The effort scale as one row of cells, reps left ("4+" … "0"), filled when
+ *  picked; the coach's target is stated in the field label, never drawn on a
+ *  cell. Tapping the picked cell clears it ([onPick] null). A stored half-point
+ *  effort (from an older entry) matches no cell and is shown in the label
+ *  instead. TalkBack reads "2 reps left". */
 @Composable
 private fun EffortScaleRow(current: Double?, onPick: (Double?) -> Unit) {
     Row(
@@ -1039,11 +1021,10 @@ private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit:
 }
 
 /** New-entry reps tap-scale ceiling. The core accepts far higher counts and the
- *  EDIT path preserves an out-of-range seed, but the tap scale needs a bound; 200
- *  covers high-rep calisthenics (air squats, push-ups) without a 10k-cell row. */
+ *  EDIT path preserves an out-of-range seed, but the tap scale needs a bound
+ *  that covers high-rep calisthenics (air squats, push-ups) without a 10k-cell row. */
 private const val SetRepsScaleMax = 200
 
-/** The tap scales, built once: the reps scale has 200 cells. */
 private val RepsScale = (1..SetRepsScaleMax).toList()
 private val HoldScale = HoldSecRange.toList()
 

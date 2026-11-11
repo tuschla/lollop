@@ -1,17 +1,11 @@
 package app.milestone
 
-// The keypad's text buffers: what a key does to one, and the buffer of a bodyweight,
-// distance or timer value in the display unit and back. Pure.
-
-/** Longest buffer [editNumericBuffer] accepts. */
 private const val NumericBufferMaxLength = 6
 
 /**
  * Apply one keypad key to a numeric text buffer. `replaceAll` implements
  * calculator-style entry: the first key after (re)activating a field starts a
- * fresh number. A second decimal point is ignored, a leading '.' becomes "0.",
- * a digit replaces a lone "0", and the length is capped at
- * [NumericBufferMaxLength]. Parsing and validation stay with the caller.
+ * fresh number. Parsing and validation stay with the caller.
  */
 fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
     val base = if (replaceAll) "" else text
@@ -68,14 +62,14 @@ internal const val HMS_DIGITS_MAX = 6
 
 /** A timer-style digit buffer filled right to left ("14530" = 1:45:30) as hours,
  *  minutes and seconds; null when empty, longer than [HMS_DIGITS_MAX] or not all
- *  digits. Each caller applies its own validity rule. Pure. */
+ *  digits. Each caller applies its own validity rule. */
 internal fun hmsDigits(digits: String): Triple<Int, Int, Int>? {
     if (digits.isEmpty() || digits.length > HMS_DIGITS_MAX || !digits.all { it.isDigit() }) return null
     val p = digits.padStart(HMS_DIGITS_MAX, '0')
     return Triple(p.substring(0, 2).toInt(), p.substring(2, 4).toInt(), p.substring(4, 6).toInt())
 }
 
-/** A timer-style digit buffer as shown: "1:45:30", "45:30", "0:30"; "" when empty. Pure. */
+/** A timer-style digit buffer as shown: "1:45:30", "45:30", "0:30"; "" when empty. */
 internal fun hmsDisplay(digits: String): String {
     if (digits.isEmpty()) return ""
     val p = digits.padStart(HMS_DIGITS_MAX, '0').takeLast(HMS_DIGITS_MAX)
@@ -86,7 +80,7 @@ internal fun hmsDisplay(digits: String): String {
 }
 
 /** Whole seconds as the timer-style digit buffer that displays them
- *  (6330 → "14530"); "" for zero. Pure. */
+ *  (6330 → "14530"); "" for zero. */
 internal fun secondsToHmsDigits(sec: Int): String {
     val h = sec / 3600
     val m = sec % 3600 / 60

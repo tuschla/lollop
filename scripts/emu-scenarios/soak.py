@@ -6,7 +6,7 @@
                            (bash, seconds after the feed starts), DIR/expected.json
   analyze LOG EXPECTED T0 FEED CORE FINISH HISTORY OUT
                            the saved tracked run (event log LOG) against the fed
-                           route, the core's figures (CORE: track_figures_of_record
+                           route, the core's figures (CORE: track_figures example
                            output, may be missing) and the Finish sheet / History
                            row text → OUT (result.json)
   checks RESULT CHECKS     the tracked run's rows (scenario "gps") into checks.tsv
@@ -173,7 +173,7 @@ def checks(resp, checksp):
     chk(g["tracked_runs_in_log"] == 1, "exactly one tracked run saved", f"{g['tracked_runs_in_log']} LogRunTrack event(s) in the log")
     chk(g.get("workout_type") == "Easy", "run type chosen on Finish is saved", f"workout_type {g.get('workout_type')!r}")
     if g["tracked_runs_in_log"] and not g["core"]:
-        chk(False, "core figures of the saved run", "cargo test --test track_figures_of_record failed: gps/core-cargo.log")
+        chk(False, "core figures of the saved run", "cargo run --example track_figures failed: gps/core-cargo.log")
     elif g["tracked_runs_in_log"]:
         c = g["core"]
         fed, recm = e["fed_moving_m"], c["distance_m"]

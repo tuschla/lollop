@@ -310,8 +310,6 @@ fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
     );
 }
 
-// ── Planned deload days survive a re-made plan and mid-week profile edits ──
-
 /// 2026-01-05, a Monday.
 const DELOAD_START: i64 = 20_458;
 

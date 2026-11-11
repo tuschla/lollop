@@ -14,13 +14,11 @@ public interface SurfaceHost {
     /** Start or update the run's Live Activity. */
     public fun updateRunActivity(json: String)
 
-    /** End the run's Live Activity. */
     public fun endRunActivity()
 
     /** Start or update the rest's Live Activity. */
     public fun updateRestActivity(json: String)
 
-    /** End the rest's Live Activity. */
     public fun endRestActivity()
 }
 

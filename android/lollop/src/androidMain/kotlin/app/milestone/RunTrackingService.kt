@@ -64,22 +64,13 @@ class RunTrackingService : Service() {
     // timers and every notification write, so no state needs a lock.
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // The recording state machine shared with iOS: locate preview, armed start,
-    // recording, pause, the signal-loss watchdog and the step ticker ([RunRecorder]).
-    // This service is its host: the foreground notification, the location engine,
-    // the vibration/tone cues and the screen-off-safe timers ([Host]).
     private val recorder = RunRecorder(Host())
 
-    // Main-thread scope for the paused-flow refresh ([refreshSurfaceOnPause]);
-    // cancelled in onDestroy. Main.immediate keeps every notification write on the
-    // main thread, serialized with onFix's, so lastNotifiedFrame needs no lock.
     private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
-    // The last notification frame actually posted (content line, chip text, step
-    // bar), so [notifyIfChanged] re-posts ONLY when what is shown changes rather than
-    // rebuilding + notify() on every ~1 Hz fix. While recording it changes ~once/sec
-    // anyway (moving time ticks), but a paused/standing-still stretch, and every
-    // locate-preview fix, whose notification is static, then costs nothing.
+    // The last notification frame actually posted. Fixes arrive at ~1 Hz; re-posting
+    // only on a change makes a paused/standing-still stretch and every locate-preview
+    // fix (a static notification) cost nothing.
     private var lastNotifiedFrame: RunNotifFrame? = null
 
     // The user swiped the notification away (its delete intent, possible for a
@@ -88,8 +79,6 @@ class RunTrackingService : Service() {
     // until the next explicit start ([startLocationForeground] clears it).
     private var notifDismissed = false
 
-    // Cached notification-building state: the PendingIntents and one builder per
-    // [NotifShape], so the ~1 Hz recording refresh only re-sets the content line.
     private val openTrackerPending by lazy { openPendingIntent(this, OpenDest.Track) }
     private val pausePending by lazy { servicePendingIntent(ACTION_PAUSE) }
     private val resumePending by lazy { servicePendingIntent(ACTION_RESUME) }
@@ -109,11 +98,8 @@ class RunTrackingService : Service() {
     // keeps the service alive instead of being torn down before its startForeground.
     private var lastStartId = 0
 
-    // The step-change beep, created on the first cue and released on teardown.
     private var toneGenerator: ToneGenerator? = null
 
-    /** [RunRecorder]'s platform side: the foreground notification, the location
-     *  engine, the vibration/tone cues and the main-looper timers. */
     private inner class Host : RecorderHost {
         // The fixes' timebase (Location.elapsedRealtimeNanos), so sensor time.
         override fun nowNanos(): Long = SystemClock.elapsedRealtimeNanos()
@@ -226,19 +212,16 @@ class RunTrackingService : Service() {
         }
     }
 
-    /** Everything one refresh shows ([runSurfaceText], counts in Latin digits as every
-     *  notification's, AppLocale.kt): the content line, the Live Update chip text and,
-     *  for a guided run, the step bar. Its equality is the [notifyIfChanged] throttle
-     *  key, so a pause or a lost signal re-posts. */
+    /** What one refresh shows ([runSurfaceText]; counts in Latin digits as in every
+     *  notification, AppLocale.kt). Its equality is the [notifyIfChanged] throttle key. */
     private fun currentNotifFrame(): RunNotifFrame {
         val state = recorder.surfaceState()
         val text = runSurfaceText(state, appResources())
         return RunNotifFrame(content = text.line, chip = text.chip, steps = state.step?.let(::stepBar))
     }
 
-    /** A short beep on the notification stream for a step change. Best-effort: a
-     *  device without a tone generator, or one that refuses it, stays silent (the
-     *  buzz still fires). */
+    /** Best-effort: a device without a tone generator, or one that refuses it, stays
+     *  silent (the buzz still fires). */
     private fun playStepTone() {
         runCatching {
             val tone = toneGenerator ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, STEP_TONE_VOLUME).also { toneGenerator = it }
@@ -278,8 +261,6 @@ class RunTrackingService : Service() {
         getSystemService(NotificationManager::class.java).notify(AndroidIds.RUN_NOTIFICATION, buildNotification(frame))
     }
 
-    /** One engine fix, handed to the recorder ([RunRecorder.onFix]). Shared by both
-     *  engines. */
     private fun onFix(loc: Location, batchSize: Int) = recorder.onFix(
         LiveFix(
             lat = loc.latitude,
@@ -296,8 +277,6 @@ class RunTrackingService : Service() {
         AppRuntime.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
         ensureLiveChannel(this, CHANNEL, appResources().getString(R.string.track_notif_channel_name), RETIRED_CHANNEL)
-        // Screen on/off drives the GPS cadence: while the screen is off the
-        // engine drops to a coarser interval to cut idle battery drain.
         // SCREEN_ON/OFF are protected system broadcasts (dynamic registration only,
         // no permission). No-op unless a stream is running (the engine guards it).
         val receiver = object : BroadcastReceiver() {
@@ -317,8 +296,7 @@ class RunTrackingService : Service() {
             },
         )
         // A pause toggled in-app (or by the notification's action) re-posts the
-        // notification so its copy and Pause/Resume label match; notifyIfChanged
-        // posts nothing before startForeground or when the shown line is unchanged.
+        // notification so its copy and Pause/Resume label match.
         refreshSurfaceOnPause(serviceScope, ::notifyIfChanged)
     }
 
@@ -357,16 +335,9 @@ class RunTrackingService : Service() {
                 requireMoving = intent?.getBooleanExtra(EXTRA_REQUIRE_MOVING, false) ?: false,
             )
             ACTION_STOP -> recorder.stop()
-            // Notification Pause/Resume. Only a live recording may toggle: on a
-            // locate/armed instance the paused-flow collector would post a
-            // notification with no foreground service behind it.
             ACTION_PAUSE -> recorder.setPaused(true)
             ACTION_RESUME -> recorder.setPaused(false)
-            // "Start now" while armed: begin recording at once, skipping the start
-            // gates. Only the live armed stream of the current session may begin.
             ACTION_START_NOW -> recorder.startNow()
-            // The user dismissed the notification: stop re-posting until the next
-            // explicit start.
             ACTION_NOTIF_DISMISSED -> notifDismissed = true
         }
         // NOT_STICKY: if the OS kills us mid-run it must not recreate the service
@@ -410,18 +381,13 @@ class RunTrackingService : Service() {
         lastNotifiedFrame = frame
     }
 
-    /** The notification "shape": what decides the title and which actions show, so
-     *  [buildNotification] can cache one builder per shape and reuse it across every
-     *  fix that keeps the same shape (only the per-frame fields change). */
+    /** What decides the title and which actions show; [buildNotification] caches one
+     *  builder per shape. */
     private data class NotifShape(val title: StringResource, val canPause: Boolean, val paused: Boolean, val ownsRun: Boolean)
 
     private fun buildNotification(frame: RunNotifFrame): Notification {
         val phase = recorder.surfaceState().phase
         val shape = NotifShape(phase.titleRes, phase.canPause, phase == RunSurfacePhase.Paused, phase != RunSurfacePhase.Locating)
-        // Per-fix hot path: while steady recording the shape (title + which
-        // actions show) never changes, so reuse the builder cached for it and only
-        // re-set the per-frame fields + build(). A state change (pause toggle, armed →
-        // recording) rebuilds the builder once.
         val builder = cachedBuilder?.takeIf { cachedShape == shape } ?: buildBuilder(shape).also {
             cachedBuilder = it
             cachedShape = shape
@@ -429,10 +395,6 @@ class RunTrackingService : Service() {
         return buildRunNotification(builder, frame)
     }
 
-    /** Build the ongoing-notification [NotificationCompat.Builder] for one notification
-     *  [shape] (the title + which actions show). Cached by [buildNotification] and
-     *  reused across every fix that keeps the same shape; the content text, chip and
-     *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
         val res = appResources()
         val builder = runNotificationBuilder(
@@ -480,8 +442,6 @@ class RunTrackingService : Service() {
         private const val ACTION_START = "app.milestone.action.START"
         private const val ACTION_ARM = "app.milestone.action.ARM"
         private const val ACTION_STOP = "app.milestone.action.STOP"
-        // Notification Pause/Resume actions (getService PendingIntents): toggle the
-        // shared RunSession.paused flag from the lockscreen.
         private const val ACTION_PAUSE = "app.milestone.action.PAUSE"
         private const val ACTION_RESUME = "app.milestone.action.RESUME"
         private const val ACTION_START_NOW = "app.milestone.action.START_NOW"
@@ -497,7 +457,7 @@ class RunTrackingService : Service() {
         private val STARTING_ACTIONS = setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)
 
         // Step-change beep: volume (percent of the notification stream's max) and
-        // duration (ms) of one short cue.
+        // duration (ms).
         private const val STEP_TONE_VOLUME = 90
         private const val STEP_TONE_MS = 350
 
@@ -621,8 +581,7 @@ internal fun stepBar(p: StepProgress): StepBar? {
     return StepBar(segments, (p.index * STEP_BAR_UNITS + within).coerceIn(0, max))
 }
 
-/** One refresh of the run notification: the content line, the chip text and, for a
- *  guided run, the step bar. Equality is the service's re-post throttle key. */
+/** One refresh of the run notification. Equality is the service's re-post throttle key. */
 internal data class RunNotifFrame(val content: String, val chip: String, val steps: StepBar?)
 
 /**
@@ -694,7 +653,7 @@ internal fun hasFineLocation(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
 
-/** A high-accuracy fix stream (~1–2 s cadence screen-on, ~3–4 s screen-off).
+/** A high-accuracy fix stream.
  *  [start] delivers each fix on the main thread and invokes [onError] on an ASYNC
  *  start failure the caller's try/catch can't observe (the fused Task failing);
  *  [stop] unregisters and is a safe no-op if not started. */
@@ -706,8 +665,8 @@ private interface LocationEngine {
     fun stop()
 }
 
-/** Foreground (screen-on) recording cadence: fused request interval / min interval
- *  (ms), and the platform GPS interval (ms). ~1–2 s, full route fidelity. */
+/** Foreground (screen-on) recording cadence for full route fidelity: fused request
+ *  interval / min interval (ms), and the platform GPS interval (ms). */
 private const val FUSED_FG_INTERVAL_MS = 2000L
 private const val FUSED_FG_MIN_INTERVAL_MS = 1000L
 private const val PLATFORM_FG_INTERVAL_MS = 1000L
@@ -719,8 +678,8 @@ private const val FUSED_BG_INTERVAL_MS = 4000L
 private const val FUSED_BG_MIN_INTERVAL_MS = 3000L
 private const val PLATFORM_BG_INTERVAL_MS = 4000L
 
-/** Platform GPS minimum displacement (m) between updates: none, so every fix is
- *  delivered and standing-still wander is handled by the moving-speed floor
+/** Platform GPS minimum displacement (m) between updates. Every fix is delivered;
+ *  standing-still wander is handled by the moving-speed floor
  *  ([CoreConstants.MIN_MOVING_SPEED_MPS]) like the fused stream. */
 private const val PLATFORM_MIN_DISTANCE_M = 0f
 
@@ -810,12 +769,12 @@ private class PlatformEngine(private val ctx: Context) : LocationEngine {
         stop()
         // GPS_PROVIDER needs FINE: a coarse-only grant would throw from inside
         // requestLocationUpdates on de-Googled devices. Throw the same exception
-        // eagerly so the service's startTracking catch unwinds one way.
+        // eagerly so the service's startStream catch unwinds one way.
         if (!hasFineLocation(ctx)) {
             throw SecurityException("ACCESS_FINE_LOCATION not granted: GPS provider unavailable")
         }
         // A device without GNSS (Wi-Fi-only tablet) has no GPS provider; requesting it
-        // throws IllegalArgumentException, which startTracking unwinds cleanly.
+        // throws IllegalArgumentException, which startStream unwinds cleanly.
         if (LocationManager.GPS_PROVIDER !in lm.allProviders) {
             throw IllegalArgumentException("no GPS provider on this device")
         }
@@ -837,7 +796,7 @@ private class PlatformEngine(private val ctx: Context) : LocationEngine {
     override fun setBackground(background: Boolean) {
         if (background == this.background) return
         this.background = background
-        val l = listener ?: return // not started → nothing to re-cadence
+        val l = listener ?: return
         // Re-register at the new interval. A runtime-permission revocation kills the
         // process, and the PROVIDERS_CHANGED receiver in RunTracking.kt covers a toggled
         // location service while the screen is composed, so a thrown SecurityException here
@@ -850,8 +809,7 @@ private class PlatformEngine(private val ctx: Context) : LocationEngine {
 
     @SuppressLint("MissingPermission")
     private fun request(l: LocationListener) = lm.requestLocationUpdates(
-        // 1 s (screen on) / 4 s (screen off); the shell thins at save time
-        // (`RunSession.decimatedTrackForCore`).
+        // The shell thins at save time (`RunSession.decimatedTrackForCore`).
         LocationManager.GPS_PROVIDER,
         if (background) PLATFORM_BG_INTERVAL_MS else PLATFORM_FG_INTERVAL_MS,
         PLATFORM_MIN_DISTANCE_M,

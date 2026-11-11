@@ -15,7 +15,6 @@ class FrameLongitudesTest {
 
     @Test
     fun ordinaryTrackKeepsNaiveBounds() {
-        // A normal local run well clear of the dateline: plain min/max, west < east.
         val b = frameLongitudes(listOf(13.40, 13.38, 13.42, 13.39))
         assertEquals(13.38, b.west, 1e-9)
         assertEquals(13.42, b.east, 1e-9)

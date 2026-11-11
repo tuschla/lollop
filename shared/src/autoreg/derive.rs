@@ -7,7 +7,7 @@
 //! synthetic [`ReadinessInput`]s, so every emitted judgement still travels with
 //! the rule's own registry evidence via the normal path.
 //!
-//! Pure + deterministic: time enters only through each check-in's `observed_at`
+//! Time enters only through each check-in's `observed_at`
 //! (day-bucketed); a bad or non-positive stamp is skipped, never a panic.
 
 use super::prescriptions::{HRV_MIN_WEEKLY_READINGS, HRV_QC_LOOKBACK, suspend_hrv_gating};
@@ -118,8 +118,6 @@ enum Normalize {
 /// single-day downgrade on its own.
 const WELLNESS_SD_FLOOR: f64 = 0.25;
 
-/// Baseline SD from a sum of squared deviations over `count` readings, per
-/// normalization mode.
 fn mode_sd(mode: Normalize, sq_sum: f64, count: f64) -> f64 {
     match mode {
         Normalize::Z => (sq_sum / count).sqrt(),
@@ -188,10 +186,8 @@ pub struct DerivedReadiness {
     pub rhr: Option<RhrNoise>,
 }
 
-/// Top of the 1–5 check-in item scale (5 = maxed).
 const CHECKIN_ITEM_MAX: f64 = 5.0;
 
-/// Clamp a 1–5 human scale item to its range as f64.
 fn scale5(v: u8) -> f64 {
     (v as f64).clamp(1.0, 5.0)
 }
@@ -212,7 +208,6 @@ fn checkin_soreness_to_seven_point(raw: f64) -> f64 {
 /// morning still counts, so a single bad item can trip the floor or the z
 /// downgrade (HARD RULE 3). `None` when no item was answered.
 pub(super) fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
-    // (item, reverse-scored): higher soreness, fatigue and stress are worse.
     let items = [
         (c.sleep_quality, false),
         (c.soreness, true),
@@ -227,12 +222,10 @@ pub(super) fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
     if n == 0.0 { None } else { Some(sum / n) }
 }
 
-/// The HRV channel's reading: a positive RMSSD (ms).
 fn hrv_reading(c: &CheckinInput) -> Option<f64> {
     c.hrv_rmssd_ms.filter(|v| *v > 0.0)
 }
 
-/// The resting-HR channel's reading: a positive bpm.
 fn rhr_reading(c: &CheckinInput) -> Option<f64> {
     c.resting_hr_bpm.filter(|v| *v > 0.0)
 }
@@ -426,8 +419,6 @@ impl Scorer<'_> {
         (mean, mode_sd(self.mode, sq_sum, count))
     }
 
-    /// The reading at `idx` normalized against `(mean, sd)`, then the wellness
-    /// absolute-floor rung.
     fn normalize(&self, idx: usize, (mean, sd): (f64, f64)) -> f64 {
         let raw = self.series[idx].1;
         let base = match self.mode {
@@ -509,8 +500,6 @@ fn streak_pass(scorer: &Scorer, streak_predicate: impl Fn(f64) -> bool) -> (Vec<
     (day_values, streak_len)
 }
 
-/// Sum and count of the per-day values over the trailing `window` local days
-/// (`newest_day − day < window`), summed in day order.
 fn trailing_sum(series: &[DaySample], day_values: &[f64], window: i64) -> (f64, usize) {
     let newest = series[series.len() - 1].0;
     series
@@ -520,14 +509,10 @@ fn trailing_sum(series: &[DaySample], day_values: &[f64], window: i64) -> (f64, 
         .fold((0.0, 0), |(sum, count), (_, v)| (sum + v, count + 1))
 }
 
-/// Whether local `day` sits inside the trailing `window_days` of `newest`
-/// (EXCLUSIVE: `newest − day < window_days`, so `window_days` inclusive days):
-/// the one window filter every baseline series and trailing mean shares.
 fn in_window(newest: i64, day: i64, window_days: i64) -> bool {
     newest - day < window_days
 }
 
-/// Local days of the dated check-ins.
 fn checkin_days(checkins: &[CheckinInput], utc_offset_sec: i64) -> impl Iterator<Item = i64> {
     checkins
         .iter()
@@ -547,7 +532,6 @@ pub(crate) fn checkin_days_in_reach(
         .filter(move |&d| newest.is_some_and(|n| in_window(n, d, LONG_BASELINE_WINDOW_DAYS)))
 }
 
-/// A core-derived reading: no pain detail, no effort duration.
 fn derived_input(
     signal: ReadinessSignal,
     value: f64,
@@ -811,8 +795,7 @@ fn baseline_sd_excluding_newest(series: &[DaySample]) -> f64 {
     (sq_sum / count).sqrt()
 }
 
-/// `(mean, Σ (v − mean)², count)` over `vals`, summed in order. The single
-/// mean/spread computation behind every baseline SD and CV in this module.
+/// `(mean, Σ (v − mean)², count)` over `vals`, summed in order.
 fn mean_and_sq_dev(vals: impl Iterator<Item = f64> + Clone) -> (f64, f64, f64) {
     let count = vals.clone().count() as f64;
     let mean = vals.clone().sum::<f64>() / count;

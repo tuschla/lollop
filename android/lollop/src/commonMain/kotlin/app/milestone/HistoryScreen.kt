@@ -72,7 +72,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Which logged type History shows: two options, no "All". */
+/** Which logged type History shows: no "All" (an owner decision, 03-history). */
 private enum class HistoryFilter { Lifts, Runs }
 
 /** Precomputed History month scaffolding: [jumpTargets] maps each month
@@ -97,7 +97,7 @@ internal fun monthLabel(epochSec: Long, zone: TimeZone, fmt: DayFormatter): Stri
 /** The month headers and jump targets for a newest-first stream with one day stamp
  *  per card ([stamps]), after [base] non-month items. MIRRORS the stream's emission
  *  order (a header slot before each month's first card, then the card): a wrong
- *  offset would scroll to the wrong row. Pure. */
+ *  offset would scroll to the wrong row. */
 internal fun buildMonthNav(
     stamps: List<Long>,
     base: Int,
@@ -159,11 +159,7 @@ internal fun HistoryDestination(
     val hasAny = liftsPresent || runsPresent
     val showLifting = model.showLifting()
     val showRunning = model.showRunning()
-    // Weight display unit for every kg figure on this screen (lift faces, e1RM,
-    // tonnage tile, the edit editor).
     val weightUnit = model.weightUnit()
-    // Distance display unit (locale + Profile override) for the running tile and
-    // the daily-distance chart; run cards resolve the same unit themselves.
     val distanceUnit = rememberDistanceUnit()
     // Re-emits once a minute so "2 hours ago" labels and the rolling-7-day window refresh.
     val nowMillis = rememberTicker(60_000L)
@@ -195,7 +191,6 @@ internal fun HistoryDestination(
     // session sheet is keyed by its day (a saveable string).
     val zone = TimeZone.currentSystemDefault()
     val liftSessions = remember(model.lifts, zone) { groupLiftSessions(model.lifts, zone) }
-    // Per-exercise best-e1RM-per-session series for the session sheet's trend lines.
     val e1rmSeries = remember(liftSessions) { bestE1rmByExerciseDay(liftSessions) }
     var selectedSessionKey by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedSession = selectedSessionKey?.let { k -> liftSessions.firstOrNull { it.key == k } }
@@ -246,7 +241,6 @@ internal fun HistoryDestination(
             model = model,
             e1rmSeries = e1rmSeries,
             weightUnit = weightUnit,
-            nowMillis = nowMillis,
             scrollState = sessionScroll,
             onOpenSet = { s -> selectedKey = historyEntryKey(HistoryEntry.Lift(s)) },
             onDismiss = { selectedSessionKey = null },
@@ -254,7 +248,6 @@ internal fun HistoryDestination(
         )
     }
     }
-    // The list state is hoisted so the jump control can scroll it.
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     // The core sends run progress only once a dated run has a distance; without it
@@ -268,7 +261,6 @@ internal fun HistoryDestination(
     // the day its title and date chip name), shared by the month headers and the cards.
     val runStream = remember(model.runs) { historyRunStream(model.runs) }
     val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords, zone, twoPane) {
-        // One stamp per stream card: a lift SESSION (its first set) or a run's start.
         val stamps: List<Long> = when (activeFilter) {
             HistoryFilter.Runs -> runStream.map(::runDaySec)
             else -> liftSessions.map { it.firstObservedAt }
@@ -284,11 +276,9 @@ internal fun HistoryDestination(
         if (showRunRecords && !twoPane) base++         // run records
         buildMonthNav(stamps, base, zone, monthFmt)
     }
-    // The screen's parts, in one-column order: the overview's top (7-day strip,
-    // heatmap), the segment, the run overview (progress, records), the entries.
     val overviewTop: LazyListScope.() -> Unit = {
-        // 1. Stat strip over the rolling last 7 days (now − 7 days) of ALL activity,
-        // so it sits above the Lifts | Runs filter. Nothing logged: only the empty line below.
+        // The rolling last 7 days of ALL activity, so it sits above the Lifts | Runs
+        // filter. Nothing logged: only the empty line below.
         if (hasAny) {
             item {
                 val nowSec = nowMillis / 1000
@@ -314,7 +304,6 @@ internal fun HistoryDestination(
                     totalLiftKg / 1000.0
                 }
                 val tonnageUnit = if (weightUnit == WeightUnit.Lb) stringResource(Res.string.main_unit_klb) else stringResource(Res.string.main_unit_t)
-                // Running distance in the user's distance unit (km or mi).
                 val runningKm = weekRuns.sumOf { it.distance_km }
                 val runningDistance = metersToDisplay(runningKm * 1000.0, distanceUnit)
                 // A modality's tile shows when it is programmed or has logged data
@@ -345,10 +334,6 @@ internal fun HistoryDestination(
                     }
                 }
             }
-            // 2. Heatmap, LAST 12 WEEKS, tinted by discipline (lift / run / both),
-            // weeks starting Monday. Local-day bucketing happens here in the shell
-            // (device timezone) so the core stays clock-free. A logged day opens what
-            // was done that day: its lift session, else its latest run.
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     SectionOverline(stringResource(Res.string.main_overline_last_12_weeks))
@@ -371,9 +356,7 @@ internal fun HistoryDestination(
         }
     }
     val segmentItem: LazyListScope.() -> Unit = {
-        // 3. Filter: two-option segmented Lifts | Runs, no "All", no counts.
-        // Hidden when only one modality is relevant: the single available
-        // list renders on its own.
+        // No counts in the segment labels (03-history).
         if (showSegment) {
             item {
                 TwoSegmentRow(
@@ -384,14 +367,10 @@ internal fun HistoryDestination(
         }
     }
     val runOverview: LazyListScope.() -> Unit = {
-        // 2b. Runs: progress at the top (visualizations first). ONE compact distance
-        // chart (16-week weekly vs the plan, or the last 14 days), then the records
-        // grid (longest run + best efforts); a record opens its run.
         if (runProgress != null) {
             item(key = "run-progress") {
-                // Garmin-style per-day distance, a factual aggregation (sum of
-                // distance_km per local day the run started) over the same local-day
-                // bucketing as the heatmap, shown in the user's distance unit.
+                // Garmin-style per-day distance: a factual aggregation over the
+                // heatmap's local-day bucketing.
                 val kmByDay = remember(model.runs, zone) { runKmByDay(model.runs, zone) }
                 RunProgressSection(
                     progress = runProgress,
@@ -414,10 +393,6 @@ internal fun HistoryDestination(
         }
     }
     val entryItems: LazyListScope.() -> Unit = {
-        // Jump to month rides on the FIRST month header (a calendar icon button that
-        // opens a whole-row option list, never an anchored dropdown) when the active
-        // stream spans >=2 months; a pick animate-scrolls to that month's header (item
-        // index precomputed in `monthNav`).
         val jumpMonths = monthNav.jumpTargets.map { it.first }.takeIf { it.isNotEmpty() }
         val onJump: (String) -> Unit = { label ->
             monthNav.jumpTargets.firstOrNull { it.first == label }?.let { target ->
@@ -425,12 +400,8 @@ internal fun HistoryDestination(
             }
         }
 
-        // 4. Entry cards, filtered to the active segment, most recent on top.
         if (activeFilter == HistoryFilter.Lifts && liftSessions.isNotEmpty()) {
-            // One card per SESSION (local day), not per set: a 20-set day is one
-            // card. Keyed by the day (stable across inserts, unique per stream). A
-            // local-month overline header ("August 2026") precedes each month's
-            // first session (newest-first stream), grouping the unbounded list.
+            // Keyed by the day (stable across inserts, unique per stream).
             liftSessions.forEachIndexed { i, s ->
                 monthNav.headerBefore[i]?.let { m ->
                     item(key = "lift-month-$m") { MonthHeader(m, jumpMonths.takeIf { i == 0 }, onJump) }
@@ -441,7 +412,6 @@ internal fun HistoryDestination(
                         nowMillis = nowMillis,
                         todayLocalDay = todayLocalDay,
                         weightUnit = weightUnit,
-                        // Beside the detail pane the open session's card is marked.
                         selected = twoPane && s.key == selectedSessionKey,
                         onClick = { selectedSessionKey = s.key },
                     )
@@ -458,7 +428,6 @@ internal fun HistoryDestination(
         }
 
         if (activeFilter == HistoryFilter.Runs && model.runs.isNotEmpty()) {
-            // Same month-header grouping as the Lifts segment, by the day each run started.
             // Runs an old build logged without an id in one second share their id;
             // the occurrence keeps their keys apart.
             val seen = HashMap<String, Int>()
@@ -539,7 +508,7 @@ internal fun HistoryDestination(
 /**
  * A month header in the History stream ("SEPTEMBER 2026", accent section overline).
  * The first one also carries the jump-to-month control when [jumpMonths] is given:
- * a trailing 48dp calendar icon button ("Jump to month") expands a full-width
+ * a trailing calendar icon button ("Jump to month") expands a full-width
  * [OptionList] of every month the active stream spans; picking one collapses it and
  * [onJump] animate-scrolls the list to that month's header. Never an anchored
  * dropdown, and the month is never echoed in a separate row above its header.
@@ -609,7 +578,6 @@ private fun resolveHistoryEntry(key: String?, model: ViewModel): HistoryEntry? {
     val parts = key.substring(1).split("|")
     val id = parts.getOrNull(0)?.toLongOrNull() ?: return null
     val obs = parts.getOrNull(1)?.toLongOrNull() ?: return null
-    // Match on entry_id AND observed_at, the pair the list keys carry.
     return when (kind) {
         'L' -> model.lifts.firstOrNull { it.entry_id == id && it.observed_at == obs }
             ?.let { HistoryEntry.Lift(it) }
@@ -619,7 +587,6 @@ private fun resolveHistoryEntry(key: String?, model: ViewModel): HistoryEntry? {
     }
 }
 
-/** A [StatTile]'s value: 19sp ExtraBold, tabular. */
 internal val StatValueStyle = androidx.compose.ui.text.TextStyle(
     fontSize = 19.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
     fontFeatureSettings = "tnum", textDirection = AppTextDirection,
@@ -634,8 +601,7 @@ internal val StatValueStyle = androidx.compose.ui.text.TextStyle(
  */
 @Composable
 internal fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: String? = null) {
-    // History week-strip anatomy (spec 03-history §1): value ABOVE (19sp
-    // ExtraBold, tabular) with the unit inline muted, label below-left.
+    // History week-strip anatomy (spec 03-history §1).
     // fillMaxHeight: in a `height(IntrinsicSize.Min)` row every tile takes the
     // tallest tile's height, so a glossary ⓘ never leaves a ragged bottom edge.
     // A traversal group: TalkBack reads each tile's value and label together, tile
@@ -662,7 +628,6 @@ internal fun RowScope.StatTile(value: String, unit: String?, label: String, glos
                 Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
             }
         }
-        // Label, with an optional glossary affordance for jargon tiles.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
             Text(label, color = OnBgFaint, style = Type.Caption)
             glossaryKey?.let { GlossaryInfo(it) }

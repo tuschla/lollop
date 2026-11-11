@@ -34,13 +34,13 @@ internal interface RecorderTimer {
 
 /** A cue the recorder gives a runner who may not be looking (screen off, pocket). */
 internal enum class RecorderCue {
-    /** Armed → recording, hands-free: one pulse. */
+    /** Armed → recording, hands-free. */
     RecordingStarted,
 
-    /** No accepted fix for [SIGNAL_LOSS_MS] while recording: two pulses. */
+    /** No accepted fix for [SIGNAL_LOSS_MS] while recording. */
     SignalLost,
 
-    /** A guided run's step changed: three pulses and a beep. */
+    /** A guided run's step changed. */
     StepChange,
 }
 
@@ -166,7 +166,6 @@ internal class RunRecorder(private val host: RecorderHost) {
         }
         started = true
         recording = record
-        // A reused recorder clears its teardown guard so onFix can post again.
         stopped = false
         sessionGeneration = RunSession.generation
         // Publish the arm state before the surface goes up, so its copy and the
@@ -212,7 +211,6 @@ internal class RunRecorder(private val host: RecorderHost) {
     /** One fix → preview state always; a route point + sidecar line only while
      *  recording. [batchSize]: how many fixes the platform delivered together. */
     fun onFix(fix: LiveFix, batchSize: Int) {
-        // Post-stop queued fix: do nothing, and never re-post the surface.
         if (stopped) return
         // Stale session (see [RunSession.generation]): stand down without touching
         // any state, not even the preview lastFix the reset just cleared.
@@ -233,7 +231,6 @@ internal class RunRecorder(private val host: RecorderHost) {
         // not read "fresh lock" for ~20 s, as the delivery time would have made it.
         RunSession.previewFix(point, fix.monoNanos / 1_000_000)
         if (recording) {
-            // A fix arrived: any signal-loss episode is over; push the watchdog out.
             onSignalFix()
             // Paused: drop the fix so the paused span records no route; the stream
             // stays up. [RunSession.setPaused] already marked the boundary.
@@ -316,9 +313,8 @@ internal class RunRecorder(private val host: RecorderHost) {
         host.finished(userStop = false)
     }
 
-    /** Clear all armed state (the flag, the trigger, and the observed flow). Called
-     *  from beginRecording (armed → recording) and every teardown path so a crash/stop
-     *  while merely armed never leaves the UI stuck armed. */
+    /** Every teardown path clears the arm state too, so a crash/stop while merely
+     *  armed never leaves the UI stuck armed. */
     private fun clearArmState() {
         armed = false
         armTrigger = null
@@ -373,7 +369,6 @@ internal class RunRecorder(private val host: RecorderHost) {
         armSignalWatchdog()
     }
 
-    /** Stop the watchdog and forget any loss episode (every teardown path). */
     private fun clearSignalWatchdog() {
         signalWake.cancel()
         signalLost = false
@@ -402,7 +397,6 @@ internal class RunRecorder(private val host: RecorderHost) {
         }
     }
 
-    /** Stop the step ticker and free the cues (every teardown path). */
     private fun clearStepTicker() {
         stepTicker.cancel()
         stepWake.cancel()
@@ -424,7 +418,6 @@ internal class RunRecorder(private val host: RecorderHost) {
         // and has to re-arm.
         private const val SIGNAL_CHECK_SLACK_MS = 250L
 
-        // The guided-run step tick.
         private const val STEP_TICK_MS = 1000L
     }
 }

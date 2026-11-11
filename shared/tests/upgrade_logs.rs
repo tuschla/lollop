@@ -38,10 +38,22 @@ mod common;
 
 const TODAY: i64 = 20725;
 const OFF: i64 = 7200;
-const VERSIONS: [&str; 3] = ["203ab56", "4728546", "901d239"];
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/upgrade")
+}
+
+/// The builds with a log in the corpus: each `<sha>.log.ndjson`, sorted.
+fn versions() -> Vec<String> {
+    let mut out: Vec<String> = fs::read_dir(dir())
+        .expect("upgrade fixtures dir")
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".log.ndjson").map(str::to_owned))
+        .filter(|stem| !stem.contains('-'))
+        .collect();
+    out.sort();
+    assert!(!out.is_empty(), "no upgrade logs in {}", dir().display());
+    out
 }
 
 fn lines(name: &str) -> Vec<String> {
@@ -177,7 +189,7 @@ fn assert_shows(v: &str, file: &str, view: &Value) {
 
 #[test]
 fn old_logs_replay_every_line_but_the_retired_calculators() {
-    for v in VERSIONS {
+    for v in versions() {
         let file = format!("{v}.log.ndjson");
         let lines = lines(&file);
         let (_, rejected) = replay(&lines);
@@ -220,7 +232,7 @@ fn old_logs_replay_every_line_but_the_retired_calculators() {
 
 #[test]
 fn old_logs_compact_to_the_same_view() {
-    for v in VERSIONS {
+    for v in versions() {
         let file = format!("{v}.log.ndjson");
         let lines = lines(&file);
         let facts: Vec<LineFacts> = lines.iter().map(|l| LineFacts::parse(l)).collect();
@@ -248,10 +260,10 @@ fn old_logs_compact_to_the_same_view() {
 
 #[test]
 fn old_logs_show_the_same_history_and_plan() {
-    for v in VERSIONS {
+    for v in versions() {
         let file = format!("{v}.log.ndjson");
         let (view, _) = replay(&lines(&file));
-        assert_shows(v, &file, &view);
+        assert_shows(&v, &file, &view);
     }
 }
 
@@ -259,8 +271,8 @@ fn old_logs_show_the_same_history_and_plan() {
 /// its entries would make the comparisons above vacuous.
 #[test]
 fn upgrade_fixtures_hold_the_logged_history() {
-    for v in VERSIONS {
-        let e = expected(v);
+    for v in versions() {
+        let e = expected(&v);
         let n = |k: &str| e[k].as_array().map_or(0, Vec::len);
         assert_eq!(
             n("lifts"),

@@ -96,7 +96,6 @@ fn push_day_audit_rows(
     // out; counting a warm-up pyramid would drag the mean under 70 % or
     // push the rep max past 6 and silence the check.
     let anchors = cx.lift_anchors_now();
-    // Log order (`observed_at`, then `entry_id`), the `lifts` order.
     let mut day_sets: Vec<&LoggedSet> = model
         .sets
         .iter()
@@ -268,7 +267,6 @@ fn push_depth_jump_row(
         .fold(0.0_f64, f64::max);
     if squat_e1rm > 0.0 {
         let ready = strength::depth_jump_ready(squat_e1rm, bw);
-        // Only the unmet gate asks for anything; a cleared gate is silent.
         if !ready.value {
             let lb = model.profile().is_some_and(|p| p.weight_lb);
             let unit = weight_suffix(lb);
@@ -298,7 +296,6 @@ pub(super) fn lift_views(sets: &[LoggedSet], sets_fp: u64, weight_lb: bool) -> V
     })
 }
 
-/// The uncached lift-list derivation (see [`lift_views`]).
 fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultView> {
     // Log order: `observed_at`, then `entry_id` (an amend or Undo re-pushes a
     // row at the tail with the same id); ties (an old build's id-less pair)

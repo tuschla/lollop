@@ -77,7 +77,7 @@ class RunFinishEffortTest {
     /**
      * Tap Save run and stand in for the foreground service's stop confirmation
      * (the service never runs under Robolectric). The clock is held while the tap
-     * lands so the screen's 2 s stop-confirm timeout can't be auto-advanced past
+     * lands so the screen's stop-confirm timeout can't be auto-advanced past
      * before `tracking` flips; then wait for the WHOLE save (event-log append +
      * session reset) to finish, so no save turn is left queued on the process-wide
      * serial consumer for a later test to trip over. Returns the saved line.

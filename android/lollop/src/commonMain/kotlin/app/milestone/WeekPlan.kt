@@ -93,8 +93,6 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Weekday name (e.g. "Monday") for the week-strip accessibility description, in
- *  the app's language ([appLocale]) like the rest of the spoken phrase. */
 private fun weekdayFull(epochDay: Long): String =
     weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Full, appLocale())
 
@@ -112,8 +110,6 @@ private fun weekDayStatusPhrase(status: SessionStatus): StringResource = when (s
     SessionStatus.Planned -> Res.string.main_week_a11y_planned
 }
 
-/** A week-strip day's type token: "Lift", "Run" or "Rest". */
-// l10n: needs context plumbing (pure display helper, no Context)
 private fun disciplineLabel(s: SessionPlanView): String = s.session_type.discipline.name
 
 /** What a week day's sessions can do: log an item or a run dated to that day,
@@ -253,7 +249,6 @@ internal fun ThisWeekCard(
     selectedDay: Long,
     onSelectDay: (Long) -> Unit,
 ) {
-    // A week with nothing planned has nothing to count.
     val counted = consistency?.takeIf { week.isNotEmpty() && it.this_week_planned > 0 }
     // Keyed on the plan's identity so an open "?" panel resets when the plan changes.
     var expanded by rememberSaveable(program?.name, program?.citation) { mutableStateOf(false) }
@@ -275,8 +270,6 @@ internal fun ThisWeekCard(
                         showConfidence = true,
                     )
                 }
-                // The face note (moved in here while open), then every note that
-                // never reaches the face, each led by its own summary.
                 (listOfNotNull(faceNote) + hiddenNotes).forEach { n ->
                     Text(n.summary, color = OnBgBody, style = Type.Caption.copy(fontWeight = FontWeight.Bold))
                     WhyDetail(
@@ -453,7 +446,6 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
  *  grows to the ✓'s line at a large font ([WeekStrip] measures it). */
 private val DayGlyphSlot = 16.dp
 
-/** A week-strip day's status dot. */
 private val DayDotSize = 8.dp
 
 /** The week strip: one column per day with its weekday, day type and ONE status
@@ -486,8 +478,8 @@ private fun WeekStrip(
             val gapPx = with(density) { Space.Xs.dp.roundToPx() }
             val needPx = with(density) { (Space.Xs.dp * 2).roundToPx() } +
                 (dayLabels.maxOfOrNull { measurer.measure(it, Type.Chip, maxLines = 1, softWrap = false).size.width } ?: 0)
-            // One glyph-slot height for every column: the 16dp floor, or the ✓'s
-            // line once the font scales past it (13sp at 130 % no longer fits 16dp).
+            // One glyph-slot height for every column: [DayGlyphSlot], or the ✓'s
+            // line once the font scales past it.
             val glyphSlot = maxOf(DayGlyphSlot, with(density) { measurer.measure("\u2713", Type.Chip, maxLines = 1).size.height.toDp() })
             // Seven equal columns while every label fits whole; at a large font on a
             // narrow phone the week wraps into balanced rows (4 + 3, …) of equal
@@ -552,7 +544,6 @@ private fun WeekStrip(
                         DisclosureButton(evidenceOpen, subject = s.title) { evidenceOpen = !evidenceOpen }
                     }
                 }
-                // Moved here / why a move was refused.
                 SessionMoveNotes(s)
                 val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, s.session_type) }
                 val isRun = { item: PrescriptionView -> isRunItem(item, s.session_type) }
@@ -641,7 +632,6 @@ private fun WeekStripDay(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
         modifier = modifier
-            // ≥48dp tap target for each day column (accessibility).
             .heightIn(min = ActionMinHeight)
             // Clip before clickable so the ripple stays rounded.
             .clip(RoundedCornerShape(Space.Md.dp))
@@ -649,7 +639,6 @@ private fun WeekStripDay(
                 if (sel) Accent.copy(alpha = 0.12f) else Color.Transparent,
                 RoundedCornerShape(Space.Md.dp),
             )
-            // TODAY is marked distinctly with an accent ring.
             .then(
                 if (isToday) {
                     Modifier.border(1.dp, Accent, RoundedCornerShape(Space.Md.dp))
@@ -670,7 +659,6 @@ private fun WeekStripDay(
             style = if (isToday) Type.Chip else Type.ChipRegular,
             maxLines = 1,
         )
-        // Day-type/label token, from the core's session_type.
         Text(
             if (beforePlan) "\u2014" else disciplineLabel(s),
             color = OnBgMuted,

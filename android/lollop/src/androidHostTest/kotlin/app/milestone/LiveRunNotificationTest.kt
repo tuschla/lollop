@@ -45,9 +45,6 @@ internal fun assertPromotableLiveUpdate(n: Notification) {
     assertNotNull("dismissal is reported", n.deleteIntent)
 }
 
-/** The run-tracking notification as an Android 16 Live Update: the documented
- *  promotion criteria, the status-bar chip text, the guided-run step bar, the same
- *  notification on older Android, and no re-post after the user dismissed it. */
 @RunWith(RobolectricTestRunner::class)
 class LiveRunNotificationTest {
 
@@ -92,7 +89,6 @@ class LiveRunNotificationTest {
         assertEquals(5, style.progressSegments.size)
         assertEquals(5 * STEP_BAR_UNITS, style.progressMax)
         assertEquals(250, style.progress)
-        // The current step name leads the content line.
         assertTrue(n.extras.getCharSequence(Notification.EXTRA_TEXT).toString().startsWith("Rep 2 of 6"))
     }
 
@@ -190,7 +186,6 @@ class LiveRunNotificationTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals("no re-post after dismissal", ctx.getString(R.string.live_chip_paused), posted().shortCriticalText)
 
-        // The next explicit start shows it again.
         controller.withIntent(start).startCommand(0, 3)
         assertEquals("the start re-posts it", "0:00", posted().shortCriticalText)
         controller.destroy()

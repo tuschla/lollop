@@ -33,7 +33,7 @@
 # under libndk_translation, where every JNI call returns null ("Core: event
 # rejected" + "core view() returned null" in logcat): it can't be measured here.
 # For the minified release build, assemble it with the x86_64 core
-# (`./gradlew assembleRelease -PqaX86Release`), sign it with the debug key,
+# (`./gradlew :app:assembleRelease -PqaX86Release=true`), sign it with the debug key,
 # uninstall the debug app (no debuggable state carries over) and pass --apk.
 #
 # GPS is fed with `adb emu geo fix` (scripts/emu-scenarios/feeder.py, 1 Hz,
@@ -73,14 +73,12 @@ SERIAL="emulator-$PORT"
 
 [[ -f "$APK" ]] || { echo "APK not found: $APK (scripts/build.sh --no-tests)" >&2; exit 2; }
 
-# Keep the generated seed + compiled probe across runs; everything else is per run.
 mkdir -p "$OUT"
 find "$OUT" -mindepth 1 -maxdepth 1 ! -name seed ! -name probe -exec rm -rf {} +
 out_init "$OUT"
 mkdir -p "$OUT"/{seed,probe}
 : >"$OUT/measurements.tsv"
 
-# ── App state ────────────────────────────────────────────────────────────────
 # reset_app [LOG]: wipe the app and boot it on LOG (default: the seed_basic log,
 # 2 run days, a squat and a 5 km run on Sun SEED_DAY, so Today, Mon RUN_DAY, is an
 # Easy run day); succeeds once Today's session is on screen.
@@ -89,11 +87,8 @@ reset_app() {
   [[ -n "${1:-}" ]] || seed_basic "$SEED_DAY" 2 >"$f"
   fresh_app "$RUN_DAY" "$f" && wait_text pre "${STR[main_todays_session]}" 40
 }
-# The app's window is up and its UI tree stopped changing (after a configuration
-# change: locale, font scale, density, time zone).
 ui_settled() { wait_for 10 app_up; settled dump_ui >/dev/null; }
 
-# ── Set editor (open_set_editor, editor_fill, close_editor in lib.sh) ────────
 # The editor's "Logged" time chip ("Today · 8:00 AM"), scrolled into view.
 editor_chip() {
   local i l
@@ -105,13 +100,9 @@ editor_chip() {
   return 1
 }
 
-# ── Tracked runs (start_run, finish_run in lib.sh) ───────────────────────────
 dismiss_crash_dialog() { wait_text eq "Close app" 3 && tap_node eq "Close app"; return 0; }
 resumed_and_recording() { [[ "$(sidecar_points)" -gt "$1" ]] && svc_fg; }
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Scenarios
-# ═════════════════════════════════════════════════════════════════════════════
 set_locale() { sh_ cmd locale set-app-locales "$APP_ID" ${1:+--locales "$1"} >/dev/null; ui_settled; }
 plan_unit() { node_label re '^[0-9.]+ (mi|km)$' | awk '{print $NF}'; }
 # ocr_check SCENARIO NAME EVIDENCE-TAG MODE TEXT: the rendered (OCR) text of the
@@ -265,8 +256,8 @@ sc_time() {
     # The core's of-record moving time of the saved run (on cargo failure the
     # check FAILs with logs/time-run-core-cargo.log).
     core="$OUT/logs/time-run-core.json"
-    (cd "$REPO_ROOT" && TRACK_FIGURES_LOG="$OUT/logs/time-run.ndjson" TRACK_FIGURES_OUT="$core" \
-      cargo test -q -p shared --test track_figures_of_record) >"$OUT/logs/time-run-core-cargo.log" 2>&1 || rm -f "$core"
+    (cd "$REPO_ROOT" && cargo run -q -p shared --example track_figures -- "$OUT/logs/time-run.ndjson" "$core") \
+      >"$OUT/logs/time-run-core-cargo.log" 2>&1 || rm -f "$core"
     core_s="$( [[ -f "$core" ]] && jfield moving_s <"$core")"
     expect $S "saved run: one track, the core's moving seconds from its fixes ≈ recorded" "$facts; core moving_s ${core_s:-n/a (logs/time-run-core-cargo.log)}" \
       python3 -c "import json,sys;f=json.loads(sys.argv[1]);sys.exit(0 if f['tracks']==1 and sys.argv[2] and abs(float(sys.argv[2])-$rec)<=30 else 1)" "$facts" "$core_s"
@@ -476,7 +467,6 @@ sc_death() {
   start_feeder death
   if ! start_run; then check FAIL $S "start tracked run" "tracker Start not reachable"; stop_feeder; return; fi
   sleep 15; pid0="$(app_pid)"
-  # The process must survive: watch it for 3 s after the kill.
   adb_ shell am kill "$APP_ID"; sleep 3
   expect $S "am kill mid-run: foreground service keeps the process" "pid $pid0 → $(app_pid); fg $(svc_fg && echo yes || echo no)" \
     eval '[[ "$(app_pid)" == "$pid0" ]] && svc_fg'
@@ -521,7 +511,6 @@ sc_lowmem() {
   local S=lowmem pid0 r n0 n1 x
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   pid0="$(app_pid)"
-  # The app must keep running: watch it for 3 s after the trim.
   r="$(sh_ am send-trim-memory "$APP_ID" RUNNING_CRITICAL)"
   sleep 3; evidence lowmem-01-fg-critical
   expect $S "RUNNING_CRITICAL in foreground: app keeps running" "'$r'; pid $pid0 → $(app_pid)" eval 'app_up && [[ "$(app_pid)" == "$pid0" ]]'
@@ -650,15 +639,14 @@ sc_backup() {
   check INFO $S "last imported set" "$x"
 }
 
-# ── 5-year history ───────────────────────────────────────────────────────────
 FIVE="$OUT/seed/five-year.ndjson"
 gen_five_year() {
   [[ -s "$FIVE" && $REGEN -eq 0 ]] && return 0
-  log "generating the 5-year LongHistorySeed log (gradle, EmuSeedExportTest)"
+  log "generating the 5-year LongHistorySeed log (gradle :lollop:exportLongHistorySeed)"
   gradle_build_dir_init "$OUT/logs/seed.init.gradle.kts" "$HOME/.cache/emuscenarios-build"
-  (cd "$REPO_ROOT/android" && EMU_SEED_OUT="$FIVE" \
+  (cd "$REPO_ROOT/android" &&
     ./gradlew --init-script "$OUT/logs/seed.init.gradle.kts" --max-workers="$GRADLE_MAX_WORKERS" -q \
-    :lollop:testAndroidHostTest --tests app.milestone.qa.EmuSeedExportTest --rerun) >"$OUT/logs/seed-gradle.log" 2>&1
+    :lollop:exportLongHistorySeed --args="$FIVE") >"$OUT/logs/seed-gradle.log" 2>&1
   [[ -s "$FIVE" ]]
 }
 # Background sampler: "Dalvik Heap" / "Native Heap" Heap-Alloc (KB) of the app's
@@ -693,7 +681,6 @@ boot_long() {
     fi
     if [[ -n "$hp" ]]; then touch "$hs.stop"; wait "$hp"; hp=""; fi
   done
-  # Memory 8 s after the third start.
   sleep 8
   sh_ dumpsys meminfo "$APP_ID" >"$OUT/logs/meminfo-${tag// /_}.txt"
   read -r -a M <<<"$(python3 "$HELP/parse.py" meminfo pss java native <"$OUT/logs/meminfo-${tag// /_}.txt")"
@@ -704,7 +691,6 @@ boot_long() {
   LAST_STARTS="$all"
 }
 median3() { tr ' ' '\n' <<<"$1" | grep -E '^[0-9]+$' | sort -n | sed -n '2p'; }
-today_ok() { tap_nav "${STR[main_dest_today]}"; wait_text pre "${STR[main_todays_session]}" 60; }
 # The longest run of the 5-year log as History shows it: its whole km or mi
 # (the Auto unit follows the locale).
 longest_rx() {
@@ -798,7 +784,6 @@ sc_longlog() {
   restart_zygote
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 trap session_cleanup EXIT
 config_run
 config apk "$APK ($(date -r "$APK" -Is))"

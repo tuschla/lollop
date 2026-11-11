@@ -112,8 +112,8 @@ internal data class RunImportPlan(
 )
 
 /**
- * Turn a batch of parsed files into the runs to import. Pure ([build] is injected,
- * normally [importedRunEvent]) so the batch rules are JVM-testable:
+ * Turn a batch of parsed files into the runs to import. [build] is injected
+ * (normally [importedRunEvent]) so the batch rules are JVM-testable:
  *  - each file stands alone, so one unreadable / wrong-type / route-only / cycling /
  *    implausibly fast file is reported by name and never blocks the others;
  *  - a run logged at the same second as an already-logged run ([existingObservedAt])
@@ -149,8 +149,7 @@ internal fun planRunImport(
     return RunImportPlan(runs, duplicates, failures)
 }
 
-/** The import size cap as the too-large reason states it, in MiB ("32"):
- *  [CoreConstants.MAX_RUN_IMPORT_BYTES], [trimDecimal]-trimmed. */
+/** The import size cap in MiB, as the too-large reason states it. */
 internal fun importCapMbLabel(): String = trimDecimal(CoreConstants.MAX_RUN_IMPORT_BYTES / (1024.0 * 1024.0))
 
 /** The plain-language reason for one skipped file ("no GPS points", "a cycling
@@ -228,7 +227,6 @@ internal fun runImportSummary(
 /** One picked, shared or opened file of an import batch, read when the batch gets
  *  to it (both calls run on the IO dispatcher). */
 internal interface RunImportFile {
-    /** The file's name as the user sees it. */
     fun displayName(): String
 
     /** The file's bytes: [ImportFailure.TooLarge] above [CoreConstants.MAX_RUN_IMPORT_BYTES]

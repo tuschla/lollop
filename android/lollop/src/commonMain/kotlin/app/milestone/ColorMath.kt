@@ -55,7 +55,7 @@ internal fun Palette.routeRamp(f: Float): Color {
  * result is a clean shade of the accent whatever the ground (a plain alpha blend
  * drifts toward the ground's hue and, on a complementary ground, through grey).
  * Chroma that falls outside sRGB at that lightness is reduced (hue and lightness
- * kept) until it fits. Pure; reads no composition state.
+ * kept) until it fits.
  */
 internal fun accentMix(accent: Color, ground: Color, t: Float, chroma: Float): Color {
     val a = accent.toOklab()
@@ -117,18 +117,11 @@ private fun oklabToLinearSrgb(lightness: Double, a: Double, b: Double): DoubleAr
 private fun oklabFitsSrgb(lightness: Double, a: Double, b: Double): Boolean =
     oklabToLinearSrgb(lightness, a, b).all { it >= -1e-4 && it <= 1 + 1e-4 }
 
-// ── Dynamic-color WCAG-AA contrast guard ──────────────────────────────────────
-// Material You's `dynamic.primary` is wallpaper-derived and carries no contrast
-// guarantee, unlike the hand-tuned theme accents (ThemeContrastTest).
-
 /** WCAG 2.x AA minimum contrast ratio for normal-size text. */
 internal const val WCAG_AA_NORMAL = 4.5
 
-/**
- * WCAG relative luminance of an sRGB color: linearize each channel (the 0.03928
- * knee), then weight 0.2126 R / 0.7152 G / 0.0722 B. Alpha is ignored (accents
- * are opaque fills).
- */
+/** WCAG 2.x relative luminance of an sRGB color. Alpha is ignored (accents are
+ *  opaque fills). */
 internal fun relativeLuminance(c: Color): Double {
     fun lin(ch: Float): Double {
         val s = ch.toDouble()
@@ -137,10 +130,8 @@ internal fun relativeLuminance(c: Color): Double {
     return 0.2126 * lin(c.red) + 0.7152 * lin(c.green) + 0.0722 * lin(c.blue)
 }
 
-/**
- * WCAG contrast ratio between two colors: (L_hi + 0.05) / (L_lo + 0.05), so it
- * runs 1.0 (identical luminance) … 21.0 (black vs white). Order-independent.
- */
+/** WCAG contrast ratio between two colors, 1.0 (identical luminance) … 21.0 (black
+ *  vs white). Order-independent. */
 internal fun contrastRatio(a: Color, b: Color): Double {
     val la = relativeLuminance(a)
     val lb = relativeLuminance(b)
@@ -154,7 +145,9 @@ internal fun contrastRatio(a: Color, b: Color): Double {
  * on every ground ([Palette.bgTop], [Palette.bgElevated], [Palette.bgSunken]):
  * [primary] as is if it passes; else its HSL lightness stepped away from the
  * grounds (hue and saturation kept) to the first shade that passes; else the
- * palette's own accent.
+ * palette's own accent. Material You's `dynamic.primary` is wallpaper-derived and
+ * carries no contrast guarantee, unlike the hand-tuned theme accents
+ * (ThemeContrastTest).
  */
 internal fun Palette.withDynamicAccent(primary: Color): Palette {
     fun passes(c: Color) = contrastRatio(c, bgTop) >= WCAG_AA_NORMAL &&

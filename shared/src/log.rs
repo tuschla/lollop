@@ -48,7 +48,6 @@ const SINGLETONS: [Family; 4] = [
     Family::HrZones,
 ];
 
-/// What a rule reads off one event.
 #[derive(Clone, Debug)]
 enum Rule {
     Plain,
@@ -251,7 +250,6 @@ pub struct Compaction {
     pub plan_removed: bool,
 }
 
-/// Compact a raw log given as one [`LineFacts`] per line.
 #[must_use]
 pub fn compact_lines(lines: &[LineFacts]) -> Compaction {
     let remove = removals(lines);
@@ -277,15 +275,15 @@ pub fn compact_lines(lines: &[LineFacts]) -> Compaction {
     out
 }
 
-/// Drop provably-inert events from a log, preserving replay order.
-#[must_use]
-pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
+/// [`compact_lines`] over decoded events: the survivors, in replay order.
+#[cfg(test)]
+pub(crate) fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
     let lines: Vec<LineFacts> = events.iter().cloned().map(LineFacts::of).collect();
-    let remove = removals(&lines);
+    let dropped = compact_lines(&lines).dropped;
     events
         .into_iter()
-        .zip(remove)
-        .filter_map(|(e, removed)| (!removed).then_some(e))
+        .enumerate()
+        .filter_map(|(i, e)| dropped.binary_search(&i).is_err().then_some(e))
         .collect()
 }
 

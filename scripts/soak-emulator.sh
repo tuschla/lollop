@@ -35,7 +35,7 @@
 # Exit status: 0 when every check passed, 1 when any check failed (see REPORT.md).
 # Requires: Android SDK (sdk.dir in android/local.properties or $ANDROID_HOME),
 # python3, cargo (the core's figures of the saved run:
-# shared/tests/track_figures_of_record.rs), KVM and an x86_64 google_apis AVD
+# shared/examples/track_figures), KVM and an x86_64 google_apis AVD
 # (Google Play services for fused location; adb root, which lib.sh's event-log
 # push/pull use).
 set -uo pipefail
@@ -96,7 +96,6 @@ reset_app() {
   seed_app "$OUT/logs/seed.ndjson" || die "could not push the seed event log"
 }
 
-# ── Sampler: meminfo + tracking service state every SAMPLE_SEC ──────────────
 sampler() {
   echo "epoch,phase,pid,pss_kb,java_kb,native_kb,graphics_kb,threads,fds,svc,svc_fg,notif" >"$OUT/samples.csv"
   while :; do
@@ -118,7 +117,6 @@ sampler() {
   done
 }
 
-# ── (a) Monkey ───────────────────────────────────────────────────────────────
 monkey_pass() { # seed events state
   local seed="$1" events="$2" state="$3" dir="$OUT/monkey/seed-$1" t_start=$SECONDS relaunch=ok m
   mark "monkey-$seed"
@@ -140,7 +138,6 @@ monkey_pass() { # seed events state
     >>"$OUT/monkey/summary.jsonl"
 }
 
-# ── (b) Tracked run ──────────────────────────────────────────────────────────
 G="$OUT/gps"
 T0=0
 at() { # at T: sleep until T seconds after the feed start (the route's schedule)
@@ -256,14 +253,13 @@ gps_run() {
   echo "$hist" >"$G/history-row.txt"
   # The core's own of-record figures of the saved run (needs cargo; on failure
   # the core checks FAIL with logs in gps/core-cargo.log).
-  (cd "$REPO_ROOT" && TRACK_FIGURES_LOG="$G/event-log.ndjson" TRACK_FIGURES_OUT="$G/core.json" \
-    cargo test -q -p shared --test track_figures_of_record) >"$G/core-cargo.log" 2>&1 || rm -f "$G/core.json"
+  (cd "$REPO_ROOT" && cargo run -q -p shared --example track_figures -- "$G/event-log.ndjson" "$G/core.json") \
+    >"$G/core-cargo.log" 2>&1 || rm -f "$G/core.json"
   "${SOAK[@]}" analyze "$G/event-log.ndjson" "$G/expected.json" "$T0" "$FEED_LOG" "$G/core.json" \
     "$summary" "$hist" "$G/result.json"
   "${SOAK[@]}" checks "$G/result.json" "$OUT/checks.tsv"
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 trap 'kill "${SAMPLER_PID:-}" 2>/dev/null; session_cleanup' EXIT
 config_run
 config apk "$APK ($(date -r "$APK" -Is))"

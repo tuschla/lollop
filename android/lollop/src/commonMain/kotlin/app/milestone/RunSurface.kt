@@ -23,11 +23,8 @@ import org.jetbrains.compose.resources.StringResource
 // What a run shows outside the app: Android's ongoing notification (and its Live
 // Update chip), iOS's Live Activity. Both render the same text from here.
 
-/** Where a run is, as its system surface titles it. */
 internal enum class RunSurfacePhase { Locating, Armed, Recording, Paused, SignalLost }
 
-/** The phase of the recorder's state. A pause outranks a lost signal; both only
- *  count while recording. */
 internal fun runSurfacePhase(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean): RunSurfacePhase = when {
     recording && paused -> RunSurfacePhase.Paused
     recording && signalLost -> RunSurfacePhase.SignalLost
@@ -36,7 +33,6 @@ internal fun runSurfacePhase(recording: Boolean, armed: Boolean, paused: Boolean
     else -> RunSurfacePhase.Locating
 }
 
-/** The surface's title; a paused recording gets the paused title. */
 internal val RunSurfacePhase.titleRes: StringResource
     get() = when (this) {
         RunSurfacePhase.Paused -> Res.string.track_notif_paused_title
@@ -67,16 +63,13 @@ internal val RunSurfacePhase.chipRes: StringResource?
 internal val RunSurfacePhase.canPause: Boolean
     get() = this == RunSurfacePhase.Recording || this == RunSurfacePhase.Paused || this == RunSurfacePhase.SignalLost
 
-/** The surface's line for a phase: a fixed string ([Literal]), the figures plus the
- *  current pace ([Progress], through `track_notif_progress(_pace)`), or the paused
- *  line ([PausedProgress]: the same "Moving 23:41 · 4.12 km" without a pace). */
 internal sealed class RunSurfaceLine {
     data class Literal(val res: StringResource) : RunSurfaceLine()
     data class Progress(val text: String, val paceNow: String?) : RunSurfaceLine()
     data class PausedProgress(val res: StringResource, val progress: String) : RunSurfaceLine()
 }
 
-/** See [RunSurfaceLine]. [progress] is the figures, null before the track has the
+/** [progress] is the figures, null before the track has the
  *  two fixes a distance needs. A paused recording keeps its figures in the
  *  recording line's words without the pace, which stands still; the title ("Run
  *  paused") and the chip ("Paused") carry the pause, so the line does not say it a
@@ -107,7 +100,6 @@ internal data class RunSurfaceState(
     val step: StepProgress? = null,
 )
 
-/** The recorder's run as its surface shows it now. */
 internal fun RunRecorder.surfaceState(): RunSurfaceState = RunSurfaceState(
     phase = runSurfacePhase(recording, armed, RunSession.paused.value, signalLost),
     movingSec = RunSession.elapsedSec.value,

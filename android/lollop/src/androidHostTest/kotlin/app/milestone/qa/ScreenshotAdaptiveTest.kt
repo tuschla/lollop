@@ -49,17 +49,15 @@ import org.robolectric.Shadows.shadowOf
 
 /**
  * Screenshot baselines for the wide and short windows: a phone in landscape
- * (891×411 dp and a small 640×360 dp one), a tablet in portrait (800×1280 dp)
- * and in landscape (1280×800 dp), in light, dark and at 200 % font. Each scene
- * is one launch of the REAL app over the real core (see [ScreenshotTest]),
- * captured as `adaptive-<window>-<variant>-<scene>.png`.
+ * (and a small one), a tablet in portrait and in landscape, in light, dark and
+ * at 200 % font. Each scene is one launch of the REAL app over the real core
+ * (see [ScreenshotTest]), captured as `adaptive-<window>-<variant>-<scene>.png`.
  *
  * The portrait phone keeps its baselines in the other Screenshot* classes.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 class ScreenshotAdaptiveTest(private val window: Window, private val variant: Variant) {
 
-    /** A window size as Robolectric qualifiers. */
     enum class Window(val qualifiers: String) {
         PhoneLand("w891dp-h411dp-land-xxhdpi"),
         SmallLand("w640dp-h360dp-land-xhdpi"),
@@ -147,15 +145,12 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         )
     }
 
-    // ── Today ─────────────────────────────────────────────────────────────────
-
     @Test
     fun today() {
         seedStrengthWithHistory()
         rule.launchApp()
         waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
         shot("today")
-        // The move-session dialog over Today.
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true))
             .performScrollTo().performClick()
         rule.waitForNode(SemanticsMatcher("testTag starts with move-target:") {
@@ -172,8 +167,6 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         waitForText("I'm pain-free now")
         shot("today-painhold")
     }
-
-    // ── Set logger ────────────────────────────────────────────────────────────
 
     @Test
     fun setLoop() {
@@ -194,7 +187,6 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         shot("setloop-keypad")
         rule.onNode(hasClickAction() and hasText(str(R.string.log_keypad_done))).performScrollTo().performClick()
         rule.waitForIdle()
-        // Logged: the rest countdown and the undo row.
         rule.onNodeWithTag("editor-primary").performClick()
         waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
         rule.waitForNode(hasText(str(R.string.log_undo)))
@@ -212,8 +204,6 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         rule.waitForIdle()
         shot("log-run-editor")
     }
-
-    // ── History ───────────────────────────────────────────────────────────────
 
     private fun seedRunsHistory() {
         val manual = buildList<Pair<Long, Event>> {
@@ -289,8 +279,6 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         shot("history-lift-session")
     }
 
-    // ── Profile, calculators, evidence ────────────────────────────────────────
-
     private fun hybridProfile(): Event = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
         liftGoal = LiftGoal.Hypertrophy,
@@ -335,15 +323,12 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         shot("evidence-references")
     }
 
-    // ── Guided setup ──────────────────────────────────────────────────────────
-
     @Test
     fun setup() {
         rule.launchAppExpectingSetup()
         shot("setup-train")
         GuidedSetupWalk.walk(rule, stopAt = "days")
         shot("setup-days")
-        // On from "days" to the review: answer each screen and press Next.
         GuidedSetupWalk.bothPath.dropWhile { it.name != "days" }.takeWhile { it.name != "review" }.forEach { screen ->
             screen.answer(rule)
             rule.waitForIdle()
@@ -352,8 +337,6 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         }
         shot("setup-review")
     }
-
-    // ── Run tracker ───────────────────────────────────────────────────────────
 
     @Test
     fun trackerPrestart() {

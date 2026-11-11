@@ -27,7 +27,6 @@ internal object RestAlarm {
         var pending = false
         var inAppVisible = false
 
-        // What the loop logs next, kept current by the open loop.
         var nextSet: RestNextSet? = null
 
         // The exercise the rest-done alert names: null until the loop reports its
@@ -43,7 +42,6 @@ internal object RestAlarm {
 
     private val state by ProcessLocal { State() }
 
-    /** The running rest; null when none runs. */
     val running: StateFlow<RestRun?> get() = state.running
 
     /** The set loop shows its one-time notice: exact alarms are not allowed, so
@@ -257,7 +255,7 @@ internal fun countdownText(res: PlatformResources, exercise: String, next: RestN
  * "Set k of N" (a plan item), "Set k" (an off-plan exercise, [offPlanSetNumber])
  * or "Extra set", then the load and reps in the fields ([load], null when not
  * entered). Once the item is complete it is the next item's first open set. Null
- * when the action logs no set (finish, a blank editor, an edit). Pure.
+ * when the action logs no set (finish, a blank editor, an edit).
  */
 internal fun restNextSet(
     res: PlatformResources,
@@ -286,7 +284,7 @@ internal fun restNextSet(
 
 /** The set loop's fields as the countdown names the next set: "100 kg × 5",
  *  "30 s hold", "12 reps" for a bodyweight rung. Null while the load or reps are
- *  not entered. Pure. */
+ *  not entered. */
 internal fun restNextLoad(
     res: PlatformResources,
     holdSec: Int?,

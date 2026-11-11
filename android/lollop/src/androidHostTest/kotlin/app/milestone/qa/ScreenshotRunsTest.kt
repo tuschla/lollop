@@ -92,8 +92,7 @@ class ScreenshotRunsTest {
         QaHarness.freshProcess()
     }
 
-    // ── Waits / drivers (every wait fetches semantics, which idles the looper) ──
-
+    // Every wait fetches semantics, which idles the looper.
     private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
         rule.waitForNode(matcher, timeoutMs)
         rule.waitForIdle()
@@ -116,18 +115,14 @@ class ScreenshotRunsTest {
         waitForText(str(R.string.main_track_run_title))
     }
 
-    /** The Records section's uppercase header. */
     private val records get() = str(R.string.history_records).uppercase(Locale.US)
 
-    /** The session card header, e.g. "3 exercises · 8 sets". */
     private fun sessionHeader(exercises: Int, sets: Int) =
         plural(R.plurals.history_exercise_count, exercises, exercises) + " · " +
             plural(R.plurals.history_set_count, sets, sets)
 
     private fun key(k: String) =
         rule.onNode(hasText(k) and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
-
-    // ── Scenario seeds ─────────────────────────────────────────────────────────
 
     /**
      * Twelve weeks of three hand-logged runs (easy, short, long) plus a half
@@ -160,7 +155,7 @@ class ScreenshotRunsTest {
                 add(t to Event.LogSet("Back Squat", 100.0, 5, 8.0, t, t * 1000))
             }
         }.sortedBy { it.first }.map { it.second }
-        // Today 07:00, before the pinned 10:00 "now".
+        // This morning, before the harness's pinned "now".
         val thisMorning = QaHarness.daysAgoAtMidday(0) - 5 * 3600
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
         rule.launchApp()
@@ -229,8 +224,6 @@ class ScreenshotRunsTest {
         rule.pickRating("effort-scale", 7)
     }
 
-    // ── History · Runs: progress section + run card ────────────────────────────
-
     private fun runsProgress(mode: DarkMode) {
         useDarkMode(mode)
         seedRunsHistory()
@@ -259,8 +252,6 @@ class ScreenshotRunsTest {
     @Test fun runsProgressLight() = runsProgress(DarkMode.Light)
 
     @Test fun runsProgressDark() = runsProgress(DarkMode.Dark)
-
-    // ── Run detail: rated GPS 10K (headline stats, route card, splits, YOUR LOG) ──
 
     private fun openRatedRunDetail() {
         seedRunsHistory()
@@ -319,8 +310,6 @@ class ScreenshotRunsTest {
         rule.shot("runs-detail-rated-font130-light")
     }
 
-    // ── Run detail: an unrated hand-logged run (no map, Rate this run) ────────
-
     private fun runsDetailRate(mode: DarkMode) {
         useDarkMode(mode)
         seedRunsHistory()
@@ -335,8 +324,6 @@ class ScreenshotRunsTest {
     @Test fun runsDetailRateLight() = runsDetailRate(DarkMode.Light)
 
     @Test fun runsDetailRateDark() = runsDetailRate(DarkMode.Dark)
-
-    // ── History · Lifts: "New best" session card + session sheet ───────────────
 
     private fun runsLifts(mode: DarkMode) {
         useDarkMode(mode)
@@ -359,8 +346,6 @@ class ScreenshotRunsTest {
     @Test fun runsLiftsLight() = runsLifts(DarkMode.Light)
 
     @Test fun runsLiftsDark() = runsLifts(DarkMode.Dark)
-
-    // ── Manual run editor: h:mm:ss, bpm, effort ────────────────────────────────
 
     private fun runsEditor(mode: DarkMode) {
         useDarkMode(mode)
@@ -389,8 +374,6 @@ class ScreenshotRunsTest {
 
     @Test fun runsEditorDark() = runsEditor(DarkMode.Dark)
 
-    // ── Tracker before Start: today's plan preview + Follow today's plan ───────
-
     private fun trackPrestart(mode: DarkMode) {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
@@ -406,8 +389,6 @@ class ScreenshotRunsTest {
 
     @Test fun trackPrestartDark() = trackPrestart(DarkMode.Dark)
 
-    // ── Tracker recording a followed plan: step guide + Pace now / Avg ─────────
-
     private fun trackRecording(mode: DarkMode) {
         useDarkMode(mode)
         openRecordingWithPlan()
@@ -417,8 +398,6 @@ class ScreenshotRunsTest {
     @Test fun trackRecordingLight() = trackRecording(DarkMode.Light)
 
     @Test fun trackRecordingDark() = trackRecording(DarkMode.Dark)
-
-    // ── Finish review: summary, effort cells, run type, Discard/Resume/Save ────
 
     private fun trackFinish(mode: DarkMode) {
         useDarkMode(mode)

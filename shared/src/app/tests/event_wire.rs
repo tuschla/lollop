@@ -3,15 +3,15 @@
 
 use super::*;
 
-/// The Android shell hand-serializes each [`Event`] to serde's external
-/// tagging (`Core.kt::toJson`) and omits every absent optional field. Replay
+/// The Android shell serializes each [`Event`] to serde's external tagging
+/// (`WireTypes.kt::EventSerializer`) and omits every absent optional field. Replay
 /// feeds those exact bytes back through `update`, and the FFI *swallows*
 /// deserialize errors (the bridge's `Update` op answers no bytes), so
 /// a drift between Kotlin's wire form and this enum's `Deserialize` would
 /// silently drop the event on every cold start. Pin the omit-optionals form.
 #[test]
 fn android_wire_form_deserializes_with_optionals_omitted() {
-    // Exactly what Core.kt emits for a review with no run/lift context: only
+    // Exactly what WireTypes.kt emits for a review with no run/lift context: only
     // the four non-optional booleans/count, every Option field absent.
     let bare = r#"{"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":0,"bad_day":false}}"#;
     match serde_json::from_str::<Event>(bare).expect("bare review must parse") {
@@ -58,7 +58,7 @@ fn android_wire_form_deserializes_with_optionals_omitted() {
         other => panic!("expected SetProfile, got {other:?}"),
     }
 
-    // TrimRunTrack: the EXACT shape Core.kt emits (all four snake_case keys).
+    // TrimRunTrack: the EXACT shape WireTypes.kt emits (all four snake_case keys).
     // FFI deserialize failure on replay is a SILENT drop, so shape drift here
     // is silent loss of a trim (an untrimmed track resurrects on cold start).
     let trim = r#"{"TrimRunTrack":{"entry_id":42,"observed_at_fallback":1700,"keep_from_sec":1720,"keep_until_sec":1900}}"#;
@@ -131,7 +131,7 @@ fn review_safety_screen_keeps_its_flat_wire_keys() {
 
 /// The consolidated person fields (age, bodyweight, sex, resting
 /// HR, measured HRmax) round-trip through the `SetProfile` wire exactly as
-/// Core.kt's guided setup / profile editor emit them. All are optional, so the
+/// the shell's guided setup / profile editor emit them. All are optional, so the
 /// shell omits absent ones (previous test) and sends present ones here.
 #[test]
 fn set_profile_person_fields_round_trip() {
@@ -218,7 +218,7 @@ fn set_profile_planning_fields_round_trip() {
 
 /// HARD RULE 3 at the wire level: the shell's red-flag readiness buttons must
 /// never be silently dropped on replay. Each safety signal's Kotlin `.name`
-/// string (`Core.kt::ReadinessSignal`) must deserialize to the matching
+/// string (`WireTypes.kt::ReadinessSignal`) must deserialize to the matching
 /// variant, a rename on either side would make the FFI swallow the event
 /// (deserialize error → cleared output) and leave a red-flag session
 /// un-blocked. Pin the safety signals' exact wire names.
@@ -244,7 +244,7 @@ fn safety_readiness_signals_deserialize_from_shell_names() {
 
 /// Wire pin for the additive readiness fields (`streak`, `pain`): the
 /// pre-existing three-field shape must keep parsing (defaults), and the new
-/// graded-pain shape must parse field-for-field as Core.kt will emit it.
+/// graded-pain shape must parse field-for-field as WireTypes.kt emits it.
 /// Kotlin-side `ignoreUnknownKeys` tolerates the view side; this guards the
 /// event side, where a drift would make the FFI silently drop the report.
 #[test]
@@ -328,8 +328,8 @@ fn checkin_wire_without_fatigue_stress_still_replays() {
 #[test]
 fn readiness_signal_wire_names_match_the_shell_contract() {
     // Each `ReadinessSignal` serialises to its bare variant name, and the
-    // Android shell hand-builds that exact string as the event's `signal`
-    // field (Core.kt `ReadinessSignal.name`). Renaming a variant here would
+    // Android shell sends that exact string as the event's `signal`
+    // field (WireTypes.kt `ReadinessSignal`). Renaming a variant here would
     // compile clean but silently drop every readiness submission for it -
     // including the medical-referral flags at the top of the safety ladder.
     // This locks the wire names so such a rename fails here instead.
@@ -540,7 +540,7 @@ fn protein_and_hr_wire_fields_are_additive_and_serde_default() {
     assert!(decoded.hr_max.is_none() && decoded.protein_figures.is_empty());
 }
 
-// The Android shell hand-builds SubmitReview JSON (Core.kt), omitting the
+// The Android shell builds SubmitReview JSON (WireTypes.kt), omitting the
 // Option fields it does not set. These two tests pin the exact wire form the
 // shell emits for the decoupling / easy-run-intensity review context, so a
 // rename on either side of the FFI fails here rather than silently dropping

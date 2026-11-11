@@ -72,8 +72,6 @@ class RandomUiWalkTest : UiProbeTest() {
     @Test fun longHistory() = walk(Start.LongHistory)
     @Test fun milesAndPounds() = walk(Start.MilesLb)
 
-    // ── The walk ────────────────────────────────────────────────────────────
-
     private lateinit var start: Start
     private var seed = 0L
     private var step = 0
@@ -236,15 +234,11 @@ class RandomUiWalkTest : UiProbeTest() {
         trace += "   (skipped: ${e.javaClass.simpleName}: ${e.message?.lineSequence()?.firstOrNull()?.take(160)})"
     }
 
-    // ── Lifecycle actions ───────────────────────────────────────────────────
-
     private fun recreate() {
         checkNotNull(lastScenario).recreate()
         rule.waitUntil(15_000) { roots().isNotEmpty() }
     }
 
-    /** Kill the process (every singleton back to a fresh process, the durable log
-     *  and prefs kept), relaunch, and require the same entries back. */
     private fun processDeath() {
         val beforeModel = EventDispatcher.model.value
         QaHarness.killProcess()
@@ -259,15 +253,11 @@ class RandomUiWalkTest : UiProbeTest() {
         }
     }
 
-    // ── Settling ────────────────────────────────────────────────────────────
-
     /** Idle with framework hiccups skipped and an app crash failing the walk. */
     override fun idle() {
         guard("idle") { rule.waitForIdle() }
         guard("idle") { roots() }
     }
-
-    // ── Invariants ──────────────────────────────────────────────────────────
 
     /** What Back's progress is judged against: the screen before it, plus what
      *  a Back may legitimately spend itself on without a visible change. */
@@ -278,7 +268,6 @@ class RandomUiWalkTest : UiProbeTest() {
         if (roots.isEmpty()) fail("no window on screen")
         if (EventDispatcher.model.value == null) fail("stuck splash: no model published")
 
-        // Non-empty screen: something labelled is visible.
         val labelled = roots.flatMap { flatten(it) }.count { it.isVisible() && labelOf(it).isNotBlank() }
         if (labelled == 0) fail("empty screen: no visible labelled node")
 
@@ -358,7 +347,6 @@ class RandomUiWalkTest : UiProbeTest() {
             if (bad.isNotEmpty()) fail("Today shows plan items $bad while training is held (${m.hold_reason})")
         }
 
-        // History renders one row per core entry.
         if (onMain && selectedTab() == str(R.string.main_dest_history)) checkHistoryRows(m)
     }
 
@@ -451,8 +439,6 @@ class RandomUiWalkTest : UiProbeTest() {
         checkAll(afterBack = null)
     }
 
-    // ── Screen helpers ──────────────────────────────────────────────────────
-
     private fun SemanticsNode.isSheet() =
         flatten(this).any { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == SHEET_SCRIM } }
 
@@ -462,7 +448,6 @@ class RandomUiWalkTest : UiProbeTest() {
      *  dialog: a tooltip, a menu. */
     private fun SemanticsNode.isPopup() = !isSheet() && !isDialog()
 
-    /** The editors' "Discard this entry?" confirm. */
     private fun SemanticsNode.isDiscardConfirm(): Boolean = flatten(this).any { labelOf(it) == str(R.string.log_discard_title) }
 
     /** The M3 date picker, or the editor's "Logged at" time picker dialog. */
@@ -494,7 +479,6 @@ class RandomUiWalkTest : UiProbeTest() {
     }
 
     companion object {
-        /** Steps per walk by default (`UIWALK_STEPS` overrides). */
         private val DEFAULT_STEPS = 150
         private const val BASE_SEED = 0x5EED_0A1CL
 
@@ -508,8 +492,6 @@ class RandomUiWalkTest : UiProbeTest() {
 
         private val FONT_SCALES = listOf(1f, 1f, 1.3f, 2f)
 
-        /** Plausible and hostile text-field input: empty, blank, numbers with
-         *  commas / dots / signs, huge, unicode, emoji, RTL, control characters. */
         private val TEXTS = listOf(
             "", " ", "0", "5", "12,5", "1,234.5", "1.234,5", "-3", "99999999999", "1e9", "NaN", "0.0001",
             "Back Squat", "squat", "Bench", "knee", "Front Lever", "Müller-Übung", "深蹲", "قرفصاء", "💪🏽🔥",

@@ -13,10 +13,6 @@ use crate::exercise::{self, ExerciseClass, MovementPattern};
 use crate::individualization::TrainingAge;
 use crate::schema::Recommended;
 
-// ---------------------------------------------------------------------------
-// 1. Per-muscle weekly volume landmarks (File 03 Table 1; HYP-LANDMARKS-001)
-// ---------------------------------------------------------------------------
-
 /// Weekly direct-set landmarks for one muscle (intermediate lifter).
 /// Population starting points, not validated constants (HYP-LANDMARKS-001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,10 +147,6 @@ pub fn landmarks_for_exercise(exercise: &str) -> Option<&'static VolumeLandmarks
     landmarks_for(landmark_key(primary))
 }
 
-// ---------------------------------------------------------------------------
-// 2. Rep/load by exercise class (File 03 Table 2; HYP-REPLOAD-001)
-// ---------------------------------------------------------------------------
-
 /// Rep range + %1RM window for a hypertrophy set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepLoad {
@@ -198,10 +190,6 @@ pub fn rest_sec_for(class: ExerciseClass) -> Recommended<(u16, u16)> {
     Recommended::new(window, claims::HYP_REST_002)
 }
 
-// ---------------------------------------------------------------------------
-// 3. Volume→frequency mapping (File 03 Table 3; HYP-FREQ-001)
-// ---------------------------------------------------------------------------
-
 /// Suggested weekly frequency and per-session set spread for a weekly volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrequencyRx {
@@ -236,10 +224,6 @@ pub fn frequency_for_weekly_sets(weekly_sets: u8) -> Recommended<FrequencyRx> {
     };
     Recommended::new(rx, claims::HYP_FREQ_001)
 }
-
-// ---------------------------------------------------------------------------
-// 4. RP accumulation drivers (File 03 hyp-032/019)
-// ---------------------------------------------------------------------------
 
 /// Largest allowed week-over-week set increment: hyp-001 climbs "~2–4
 /// sets/week", and hyp-011 (SAFETY, HYP-VOLRAMP-SAFE-001) forbids abrupt
@@ -299,7 +283,7 @@ pub const MAX_SCHEDULED_RIR: u8 = 4;
 /// (File 03 hyp-019; HYP-RIR-RAMP-001). RIR descends to 1 in the final week:
 /// a 4-week block gives week 1→4, 2→3, 3→2, 4→1. `None` outside `1..=block_weeks`.
 ///
-/// The KB schedule is 4 weeks; longer blocks hold [`MAX_SCHEDULED_RIR`] (4)
+/// The KB schedule is 4 weeks; longer blocks hold [`MAX_SCHEDULED_RIR`]
 /// in the early weeks instead of extrapolating higher, hyp-020: RIR is only
 /// ~±1-rep accurate at 0–5 RIR, so >5 RIR targets would be unreliable.
 pub fn rir_for_week(week: u8, block_weeks: u8) -> Option<Recommended<u8>> {
@@ -309,11 +293,6 @@ pub fn rir_for_week(week: u8, block_weeks: u8) -> Option<Recommended<u8>> {
     let rir = (block_weeks - week + 1).min(MAX_SCHEDULED_RIR);
     Some(Recommended::new(rir, claims::HYP_RIR_RAMP_001))
 }
-
-// ---------------------------------------------------------------------------
-// 5. Volume ceilings, training-age MEV, and recovery scaling (File 03
-//    hypertrophy-003/004/006/007/008/009/010/045/025)
-// ---------------------------------------------------------------------------
 
 /// Growth-target ceiling: outcome superiority is undetectable beyond ~31
 /// fractional weekly sets/muscle (File 03 hypertrophy-003; Pelland 2025). Never
@@ -504,11 +483,6 @@ pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
     Recommended::new(rep_drop_frac > REP_DROP_REST_FRAC, claims::HYP_REST_001)
 }
 
-// ---------------------------------------------------------------------------
-// 6. Load interchangeability + effort/RIR rules (File 03
-//    hypertrophy-012/017/018/020/021/022/023)
-// ---------------------------------------------------------------------------
-
 /// Load-interchangeability window (File 03 hypertrophy-012; HYP-LOADRANGE-001,
 /// Strong, contested): hypertrophy is equivalent across ~30–85% 1RM
 /// (~5–30+ reps) when sets are taken close to failure. The rep upper bound is
@@ -596,12 +570,6 @@ pub fn rir_reliability(reported_rir: u8) -> Recommended<RirReliability> {
 pub fn novice_start_rir() -> Recommended<(u8, u8)> {
     Recommended::new((3, 4), claims::HYP_RIR_ACC_001)
 }
-
-// ---------------------------------------------------------------------------
-// 7. Any-name muscle resolution, fractional volume accounting, block
-//    targets, specialization, double progression
-//     (File 03 Tables 1–4, hyp-001/019/020/033/043/044; 13-hypertrophy-update)
-// ---------------------------------------------------------------------------
 
 /// Double-progression rep RANGE per exercise class: each
 /// sits inside its Table 2 window (HYP-REPLOAD-001: heavy 5–10, moderate 8–15,
@@ -926,11 +894,6 @@ pub fn double_progression(
     Recommended::new(step, claims::HYP_DOUBLEPROG_001)
 }
 
-// ---------------------------------------------------------------------------
-// 8. Mesocycle macro-structure + progression drivers (File 03
-//    hypertrophy-031/033/037/044)
-// ---------------------------------------------------------------------------
-
 /// Mesocycle macro-structure (File 03 hypertrophy-031).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MesoStructure {
@@ -956,10 +919,6 @@ pub fn meso_structure() -> Recommended<MesoStructure> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 9. Tempo + time-efficiency (File 03 hypertrophy-040/041)
-// ---------------------------------------------------------------------------
-
 /// Controlled-tempo prescription (File 03 hypertrophy-040).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TempoRx {
@@ -984,10 +943,6 @@ pub fn tempo_rx() -> Recommended<TempoRx> {
         claims::HYP_TEMPO_001,
     )
 }
-
-// ---------------------------------------------------------------------------
-// 10. Default program synthesis (File 03 hypertrophy-043)
-// ---------------------------------------------------------------------------
 
 /// Intermediate default hypertrophy program (File 03 hypertrophy-043).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

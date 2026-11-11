@@ -48,7 +48,6 @@ import app.milestone.resources.trim_removes
 import app.milestone.resources.trim_start_thumb
 import org.jetbrains.compose.resources.stringResource
 
-/** Saves a [RangeSlider] window as its two ends. */
 private val FloatRangeSaver = listSaver<ClosedFloatingPointRange<Float>, Float>(
     save = { listOf(it.start, it.endInclusive) },
     restore = { it[0]..it[1] },
@@ -60,7 +59,6 @@ private val TrimTrackHeight = 6.dp
 /** Visual size of a trim thumb, inside its 48dp target. */
 private val TrimThumbSize = 24.dp
 
-/** Opacity of the trim slider's inactive `OnBgBody` track. */
 private const val TrimInactiveAlpha = 0.12f
 
 /**
@@ -151,8 +149,6 @@ internal fun TrimRunSheetContent(
             track = { TrimTrack(it) },
         )
 
-        // No-op guard: keeping <2 fixes, or the whole track (both bounds at the
-        // extremes), can't produce a meaningful trim.
         val wholeTrack = keepFromSec <= firstFixSec && keepUntilSec >= lastFixSec
         val canApply = keptCount >= 2 && !wholeTrack
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
@@ -199,11 +195,7 @@ internal fun TrimRunSheetContent(
     }
 }
 
-/**
- * A trim thumb that mirrors its map marker: the start a [TrimThumbSize] `BgElevated`
- * disc with the start marker's `Accent` ring, the end a solid `Accent` disc, each in
- * a 48dp target and spoken "Trim start, 0.42 mi removed".
- */
+/** A trim thumb that mirrors its map marker: the start ring or the finish disc. */
 @Composable
 private fun TrimThumb(start: Boolean, description: String, state: String) {
     Box(
@@ -229,8 +221,6 @@ private fun TrimThumb(start: Boolean, description: String, state: String) {
     }
 }
 
-/** The trim slider's track: `OnBgBody` @ 12% end to end, `Accent` over the kept
- *  window (mirrored under RTL, as the slider's thumbs are); no ticks. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TrimTrack(state: RangeSliderState) {
@@ -257,7 +247,7 @@ private fun TrimTrack(state: RangeSliderState) {
  *  parsed track's ([track]), applied to the run's of-record figure ([record], the
  *  core's QC'd moving distance or moving time). The untouched window therefore
  *  reads exactly what History and the run detail show, and a trimmed one moves in
- *  proportion. Falls back to the raw figure when either total is unknown. Pure. */
+ *  proportion. Falls back to the raw figure when either total is unknown. */
 internal fun trimPreviewShare(window: Double, track: Double, record: Double): Double =
     if (track > 0.0 && record > 0.0) record * (window / track) else window
 
@@ -265,7 +255,7 @@ internal fun trimPreviewShare(window: Double, track: Double, record: Double): Do
  *  fixes [firstKept]..[lastKept] (pause gaps and standing still excluded, as in
  *  [timedTrackFromSegments]) scaled by [trimPreviewShare] onto the run's of-record
  *  moving time [recordSec], so it reads like the run detail's Time, never the
- *  wall-clock span. 0 when fewer than two fixes are kept. Pure. */
+ *  wall-clock span. 0 when fewer than two fixes are kept. */
 internal fun trimKeptMovingSec(points: List<TimedTrackPoint>, firstKept: Int, lastKept: Int, recordSec: Double): Int {
     if (firstKept < 0 || lastKept - firstKept < 1) return 0
     val window = points[lastKept].movingSec - points[firstKept].movingSec

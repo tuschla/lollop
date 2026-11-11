@@ -10,5 +10,4 @@ fun Event.toJson(): JsonElement = coreJson.encodeToJsonElement(EventSerializer, 
  *  last-write-wins line in memory only. */
 val Event.persist: Boolean get() = this !is Event.SetToday
 
-/** Any of the four overtraining signs ticked. */
 val OvertrainingSigns.anyTicked: Boolean get() = worsePerformance || lowMood || higherRestingHr || worseSleep

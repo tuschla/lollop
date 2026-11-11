@@ -51,7 +51,6 @@ S=upgrade
 SEED="$OUT/logs/seed-basic.ndjson"
 HERO="${STR[main_todays_session]}"
 
-# ── Helpers (the shared device, tile and widget helpers are in lib.sh) ───────
 log_two_sets() {
   open_set_editor && editor_fill || return 1
   tap_log_set || return 1
@@ -59,7 +58,6 @@ log_two_sets() {
   evidence old-sets
   close_editor
 }
-# old_run: a GPS run of 60 s through the tracker, its Finish sheet as evidence.
 old_run() {
   start_feeder old-run
   start_run || return 1
@@ -108,9 +106,7 @@ install_r() { # APK TAG
   check INFO $S "install -r $2" "$r ($(basename "$1"), $(sha256sum "$1" | cut -c1-12)); version $(sh_ dumpsys package "$APP_ID" | sed -n 's/.*lastUpdateTime=//p' | head -1)"
   [[ "$r" == Success ]]
 }
-# Facts of an event log: sets, runs, GPS runs, pain reports, plan lines.
 facts() { echo "sets=$(EV count "$1" LogSet) runs=$(EV count "$1" LogRun) gps=$(EV count "$1" LogRunTrack) readiness=$(EV count "$1" SubmitReadiness) plans=$(EV count "$1" GeneratePlan) clearplan=$(EV count "$1" ClearPlan)"; }
-# old_install: a wiped install of OLD, booted on the seed (Today's session shown).
 old_install() {
   adb_ uninstall "$APP_ID" >/dev/null || log "$APP_ID was not installed"
   install_apk "$OLD" >/dev/null || { check FAIL $S "install old" "$(basename "$OLD") did not install"; return 1; }
@@ -119,7 +115,6 @@ old_install() {
   launch && wait_text pre "$HERO" 40
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 trap session_cleanup EXIT
 config_run
 config old "$OLD ($(sha256sum "$OLD" | cut -c1-16))"
@@ -244,7 +239,6 @@ home
 if old_install; then
   start_feeder mid-run
   if start_run; then
-    # 25 s recorded by the old build.
     sleep 25
     n0="$(sidecar_points)"
     pull_sidecar "$OUT/logs/mid-run-old-sidecar.ndjson"
@@ -253,7 +247,6 @@ if old_install; then
     expect $S "new build offers to resume the old build's run" "sidecar $n0 fixes" wait_text eq "${STR[main_resume_run_title]}" 20
     evidence mid-run-01-resume-prompt
     tap_node eq "${STR[track_action_resume]}"
-    # 15 s recorded by the new build.
     sleep 15
     if tap_node eq "${STR[track_btn_stop]}" && wait_text eq "${STR[track_btn_save_run]}" 15; then
       evidence mid-run-02-finish

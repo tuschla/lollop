@@ -119,7 +119,6 @@ const MAX_QUALIFYING_RPE: f64 = 9.0;
 /// this many reps (or hold seconds).
 const UNRATED_MARGIN: u32 = 2;
 
-/// A set's metric on a rung: hold seconds on a timed rung, else reps.
 fn metric<S: RungSet>(timed: bool, s: &S) -> u32 {
     if timed {
         u32::from(s.hold_sec().unwrap_or(0))
@@ -161,7 +160,6 @@ fn judge_rung<S: RungSet>(
     // (qualifies, the only blocker is an unrated set)
     let qualifies = |ss: &[&S]| -> (bool, bool) {
         if l.skill {
-            // Skill rung: one clean set at the trigger (test hold or reps).
             let hits: Vec<&&S> = ss.iter().filter(|s| val(s) >= top).collect();
             if hits.iter().any(|s| effort_ok(s)) {
                 (true, false)
@@ -169,7 +167,6 @@ fn judge_rung<S: RungSet>(
                 (false, hits.iter().any(|s| s.rpe() <= 0.0))
             }
         } else {
-            // Dynamic rung: >= 3 sets, every one at the band top.
             if ss.len() < 3 || !ss.iter().all(|s| val(s) >= top) {
                 return (false, false);
             }
@@ -307,14 +304,12 @@ pub(crate) fn build_anchors<'a, S: RungSet + 'a>(
 ) -> Vec<CalisAnchor> {
     let day_of = |t: i64| local_day(t, utc_offset_sec);
 
-    // Every logged set that names a ladder rung, with its (ladder, rung).
     let matched: Vec<(LadderId, u8, &S)> = sets
         .filter_map(|(s, tier)| tier.map(|(l, r)| (l, r, s)))
         .collect();
 
     let mut out = Vec::new();
     for l in super::LADDERS {
-        // This ladder's sessions: local day → (rung, set), chronological.
         let mut by_day: BTreeMap<i64, Vec<(u8, &S)>> = BTreeMap::new();
         for (lid, r, s) in &matched {
             if *lid == l.id {
@@ -357,7 +352,6 @@ pub(crate) fn build_anchors<'a, S: RungSet + 'a>(
             .last()
             .and_then(|(_, ss)| ss.last())
             .map_or(0.0, |s| s.weight_kg().max(0.0));
-        // Newest loaded set at a weighted rung, for the system-load e1RM line.
         let last_loaded_set = matched
             .iter()
             .filter(|(lid, r, s)| {
@@ -444,7 +438,6 @@ fn replay_ladder<'s, S: RungSet>(
             st = Some(place(places[pi]));
             pi += 1;
         }
-        // The session's rung: the most sets that day (ties → the easier rung).
         let mut counts: BTreeMap<u8, usize> = BTreeMap::new();
         for (r, _) in day_sets {
             *counts.entry(*r).or_default() += 1;

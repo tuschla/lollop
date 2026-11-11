@@ -218,8 +218,6 @@ fn a_sound_aerobic_base_verdict_does_not_headline() {
     );
 }
 
-// ── A tolerable-pain day's headline is the pain call, and the session
-//        prescription is actually capped (ModifyAndMonitor), not full-load ──
 #[test]
 fn tolerable_pain_headline_is_the_pain_call_and_caps_the_session() {
     let (app, mut model) = planned_strength_model(true);

@@ -29,7 +29,6 @@ internal fun appNotificationSettingsIntent(ctx: Context): Intent =
         appDetailsIntent(ctx)
     }
 
-/** This app's details page in the system settings. */
 internal fun appDetailsIntent(ctx: Context): Intent =
     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
 

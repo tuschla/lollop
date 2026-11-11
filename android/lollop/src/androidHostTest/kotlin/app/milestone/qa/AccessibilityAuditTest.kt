@@ -90,8 +90,6 @@ class AccessibilityAuditTest : UiProbeTest() {
     private var config = Config(1f, false, false)
     private var where = ""
 
-    // ── Tests ───────────────────────────────────────────────────────────────
-
     @Test
     fun hybridAthlete_font2_dark_rtl() = audit(Start.Hybrid, Config(2f, dark = true, rtl = true), depth = 1)
 
@@ -106,8 +104,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         audit(Start.Hybrid, Config(1f, dark = false, rtl = false), depth = 1)
     }
 
-    /** Every palette (and Paper with the system accent, a fresh install's default),
-     *  light and dark: every page of each tab, sampled from captures. */
+    /** Paper with the system accent is a fresh install's default. */
     @Test
     fun renderedTextContrast_everyTheme() {
         assumeTrue("A11Y_FULL=1 runs the contrast pass", FULL)
@@ -135,9 +132,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         assertNoFindings()
     }
 
-    // ── Custom controls: value and action exposed ─────────────────────────────
-
-    /** The set loop's rating tracks (effort, reps left) and its number keypad. */
     @Test
     fun customControls_setLoopScalesAndKeypad() {
         config = Config(1f, dark = false, rtl = false)
@@ -148,7 +142,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         settle()
         where = "set loop"
         auditNow()
-        // Reps and reps-left rows: pick-one groups whose cells read their state and label.
         for (tag in listOf("reps-scale", "effort-scale")) {
             val group = unmergedNodes().firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
             assertTrue("the loop shows $tag", group != null)
@@ -165,7 +158,6 @@ class AccessibilityAuditTest : UiProbeTest() {
             }
             assertEquals("$tag: the tapped cell reads selected", listOf(nameOf(cells.first())), picked.map { nameOf(it) })
         }
-        // The keypad: every key a labelled button; the non-digit keys say what they do.
         tapLabelContaining(str(R.string.log_field_weight))
         settle()
         where = "set loop keypad"
@@ -181,12 +173,10 @@ class AccessibilityAuditTest : UiProbeTest() {
         assertNoFindings()
     }
 
-    /** Week strip, activity heatmap, distance charts, route map and the trim thumbs. */
     @Test
     fun customControls_weekStripHeatmapChartsRouteAndTrim() {
         config = Config(1f, dark = false, rtl = false)
         launch(Start.Hybrid, config, extra = listOf(QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(2) - 7_200L, sessionRpe = 6)))
-        // Week strip: seven day tabs, each naming its weekday, one selectable at a time.
         val days = mergedNodes().filter { n ->
             n.config.getOrNull(SemanticsProperties.Role) == Role.Tab && generateSequence(n) { it.parent }.any { it.config.getOrNull(SemanticsProperties.TestTag) == "this-week" }
         }
@@ -202,7 +192,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         where = "Today, Thursday open"
         auditNow()
 
-        // Morning check-in: each rating track is one adjustable node with a spoken value.
         tapTag("log-fab")
         settle()
         tapLabelContaining(str(R.string.main_morning_checkin_title))
@@ -210,13 +199,11 @@ class AccessibilityAuditTest : UiProbeTest() {
         where = "morning check-in"
         auditNow()
 
-        // History: every logged heatmap day names itself, with an open action.
         goHome(str(R.string.main_dest_history))
         val cells = unmergedNodes().filter { it.config.getOrNull(SemanticsActions.CustomActions)?.any { a -> a.label == str(R.string.history_heatmap_open_day) } == true }
         assertTrue("logged heatmap days offer \"Open this day\"", cells.isNotEmpty())
         assertTrue("each logged day names itself", cells.all { cds(it).any { c -> c.isNotBlank() } })
 
-        // Run detail: the route map describes the route.
         val runTitle = str(R.string.history_run_weekday, "Saturday")
         scrollMainToText(runTitle)
         tapLabelContaining(runTitle)
@@ -226,7 +213,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         val mapPrefix = str(R.string.runmap_cd).substringBefore("%")
         assertTrue("route map description", unmergedNodes(roots().last()).any { n -> cds(n).any { it.startsWith(mapPrefix) } })
 
-        // Trim: two adjustable thumbs, each named and saying what it removes.
         val trim = flatten(roots().last()).first { it.config.getOrNull(SemanticsProperties.TestTag) == "run-trim" }
         node(trim).performSemanticsAction(SemanticsActions.OnClick)
         settle()
@@ -261,7 +247,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         val primary = flatten(roots().last()).first { it.config.getOrNull(SemanticsProperties.TestTag) == "editor-primary" }
         node(primary).performSemanticsAction(SemanticsActions.OnClick)
         awaitCoreLifts(sets + 1)
-        // The countdown on Today's card or in the loop ("Rest: 2:59 left").
         val restWord = strPrefix(R.string.log_rest_left_cd).substringBefore(' ')
         val clock = Regex("""\d+:\d\d""")
         val rest = roots().flatMap { allUnmerged(it) }.firstOrNull { n -> spoken(n).any { it.startsWith(restWord) && clock.containsMatchIn(it) } }
@@ -271,8 +256,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         val line = unmergedNodes(roots().last()).firstOrNull { it.config.contains(SemanticsProperties.LiveRegion) && texts(it).isNotEmpty() }
         assertTrue("the loop's \"Logged … · $undo\" line is a live region", line != null)
     }
-
-    // ── Regression pins for fixed findings ────────────────────────────────────
 
     @Test
     fun rtl_bottomNavigation_isReadStartToEnd() {
@@ -341,7 +324,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         assertTrue("clickable with no role: $bare", bare.isEmpty())
     }
 
-    /** One node per week the chart shows, each in TalkBack's order after the summary. */
     @Test
     fun weeklyDistanceChart_weekFiguresReachableWithoutTouch() {
         config = Config(1f, dark = false, rtl = false)
@@ -400,8 +382,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         assertNoFindings()
     }
 
-    // ── Small node helpers for the targeted tests ─────────────────────────────
-
     private fun mergedNodes(root: SemanticsNode = roots().last()): List<SemanticsNode> = flatten(root).filter { it.placedVisible() }
 
     private fun unmergedNodes(root: SemanticsNode = roots().last()): List<SemanticsNode> = allUnmerged(root).filter { it.placedVisible() }
@@ -418,7 +398,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         node(n).performSemanticsAction(SemanticsActions.OnClick)
     }
 
-    /** Scroll the main list until a node speaking [text] is on screen. */
     private fun scrollMainToText(text: String) {
         scrollMainToTop()
         var page = 0
@@ -436,8 +415,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         }
         assertNoFindings()
     }
-
-    // ── Driver ──────────────────────────────────────────────────────────────
 
     private fun audit(start: Start, c: Config, depth: Int) {
         crawlOnce(start, c, depth)
@@ -475,7 +452,6 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private var launchSettings: Triple<AppTheme, Boolean, DarkMode>? = null
 
-    /** [MATERIAL_SHEET_CHROME] in the current locale. */
     private val materialSheetChrome: Set<String>
         get() = MATERIAL_SHEET_CHROME.mapNotNull(::materialString).toSet()
 
@@ -491,13 +467,11 @@ class AccessibilityAuditTest : UiProbeTest() {
             ctx.resources.getIdentifier(name, "string", pkg).takeIf { it != 0 }
         }?.let { ctx.getString(it) }
 
-    /** A number on the Material time picker's clock face (library code: see [MATERIAL_TIME_DIAL]). */
     private fun isTimeDialNumber(n: SemanticsNode, dial: List<Regex> = materialTimeDial): Boolean =
         spoken(n).singleOrNull()?.let { s -> dial.any { it.matches(s) } } == true
 
     private lateinit var start: Start
 
-    /** Audit the current screen page by page and tap each action on each page. */
     private fun crawlScreen(tab: String?, depth: Int) {
         val base = tab ?: "setup"
         scrollMainToTop()
@@ -517,7 +491,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         }
     }
 
-    /** Tap [label] on page [page] of [tab]; audit what it opened; restore. */
     private fun tapAndAudit(tab: String?, page: Int, label: String, depth: Int) {
         if (label in SKIP_TAPS.map { str(it) }) return
         if (!bringIntoView(tab, page, label)) return
@@ -551,7 +524,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         settle()
     }
 
-    /** One level deeper inside the open overlay (sheet or dialog). */
     private fun crawlOverlay(path: String) {
         val depthWindows = roots().size
         val tapped = HashSet<String>()
@@ -565,7 +537,6 @@ class AccessibilityAuditTest : UiProbeTest() {
                 if (fingerprint() == before) continue
                 where = "$path > $label"
                 auditNow()
-                // Back to the overlay we came from.
                 var n = 0
                 while (roots().size > depthWindows && n++ < 3) {
                     guard("back") { Espresso.pressBackUnconditionally() }
@@ -585,7 +556,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         }
     }
 
-    /** Back to [tab] on the main scaffold with nothing open; relaunch if Back cannot. */
     private fun goHome(tab: String): Boolean {
         var n = 0
         while ((roots().size > 1 || selectedTab() == null) && n++ < 5) {
@@ -612,11 +582,8 @@ class AccessibilityAuditTest : UiProbeTest() {
         settle()
     }
 
-    // ── Screen helpers ──────────────────────────────────────────────────────
-
     override fun fail(msg: String): Nothing = super.fail("$msg\n@ $where ($config)")
 
-    /** Labels of the enabled, visible actions in [root], top to bottom. */
     private fun actionLabels(root: SemanticsNode, skipTabs: Boolean): List<String> = flatten(root)
         .filter { n ->
             n.isVisible() && n.config.getOrNull(SemanticsActions.OnClick) != null &&
@@ -678,8 +645,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         return visible()
     }
 
-    // ── Audit ───────────────────────────────────────────────────────────────
-
     private class Win(val index: Int, val view: ViewRootForTest, val merged: SemanticsNode, val unmerged: SemanticsNode, val order: List<Int>)
 
     private fun windows(): List<Win> = composeRoots().mapIndexed { i, r ->
@@ -694,7 +659,6 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private fun report(kind: String, detail: String) {
         val f = Finding(kind, detail, where, "${if (::start.isInitialized) "$start " else ""}$config")
-        // One entry per kind + detail: the same widget seen again elsewhere is the same finding.
         findings.putIfAbsent("$kind|$detail", f)
     }
 
@@ -705,7 +669,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         auditSemantics(w)
         auditTraversal(w)
         smallTargets().forEach { report("small-touch-target", it) }
-        // In the crawl's own theme (the seeded user's).
         auditContrast(
             "${AppSettings.theme.value}${if (AppSettings.dynamicAccent.value) "+system accent" else ""} " +
                 if (AppSettings.darkMode.value == DarkMode.Dark) "dark" else "light",
@@ -763,7 +726,6 @@ class AccessibilityAuditTest : UiProbeTest() {
             if (c.getOrNull(SemanticsProperties.ToggleableState) != null && role == null) {
                 report("state-without-role", "\"$name\" has a checked state but no role (switch/checkbox)")
             }
-            // A focusable node (merging, or a leaf that speaks) announcing a phrase twice.
             if (c.isMergingSemanticsOfDescendants || n.children.isEmpty()) {
                 val words = spoken(n).map { it.trim().lowercase() }.filter { it.length > 1 }
                 val dupes = words.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
@@ -771,9 +733,9 @@ class AccessibilityAuditTest : UiProbeTest() {
             }
             auditCustomControl(n)
         }
-        // Headings: titles and section overlines outside an action. A title-size
-        // figure (tabular digits: the trim readout, a record value) is a value, and the
-        // brand wordmark in the top bar is the app's name on every tab, not a title.
+        // A title-size figure (tabular digits: the trim readout, a record value) is a
+        // value, and the brand wordmark in the top bar is the app's name on every tab,
+        // not a title.
         val unmerged = flatten(w.unmerged).drop(1).filter { it.placedVisible() }
         for (n in unmerged) {
             val layout = layoutOf(n) ?: continue
@@ -813,7 +775,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         if (c.getOrNull(SemanticsProperties.ProgressBarRangeInfo) != null && c.isMergingSemanticsOfDescendants) {
             if (c.getOrNull(SemanticsActions.SetProgress) == null) report("custom-control", "adjustable \"$name\" has no set-progress action")
         }
-        // A pick-one group (scale rows, effort cells, chips): every option says whether it is picked.
         if (c.contains(SemanticsProperties.SelectableGroup)) {
             flatten(n).drop(1).filter { it.placedVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null }.forEach { o ->
                 if (o.config.getOrNull(SemanticsProperties.Selected) == null && o.config.getOrNull(SemanticsProperties.ToggleableState) == null) {
@@ -821,11 +782,9 @@ class AccessibilityAuditTest : UiProbeTest() {
                 }
             }
         }
-        // Keypad keys: each a labelled button.
         if (c.getOrNull(SemanticsActions.OnClick) != null && generateSequence(n) { it.parent }.any { it.config.getOrNull(SemanticsProperties.TestTag) == "numeric-keypad" }) {
             if (c.getOrNull(SemanticsProperties.Role) != Role.Button) report("custom-control", "keypad key \"$name\" is not a button")
         }
-        // Anything with a range must say its value.
         c.getOrNull(SemanticsProperties.ProgressBarRangeInfo)?.let {
             if (c.getOrNull(SemanticsProperties.StateDescription).isNullOrBlank() && c.getOrNull(SemanticsActions.SetProgress) != null) {
                 report("custom-control", "adjustable \"$name\" has no spoken value")
@@ -833,7 +792,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         }
     }
 
-    /** Traversal: never upward within a column, start-to-end within a row. */
     private fun auditTraversal(w: Win) {
         val byId = flatten(w.merged).associateBy { it.id }
         val seq = w.order.mapNotNull { byId[it] }.filter { n ->
@@ -862,7 +820,6 @@ class AccessibilityAuditTest : UiProbeTest() {
             if (rb.bottom <= ra.top - slack && hOverlap > slack) {
                 report("traversal-order", "\"${nameOf(b)}\" ${rb.dpString()} is read after \"${nameOf(a)}\" ${ra.dpString()} below it")
             } else if (vOverlap > 0.5f * min(ra.height, rb.height) && hOverlap <= slack && rb.top <= ra.top + slack) {
-                // Same row, and not a lower line: the later node must sit further toward the end.
                 val backwards = if (rtl) rb.left >= ra.right - slack else rb.right <= ra.left + slack
                 if (backwards) {
                     report(
@@ -873,8 +830,6 @@ class AccessibilityAuditTest : UiProbeTest() {
             }
         }
     }
-
-    // ── Contrast ────────────────────────────────────────────────────────────
 
     /** Rendered contrast of every fully visible text line in the top window (what is
      *  under a sheet's scrim is not readable content). */
@@ -983,8 +938,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         return Triple(contrastRatio(Color(glyph), Color(ground)), glyph, ground)
     }
 
-    // ── Traversal map + windows (reflection into the Compose accessibility delegate) ──
-
     private fun delegateOf(root: ViewRootForTest): Any {
         val view = root.view
         val f = generateSequence<Class<*>>(view.javaClass) { it.superclass }.firstNotNullOf { c ->
@@ -1021,8 +974,6 @@ class AccessibilityAuditTest : UiProbeTest() {
     private fun composeRoots(): List<ViewRootForTest> =
         windowViews().flatMap { w -> w.descendants().filter { it is ViewRootForTest && it.isShown }.map { it as ViewRootForTest }.toList() }
 
-    // ── Verdict ─────────────────────────────────────────────────────────────
-
     private fun assertNoFindings() {
         if (findings.isNotEmpty()) throw AssertionError("${findings.size} accessibility findings:\n" + findings.values.take(40).joinToString("\n"))
     }
@@ -1033,8 +984,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         private const val MAX_OVERLAY_PAGES = 3
         private const val BRAND = "lollop"
 
-        /** Up to 2 s of virtual time for an opening or closing overlay to settle
-         *  before a contrast sample. */
         private const val OVERLAY_SETTLE_STEPS = 20
         private const val OVERLAY_SETTLE_STEP_MS = 100L
 
@@ -1042,8 +991,7 @@ class AccessibilityAuditTest : UiProbeTest() {
 
         val CONFIGS = listOf(1f, 2f).flatMap { f -> listOf(false, true).flatMap { d -> listOf(false, true).map { r -> Config(f, d, r) } } }
 
-        /** Taps that leave the app's UI (system pickers, share sheets) or wipe the
-         *  state the crawl stands on. */
+        /** Taps that wipe the state the crawl stands on. */
         private val SKIP_TAPS = listOf(R.string.main_clear_all_data)
         private val OVERLAY_SKIP = listOf(R.string.main_cancel)
 

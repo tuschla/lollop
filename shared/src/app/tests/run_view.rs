@@ -21,10 +21,10 @@ fn logging_a_run_classifies_zone_and_pace() {
 #[test]
 fn run_zone_strings_match_the_shell_colour_contract() {
     // The view emits the zone as a bare `"Z1"/"Z2"/"Z3"` string (or `"-"`
-    // with no HR), and the Android shell's `hrZoneColor` matches on exactly
-    // those literals. Renaming the `ThreeZone` variants would compile clean
-    // but silently drop every zone colour on-device: this locks the wire
-    // strings so such a rename fails here instead.
+    // with no HR), and the Kotlin shell's `ThreeZoneOrNoneSerializer` accepts
+    // exactly those literals. Renaming the `ThreeZone` variants would compile
+    // clean but make the shell reject every view with a zone: this locks the
+    // wire strings so such a rename fails here instead.
     let app = Engine;
     let cases = [(70.0, "Z1"), (85.0, "Z2"), (92.0, "Z3"), (0.0, "-")];
     for (hr, expected) in cases {
@@ -403,7 +403,6 @@ fn run_view_differentiates_interval_from_steady_same_average() {
     let sv = run_card(&steady);
     let iv = run_card(&interval);
 
-    // Same average pace by construction.
     assert_eq!(sv.pace, iv.pace, "same-average precondition broke");
 
     let s = sv.interval.expect("steady interval verdict");

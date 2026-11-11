@@ -119,7 +119,6 @@ class TodayWidgetContentTest {
         for (w in 130..520 step 5) for (h in 140..520 step 5) {
             assertEquals("${w}x$h", WidgetShape.Stack, layoutAt(DpSize(w.dp, h.dp)).shape)
         }
-        // And a one-row widget picks a one-row step.
         for (w in 130..520 step 5) for (h in 60..130 step 5) {
             assertEquals("${w}x$h", WidgetShape.Line, layoutAt(DpSize(w.dp, h.dp)).shape)
         }
@@ -176,7 +175,6 @@ class TodayWidgetContentTest {
             assertEquals(1, it.maxActions)
             assertFalse("no room for the label", it.labelled)
         }
-        // 4×1: the same row with the labelled action and Log.
         layoutAt(cells4x1).let {
             assertEquals(WidgetShape.Line, it.shape)
             assertTrue(it.labelled)
@@ -190,7 +188,6 @@ class TodayWidgetContentTest {
             assertEquals(1, it.maxActions)
             assertFalse(it.week)
         }
-        // 3×2 and 4×2: both actions.
         for (c in listOf(cells3x2, cells4x2)) layoutAt(c).let {
             assertEquals(WidgetShape.Stack, it.shape)
             assertEquals(2, it.maxActions)
@@ -200,7 +197,6 @@ class TodayWidgetContentTest {
         // strip's labels do not fit their columns: the count alone.
         layoutAt(cells2x3).let { assertTrue(it.week); assertFalse(it.weekDays); assertEquals(1, it.maxActions) }
         layoutAt(cells4x3).let { assertTrue(it.week); assertTrue(it.weekDays); assertEquals(2, it.maxActions) }
-        // Without a plan week there is no week block.
         assertFalse(layoutAt(cells4x3, face = liftDay().copy(week = null, days = emptyList())).week)
         // Every size shows more as it grows: body lines never shrink with height.
         val lines = listOf(cells2x2, cells2x3).map { bodyLines(liftDay(), layoutAt(it), res).size }
@@ -281,7 +277,6 @@ class TodayWidgetContentTest {
                 assertTrue("rest $c: an item of the next session", bodyLines(restDay(), l, res).isNotEmpty())
             }
         }
-        // Session done: "Session done" over the next session.
         layoutAt(cells4x3, face = doneDay()).let {
             assertTrue(it.hero)
             assertEquals(res.getString(R.string.widget_session_done), bodyLines(doneDay(), it, res).first().text)
@@ -297,7 +292,6 @@ class TodayWidgetContentTest {
         // A wrapped item line keeps its prescription whole: never a line ending on "@"
         // nor one starting with it ("Back squat · 5×3" / "@ 117.5 kg" on a 2×2, e37).
         assertEquals("Back squat · 5×3 @\u00A0117.5\u00A0kg", liftDay().items.first())
-        // A list never gets the large title.
         assertFalse(layoutAt(cells4x3).bigTitle)
     }
 
@@ -326,7 +320,6 @@ class TodayWidgetContentTest {
         // Two cells wide at 1.3: no strip of cut weekday labels, the count alone.
         assertFalse(layoutAt(cells2x3, 1.3f).weekDays)
         assertTrue(layoutAt(cells4x3, 1.3f).weekDays)
-        // Fewer body lines at a larger font, never more.
         val at1 = bodyLines(liftDay(), layoutAt(cells2x2, 1f), res)
         val at13 = bodyLines(liftDay(), layoutAt(cells2x2, 1.3f), res)
         assertTrue("$at1 / $at13", at13.sumOf { it.maxLines } <= at1.sumOf { it.maxLines })
@@ -400,8 +393,6 @@ class TodayWidgetContentTest {
         onNode(hasTextEqualTo("\u2713")).assertDoesNotExist()
     }
 
-    // ── Theme ────────────────────────────────────────────────────────────────
-
     private fun ColorProvider.at(night: Boolean): Color = (this as? DayNightColorProvider)?.getColor(night) ?: getColor(ctx)
 
     private fun assertPalette(what: String, p: Palette, c: WidgetColors, night: Boolean) {
@@ -435,7 +426,6 @@ class TodayWidgetContentTest {
         val paper = widgetColors(ctx, AppTheme.Paper, DarkMode.System, dynamic = true)
         assertPalette("paper day", AppTheme.Paper.light.withDynamicAccent(dynamicLightColorScheme(ctx).primary), paper, night = false)
         assertPalette("paper night", AppTheme.Paper.dark.withDynamicAccent(dynamicDarkColorScheme(ctx).primary), paper, night = true)
-        // The accent off: the theme's own accent.
         assertEquals(AppTheme.Rose.light.accent, widgetColors(ctx, AppTheme.Rose, DarkMode.Light, dynamic = false).accent.at(false))
     }
 }

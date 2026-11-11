@@ -50,7 +50,7 @@ class TodayEditorA11yTest {
     @Test
     fun aHeldDayInTheWeekStripIsSpokenPaused() {
         Locale.setDefault(Locale.US)
-        // Mon 2026-09-21: Thursday is held.
+        // A Monday; Thursday is held.
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
         val week = (0 until 7).map {
             SessionPlanView(epoch_day = monday + it, title = "Day $it", session_type = SessionType.LiftMaxEffort, status = if (it == 3) SessionStatus.Blocked else SessionStatus.Planned)

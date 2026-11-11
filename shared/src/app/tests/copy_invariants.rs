@@ -18,8 +18,6 @@ use super::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-// ── String scanning ─────────────────────────────────────────────────────────
-
 /// A numeric token: `[0-9]+([.:][0-9]+)*`, as a byte span of the string.
 fn number_spans(s: &str) -> Vec<(usize, usize)> {
     let b = s.as_bytes();
@@ -585,8 +583,6 @@ fn miles_violations(v: &Value, path: &mut String, scenario: &str, out: &mut Hits
     }
 }
 
-// ── Scenarios ───────────────────────────────────────────────────────────────
-
 /// Shell-side local time: `hour` o'clock on local day `d` as a UTC stamp.
 fn at(d: i64, hour: i64, offset: i64) -> i64 {
     d * DAY_SEC + hour * HOUR - offset
@@ -1119,7 +1115,9 @@ pub(super) fn report(hits: &[(&(String, String), &Hit)]) -> String {
 
 /// Empty states: no profile, a profile with no today, each archetype with no
 /// logs, a fresh plan, and the calculators.
-fn sweep_empty(hits: &mut Hits) {
+fn sweep_empty() -> Hits {
+    let mut all = Hits::new();
+    let hits = &mut all;
     let app = Engine;
     let mut model = Model::default();
     collect(&app, &model, "empty", false, hits);
@@ -1165,6 +1163,7 @@ fn sweep_empty(hits: &mut Hits) {
             hits,
         );
     }
+    all
 }
 
 /// Every archetype after 7 weeks of logs (follow-the-plan from week 3) at four UTC
@@ -1225,19 +1224,13 @@ fn sweep_long_history() -> Hits {
     hits
 }
 
-fn sweep_empty_hits() -> Hits {
-    let mut hits = Hits::new();
-    sweep_empty(&mut hits);
-    hits
-}
-
 /// All sweeps, run once per test binary and shared by the rule-family tests.
 /// The independent sweeps run on a few worker threads (each `Engine` view
 /// memo is thread-local), merged in a fixed order so the first example of a
 /// violation is deterministic.
-static ALL_HITS: std::sync::LazyLock<Hits> = std::sync::LazyLock::new(|| {
+pub(super) static ALL_HITS: std::sync::LazyLock<Hits> = std::sync::LazyLock::new(|| {
     type Job = Box<dyn FnOnce() -> Hits + Send>;
-    let mut jobs: Vec<Job> = vec![Box::new(sweep_empty_hits), Box::new(sweep_long_history)];
+    let mut jobs: Vec<Job> = vec![Box::new(sweep_empty), Box::new(sweep_long_history)];
     for (i, (name, p)) in archetypes(END_MON + 3).into_iter().enumerate() {
         jobs.push(Box::new(move || sweep_archetype(i, name, p)));
     }
@@ -1270,13 +1263,8 @@ static ALL_HITS: std::sync::LazyLock<Hits> = std::sync::LazyLock::new(|| {
     all
 });
 
-pub(super) fn all_hits() -> &'static Hits {
-    &ALL_HITS
-}
-
-/// The family's hits.
 pub(super) fn assert_family(prefixes: &[&str]) {
-    let bad: Vec<_> = all_hits()
+    let bad: Vec<_> = ALL_HITS
         .iter()
         .filter(|((_, rule), _)| prefixes.iter().any(|p| rule.starts_with(p)))
         .collect();
@@ -1290,14 +1278,12 @@ pub(super) fn assert_family(prefixes: &[&str]) {
 
 /// No hit of `rule` at `path`.
 fn assert_fixed(path: &str, rule: &str) {
-    let bad: Vec<_> = all_hits()
+    let bad: Vec<_> = ALL_HITS
         .iter()
         .filter(|((p, r), _)| p == path && r.starts_with(rule))
         .collect();
     assert!(bad.is_empty(), "still present:{}", report(&bad));
 }
-
-// ── Scanner self-checks (the rules flag what they claim to) ─────────────────
 
 #[test]
 fn the_scanner_flags_each_rule_and_passes_clean_copy() {
@@ -1358,8 +1344,6 @@ fn the_scanner_flags_each_rule_and_passes_clean_copy() {
     assert!(string_violations("citation", "doi:10.1007/s40279-015-0303-1", false).is_empty());
 }
 
-// ── Rule families over every swept view ─────────────────────────────────────
-
 #[test]
 fn copy_numbers_are_sane() {
     assert_family(&["number:"]);
@@ -1398,8 +1382,6 @@ fn copy_carries_no_claim_ids() {
 fn copy_text_parts_match_the_text() {
     assert_family(&["marks:", "effort:"]);
 }
-
-// ── Single rules pinned at one path ───────────────────────────────────────
 
 #[test]
 fn guidance_weight_heading_never_says_loading() {

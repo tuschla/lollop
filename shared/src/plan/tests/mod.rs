@@ -226,7 +226,7 @@ fn novice_lifting_block_has_no_calendar_deload() {
 
 /// With no calendar deload nothing restarts a novice's %1RM ramp: a week's
 /// percentage never falls back to the band floor after five load weeks
-/// (STR-PCTPROG-001 adds load per successful week; KbGolden bug 3).
+/// (STR-PCTPROG-001 adds load per successful week).
 #[test]
 fn novice_percent_ramp_never_restarts() {
     let mut p = base_profile();
@@ -620,8 +620,6 @@ fn runner_strength_block_avoids_hard_run_neighbours() {
         lift_days(&synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap()).is_empty()
     );
 }
-
-// ── age_years → conservative running deload cadence (masters) ──
 
 #[test]
 fn masters_runner_takes_the_conservative_two_week_load_cadence() {

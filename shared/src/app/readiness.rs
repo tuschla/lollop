@@ -85,7 +85,6 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
     let n = days.len().min(usize::from(u16::MAX)) as u16;
     let prov = feedback::provisional_until_baseline(n);
     prov.value.then(|| {
-        // One plain line: the loads are typical starting values that adapt.
         let text = if n == 0 {
             "Starting weights are typical values; they adapt as you log.".to_string()
         } else {
@@ -138,7 +137,6 @@ pub(super) fn build_autoreg_source(
     // newest HRV day (`autoreg::derive_readiness`), so it counts as usable HRV
     // even when that day is not the latest.
     let src = autoreg::autoreg_source(hrv_today || hrv_baseline_active, recent_hrv, subjective);
-    // One plain line: what the weights follow right now.
     let text = match src.value {
         _ if hrv_suspended => {
             "HRV readings look unreliable, so weights follow your check-ins and logged sets."

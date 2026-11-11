@@ -63,25 +63,19 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Route inset from the card edge inside the run detail card and trim preview. */
 private const val CardFrameInsetDp = 24f
-/** Route inset from the free rectangle (between the chrome) on the full-screen map. */
 private const val FullScreenFrameInsetDp = 48f
 /** Pinch range on the app-drawn full-screen map, relative to the fitted route. */
 internal const val MinUserScale = 0.5f
 internal const val MaxUserScale = 32f
-/** Height of the full-screen map's top chrome row (below the status bar). */
 private val MapTopRowHeight = 64.dp
-/** The sheet map's "open in full" control: visual square and glyph. */
 private val ExpandVisual = 40.dp
 private val ExpandGlyph = 20.dp
-/** The full-screen map's control glyphs (close, Fit route). */
 private val FitGlyph = 24.dp
 
 /** Opacity of a trimmed-off leg's dashed `OnBgFaint` stroke (spec §4). */
 internal const val TrimCutAlpha = 0.6f
 
-/** Metres in one display distance unit. */
 internal val DistanceUnit.metres: Double get() = if (this == DistanceUnit.Mi) CoreConstants.MILE_M else 1000.0
 
 /** The header and stats the full-screen route map shows over the map. */
@@ -102,7 +96,7 @@ private fun routeDescription(track: RouteTrack, recordKm: Double, unit: Distance
  * The route map card (spec §2.3): the run's route over map tiles (or, with maps
  * off, on the plain `BgElevated` card), drawn in the §0.2 progression ramp with a
  * start ring, a finish flag disc, their label pills and a numbered marker at every
- * whole km/mi, framed with a 24dp inset. Static, so a drag over it scrolls the
+ * whole km/mi, framed with an inset. Static, so a drag over it scrolls the
  * sheet. With [fullScreen] the whole card and its corner control open
  * [FullScreenRouteMap]; without it the card is a picture only (finish review
  * thumbnail). [recordKm] (the run's of-record distance) keeps the numbered markers
@@ -152,9 +146,8 @@ internal fun RouteMapCard(
     }
 }
 
-/** The §2.3 card both sheet route maps draw [track] in: [height] tall, over map tiles
- *  or (maps off) on the plain `BgElevated` card with a hairline, framed with a 24dp
- *  inset and static. [layer] styles the route layer; [overlay] sits over it. */
+/** The §2.3 card both sheet route maps draw [track] in. [layer] styles the route
+ *  layer; [overlay] sits over it. */
 @Composable
 private fun RouteCard(
     track: RouteTrack,
@@ -179,7 +172,6 @@ private fun RouteCard(
     }
 }
 
-/** The sheet map's "open in full" corner control: a 40dp square in a 48dp target, 8dp in. */
 @Composable
 private fun ExpandButton(modifier: Modifier, onClick: () -> Unit) {
     Box(
@@ -217,8 +209,8 @@ internal expect fun FullScreenMapDialog(onDismissRequest: () -> Unit, content: @
 /**
  * The full-screen route (spec §3), edge to edge behind both system bars: a
  * near-opaque `BgTop` top chrome under the status bar (close, run name, date), the
- * route fitted into the space between the chrome and the bottom stat sheet with a
- * 48dp inset, "Fit route" above the sheet, and the same 3-up stats as the detail
+ * route fitted into the space between the chrome and the bottom stat sheet,
+ * "Fit route" above the sheet, and the same 3-up stats as the detail
  * sheet. Pans and pinches; Back or ✕ closes.
  */
 @Composable
@@ -450,8 +442,8 @@ fun TrimRouteMap(
 }
 
 /** A round `BgElevated` button with a hairline floating over a map: the full-screen
- *  route's 56dp "Fit route" (spec §3.3, ground at [MapChromeAlpha]) and the tracker's
- *  48dp Recenter (opaque ground). */
+ *  route's "Fit route" (spec §3.3, ground at [MapChromeAlpha]) and the tracker's
+ *  Recenter (opaque ground). */
 @Composable
 internal fun MapOverlayButton(
     icon: DrawableResource,
@@ -475,15 +467,12 @@ internal fun MapOverlayButton(
     }
 }
 
-/** Height of an embedded route map (run detail, trim sheet). */
 val RouteMapHeight = 220.dp
 
-/** Top-corner radius of the tracker's floating stat sheet. */
 val SheetCornerRadius = 26.dp
 
-/** Opacity of the `BgTop` ground behind the full-screen map's top bar and stat sheet. */
 const val MapChromeAlpha = 0.94f
 
-/** Medium motion, in ms: a content fade-in (the route map). */
+/** Medium motion, in ms: a content fade-in. */
 const val MotionMedium = 200
 

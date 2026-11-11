@@ -4,9 +4,8 @@ import WidgetKit
 
 /// The Control Center control (iOS 18): Android's Quick Settings tile
 /// (QuickTileService.kt, visual-design-system §10 "Quick Settings tile"). It shows
-/// the tile's face for today from the widget payload, never the core: Start run,
-/// Log set, Run · recording, else Log, with the widget's title under the label,
-/// and a tap opens that screen. The app reloads it whenever it writes the payload.
+/// the tile's face for today from the widget payload, never the core. The app
+/// reloads it whenever it writes the payload.
 @available(iOS 18.0, *)
 struct LollopControl: ControlWidget {
     static let kind = "app.milestone.lollop.control"

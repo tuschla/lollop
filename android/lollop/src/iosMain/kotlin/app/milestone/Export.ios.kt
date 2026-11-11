@@ -67,8 +67,7 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     }
 }
 
-/** Write [lines] to the backup's temporary file, streamed ([AppFiles.writeLinesSynced]);
- *  its URL, or null when the write failed. */
+/** Write [lines] to the backup's temporary file: its URL, or null when the write failed. */
 private fun writeBackupFile(lines: List<String>): NSURL? = runCatching {
     val path = NSTemporaryDirectory() + dataExportFilename()
     AppFiles.writeLinesSynced(AppPath(path), lines)

@@ -514,7 +514,6 @@ fn text(t: &str) -> BasisPiece {
     BasisPiece::Text(t.to_string())
 }
 
-/// A `"3×5"` sets×reps lead.
 fn lead(sets: u8, reps: &str) -> BasisPiece {
     BasisPiece::Lead(format!("{sets}×{reps}"))
 }

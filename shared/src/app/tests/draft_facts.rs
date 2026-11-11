@@ -53,8 +53,6 @@ const D_2026_03_11: i64 = 20_523;
 const D_2026_03_12: i64 = 20_524;
 const D_2026_10_17: i64 = 20_743;
 
-// ── PAR-Q+ answers and clearance ──────────────────────────────────────────
-
 #[test]
 fn a_new_follow_up_yes_after_clearance_drops_the_clearance() {
     let cleared = clearance(
@@ -255,8 +253,6 @@ fn each_health_answer_defers_and_a_cleared_doctor_flag_does_not() {
     assert!(!flag(|h| h.youth = true));
 }
 
-// ── Age and the youth gate ────────────────────────────────────────────────
-
 #[test]
 fn the_age_counts_completed_calendar_years() {
     let age = |birth, today| aged(None, Some(birth), Some(today)).age_years;
@@ -329,8 +325,6 @@ fn a_sent_youth_flag_never_outlives_its_age() {
         "the age raises the gate on its own"
     );
 }
-
-// ── Equipment ─────────────────────────────────────────────────────────────
 
 #[test]
 fn pull_up_rungs_need_something_to_hang_from() {

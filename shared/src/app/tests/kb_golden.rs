@@ -24,8 +24,6 @@ fn week_of(d: i64) -> usize {
     ((d - DAY0) / 7) as usize
 }
 
-// ── The simulated life ─────────────────────────────────────────────────────
-
 /// One plan week as the athlete saw it on its Monday.
 #[derive(Clone, Debug)]
 struct WeekRec {
@@ -520,8 +518,6 @@ life!(
     }
 );
 
-// ── Running week arithmetic ────────────────────────────────────────────────
-
 /// One planned week's running, as the plan shows it on Monday.
 #[derive(Debug, Default)]
 struct RunWeek {
@@ -875,8 +871,6 @@ fn check_run_bands(name: &str, life: &Life) {
     }
 }
 
-// ── Running ────────────────────────────────────────────────────────────────
-
 /// A 40 km/wk 10K runner with a race in week 12: weekly ramp, long-run share,
 /// ~80/20, quality count and spacing, intensity caps, 3:1 cadence and depth,
 /// a two-week taper, and the KB intensity band on every run face.
@@ -1052,8 +1046,6 @@ fn couch_to_5k_follows_the_nhs_table() {
         );
     }
 }
-
-// ── Lifting ────────────────────────────────────────────────────────────────
 
 /// The %e1RM a lift item is prescribed at, if any.
 fn pct(it: &PlanItem) -> Option<u32> {
@@ -1249,10 +1241,6 @@ const TABLE1_MAV_HIGH: &[(&str, u8)] = &[
     ("Calves", 16),
 ];
 
-fn is_compound(it: &PlanItem) -> bool {
-    crate::exercise::is_barbell_lift(&it.exercise)
-}
-
 /// A 4-day intermediate hypertrophy lifter: rep ranges by exercise type
 /// (03-hypertrophy.md:142, :164), rest (03-hypertrophy.md:416-417;
 /// 13-hypertrophy-update.md:11-12), RIR 1–3 ramping toward 1 through the
@@ -1282,12 +1270,13 @@ fn hypertrophy_plan_follows_the_hypertrophy_tables() {
             );
             for it in lift_items(row) {
                 let ctx = format!("week {i} {}: {}", row.title, it.summary);
-                let (lo, hi) = if is_compound(it) { (5, 10) } else { (12, 25) };
+                let compound = crate::exercise::is_barbell_lift(&it.exercise);
+                let (lo, hi) = if compound { (5, 10) } else { (12, 25) };
                 assert!(
                     it.reps_low >= lo && it.reps_high <= hi,
                     "{ctx}: reps outside {lo}–{hi} (03-hypertrophy.md:142, :164)"
                 );
-                let rest_floor = if is_compound(it) { 120 } else { 90 };
+                let rest_floor = if compound { 120 } else { 90 };
                 assert!(
                     (rest_floor..=180).contains(&it.rest_sec),
                     "{ctx}: rest (03-hypertrophy.md:416-417; 13-hypertrophy-update.md:11-12)"
@@ -1903,8 +1892,6 @@ fn female_and_male_twins_get_the_same_plan() {
         assert_eq!(a.program, b.program, "week {}", week_of(a.monday));
     }
 }
-
-// ── Cited claims ───────────────────────────────────────────────────────────
 
 /// Every row of every life cites a registered, non-myth claim; a row citing
 /// STR-DELOAD-VOL-001 is a lifting deload day, and an easy run citing

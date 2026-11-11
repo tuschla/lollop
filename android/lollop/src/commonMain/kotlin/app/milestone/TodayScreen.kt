@@ -151,7 +151,7 @@ internal class TodayActions(
  * the plan or setup prompt), this week, then the e1RM trend. While training is
  * blocked the pinned banner carries the call; Today then shows only a hold card
  * the banner does not state, what still works and the read-only week. The call
- * is the core's `today_headline`; the shell never ranks it.
+ * is the core's `today_headline`.
  */
 @Composable
 internal fun TodayDestination(
@@ -160,7 +160,6 @@ internal fun TodayDestination(
     actions: TodayActions,
 ) {
     val onEvent = actions.onEvent
-    // Removing the generated plan is confirm-gated.
     var confirmRemovePlan by rememberSaveable { mutableStateOf(false) }
     // The day open under the week strip, hoisted so a move opens its target day.
     var weekSelectedDay by rememberSaveable { mutableStateOf(-1L) }
@@ -284,7 +283,6 @@ internal fun TodayDestination(
                     today = model.today(),
                     weightUnit = weightUnit,
                     program = model.program,
-                    // Nothing logged yet: the week card's last line.
                     footnote = if (!blocked && !hasAnything) stringResource(Res.string.main_today_empty) else null,
                     painArea = painArea,
                     onRemovePlan = { confirmRemovePlan = true },
@@ -318,7 +316,6 @@ internal fun TodayDestination(
             }
         }
     }
-    // Progress: the e1RM trend of the plan's main lift, the last section.
     val progressItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
         if (showProgress && trend != null) {
             item { SectionOverline(stringResource(Res.string.main_overline_progress)) }
@@ -370,8 +367,7 @@ internal fun TodayDestination(
         }
     }
 
-    ClearConfirmDialog(
-        visible = confirmRemovePlan,
+    if (confirmRemovePlan) ClearConfirmDialog(
         title = stringResource(Res.string.main_remove_plan_title),
         message = stringResource(Res.string.main_remove_plan_message),
         confirmLabel = stringResource(Res.string.main_remove_plan),
@@ -428,7 +424,7 @@ internal class TodayCards(
  * stay. One safety card hosts each hold, its other safety rows behind its "?". A
  * new best and its lift's next-time advice (the row the core marks
  * `win_advice`) share one card.
- * [hasSignal] false (a brand-new user) leaves only the plan-state card. Pure.
+ * [hasSignal] false (a brand-new user) leaves only the plan-state card.
  */
 internal fun todayCards(model: ViewModel, hasSignal: Boolean): TodayCards {
     val headline = model.today_headline
@@ -761,7 +757,6 @@ private fun TodayHeroCard(
                 c.coachingCards.forEach { coachingCard(it) }
             }
         }
-        // The session's own adjustment when no card above speaks for it.
         c.sessionAdjustmentCard?.let { coachingCard(it) }
         if (hasSignal) {
             if (!c.headlineIsStatus && !(c.folded && c.foldHeadline)) headlineCard()
@@ -794,7 +789,6 @@ private fun TodayHeroCard(
                 onReview = { actions.onOpenSheet(LogMode.Review) },
             )
         }
-        // The plan-state card, always: the next session, else the way to a plan.
         when {
             nextSession != null -> NextSessionCard(
                 nextSession,
@@ -880,7 +874,7 @@ private fun CoachingNotesRow(count: Int, open: Boolean, onToggle: () -> Unit) {
  * exercise the headline already speaks about, none; otherwise the in-session cue
  * (it reacts to today's sets, so it is the newest word) wins over a plan-level
  * or next-time note, else the first in priority order. Adjustments with no
- * exercise all stay. Order is preserved. Pure.
+ * exercise all stay. Order is preserved.
  */
 internal fun coachingPerExercise(headlineExercise: String?, candidates: List<AdjustmentView>): List<AdjustmentView> {
     val key = { a: AdjustmentView -> a.exercise?.takeIf { it.isNotBlank() }?.let(::nameKey) }
@@ -1188,7 +1182,6 @@ private fun NextSessionCard(
     val actionable = isToday && ns.actionable
     val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, ns.session_type) }
     val isRun = { item: PrescriptionView -> isRunItem(item, ns.session_type) }
-    // The session's adjustment, unless it already renders as its own card above.
     val adjustment = ns.adjustment?.takeIf { ns.status == SessionStatus.Adjusted && !adjustmentAbove }
     val hasEvidence = ns.items.isNotEmpty() || coachStatus.isNotEmpty() || adjustment != null
     var expanded by rememberSaveable(ns.epoch_day, ns.title) { mutableStateOf(false) }
@@ -1209,7 +1202,6 @@ private fun NextSessionCard(
         // narrow phone) they drop to their own line under it, at the end.
         val titleLead: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Discipline icon tile: Run / Lift get a symbol; Rest gets none.
                 val iconRes = when (discipline) {
                     SessionDiscipline.Run -> Res.drawable.ic_content_run
                     SessionDiscipline.Lift -> Res.drawable.ic_content_set_dumbbell
@@ -1259,7 +1251,6 @@ private fun NextSessionCard(
         if (actionable) {
             LocalRestRunning.current.collectAsState().value?.let { RestPill(it) }
         }
-        // Where a moved session came from / why a move was refused.
         SessionMoveNotes(ns)
         if (ns.status == SessionStatus.Blocked) Chip(stringResource(Res.string.main_chip_on_hold), status.danger)
         // A safety-critical adjustment that reshaped the session keeps its SAFETY
@@ -1342,7 +1333,7 @@ private fun RestPill(run: RestRun) {
 }
 
 /** The prescribed reps-in-reserve as a whole number (RIR = 10 − RPE), or null
- *  for an open-ended ("4+") or half-point target the guide can't state plainly. Pure. */
+ *  for an open-ended ("4+") or half-point target the guide can't state plainly. */
 internal fun prescribedRir(rpe: Double): Int? {
     val rir = 10.0 - rpe
     return if (rir >= 0.0 && rir < 4.0 && rir % 1.0 == 0.0) rir.toInt() else null
@@ -1350,7 +1341,7 @@ internal fun prescribedRir(rpe: Double): Int? {
 
 /** For an item with no load to start from (never logged, no prescribed or
  *  suggested load): the reps a first weight should be liftable for, reps_low
- *  plus the prescribed reps in reserve. Null otherwise. Pure. */
+ *  plus the prescribed reps in reserve. Null otherwise. */
 internal fun PrescriptionView.firstWeightReps(): Int? {
     if (reps_low <= 0 || last_set != null || logged_sets.isNotEmpty() || load_kg != null || suggested_load_kg != null) return null
     return target_rpe?.let(::prescribedRir)?.let { reps_low + it }
@@ -1541,7 +1532,6 @@ private fun sessionDoneRunLine(row: SessionDoneItemView, unit: DistanceUnit): St
     return listOfNotNull(distText, minText).joinToString(" \u00b7 ").ifBlank { null }
 }
 
-/** A plan-state card with one way forward: a title, a body and a full-width action. */
 @Composable
 private fun PromptCard(title: String, body: String, cta: String, onClick: () -> Unit) {
     PlainCard {

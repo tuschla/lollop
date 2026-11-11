@@ -46,11 +46,10 @@ import platform.UIKit.UIGraphicsPopContext
 import platform.UIKit.UIGraphicsPushContext
 import platform.UIKit.UIImage
 
-/** The tile cache's size on disk (Caches/osm-tiles, 128 MB); the system may purge it. */
+/** The tile cache's size on disk; the system may purge it. */
 private const val TILE_DISK_CACHE_BYTES = 134_217_728uL
-/** The HTTP layer's in-memory share (8 MB); decoded tiles live in [OsmTileOverlay]'s cache. */
+/** The HTTP layer's in-memory share; decoded tiles live in [OsmTileOverlay]'s cache. */
 private const val TILE_MEMORY_CACHE_BYTES = 8_388_608uL
-/** Decoded tiles a map keeps in memory. */
 private const val DECODED_TILE_LIMIT = 256L
 /** A failed tile is drawn empty and asked for again only after this long (seconds). */
 private const val TILE_RETRY_SEC = 60.0
@@ -83,7 +82,6 @@ private val tileSession: NSURLSession by lazy {
     NSURLSession.sessionWithConfiguration(config)
 }
 
-/** The tile URL for zoom [z], column [x] and row [y] ([OSM_TILE_URL_TEMPLATE]). */
 private fun tileUrl(z: Int, x: Int, y: Int): NSURL? = NSURL.URLWithString(
     OSM_TILE_URL_TEMPLATE.replace("{z}", z.toString()).replace("{x}", x.toString()).replace("{y}", y.toString()),
 )
@@ -112,10 +110,8 @@ internal class OsmTileOverlay(val dark: Boolean) : MKTileOverlay(OSM_TILE_URL_TE
 
     private fun key(z: Int, x: Int, y: Int) = "$z/$x/$y"
 
-    /** The decoded tile, if loaded. */
     fun tile(z: Int, x: Int, y: Int): UIImage? = decoded.objectForKey(key(z, x, y)) as? UIImage
 
-    /** Whether the tile is drawable now: loaded, or failed recently (drawn empty). */
     fun ready(z: Int, x: Int, y: Int): Boolean {
         if (tile(z, x, y) != null) return true
         val k = key(z, x, y)
@@ -230,7 +226,6 @@ internal class OsmTileRenderer(private val tiles: OsmTileOverlay) : MKOverlayRen
 
 private val DarkMatrix = darkTileMatrix()
 
-/** [png] decoded with [DarkMatrix] applied to every pixel's straight colour; null if it doesn't decode. */
 @OptIn(ExperimentalForeignApi::class)
 private fun darkTile(png: platform.Foundation.NSData): UIImage? {
     val image = UIImage.imageWithData(png)?.CGImage ?: return null

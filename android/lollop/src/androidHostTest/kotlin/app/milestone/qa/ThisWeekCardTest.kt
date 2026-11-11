@@ -63,7 +63,6 @@ class ThisWeekCardTest {
     @Test
     fun aPartlyDoneDaySaysSoInItsPreview() {
         java.util.Locale.setDefault(java.util.Locale.US)
-        // Mon 2026-09-21 … Sun: done, partly done, missed, today, then planned and rest.
         val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
         val statuses = listOf(SessionStatus.Done, SessionStatus.Partial, SessionStatus.Missed, SessionStatus.Next, SessionStatus.Planned, SessionStatus.Rest, SessionStatus.Planned)
         val week = statuses.mapIndexed { i, status ->
@@ -114,7 +113,7 @@ class ThisWeekCardTest {
         assertEquals(7, days.size)
         val widths = days.map { it.width }
         assertTrue("equal columns: $widths", widths.max() - widths.min() <= 1f)
-        // The last column ends at the card's content edge (14dp padding), not short of it.
+        // The last column ends at the card's content edge, not short of it.
         val inset = with(rule.density) { 14.dp.toPx() }
         assertEquals(card.right - inset, days.maxOf { it.right }, 2f)
         assertEquals(card.left + inset, days.minOf { it.left }, 2f)
@@ -207,7 +206,6 @@ class ThisWeekCardTest {
         assertTrue(rule.onAllNodes(inWeek and hasText(area), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
     }
 
-    /** The muscle-volume toggle tells TalkBack whether its table is open. */
     @Test
     fun theMuscleVolumeToggleSpeaksItsState() {
         val program = ProgramSummaryView(

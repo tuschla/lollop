@@ -195,7 +195,6 @@ impl PlanWeeks {
 pub(in crate::app) struct DeloadDays<'a>(pub(in crate::app) &'a [i64]);
 
 impl DeloadDays<'_> {
-    /// Whether local `day` was a planned lifting deload day.
     pub(in crate::app) fn contains(&self, day: i64) -> bool {
         self.0.binary_search(&day).is_ok()
     }

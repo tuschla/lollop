@@ -32,10 +32,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * History's activity heatmap: square cells sized from the available width, tints,
- * month ticks, and a tap that opens the logged day under the finger.
- */
 @RunWith(RobolectricTestRunner::class)
 class ContributionHeatmapTest {
 

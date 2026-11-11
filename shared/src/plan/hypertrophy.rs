@@ -9,7 +9,7 @@
 //! from failure (HYP-RIR-DOSE-001, HYP-VL-001), a weak growth stimulus. So the
 //! week keeps one quality (1–3 RIR) and varies exercises, not intensities.
 //!
-//! Pure and deterministic: the whole week is allocated once from the profile,
+//! The whole week is allocated once from the profile,
 //! the anchors and the block position, then each day's share is emitted, so
 //! every day of the week agrees with every other.
 
@@ -123,32 +123,9 @@ pub(crate) fn hypertrophy_week_targets(
     block_weeks: u8,
     lift_days: usize,
 ) -> Vec<MuscleWeekTarget> {
-    week_targets(
-        pp.profile(),
-        pp.training_age(),
-        week_in_block,
-        block_weeks,
-        lift_days,
-    )
-}
-
-fn week_targets(
-    profile: &Profile,
-    ta: TrainingAge,
-    week_in_block: u8,
-    block_weeks: u8,
-    lift_days: usize,
-) -> Vec<MuscleWeekTarget> {
     let weeks = block_weeks.max(1);
     let idx = usize::from(week_in_block.clamp(1, weeks) - 1);
-    fitted_block(
-        profile.specialization_muscle.as_deref(),
-        profile.weekly_sets,
-        ta,
-        weeks,
-        lift_days.clamp(1, 7),
-    )
-    .swap_remove(idx)
+    hypertrophy_block_targets(pp, weeks, lift_days).swap_remove(idx)
 }
 
 /// [`hypertrophy_week_targets`] for every week of the block, in order.
@@ -405,14 +382,14 @@ impl<'a> HypertrophyWeek<'a> {
     /// Allocate week `week_in_block` of a `block_weeks` block over the lift
     /// days `regions` (weekday order).
     pub(super) fn new(
-        profile: &Profile,
+        pp: &PlanProfile,
         anchors: &'a LiftAnchors,
-        ta: TrainingAge,
         week_in_block: u8,
         block_weeks: u8,
         regions: &[DayRegion],
     ) -> Self {
-        let targets = week_targets(profile, ta, week_in_block, block_weeks, regions.len());
+        let ta = pp.training_age();
+        let targets = hypertrophy_week_targets(pp, week_in_block, block_weeks, regions.len());
         let items = allocate_week(
             &WeekOptions::new(anchors),
             regions,
@@ -486,8 +463,6 @@ fn allocate_week(
     let mut credit = [0.0f32; MUSCLE_ORDER.len()];
     let mut items: Vec<Item> = Vec::new();
 
-    // 1. Logged lifts with no Table 1 primary muscle: kept, never dropped, at
-    //    the hypertrophy loading band's set count, up to twice a week.
     let unmapped_sets = strength::loading_rx(LiftGoal::Hypertrophy).value.sets.0;
     for (name, rank) in &options.unmapped {
         let mut eligible: Vec<usize> = (0..n)
@@ -510,7 +485,6 @@ fn allocate_week(
         }
     }
 
-    // 2. Each muscle, sized to its weekly target.
     let min_sets = u32::from(hypertrophy::MIN_SETS_PER_EXERCISE);
     let cap = u32::from(hypertrophy::PER_SESSION_SET_CEILING);
     for (mi, muscle) in MUSCLE_ORDER.iter().enumerate() {
@@ -527,11 +501,10 @@ fn allocate_week(
         let target = f32::from(t.target);
         let need = target - credit[mi];
         if need < 1.0 {
-            continue; // indirect work from the compounds already covers it
+            continue;
         }
         let mut total = (need.round() as u32).max(min_sets);
         let mut eligible = eligible_days(regions, muscle);
-        // A day with no room for even the per-exercise minimum is full.
         eligible.retain(|&s| load[s].saturating_add(min_sets) <= day_cap);
         if eligible.is_empty() {
             continue;
@@ -769,9 +742,7 @@ fn prescribe(
     let by_effort = |rx: Prescription| rir_rx.with_value(rx);
 
     // A >8 wk layoff re-enters like a novice by effort (REENTRY-001): no load
-    // is carried from before the break. A last working load stays current for
-    // the e1RM anchor's full-credit window; an older one falls back to the
-    // (decayed) e1RM anchor or to effort.
+    // is carried from before the break.
     if !anchors.reentry_novice {
         if let Some(lw) = anchors
             .last_working_for(name)

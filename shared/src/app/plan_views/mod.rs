@@ -31,7 +31,9 @@ pub(super) use plan_item::{PlanItem, PlanRow};
 pub(super) use plan_week::{PlanViews, build_plan_views};
 
 #[cfg(test)]
-pub(super) use adjustments::apply_adjustments_to_session;
+pub(super) use adjust_fold::{fold_completion_adjustments, fold_item_numbers};
+#[cfg(test)]
+pub(super) use adjustments::annotate_and_rejudge;
 #[cfg(test)]
 pub(super) use completion::{apply_last_sets, refresh_item_statuses};
 #[cfg(test)]

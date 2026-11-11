@@ -149,8 +149,8 @@ class ThemeContrastTest {
     @Test
     fun warnTile_clearsNonTextContrastOnBgElevated_andItsGlyphOnTheTile() {
         // The solid 40dp mark tile of an `Adjusted` StatusCard sits on the card
-        // (bgElevated) and holds a glyph: tile vs card ≥3:1, glyph vs tile ≥3:1, on
-        // all 8 palettes. Light: the warn fill with a white glyph; dark: the lighter
+        // (bgElevated) and holds a glyph: tile vs card ≥3:1, glyph vs tile ≥3:1, in
+        // every palette. Light: the warn fill with a white glyph; dark: the lighter
         // on-ground ochre with the ground's ink (bgTop) as the glyph.
         for (t in AppTheme.entries) {
             for ((mode, p, tile) in listOf(

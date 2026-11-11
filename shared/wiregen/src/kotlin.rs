@@ -1027,7 +1027,6 @@ fn string(s: &str) -> String {
     out
 }
 
-/// A KDoc block for `docs`, each line at `indent`.
 fn doc(out: &mut String, docs: &str, indent: &str) {
     let docs = docs.trim();
     if docs.is_empty() {

@@ -28,7 +28,6 @@ class FormattingJvmParityTest {
             out += miToKm(i / 10.0)
             out += i / 60.0
         }
-        // Random doubles across magnitudes.
         repeat(200_000) {
             val mag = rng.nextInt(-6, 13)
             out += (rng.nextDouble() * 10.0 - 5.0) * Math.pow(10.0, mag.toDouble())
