@@ -4,11 +4,8 @@ import android.content.Context
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppSettings
@@ -76,8 +73,7 @@ class ScreenshotThemesTest(private val theme: AppTheme, private val mode: DarkMo
         rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and hasText(str(R.string.main_dest_today)))
             .performClick()
         rule.waitForIdle()
-        rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText(str(R.string.main_log_set_title)).fetchSemanticsNodes().isNotEmpty() }
+        rule.openLogChooser()
         rule.shot("$name-logsheet-$s")
     }
 

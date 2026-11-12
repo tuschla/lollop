@@ -1,6 +1,5 @@
 package app.milestone
 
-import app.milestone.core.CoreBridge
 import kotlin.concurrent.Volatile
 
 /** The app clock the host tests run on ([AppRuntime.resetForTest]): the device
@@ -8,7 +7,11 @@ import kotlin.concurrent.Volatile
 internal object TestClock : WallClock {
     @Volatile var offsetMillis: Long = 0L
 
-    override fun nowMillis(): Long = System.currentTimeMillis() + offsetMillis
+    /** Non-null: [nowMillis] stands still at this instant ([offsetMillis] ignored), so a
+     *  ticking readout reads the same value every frame (screenshot captures). */
+    @Volatile var frozenAtMillis: Long? = null
+
+    override fun nowMillis(): Long = frozenAtMillis ?: (System.currentTimeMillis() + offsetMillis)
 
     override fun monotonicMillis(): Long = deviceMonotonicMillis()
 }
@@ -19,6 +22,22 @@ internal object PlainJvmClock : WallClock {
     override fun nowMillis(): Long = System.currentTimeMillis()
 
     override fun monotonicMillis(): Long = 0L
+}
+
+/** Restores the JVM default Locale and TimeZone that a test (or [app.milestone.qa.QaHarness.reset]) changed. */
+class JvmDefaultsRule : org.junit.rules.ExternalResource() {
+    private lateinit var locale: java.util.Locale
+    private lateinit var zone: java.util.TimeZone
+
+    override fun before() {
+        locale = java.util.Locale.getDefault()
+        zone = java.util.TimeZone.getDefault()
+    }
+
+    override fun after() {
+        java.util.Locale.setDefault(locale)
+        java.util.TimeZone.setDefault(zone)
+    }
 }
 
 /** The event queue's send path in the host tests ([AppRuntime.resetForTest]): the
@@ -35,41 +54,4 @@ internal object TestSink : EventSink {
         sender = EngineSink::send
         batchSender = EngineSink::sendAll
     }
-}
-
-/** A stand-in for the native core's two round trips: the raw `update` response
- *  bytes for one event's wire JSON, and the raw `view` bytes. */
-internal interface CoreFault {
-    fun update(event: ByteArray): ByteArray?
-    fun view(): ByteArray?
-}
-
-/** A [CoreBridge] whose two round trips are [fault]'s (a core that answers null,
- *  an error envelope, or never loaded) and that answers nothing else. */
-internal class FaultBridge(@Volatile var fault: CoreFault) : CoreBridge {
-    override fun update(event: ByteArray): ByteArray? = fault.update(event)
-
-    override fun view(): ByteArray? = fault.view()
-
-    override fun parseRunFile(file: ByteArray): ByteArray? = null
-
-    override fun exportGpx(run: ByteArray): ByteArray? = null
-
-    override fun runTrack(run: ByteArray): ByteArray? = null
-
-    override fun trackFigures(event: ByteArray): ByteArray? = null
-
-    override fun exerciseKeys(names: Array<String>): ByteArray? = null
-
-    override fun warmUpRamp(query: ByteArray): ByteArray? = null
-
-    override fun draftFacts(draft: ByteArray): ByteArray? = null
-
-    override fun thinTrack(track: ByteArray): ByteArray? = null
-
-    override fun importedHrPct(hr: ByteArray): ByteArray? = null
-
-    override fun compactLog(lines: Array<String>): ByteArray? = null
-
-    override fun reset(): ByteArray? = null
 }

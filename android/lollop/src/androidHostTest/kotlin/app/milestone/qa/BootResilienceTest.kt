@@ -18,18 +18,21 @@ import app.milestone.AppFileNames
 import app.milestone.AppProcess
 import app.milestone.AppSettings
 import app.milestone.Core
-import app.milestone.CoreFault
-import app.milestone.FaultBridge
 import app.milestone.DurableCore
 import app.milestone.EventDispatcher
+import app.milestone.EventLog
+import app.milestone.FakeCore
 import app.milestone.GpsPoint
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.TestClock
+import app.milestone.core.CoreBridge
+import app.milestone.core.JniCore
 import app.milestone.exportDataTo
 import app.milestone.toJson
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -81,7 +84,6 @@ class BootResilienceTest {
     @After
     fun tearDown() {
         QaHarness.teardown()
-        ProcessDeath.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
         QaHarness.freshProcess()
@@ -109,14 +111,14 @@ class BootResilienceTest {
         ActiveRunStore.begin()
         pts.forEach { p -> if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p, RunSession.isSegmentStart(p)) }
         RunSession.recordingStarted()
-        ProcessDeath.kill(ctx)
+        QaHarness.killProcess()
         shadowOf(app).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         return pts.size
     }
 
     private fun resumeFromPrompt() {
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_resume_run_title)), 1)
         drainStartedServiceActions()
         rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
     }
@@ -174,11 +176,10 @@ class BootResilienceTest {
         QaHarness.loggedRun(QaHarness.daysAgoAtMidday(1)),
     )
 
-    private fun bootsIntoCoreUnavailable(fault: CoreFault) {
+    private fun bootsIntoCoreUnavailable(core: FakeCore) {
         QaHarness.seedLog(ctx, seeded)
         val before = logFile.readBytes()
-        val bridge = FaultBridge(fault)
-        val engine = DurableCore(bridge)
+        val engine = DurableCore(core)
         QaHarness.freshProcess(engine)
         lastScenario = launchMain()
         rule.waitForNode(hasText(str(R.string.main_core_unavailable_title), substring = true), 30_000)
@@ -192,10 +193,9 @@ class BootResilienceTest {
 
         // Even an event that reaches the dispatcher can't append: the core refuses
         // every event once it is unavailable, whatever the library would answer.
-        bridge.fault = object : CoreFault {
-            override fun update(event: ByteArray): ByteArray = "[]".toByteArray()
-            override fun view(): ByteArray? = null
-        }
+        core.dead = false
+        core.linkError = null
+        core.refuses = { false }
         EventDispatcher.send(QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(0)))
         val r = engine.send(QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(0)))
         assertFalse(r.accepted)
@@ -213,28 +213,17 @@ class BootResilienceTest {
     }
 
     @Test
-    fun aCoreAnsweringNullBootsIntoTheErrorStateNotSetup() = bootsIntoCoreUnavailable(
-        object : CoreFault {
-            override fun update(event: ByteArray): ByteArray? = null
-            override fun view(): ByteArray? = null
-        },
-    )
+    fun aCoreAnsweringNullBootsIntoTheErrorStateNotSetup() = bootsIntoCoreUnavailable(FakeCore().apply { dead = true })
 
     @Test
     fun aLibraryThatNeverLoadedBootsIntoTheErrorState() = bootsIntoCoreUnavailable(
-        object : CoreFault {
-            override fun update(event: ByteArray): ByteArray? = throw UnsatisfiedLinkError("libshared.so not found")
-            override fun view(): ByteArray? = throw UnsatisfiedLinkError("libshared.so not found")
-        },
+        FakeCore().apply { linkError = UnsatisfiedLinkError("libshared.so not found") },
     )
 
     @Test
     fun aCoreThatRefusesTheBootClockBootsIntoTheErrorState() = bootsIntoCoreUnavailable(
-        object : CoreFault {
-            // A view that decodes, but every event rejected (empty response).
-            override fun update(event: ByteArray): ByteArray = ByteArray(0)
-            override fun view(): ByteArray = "{}".toByteArray()
-        },
+        // A view that decodes, but every event rejected (no bytes).
+        FakeCore().apply { refuses = { true } },
     )
 
     @Test
@@ -252,10 +241,21 @@ class BootResilienceTest {
     @Test
     fun aRotationDoesNotResendTheBootClock() {
         QaHarness.seedLog(ctx, seeded)
+        // The real core, counting the clock events that reach it.
+        val clocks = AtomicInteger()
+        QaHarness.freshProcess(
+            DurableCore(
+                object : CoreBridge by JniCore {
+                    override fun update(event: ByteArray): ByteArray? {
+                        if (EventLog.variantOf(event.decodeToString()) == "SetToday") clocks.incrementAndGet()
+                        return JniCore.update(event)
+                    }
+                },
+            ),
+        )
         rule.launchApp()
-        val lastSetToday = DurableCore::class.java.getDeclaredField("lastSetToday").apply { isAccessible = true }
-        assertTrue("boot sent the clock", lastSetToday.get(Core) != null)
-        lastSetToday.set(Core, null)
+        val booted = clocks.get()
+        assertTrue("boot sent the clock", booted > 0)
 
         checkNotNull(lastScenario).recreate()
         rule.waitForIdle()
@@ -267,7 +267,7 @@ class BootResilienceTest {
         }
         rule.waitForState(30_000) { settled }
 
-        assertNull("no SetToday reached the core on the rotation", lastSetToday.get(Core))
+        assertEquals("no SetToday reached the core on the rotation", booted, clocks.get())
         assertEquals(1, EventDispatcher.model.value?.runs?.size)
     }
 }

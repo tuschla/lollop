@@ -17,12 +17,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
-import app.milestone.AppSettings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,7 +96,7 @@ class HistorySessionTest {
         rule.onAllNodes(hasContentDescription(str(R.string.history_set_n, 3) + ",", substring = true)).assertCountEquals(2)
         val rows = rule.onAllNodesWithTag("lift-set-row").fetchSemanticsNodes().map { it.boundsInRoot }
         assertEquals(6, rows.size)
-        val rowPx = with(rule.density) { 48.dp.toPx() }
+        val rowPx = with(rule.density) { UxInvariants.MIN_TOUCH.toPx() }
         rows.forEach { assertEquals("a set row is 48dp tall", rowPx, it.height, 1.5f) }
         // One column grid across both cards: every row starts and ends at the same x.
         assertTrue("set rows align across cards", rows.all { it.left == rows[0].left && it.right == rows[0].right })
@@ -130,7 +128,7 @@ class HistorySessionTest {
         rule.onAllNodesWithText(plural(R.plurals.log_reps_left, 2, 2)).assertCountEquals(1)
         // Key/value facts: the load is a share of the ESTIMATED max.
         rule.onAllNodesWithText(str(R.string.history_set_e1rm_label)).assertCountEquals(1)
-        rule.onAllNodesWithText("of estimated max", substring = true).assertCountEquals(1)
+        rule.onAllNodesWithText(str(R.string.history_pct_e1rm, 0).substringAfter('0'), substring = true).assertCountEquals(1)
         // No filled slab: Edit and Delete are ActionRows, and Delete confirms first.
         rule.onAllNodesWithText(str(R.string.main_edit)).assertCountEquals(0)
         rule.onAllNodesWithText(str(R.string.history_edit_set)).assertCountEquals(1)
@@ -158,7 +156,7 @@ class HistorySessionTest {
         // A 48dp icon button named "Jump to month", never a bold text link; one only.
         val jump = rule.onAllNodesWithTag("history-jump-to-month").fetchSemanticsNodes()
         assertEquals(1, jump.size)
-        val px48 = with(rule.density) { 48.dp.toPx() }
+        val px48 = with(rule.density) { UxInvariants.MIN_TOUCH.toPx() }
         assertEquals(px48, jump[0].boundsInRoot.width, 1.5f)
         assertEquals(px48, jump[0].boundsInRoot.height, 1.5f)
         rule.onAllNodes(hasContentDescription(str(R.string.main_jump_to_month))).assertCountEquals(1)

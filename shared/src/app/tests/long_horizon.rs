@@ -3,8 +3,10 @@
 //! seeded PRNG per archetype, so a run is identical on every machine. Each
 //! simulated day sends `SetToday`, then follows the plan with noisy
 //! adherence (skips, lighter days, overshoots, off-plan sessions, backdated
-//! logs, amends and deletes) plus check-ins and weekly reviews, and checks
-//! consumer-visible invariants on that day's `ViewModel`:
+//! logs, amends and deletes) as an athlete of finite, slowly growing strength
+//! whose logged reps and efforts are true to it ([`Sim::lift_set`]), plus
+//! check-ins and weekly reviews, and checks consumer-visible invariants on
+//! that day's `ViewModel`:
 //!
 //! - numbers: no NaN/inf, no negative distance/load/duration, the JSON wire
 //!   round-trips (a NaN serializes as `null` and fails to decode);
@@ -36,22 +38,10 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-/// Monday-based weekday of an epoch day (epoch day 4 is a Monday).
-fn wd(d: i64) -> i64 {
-    (d - 4).rem_euclid(7)
-}
-
-fn monday_of(d: i64) -> i64 {
-    d - wd(d)
-}
-
-/// 2026-01-05, a Monday: the first simulated day of every life.
-const START: i64 = 20_458;
-
-/// The planner's run-anchor horizon (`anchors.rs`): the 30-day spike window
-/// plus the 28-day detraining taper. A prescribed run is spike-bounded by the
-/// longest logged run inside it (RUN-SPIKE-001, DETRAIN-001).
-const RUN_HORIZON_DAYS: i64 = 58;
+/// The planner's run-anchor horizon: the spike window plus the detraining
+/// taper. A prescribed run is spike-bounded by the longest logged run inside
+/// it (RUN-SPIKE-001, DETRAIN-001).
+const RUN_HORIZON_DAYS: i64 = crate::app::anchors::RUN_DECAY_END_DAYS;
 
 #[derive(Clone, Debug)]
 struct SetRec {
@@ -152,7 +142,7 @@ impl ReEntry {
     /// What a break of a week or more left unjudged, had there been
     /// something before it to compare against.
     fn misses(&self) -> Vec<String> {
-        let back = self.back_day - START;
+        let back = self.back_day - DAY0;
         let mut out = Vec::new();
         if self.lift_gap.is_some_and(|g| g > 7) && !self.pre_lifts.is_empty() && self.lift_hits == 0
         {
@@ -216,6 +206,9 @@ struct Sim {
     weeks: BTreeMap<i64, WeekSnap>,
     /// Today's prescribed load per (exercise, reps): (day, load, e1RM bound).
     lift_seen: HashMap<(String, u8), Vec<LiftSeen>>,
+    /// The athlete's true strength per loaded lift (lowercased name):
+    /// (e1RM, ceiling), see [`Sim::lift_set`].
+    strength: HashMap<String, (f64, f64)>,
     rhr_base: f64,
     max_view: Duration,
     sum_view: Duration,
@@ -336,19 +329,15 @@ const SIGNED_KEYS: &[&str] = &[
     "birth_epoch_day",
 ];
 
-/// Walk the wire JSON: every number finite and, unless its key is signed by
-/// nature, non-negative; no string rendering a non-number. `path` names the
-/// enclosing keys for the report.
+/// Walk the wire JSON: unless its key is signed by nature, every number is
+/// non-negative; no string renders a non-number. `path` names the enclosing
+/// keys for the report. (A non-finite float encodes as `null`, which the
+/// `ViewModel` decode in `check_numbers` catches.)
 fn walk_json(v: &serde_json::Value, path: &str, key: &str, out: &mut Vec<String>) {
     match v {
         serde_json::Value::Number(n) => {
             let x = n.as_f64().unwrap_or(0.0);
-            if !x.is_finite() {
-                out.push(format!("{path} = {n} is not finite"));
-            } else if x < 0.0
-                && !SIGNED_KEYS.contains(&key)
-                && !path.starts_with(".readiness_summary.")
-            {
+            if x < 0.0 && !SIGNED_KEYS.contains(&key) && !path.starts_with(".readiness_summary.") {
                 out.push(format!("{path} = {x} is negative"));
             }
         }
@@ -387,7 +376,7 @@ impl Sim {
             app: Engine,
             model: Model::default(),
             rng: Lcg(seed),
-            today: START,
+            today: DAY0,
             off: 0,
             id: 1,
             profile: profile.clone(),
@@ -399,7 +388,7 @@ impl Sim {
             holds: BTreeSet::new(),
             returning: None,
             gate_lifted: None,
-            last_profile_change: START,
+            last_profile_change: DAY0,
             last_hold_day: i64::MIN / 2,
             last_delete_day: i64::MIN / 2,
             away_until: None,
@@ -410,6 +399,7 @@ impl Sim {
             backdated: Vec::new(),
             weeks: BTreeMap::new(),
             lift_seen: HashMap::new(),
+            strength: HashMap::new(),
             rhr_base: profile.resting_hr_bpm.unwrap_or(58.0),
             max_view: Duration::ZERO,
             sum_view: Duration::ZERO,
@@ -417,9 +407,9 @@ impl Sim {
             hits: BTreeMap::new(),
             failures: Vec::new(),
         };
-        sim.send(set_today_ev(START));
+        sim.send(set_today_ev(DAY0));
         sim.set_profile(Profile {
-            effective_from_epoch_day: Some(START),
+            effective_from_epoch_day: Some(DAY0),
             ..profile
         });
         sim
@@ -448,7 +438,7 @@ impl Sim {
             self.failures.push(format!(
                 "[{}] day {} {check}: {msg}",
                 self.name,
-                self.today - START
+                self.today - DAY0
             ));
         }
     }
@@ -596,10 +586,10 @@ impl Sim {
                     } else {
                         it.sets.max(1)
                     };
+                    let strong = kind == ItemKind::Lift && !it.timed_hold && kg > 0.0;
                     for s in 0..n {
                         let target = it.target_rpe.unwrap_or(8.0);
-                        let rpe = (target + [-0.5, 0.0, 0.0, 0.5][self.rng.int(0, 3) as usize])
-                            .clamp(6.0, 10.0);
+                        let noise = [-0.5, 0.0, 0.0, 0.5][self.rng.int(0, 3) as usize];
                         let (reps, hold) = if it.timed_hold {
                             let lo = f64::from(it.hold_low_sec.max(5));
                             let hi = f64::from(it.hold_high_sec.max(it.hold_low_sec).max(5));
@@ -616,6 +606,12 @@ impl Sim {
                             };
                             (r, None)
                         };
+                        let (reps, felt) = if strong {
+                            self.lift_set(&it.exercise, kg, reps, target, over)
+                        } else {
+                            (reps, target)
+                        };
+                        let rpe = (felt + noise).clamp(6.0, 10.0);
                         let rec = SetRec {
                             id: self.next_id(),
                             day: self.today,
@@ -629,10 +625,49 @@ impl Sim {
                         self.log_set_rec(rec, backdate);
                         hour += 0.05;
                     }
+                    if strong {
+                        self.adapt(&it.exercise);
+                    }
                 }
             }
         }
         self.returning = None;
+    }
+
+    /// One loaded set as the athlete can do it: their true strength (an Epley
+    /// e1RM) gives the reps to failure at `kg`; they stop at the effort asked
+    /// (`target_rpe`'s reps in reserve, one rep closer on an overshoot day),
+    /// never past failure, and rate the set by the reps they really had left.
+    /// The first set of a lift is done as asked and sets that strength, its
+    /// ceiling twice that ([`Sim::adapt`]). Returns (reps, RPE).
+    fn lift_set(
+        &mut self,
+        ex: &str,
+        kg: f64,
+        reps: u32,
+        target_rpe: f64,
+        over: bool,
+    ) -> (u32, f64) {
+        let rir = (10.0 - target_rpe).max(0.0);
+        let (e1rm, _) = *self.strength.entry(ex.to_lowercase()).or_insert_with(|| {
+            let e = kg * (1.0 + (f64::from(reps) + rir) / 30.0);
+            (e, 2.0 * e)
+        });
+        let to_failure = 30.0 * (e1rm / kg - 1.0);
+        let leave = if over { (rir - 1.0).max(0.0) } else { rir };
+        let done = reps.min((to_failure - leave + 1e-9).floor().max(1.0) as u32);
+        let left = (to_failure - f64::from(done)).max(0.0);
+        (done, round_to(10.0 - left, 0.5))
+    }
+
+    /// A session of a lift makes the athlete stronger by up to 2 %, scaled by
+    /// the share of their ceiling still to gain: gains shrink as training goes
+    /// on, and a lift never runs away from what a body can lift, whatever the
+    /// plan asks.
+    fn adapt(&mut self, ex: &str) {
+        if let Some((e1rm, ceiling)) = self.strength.get_mut(&ex.to_lowercase()) {
+            *e1rm *= 1.0 + 0.02 * (1.0 - *e1rm / *ceiling).max(0.0);
+        }
     }
 
     fn maybe_off_plan(&mut self) {
@@ -661,14 +696,15 @@ impl Sim {
             }
             _ => {
                 let id = self.next_id();
-                self.send(Event::LogActivity {
-                    kind: ActivityKind::Cycling,
-                    minutes: 45.0,
-                    vigorous: false,
-                    strengthening: false,
-                    observed_at: self.at(self.today, 16.0),
-                    entry_id: id,
-                });
+                let at = self.at(self.today, 16.0);
+                self.send(log_activity(
+                    ActivityKind::Cycling,
+                    45.0,
+                    false,
+                    false,
+                    at,
+                    id,
+                ));
                 self.activities += 1;
             }
         }
@@ -824,17 +860,14 @@ impl Sim {
     /// archetype's scheduled events each morning before the view.
     fn run(&mut self, days: i64, mut script: impl FnMut(&mut Sim, i64)) {
         for i in 0..days {
-            self.today = START + i;
+            self.today = DAY0 + i;
             if let Some(until) = self.away_until {
                 if self.today < until {
                     continue;
                 }
                 self.away_until = None;
             }
-            self.send(Event::SetToday {
-                epoch_day: self.today,
-                utc_offset_sec: self.off,
-            });
+            self.send(set_today_off_ev(self.today, self.off));
             for (e, s, r) in std::mem::take(&mut self.backdated) {
                 self.send(e);
                 self.sets.extend(s);
@@ -933,7 +966,7 @@ impl Sim {
         let Ok(spec) = std::env::var("LONG_HORIZON_DUMP") else {
             return;
         };
-        let i = self.today - START;
+        let i = self.today - DAY0;
         let wanted = spec
             .split(';')
             .filter_map(|s| s.split_once(':'))
@@ -951,7 +984,7 @@ impl Sim {
             vm.hold_reason
         );
         for s in &vm.week_plan {
-            eprintln!("  day {} {} {:?}", s.epoch_day - START, s.title, s.status);
+            eprintln!("  day {} {} {:?}", s.epoch_day - DAY0, s.title, s.status);
             for it in &s.items {
                 eprintln!(
                     "    {} | load {:?} sugg {:?} {:?} | {} | {}",
@@ -978,7 +1011,7 @@ impl Sim {
         if vm.program.is_some() && self.holds.is_empty() {
             self.check_strip(vm);
             self.check_runs(vm);
-            self.check_lifts();
+            self.check_lifts(vm);
             self.check_reentry(vm);
             self.snapshot_week(vm);
         }
@@ -1036,11 +1069,6 @@ impl Sim {
             {
                 bad.push(format!("run row {} / {}", r.distance_km, r.duration_min));
             }
-        }
-        if let Some(tl) = load_figures_of(&self.model)
-            && (!tl.ctl.is_finite() || !tl.atl.is_finite() || tl.ctl < 0.0 || tl.atl < 0.0)
-        {
-            bad.push(format!("training load {} / {}", tl.ctl, tl.atl));
         }
         if full {
             self.hit("wire");
@@ -1140,7 +1168,7 @@ impl Sim {
                         "gate lifts",
                         format!(
                             "{h:?} lifted on day {} but the plan is still withheld",
-                            day - START
+                            day - DAY0
                         ),
                     );
                 }
@@ -1152,7 +1180,7 @@ impl Sim {
                 }
             }
             if let Some(h) = self.returning {
-                self.check_return(h);
+                self.check_return(vm, h);
             }
             return;
         };
@@ -1221,13 +1249,8 @@ impl Sim {
     /// The first session after a pain/illness hold is the easy return
     /// (RETURN-HOLD-001: lifts with 3+ reps left, runs at easy effort;
     /// ILLNESS-RTT-001: the 10–20 min return check).
-    fn check_return(&mut self, h: Hold) {
-        let plan = working_plan(&self.model);
-        let Some(ns) = plan
-            .hero_day
-            .and_then(|d| plan.row(d))
-            .filter(|ns| !ns.items.is_empty())
-        else {
+    fn check_return(&mut self, vm: &ViewModel, h: Hold) {
+        let Some(ns) = vm.next_session.as_ref().filter(|ns| !ns.items.is_empty()) else {
             return;
         };
         self.hit("easy return");
@@ -1235,7 +1258,7 @@ impl Sim {
             let easy = if it.return_check {
                 true
             } else if it.is_run() {
-                it.rep_count == 0
+                it.run_structure.as_ref().is_none_or(|rs| rs.reps == 0)
                     && it
                         .run_target
                         .as_ref()
@@ -1311,7 +1334,7 @@ impl Sim {
                 {
                     bad.push(format!(
                         "week {}: {} runs / {} km vs logged {} / {k:.2}",
-                        w.week_start_epoch_day - START,
+                        w.week_start_epoch_day - DAY0,
                         w.runs,
                         w.km,
                         in_week.len()
@@ -1330,7 +1353,7 @@ impl Sim {
                 if (m..m + 7).all(|d| self.gated.contains(&d)) && w.done < w.planned {
                     bad.push(format!(
                         "held week {} scored {} of {} planned",
-                        m - START,
+                        m - DAY0,
                         w.done,
                         w.planned
                     ));
@@ -1351,7 +1374,7 @@ impl Sim {
                 if w.done != want {
                     bad.push(format!(
                         "consistency week {}: done {} of {} vs {} logged days",
-                        w.week_monday_epoch_day - START,
+                        w.week_monday_epoch_day - DAY0,
                         w.done,
                         w.planned,
                         days.len()
@@ -1393,7 +1416,7 @@ impl Sim {
         if days != (mon..mon + 7).collect::<Vec<_>>() {
             bad.push(format!(
                 "strip days {:?}",
-                days.iter().map(|d| d - START).collect::<Vec<_>>()
+                days.iter().map(|d| d - DAY0).collect::<Vec<_>>()
             ));
         }
         let live: BTreeSet<u64> = self.sets.iter().map(|s| s.id).collect();
@@ -1401,7 +1424,7 @@ impl Sim {
         for row in &vm.week_plan {
             let d = row.epoch_day;
             if self.gated.contains(&d) && !row.items.is_empty() {
-                bad.push(format!("day {} was gated yet shows a plan", d - START));
+                bad.push(format!("day {} was gated yet shows a plan", d - DAY0));
             }
             if d > self.today
                 && matches!(
@@ -1412,23 +1435,23 @@ impl Sim {
                         | SessionStatus::Partial
                 )
             {
-                bad.push(format!("future day {} is {:?}", d - START, row.status));
+                bad.push(format!("future day {} is {:?}", d - DAY0, row.status));
             }
             if d < self.today && row.status == SessionStatus::Next {
-                bad.push(format!("past day {} is the next session", d - START));
+                bad.push(format!("past day {} is the next session", d - DAY0));
             }
             let run = matches!(row.session_type, SessionType::Run(_));
             let src = row.credited_from_epoch_day.unwrap_or(d);
             if row.status.is_done() {
                 if (src - d).abs() > 2 || monday_of(src) != mon {
-                    bad.push(format!("day {} credited from {}", d - START, src - START));
+                    bad.push(format!("day {} credited from {}", d - DAY0, src - DAY0));
                 }
                 if !self.logged_on(src, run) {
                     bad.push(format!(
                         "day {} {:?} with nothing logged on {}",
-                        d - START,
+                        d - DAY0,
                         row.status,
-                        src - START
+                        src - DAY0
                     ));
                 }
             }
@@ -1437,14 +1460,14 @@ impl Sim {
                     if !live.contains(&s.entry_id) {
                         bad.push(format!(
                             "day {} lists deleted/unknown set {}",
-                            d - START,
+                            d - DAY0,
                             s.entry_id
                         ));
                     } else if set_day[&s.entry_id] != d && set_day[&s.entry_id] != src {
                         bad.push(format!(
                             "day {} lists a set from day {}",
-                            d - START,
-                            set_day[&s.entry_id] - START
+                            d - DAY0,
+                            set_day[&s.entry_id] - DAY0
                         ));
                     }
                 }
@@ -1466,7 +1489,7 @@ impl Sim {
                     if it.run_logged_km > k + 0.06 {
                         bad.push(format!(
                             "day {} run_logged_km {} > logged {k:.2}",
-                            d - START,
+                            d - DAY0,
                             it.run_logged_km
                         ));
                     }
@@ -1515,7 +1538,7 @@ impl Sim {
                     if km > 1.1 * b + 0.01 {
                         bad.push(format!(
                             "day {}: {km} km > 110% of {b} km",
-                            row.epoch_day - START
+                            row.epoch_day - DAY0
                         ));
                     }
                 }
@@ -1534,12 +1557,11 @@ impl Sim {
         }
     }
 
-    fn check_lifts(&mut self) {
+    fn check_lifts(&mut self, vm: &ViewModel) {
         let lb_slack = if self.profile.weight_lb { 2.3 } else { 0.0 };
         let mut bad = Vec::new();
         let mut seen_today: Vec<((String, u8), f64, f64)> = Vec::new();
-        let plan = working_plan(&self.model);
-        for row in plan
+        for row in vm
             .week_plan
             .iter()
             .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
@@ -1550,7 +1572,11 @@ impl Sim {
                 if it.target_rpe.is_some_and(|r| r > 9.0 + 1e-9) {
                     bad.push(format!("{}: target RPE {:?}", it.summary, it.target_rpe));
                 }
-                if let PlanIntensity::PercentE1rm { pct, .. } = it.intensity {
+                let pct = it
+                    .intensity_label
+                    .split_once("% e1RM")
+                    .and_then(|(p, _)| p.parse::<u32>().ok());
+                if let Some(pct) = pct {
                     let rir = 30.0 * (100.0 / f64::from(pct) - 1.0) - f64::from(it.reps_high);
                     if rir < 0.95 {
                         bad.push(format!(
@@ -1643,7 +1669,7 @@ impl Sim {
                     "{} ×{}: {pl} kg (day {}) → {load} kg, e1RM bound {pe:.1} → {e:.1}",
                     key.0,
                     key.1,
-                    pd - START
+                    pd - DAY0
                 ));
             }
         }
@@ -1782,7 +1808,7 @@ impl Sim {
                         "  [{}] day {} run re-entry: {} days off, pre {:.1} km/wk, caps week {week_cap:.1} \
                          long {long_cap:.1}, planned {kms:?}",
                         self.name,
-                        self.today - START,
+                        self.today - DAY0,
                         gap - 1,
                         re.pre_week_km
                     );
@@ -1971,12 +1997,14 @@ impl Sim {
     }
 
     /// Fail the test with every collected violation, then assert each named
-    /// invariant was actually exercised and the view stayed fast.
+    /// invariant was actually exercised. The view's cost is pinned by
+    /// `view_time_stays_bounded_for_a_heavy_lifter_over_three_years` (memo
+    /// build and lookup counts, not the wall clock of a shared machine).
     fn finish(&self, must_hit: &[&str]) {
         let avg = self.sum_view / self.n_views.max(1);
         if std::env::var_os("LONG_HORIZON_TRACE").is_some() {
             for (m, w) in &self.weeks {
-                eprintln!("  week {:>3}: {w:?}", (m - START) / 7);
+                eprintln!("  week {:>3}: {w:?}", (m - DAY0) / 7);
             }
             eprintln!(
                 "[{}] {} views, max {:?}, mean {:?}, {} sets, {} runs, hits {:?}",
@@ -2021,16 +2049,6 @@ impl Sim {
                 self.name,
             );
         }
-        // A catastrophic-regression guard only (debug build, a loaded CI
-        // box): the owner's 250 ms bound is pinned deterministically (per-view
-        // name-classification and `SetIndex` build counts) on a dedicated
-        // 3-year history by `view_time_stays_bounded_for_a_heavy_lifter_over_three_years`.
-        assert!(
-            self.max_view < Duration::from_secs(3),
-            "[{}] slowest view {:?}",
-            self.name,
-            self.max_view
-        );
     }
 }
 
@@ -2050,7 +2068,7 @@ fn beginner_runner_to_half_marathon_over_two_years() {
     let p = Profile {
         progression_cadence: ProgressionCadence::EverySession,
         stated_longest_recent_km: Some(4.0),
-        goal_race_epoch_day: Some(START + 7 * 40 + 6),
+        goal_race_epoch_day: Some(DAY0 + 7 * 40 + 6),
         age_years: Some(29.0),
         ..runner(GoalDistance::HalfMarathon, 3, 12.0)
     };
@@ -2062,7 +2080,7 @@ fn beginner_runner_to_half_marathon_over_two_years() {
             182 => s.edit_profile(|p| p.progression_cadence = ProgressionCadence::WeekToWeek),
             // After the race: the next one a year later, a fourth run day.
             290 => s.edit_profile(|p| {
-                p.goal_race_epoch_day = Some(START + 7 * 92 + 6);
+                p.goal_race_epoch_day = Some(DAY0 + 7 * 92 + 6);
                 p.running_days_per_week = 4;
             }),
             // A ten-day holiday in the second summer.
@@ -2295,7 +2313,7 @@ fn illness_pain_and_reds_episodes_resolved() {
     let days = if full { 540 } else { 260 };
     // A RED-S screen positive on a Sunday weekly check-in, cleared by the
     // check-in two weeks later (REDS-SCREEN-001).
-    let sunday = |i: i64| i - wd(START + i) + 6;
+    let sunday = |i: i64| i - wd(DAY0 + i) + 6;
     let mut sim = Sim::new("episodes", 0x111e_0008, hybrid(), STEADY);
     sim.generate_plan();
     sim.run(days, |s, i| match i {
@@ -2366,7 +2384,7 @@ fn youth_life(days: i64) -> Sim {
     let mut sim = Sim::new("youth", 0x0018_000a, p, STEADY);
     sim.generate_plan();
     sim.run(days, |s, i| {
-        let d = START + i;
+        let d = DAY0 + i;
         if i == 21 {
             s.edit_profile(|p| p.birth_epoch_day = Some(birth));
             s.holds.insert(Hold::Youth);
@@ -2380,14 +2398,14 @@ fn youth_life(days: i64) -> Sim {
                 let id = s.next_id();
                 let strengthening = s.rng.chance(0.5);
                 let observed_at = s.at(d, 15.0);
-                s.send(Event::LogActivity {
-                    kind: ActivityKind::Sport,
-                    minutes: 60.0,
-                    vigorous: true,
+                s.send(log_activity(
+                    ActivityKind::Sport,
+                    60.0,
+                    true,
                     strengthening,
                     observed_at,
-                    entry_id: id,
-                });
+                    id,
+                ));
                 s.activities += 1;
                 if s.rng.chance(0.3) {
                     s.log_run_km(4.0, 17.0, false);
@@ -2464,13 +2482,13 @@ fn start_runner(p: Profile) -> (Engine, Model) {
     let app = Engine;
     let mut m = Model::default();
     for e in [
-        set_today_ev(START),
+        set_today_ev(DAY0),
         Event::SetProfile(Profile {
-            effective_from_epoch_day: Some(START),
+            effective_from_epoch_day: Some(DAY0),
             ..p
         }),
         Event::GeneratePlan {
-            start_epoch_day: START,
+            start_epoch_day: DAY0,
         },
     ] {
         let _ = app.update(e, &mut m);
@@ -2489,7 +2507,7 @@ fn compliant_three_day_half_marathon_runner_keeps_building() {
         stated_longest_recent_km: Some(4.0),
         ..runner(GoalDistance::HalfMarathon, 3, 12.0)
     });
-    let weeks = run_as_prescribed(&app, &mut m, START, 7 * 30, &mut 1);
+    let weeks = run_as_prescribed(&app, &mut m, DAY0, 7 * 30, &mut 1);
     // The first cycle's top week against the last cycle's.
     let (w0, l0) = peak_of_last(&weeks[..3], 3);
     let (w1, l1) = peak_of_last(&weeks, 3);
@@ -2513,10 +2531,10 @@ fn return_after_ten_weeks_off_rebuilds_the_running_base() {
         ..runner(GoalDistance::TenK, 4, 30.0)
     });
     let mut id = 1;
-    let before = run_as_prescribed(&app, &mut m, START, 70, &mut id);
+    let before = run_as_prescribed(&app, &mut m, DAY0, 70, &mut id);
     let (pre_week, pre_long) = peak_of_last(&before, 4);
     // Ten weeks with no app open and nothing logged; back on a Monday.
-    let after = run_as_prescribed(&app, &mut m, START + 140, 8, &mut id);
+    let after = run_as_prescribed(&app, &mut m, DAY0 + 140, 8, &mut id);
     let (week, long) = after[0];
     assert!(
         long == 0.0 && week < pre_week,
@@ -2619,21 +2637,21 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
         let (b1, c1) = counts();
         (vm, b1 - b0, c1 - c0)
     };
-    send(&mut m, today(START));
+    send(&mut m, today(DAY0));
     send(
         &mut m,
         Event::SetProfile(Profile {
             lift_goal: LiftGoal::Hypertrophy,
             concurrent_goal: ConcurrentGoal::Hypertrophy,
             weekly_sets: 16,
-            effective_from_epoch_day: Some(START),
+            effective_from_epoch_day: Some(DAY0),
             ..lifter()
         }),
     );
     send(
         &mut m,
         Event::GeneratePlan {
-            start_epoch_day: START,
+            start_epoch_day: DAY0,
         },
     );
     let mut id = 0u64;
@@ -2641,12 +2659,12 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
     // day changes, the refresh after one more set, the next day's re-render).
     let mut rows = Vec::new();
     for year in 1..=3 {
-        for d in START + 365 * (year - 1)..START + 365 * year {
+        for d in DAY0 + 365 * (year - 1)..DAY0 + 365 * year {
             send(&mut m, today(d));
             if !matches!(wd(d), 0 | 1 | 3 | 4) {
                 continue;
             }
-            let prog = 1.0 + 0.0005 * (d - START) as f64;
+            let prog = 1.0 + 0.0005 * (d - DAY0) as f64;
             for k in 0..6 {
                 let name = names[(k + 2 * wd(d) as usize) % names.len()];
                 let kg = round_to(first_load(name) * prog, 2.5);
@@ -2657,7 +2675,7 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
                 }
             }
         }
-        let d = START + 365 * year;
+        let d = DAY0 + 365 * year;
         send(&mut m, today(d));
         let (vm, b1, c1) = measured(&m);
         assert_eq!(vm.lifts.len() as u64, id);

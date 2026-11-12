@@ -16,6 +16,19 @@ fn bench(weight_kg: f64, reps: u32, observed_at: i64, entry_id: u64) -> Event {
     )
 }
 
+/// The heaviest anchored bench load of the week strip: the heavy day's,
+/// 85 % of the anchor.
+fn heaviest_bench_load(model: &Model) -> Option<f64> {
+    Engine
+        .view(model)
+        .week_plan
+        .into_iter()
+        .flat_map(|s| s.items.into_iter())
+        .filter(|i| same_movement(&i.exercise, "Bench"))
+        .filter_map(|i| i.load_kg)
+        .reduce(f64::max)
+}
+
 #[test]
 fn anchor_survives_while_same_movement_training_continues() {
     // A 50-day-old heavy bench set (e1RM ≈ 116.7). WITH bridging, weekly 12-rep
@@ -51,19 +64,9 @@ fn anchor_survives_while_same_movement_training_continues() {
         set_today(&app, &mut model, mon);
         model
     };
-    // Read the (deterministic) Heavy-day bench load: 85% of the anchor.
-    let heavy_bench_load = |model: &Model| -> Option<f64> {
-        let app = Engine;
-        app.view(model)
-            .week_plan
-            .into_iter()
-            .filter(|s| s.title == "Heavy day")
-            .flat_map(|s| s.items.into_iter())
-            .find(|i| i.exercise.to_lowercase().contains("bench") && i.load_kg.is_some())
-            .and_then(|i| i.load_kg)
-    };
-    let bridged = heavy_bench_load(&build(true)).expect("the bench is anchored on the heavy set");
-    let lapsed = heavy_bench_load(&build(false));
+    let bridged =
+        heaviest_bench_load(&build(true)).expect("the bench is anchored on the heavy set");
+    let lapsed = heaviest_bench_load(&build(false));
     // 0.85 × 116.7 ≈ 99 → 97.5 kg on the grid: near full, not decayed.
     assert!(
         bridged > 90.0,
@@ -239,15 +242,7 @@ fn lb_user_gets_a_loadable_prescription() {
     )
     .expect_only_render();
     set_today(&app, &mut model, MON);
-    let load_kg = app
-        .view(&model)
-        .week_plan
-        .into_iter()
-        .filter(|s| s.title == "Heavy day")
-        .flat_map(|s| s.items.into_iter())
-        .find(|i| i.exercise.to_lowercase().contains("bench") && i.load_kg.is_some())
-        .and_then(|i| i.load_kg)
-        .expect("an anchored heavy bench");
+    let load_kg = heaviest_bench_load(&model).expect("an anchored bench");
     let lb = load_kg * LB_PER_KG;
     // The working load lands on the US 5 lb plate grid (the wire stays kg), so a
     // lb user never sees a fractional-lb load no plate combination can make.
@@ -255,13 +250,9 @@ fn lb_user_gets_a_loadable_prescription() {
         ((lb / 5.0).round() * 5.0 - lb).abs() < 1e-4,
         "load {lb} lb must sit on the 5 lb grid"
     );
-    // Rounding DOWN never exceeds the prescribed 85% of the logged e1RM anchor
-    // (a 100 kg × 5 set estimates ≈ 116.7 kg; the plan anchors off that).
-    let anchor = (crate::strength::e1rm_epley(100.0, 5) * 10.0).round() / 10.0;
-    assert!(
-        load_kg <= anchor * 0.85 + 1e-9,
-        "load {load_kg} kg must not overshoot 85% of the e1RM anchor {anchor}"
-    );
+    // Rounding DOWN never exceeds the prescribed 85% of the logged e1RM anchor:
+    // a 100 kg × 5 set estimates 116.7 kg, 85 % is 99.2 kg = 218.7 lb → 215 lb.
+    assert_eq!(lb.round(), 215.0, "{lb} lb");
 }
 
 #[test]
@@ -310,26 +301,24 @@ fn power_day_prescriptions_carry_the_velocity_intent() {
 
 #[test]
 fn calisthenics_days_are_titled_honestly() {
-    let prog = synthesize(
-        &PlanProfile::new(&calisthenics_profile()),
-        &Anchors::default(),
-        0,
-    )
-    .expect("a calisthenics profile plans");
-    let lift = prog
-        .mesocycle
-        .sessions
-        .iter()
-        .find(|s| matches!(s.session_type, SessionType::Lift(_)))
-        .expect("a calisthenics training day");
-    assert_eq!(
-        lift.session_type,
-        SessionType::Lift(LiftSessionType::Calisthenics)
-    );
-    // Honest, user-facing title — not a borrowed barbell "Heavy day".
-    assert_eq!(plan_session_title(lift), "Calisthenics");
-    // The shell's discipline parsing still keys on the "Lift" prefix.
-    assert!(lift.session_type.wire_name().starts_with("Lift"));
+    let (app, model) = planned_calisthenics();
+    let lift_days: Vec<SessionPlanView> = app
+        .view(&model)
+        .week_plan
+        .into_iter()
+        .filter(|s| matches!(s.session_type, SessionType::Lift(_)))
+        .collect();
+    assert!(!lift_days.is_empty(), "a calisthenics training week");
+    for day in &lift_days {
+        assert_eq!(
+            day.session_type,
+            SessionType::Lift(LiftSessionType::Calisthenics)
+        );
+        // Honest, user-facing title — not a borrowed barbell "Heavy day".
+        assert_eq!(day.title, "Calisthenics");
+        // The shell's discipline parsing still keys on the "Lift" prefix.
+        assert!(day.session_type.wire_name().starts_with("Lift"));
+    }
 }
 
 #[test]
@@ -402,43 +391,27 @@ fn regenerating_a_plan_preserves_the_original_anchor() {
     // must NOT re-date the plan (else the week strip sits at "week 1" forever
     // and logged done/missed days flip back to "planned"). Only ClearPlan then
     // GeneratePlan makes a new anchor.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
+    let (app, mut model) = planned_strength_model(false);
+    // A later launch, on Wednesday two weeks on, re-fires with its "today".
+    let (monday, today) = (MON + 14, MON + 16);
+    set_today(&app, &mut model, today);
+    let generate = Event::GeneratePlan {
+        start_epoch_day: today,
+    };
+    app.update(generate.clone(), &mut model)
         .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    // A later launch re-fires with a different "today".
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON + 14,
-        },
-        &mut model,
-    )
-    .expect_only_render();
     assert_eq!(
-        model.plan_request.as_ref().map(|p| p.start_epoch_day),
-        Some(MON),
-        "re-firing GeneratePlan must keep the ORIGINAL anchor",
+        day_row(&app, &model, monday).status,
+        SessionStatus::Missed,
+        "re-firing GeneratePlan must keep the ORIGINAL start: Monday is still planned",
     );
     // ClearPlan then GeneratePlan DOES re-anchor (a deliberate fresh plan).
     app.update(Event::ClearPlan, &mut model)
         .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON + 14,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    app.update(generate, &mut model).expect_only_render();
     assert_eq!(
-        model.plan_request.as_ref().map(|p| p.start_epoch_day),
-        Some(MON + 14),
+        day_row(&app, &model, monday).status,
+        SessionStatus::BeforePlan,
         "after ClearPlan, GeneratePlan takes the new day",
     );
 }
@@ -551,8 +524,10 @@ fn prescription_views_carry_numeric_prefill_targets() {
     // The wire carries a numeric RPE target for prefilling a log entry: an
     // RIR-prescribed lift maps its RIR to an RPE (RIR 3 → RPE 7.0), and a
     // %e1RM-anchored lift carries the effort its load implies on the Epley
-    // model (strength-005 inverse, 1–4 RIR, never 0): the load as a share of
-    // the estimate, after the plate grid floored it.
+    // model (strength-005 inverse, 1–4 RIR, never 0): 120 kg × 3 @ RPE 8 is a
+    // 140 kg estimate, 85 % × 3 is 119 kg floored to 117.5 kg, and 140/117.5
+    // is ~5.7 reps of capacity, ~3 left after 3 reps: RPE 7 (85 % itself would
+    // ask ~2 left, RPE 8).
     let (app, model) = planned_strength_model(true);
     let ns = app
         .view(&model)
@@ -563,83 +538,48 @@ fn prescription_views_carry_numeric_prefill_targets() {
         .iter()
         .find(|i| i.exercise.eq_ignore_ascii_case("Back Squat"))
         .expect("the anchored %e1RM lift");
-    assert!(
-        anchored.intensity_label.contains("e1RM"),
-        "the anchored lift is %e1RM-prescribed: {}",
-        anchored.intensity_label
-    );
-    let cx = ViewCtx::new(&model);
-    let now = cx.lift_anchors_now();
-    let e1 = now.e1rm_for("Back Squat").expect("an anchored squat")
-        * now.load_frac_for("Back Squat").map_or(1.0, |d| d.frac);
-    let (load, reps) = (anchored.load_kg.expect("a load"), anchored.reps_low as u32);
+    assert_eq!(anchored.intensity_label, "85% e1RM");
     assert_eq!(
-        anchored.target_rpe,
-        Some(crate::strength::rir_to_rpe(
-            crate::strength::effort_target_rir(100.0 * load / e1, reps) as f64
-        )),
+        (anchored.load_kg, anchored.target_rpe),
+        (Some(117.5), Some(7.0)),
         "a %e1RM lift carries the effort its load implies"
-    );
-    assert!(
-        anchored.target_rpe.is_some_and(|r| r < 10.0),
-        "a percentage set is never targeted at failure"
     );
     let rir = ns
         .items
         .iter()
         .find(|i| i.intensity_label == "RIR 3")
         .expect("an unanchored RIR 3 accessory");
-    assert_eq!(
-        rir.target_rpe,
-        Some(crate::strength::rir_to_rpe(3.0)),
-        "RIR 3 maps 1:1 to RPE 7.0"
-    );
-    assert_eq!(
-        rir.target_rpe,
-        Some(7.0),
-        "the mapped value is exactly RPE 7.0"
-    );
+    assert_eq!(rir.target_rpe, Some(7.0), "RIR 3 maps 1:1 to RPE 7.0");
 }
 
 #[test]
 fn a_sub_1_25kg_anchor_never_prescribes_at_0kg() {
-    // A %1RM load that rounds below the 2.5 kg grid (80% of a 1 kg
-    // anchor = 0.8 kg → round_2_5 = 0) must never render "@ 0 kg"; the item
+    // A %1RM load that rounds below the 2.5 kg grid (85% of a 1 kg
+    // anchor = 0.85 kg → 0) must never render "@ 0 kg"; the item
     // drops the load and falls back to an RIR (effort) prescription.
-    let pres = Prescription::Lift(crate::schema::LiftPrescription {
-        exercise: "Back Squat".into(),
-        sets: 3,
-        reps: 5,
-        intensity: LiftIntensity::PercentOneRm(80.0),
-        rest_sec: 180,
-        velocity_loss_pct: None,
-        reps_max: None,
-        load_kg: None,
-    });
-    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
-    let tiny = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 1.0)],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let it = flatten_prescription(&rx, &tiny, None, false, DistanceUnit::Km);
+    let (app, model) = planned_on(
+        strength_profile(),
+        [log_set("Back Squat", 1.0, 1, 8.0, (MON - 1) * DAY_SEC)],
+        MON,
+    );
+    let squat = day_row(&app, &model, MON)
+        .items
+        .into_iter()
+        .find(|i| same_movement(&i.exercise, "Back Squat"))
+        .expect("a squat item");
     assert!(
-        !it.summary.contains("@ 0"),
+        !squat.summary.contains("@ 0"),
         "no '@ 0 kg' on a collapsed anchor: {}",
-        it.summary
+        squat.summary
     );
-    assert_eq!(it.load_kg, None, "the collapsed load is dropped, not 0 kg");
+    assert_eq!(
+        squat.load_kg, None,
+        "the collapsed load is dropped, not 0 kg"
+    );
     assert!(
-        it.intensity_label.starts_with("RIR "),
+        squat.intensity_label.starts_with("RIR "),
         "the fallback is an RIR (effort) prescription: {}",
-        it.intensity_label
-    );
-    assert!(
-        matches!(it.intensity, PlanIntensity::Rir { .. }),
-        "the structured intensity is RIR: {:?}",
-        it.intensity
+        squat.intensity_label
     );
 }
 

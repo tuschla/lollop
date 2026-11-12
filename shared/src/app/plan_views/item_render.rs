@@ -405,7 +405,7 @@ pub(super) fn clear_run_reps(it: &mut PlanItem) {
     it.rep_amount = None;
 }
 
-pub(super) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
+pub(in crate::app) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
 
 /// Cap a RUN item to an easy target: keep the bounded volume but replace the
 /// hard intensity with an easy zone. An interval day keeps its numbers as one

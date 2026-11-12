@@ -22,18 +22,15 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppRuntime
 import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.OpenDest
 import app.milestone.PrescriptionView
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
 import app.milestone.AppSettings
-import app.milestone.openIntent
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -92,27 +89,11 @@ class ScreenshotRunsTest {
         QaHarness.freshProcess()
     }
 
-    // Every wait fetches semantics, which idles the looper.
-    private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
-        rule.waitForNode(matcher, timeoutMs)
-        rule.waitForIdle()
-    }
-
-    private fun waitForText(text: String, substring: Boolean = false, timeoutMs: Long = 10_000) =
-        waitFor(hasText(text, substring = substring), timeoutMs)
-
     /** A partially-expanded bottom sheet opened fully: an upward drag on its content
      *  is consumed by the sheet before its own scroll. */
     private fun expandSheetFrom(matcher: SemanticsMatcher) {
         rule.onAllNodes(matcher).onFirst().performTouchInput { swipeUp(startY = centerY, endY = centerY - 900f) }
         rule.waitForIdle()
-    }
-
-    private val logButton get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
-
-    private fun openChooser() {
-        rule.onNode(logButton).performClick()
-        waitForText(str(R.string.main_track_run_title))
     }
 
     private val records get() = str(R.string.history_records).uppercase(Locale.US)
@@ -125,43 +106,14 @@ class ScreenshotRunsTest {
         rule.onNode(hasText(k) and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
 
     /**
-     * Twelve weeks of three hand-logged runs (easy, short, long) plus a half
-     * marathon five weeks back, oldest first, one squat session three days ago (so
-     * the Lifts | Runs segment shows), and this morning's rated GPS 10K. The core
-     * then reports: a 16-week chart against the 30 km plan line, longest run
-     * 21.2 km, best efforts 1K / 5K (inside the 10K) / 10K / Half marathon, and
-     * Monday's card (untagged, so titled by its weekday) with "Effort 7 of 10" and the
-     * Fastest 10K chip. Runs is the default segment (the run is newest).
+     * History over twelve weeks of runs plus a half marathon five weeks back
+     * ([openRunsHistory]). The core then reports: a 16-week chart against the 30 km
+     * plan line, longest run 21.2 km, best efforts 1K / 5K (inside the 10K) / 10K /
+     * Half marathon, and Monday's card (untagged, so titled by its weekday) with
+     * "Effort 7 of 10" and the Fastest 10K chip. Runs is the default segment (the
+     * run is newest).
      */
-    private fun seedRunsHistory() {
-        // (stamp, event) pairs so the mixed runs + sets replay oldest first.
-        val manual = buildList<Pair<Long, Event>> {
-            for (w in 12 downTo 1) {
-                for (off in intArrayOf(6, 4, 2)) {
-                    val km = when (off) {
-                        2 -> 6.0 + w % 3
-                        4 -> 4.5 + w % 2
-                        else -> 11.0 + w % 4
-                    }
-                    val at = QaHarness.daysAgoAtMidday(7 * (w - 1) + off)
-                    add(at to Event.LogRun(km, km * 5.8, 0.0, observedAt = at, entryId = at * 1000))
-                }
-            }
-            val half = QaHarness.daysAgoAtMidday(33) + 600
-            add(half to Event.LogRun(21.2, 115.0, 0.0, observedAt = half, entryId = half * 1000))
-            var t = QaHarness.daysAgoAtMidday(3)
-            repeat(3) {
-                t += 180
-                add(t to Event.LogSet("Back Squat", 100.0, 5, 8.0, t, t * 1000))
-            }
-        }.sortedBy { it.first }.map { it.second }
-        // This morning, before the harness's pinned "now".
-        val thisMorning = QaHarness.daysAgoAtMidday(0) - 5 * 3600
-        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
-        rule.launchApp()
-        rule.selectTab(str(R.string.main_dest_history))
-        waitForText(str(R.string.main_overline_last_7_days).uppercase(Locale.US))
-    }
+    private fun seedRunsHistory() = rule.openRunsHistory(ctx, halfMarathon = true)
 
     /** Three squat/bench sessions with rising loads; yesterday's also adds rows, so
      *  its card reads "3 exercises · 8 sets" with "New best" on squat and bench. */
@@ -209,18 +161,15 @@ class ScreenshotRunsTest {
         ))
         QaHarness.seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitUntil(30_000) {
-            rule.onAllNodesWithText(str(R.string.track_step_skip)).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
-        }
-        rule.waitForIdle()
+        rule.launchOnTracker()
+        rule.waitForNodeSettled(hasText(str(R.string.track_step_skip)))
     }
 
     /** Stop → the Finish review, effort 7 picked (local state only; nothing saved). */
     private fun openFinishReview() {
         openRecordingWithPlan()
-        rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        waitForText(str(R.string.track_finish_title))
+        rule.stopToFinishReview()
+        rule.waitForIdle()
         rule.pickRating("effort-scale", 7)
     }
 
@@ -258,10 +207,10 @@ class ScreenshotRunsTest {
         rule.scrollToText("Fastest 10K")
         rule.onAllNodesWithText("Fastest 10K").onFirst().performClick()
         // Rated: YOUR LOG's Effort row reads "7 of 10 · Very hard".
-        waitForText(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7)))
+        rule.waitForText(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7)))
         // The GPS route parses off the main thread (Trim appears once it has); wait
         // so the sheet's height is final before capturing.
-        waitFor(hasTestTag("run-trim"))
+        rule.waitForNodeSettled(hasTestTag("run-trim"))
     }
 
     private fun runsDetailRated(mode: DarkMode) {
@@ -317,7 +266,7 @@ class ScreenshotRunsTest {
         val saturdayRun = str(R.string.history_run_weekday, "Saturday")
         rule.scrollToText(saturdayRun)
         rule.onAllNodesWithText(saturdayRun).onFirst().performClick()
-        waitFor(hasTestTag("run-log-details"))
+        rule.waitForNodeSettled(hasTestTag("run-log-details"))
         rule.shot("runs-detail-rate-${mode.suffix}")
     }
 
@@ -332,14 +281,14 @@ class ScreenshotRunsTest {
         rule.shot("runs-lifts-card-$s")
         // The card's own click action: a tap at its center can land on the estimated-max "?".
         rule.onNodeWithText(sessionHeader(3, 8)).performSemanticsAction(SemanticsActions.OnClick)
-        waitForText(str(R.string.history_delete_session))
+        rule.waitForText(str(R.string.history_delete_session))
         expandSheetFrom(hasTestTag("lift-set-row"))
         // Per-exercise set rows; "New best" once beside each record exercise's name.
         rule.shot("runs-lifts-sheet-top-$s")
         // A set opened from the table: the set as the sheet's largest figure, its
         // e1RM / load card, the cross-check and the Edit set / Delete set rows.
         rule.onAllNodes(hasTestTag("lift-set-row")).onFirst().performScrollTo().performClick()
-        waitFor(hasTestTag("set-detail-delete"))
+        rule.waitForNodeSettled(hasTestTag("set-detail-delete"))
         rule.shot("runs-lifts-set-detail-$s")
     }
 
@@ -351,9 +300,9 @@ class ScreenshotRunsTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_log_run_title)).performScrollTo().performClick()
-        waitFor(hasContentDescription(str(R.string.log_field_duration)))
+        rule.waitForNodeSettled(hasContentDescription(str(R.string.log_field_duration)))
         val s = mode.suffix
         // Distance 6.2 mi, duration typed timer-style: 1:05:30.
         listOf("6", ".", "2").forEach { key(it) }
@@ -378,10 +327,10 @@ class ScreenshotRunsTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_track_run_title)).performScrollTo().performClick()
-        waitForText(str(R.string.track_plan_follow))
-        waitForText(strPrefix(R.string.track_plan_title), substring = true)
+        rule.waitForText(str(R.string.track_plan_follow))
+        rule.waitForText(strPrefix(R.string.track_plan_title), substring = true)
         rule.shot("track-prestart-${mode.suffix}")
     }
 

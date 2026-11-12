@@ -3,16 +3,13 @@ package app.milestone.qa
 import android.app.Application
 import android.content.Context
 import android.provider.Settings
-import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppClock
+import app.milestone.LoopRepeatGuardMs
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.RestAlarm
@@ -66,21 +63,15 @@ class ExactAlarmNoticeTest {
         )
         rule.launchApp()
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
-        rule.onNode(
-            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
-        ).performScrollTo().performClick()
-        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("editor-primary")).fetchSemanticsNodes().isNotEmpty() }
+        rule.openLoopFor(first.exercise)
         return first.sets
     }
 
     private fun logSet(n: Int, of: Int) {
-        // The lifter rests first (this also clears the loop's double-tap guard).
-        if (n > 1) TestClock.offsetMillis += 90_000L
-        rule.onNode(hasTestTag("editor-primary")).performClick()
-        rule.waitUntil(10_000) {
-            rule.onAllNodes(hasText(str(R.string.log_set_header_n_of_n, n + 1, of))).fetchSemanticsNodes().isNotEmpty()
-        }
+        // A later set comes after the loop's double-tap guard.
+        if (n > 1) TestClock.offsetMillis += LoopRepeatGuardMs
+        rule.tapEditorPrimary()
+        rule.waitForNode(hasText(str(R.string.log_set_header_n_of_n, n + 1, of)))
         assertNotNull("the set started a rest", RestAlarm.running.value)
         rule.waitForIdle()
     }

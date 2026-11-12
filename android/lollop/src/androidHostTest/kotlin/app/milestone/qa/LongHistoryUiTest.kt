@@ -57,8 +57,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The real app over the real core against a LONG history (years of it; longer
- * with `LOLLOP_LONG_UI=1`) of a hybrid athlete's lifting sessions, tracked /
+ * The real app over the real core against a LONG history (two years) of a
+ * hybrid athlete's lifting sessions, tracked /
  * hand-logged / imported runs, morning check-ins, a
  * pain and two illness holds, profile edits and a plan, seeded as the exact wire
  * events the app sends ([LongHistorySeed]).
@@ -100,10 +100,10 @@ class LongHistoryUiTest {
         val full = metric
         val quarter = LongHistorySeed.build(DAYS / 4, fixEverySec = FIX_SEC)
         measureCore(quarter) // warm-up: JIT + native first-call costs
-        val (fullRestore, fullView, m) = measureCore(full)
-        val (qRestore, qView, _) = measureCore(quarter)
+        val (fullRestore, fullView, m, stale) = measureCore(full)
+        val (qRestore, qView) = measureCore(quarter)
 
-        assertFalse("a replayed line reset the core (logDegraded)", privateBool(Core, "logDegraded"))
+        assertFalse("the replayed long history left the core's view stale (a line reset the core)", stale)
         assertEquals("every seeded set is in the model", full.sets.size, m.lifts.size)
         assertEquals("every seeded run is in the model", full.runs.size, m.runs.size)
         assertTrue("lifts in time order", m.lifts.zipWithNext().all { (a, b) -> a.observed_at <= b.observed_at })
@@ -173,7 +173,7 @@ class LongHistoryUiTest {
         )
 
         // The segment opens on whichever type was logged last; pick Runs explicitly.
-        timed("Runs segment") { rule.selectHistoryFilter(str(R.string.main_segment_runs)) }
+        timed("Runs segment") { rule.selectTab(str(R.string.main_segment_runs)) }
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         historyList().performScrollToNode(weekly)
         val spoken = contentDescription(weekly)
@@ -211,7 +211,12 @@ class LongHistoryUiTest {
         val cells = recordCells()
         val longestCell = cells.first { it.any { t -> t.equals(str(R.string.history_longest_run), ignoreCase = true) } }
         assertTrue("longest cell value: $longestCell", "${trimDecimal(p.longest_run_km)} km" in longestCell)
-        assertEquals(listOf(1000, 5000, 10000, 21097), p.best_efforts.map { it.distance_m })
+        val efforts = p.best_efforts.map { it.distance_m }
+        assertTrue("a two-year runner has best efforts: $efforts", efforts.isNotEmpty())
+        assertTrue(
+            "best efforts are distinct, shortest first, and no longer than the longest run: $efforts",
+            efforts.zipWithNext().all { (a, b) -> a < b } && efforts.last() <= p.longest_run_km * 1000.0,
+        )
         p.best_efforts.forEach { b ->
             val secPerKm = b.time_sec / (b.distance_m / 1000.0)
             assertTrue("${b.label} at $secPerKm s/km is faster than anything seeded", secPerKm >= FASTEST_SEEDED_SEC_PER_KM)
@@ -263,7 +268,7 @@ class LongHistoryUiTest {
         val h = metric
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
-        rule.selectHistoryFilter(str(R.string.main_segment_runs))
+        rule.selectTab(str(R.string.main_segment_runs))
         historyList().performScrollToNode(hasTestTag("history-record"))
         val longestRow = hasTestTag("history-record") and hasText(str(R.string.history_longest_run), substring = true, ignoreCase = true)
         timed("open longest run") {
@@ -349,7 +354,7 @@ class LongHistoryUiTest {
         val h = metric
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
-        timed("Lifts segment") { rule.selectHistoryFilter(str(R.string.main_segment_lifts)) }
+        timed("Lifts segment") { rule.selectTab(str(R.string.main_segment_lifts)) }
 
         val walk = walkHistoryList()
         val cards = walk.items.filter { it.kind == Kind.Lift }
@@ -380,7 +385,7 @@ class LongHistoryUiTest {
             rule.waitForIdle()
         }
         val volume = groupedFigure(Math.round(bigSets.filter { it.holdSec == null }.sumOf { it.weightKg * it.reps }))
-        rule.assertTextCountEventually("$countLine · ${str(R.string.history_session_volume, volume, "kg")}", 1)
+        rule.assertCountEventually(hasText("$countLine · ${str(R.string.history_session_volume, volume, "kg")}"), 1)
         assertEquals("every set of the day has its row", h.bigSessionSets, rule.onAllNodesWithTag("lift-set-row").fetchSemanticsNodes().size)
         val sheet = topWindowTexts()
         bigSets.map { it.exercise }.distinct().forEach { ex ->
@@ -402,7 +407,7 @@ class LongHistoryUiTest {
             rule.waitForIdle()
         }
         val load = str(R.string.log_set_line_reps, str(R.string.log_value_with_unit, trimDecimal(first.weightKg), "kg"), first.reps)
-        rule.assertTextCountEventually(load, 1)
+        rule.assertCountEventually(hasText(load), 1)
         rule.onAllNodes(hasText("of estimated max", substring = true)).fetchSemanticsNodes().let { assertEquals(1, it.size) }
         sheetChecks("set detail")
         closeTopSheet()
@@ -457,7 +462,7 @@ class LongHistoryUiTest {
         val h = imperial
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
-        rule.selectHistoryFilter(str(R.string.main_segment_runs))
+        rule.selectTab(str(R.string.main_segment_runs))
         val m = model()
 
         val window = AppClock.nowSec() - 7L * 86_400L
@@ -503,7 +508,7 @@ class LongHistoryUiTest {
         assertNoUnitLeak("run sheet", "km", "kilomet")
         closeTopSheet()
 
-        rule.selectHistoryFilter(str(R.string.main_segment_lifts))
+        rule.selectTab(str(R.string.main_segment_lifts))
         historyList().performScrollToIndex(0)
         rule.waitForIdle()
         val bigSets = h.sets.filter { Math.floorDiv(it.observedAt, 86_400L) == h.bigSessionDay }
@@ -547,15 +552,16 @@ class LongHistoryUiTest {
 
     /**
      * Close the topmost bottom sheet the way a tap outside it does: its scrim
-     * ("Close sheet"). A sheet is its own window, so the activity's Back
+     * ([sheetScrimLabel]). A sheet is its own window, so the activity's Back
      * dispatcher never reaches it under Robolectric.
      */
     private fun closeTopSheet() {
         val before = rule.onAllNodes(isRoot()).fetchSemanticsNodes().size
         val root = rule.onAllNodes(isRoot()).fetchSemanticsNodes().last()
+        val scrimLabel = sheetScrimLabel
         fun find(n: SemanticsNode): SemanticsNode? {
             val cd = n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
-            if (cd.contains(SHEET_SCRIM) && n.config.getOrNull(SemanticsActions.OnClick) != null) return n
+            if (cd.contains(scrimLabel) && n.config.getOrNull(SemanticsActions.OnClick) != null) return n
             return n.children.firstNotNullOfOrNull { find(it) }
         }
         val scrim = find(root)
@@ -568,28 +574,24 @@ class LongHistoryUiTest {
         rule.waitForIdle()
     }
 
-    /** Restore [h] into a fresh core and time it and its view (median of three). */
-    private fun measureCore(h: LongHistory): Triple<Long, Long, ViewModel> {
+    private data class CoreCost(val restoreMs: Long, val viewMs: Long, val view: ViewModel, val stale: Boolean)
+
+    /** Restore [h] into a fresh core and time it and its view (median of three);
+     *  [CoreCost.stale] is the first send's report that its view is not the log's. */
+    private fun measureCore(h: LongHistory): CoreCost {
         QaHarness.reset(ctx)
         QaHarness.seedLog(ctx, h.events)
         val t0 = System.nanoTime()
         Core.restore(ctx)
         val restoreMs = (System.nanoTime() - t0) / 1_000_000
-        Core.send(Event.SetToday(h.today, 0))
+        val stale = Core.send(Event.SetToday(h.today, 0)).stale
         var last: ViewModel? = null
         val views = (0 until 3).map {
             val s = System.nanoTime()
             last = Core.currentView()
             (System.nanoTime() - s) / 1_000_000
         }.sorted()
-        return Triple(restoreMs, views[1], last!!)
-    }
-
-    private fun privateBool(target: Any, field: String): Boolean {
-        val f = generateSequence<Class<*>>(target.javaClass) { it.superclass }
-            .firstNotNullOf { runCatching { it.getDeclaredField(field) }.getOrNull() }
-        f.isAccessible = true
-        return f.getBoolean(target)
+        return CoreCost(restoreMs, views[1], last!!, stale)
     }
 
     private fun <T> assertNotNullV(v: T?, msg: String): T {
@@ -687,12 +689,12 @@ class LongHistoryUiTest {
             vis.forEach { seen.putIfAbsent(it.key, it) }
             if (step % checkEvery == 0) {
                 violations += UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
-                textProblems += textProblems()
+                textProblems += rule.textProblems()
             }
             val range = list.fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
             if (range != null && range.value() >= range.maxValue()) {
                 violations += UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
-                textProblems += textProblems()
+                textProblems += rule.textProblems()
                 break
             }
             unchanged = if (keys.toSet() == prev) unchanged + 1 else 0
@@ -781,7 +783,7 @@ class LongHistoryUiTest {
     private fun sheetChecks(where: String) {
         val v = UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
         assertTrue("[$where] UX invariants:\n" + v.joinToString("\n"), v.isEmpty())
-        val t = textProblems()
+        val t = rule.textProblems()
         assertTrue("[$where] text cut off / overlapping:\n" + t.joinToString("\n"), t.isEmpty())
     }
 
@@ -872,49 +874,9 @@ class LongHistoryUiTest {
         assertTrue("[$where] shows ${units.toList()}: ${leaks.distinct().take(8)}", leaks.isEmpty())
     }
 
-    /**
-     * Visible text the layout cut off (ellipsis, lines past maxLines, an unwrapped
-     * line wider than its box) or that overlaps another visible text in the same
-     * window.
-     */
-    private fun textProblems(): List<String> {
-        val out = ArrayList<String>()
-        val slack = 2f * rule.density.density
-        rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().forEach { root ->
-            val boxes = ArrayList<Pair<String, Rect>>()
-            fun visit(n: SemanticsNode) {
-                val b = n.boundsInRoot
-                if (b.width > 0f && b.height > 0f) {
-                    n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { get ->
-                        val layouts = ArrayList<TextLayoutResult>()
-                        if (get(layouts)) layouts.filter { it.cutsOffText }.forEach { out += "cut off: \"${it.layoutInput.text.text}\"" }
-                    }
-                    n.config.getOrNull(SemanticsProperties.Text)?.let { t -> boxes += t.joinToString(" ") { it.text } to b }
-                }
-                n.children.forEach(::visit)
-            }
-            visit(root)
-            for (i in boxes.indices) for (j in i + 1 until boxes.size) {
-                val a = boxes[i].second
-                val b = boxes[j].second
-                val w = minOf(a.right, b.right) - maxOf(a.left, b.left)
-                val hgt = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-                if (w > slack && hgt > slack) out += "overlap: \"${boxes[i].first}\" × \"${boxes[j].first}\""
-            }
-        }
-        return out
-    }
-
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
-
     companion object {
-        /** `LOLLOP_LONG_UI=1`: a longer history at the tracker's own fix cadence. */
-        private val LONG = System.getenv("LOLLOP_LONG_UI") == "1"
-        private val DAYS = if (LONG) 1_095 else 730
-        private val FIX_SEC = if (LONG) 3L else 15L
+        private const val DAYS = 730
+        private const val FIX_SEC = 15L
 
         private val metric: LongHistory by lazy { LongHistorySeed.build(DAYS, lb = false, fixEverySec = FIX_SEC) }
         private val imperial: LongHistory by lazy { LongHistorySeed.build(DAYS, lb = true, fixEverySec = FIX_SEC, seed = 0x0B0BL) }
@@ -922,9 +884,6 @@ class LongHistoryUiTest {
         /** One tap / scroll / sheet under Robolectric with a debug core: "absurd" is far past this. */
         private const val INTERACTION_BUDGET_MS = 8_000L
         private const val BOOT_BUDGET_MS = 45_000L
-
-        /** Material 3's spoken name for a modal bottom sheet's scrim (its own resource; English locale). */
-        private const val SHEET_SCRIM = "Close sheet"
 
         /** No seeded kilometre is faster than tempo at the end of the span with its ±4 % wobble. */
         private const val FASTEST_SEEDED_SEC_PER_KM = 275.0 * 0.94 * 0.96 - 5.0

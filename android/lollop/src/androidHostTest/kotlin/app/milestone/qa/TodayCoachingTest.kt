@@ -18,8 +18,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
@@ -68,11 +66,6 @@ class TodayCoachingTest {
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
     }
 
-    private fun waitForAny(matcher: SemanticsMatcher, timeoutMs: Long = 10_000): Int {
-        runCatching { rule.waitForNode(matcher, timeoutMs) }
-        return rule.countOf(matcher)
-    }
-
     private fun tagStartsWith(prefix: String) = SemanticsMatcher("testTag starts with $prefix") {
         it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith(prefix) == true
     }
@@ -85,16 +78,14 @@ class TodayCoachingTest {
         )
         rule.launchApp()
         val inSquat = hasAnyAncestor(hasTestTag("plan-item:Back Squat"))
-        assertTrue(
-            "the squat shows the plates to load on each side",
-            waitForAny(inSquat and hasText(strPrefix(R.string.plan_face_per_side), substring = true)) >= 1,
-        )
+        // The squat shows the plates to load on each side.
+        rule.waitForNode(inSquat and hasText(strPrefix(R.string.plan_face_per_side), substring = true))
         // One effort statement on the face: the prescription line's "~2 reps left"
         // (worded by the core/pure formatter, not a resource), or for a newcomer
         // the guide's spelled-out line alone ("…stopping with about 2 reps left"),
         // whose subtitle then drops its own "~N reps left".
         val effort = inSquat and hasText("left", substring = true)
-        assertTrue("the squat states its effort target once, in plain words", waitForAny(effort) == 1)
+        rule.assertCountEventually(effort, 1)
         assertTrue(
             "no separate Effort line restates it",
             rule.onAllNodes(inSquat and hasText(strPrefix(R.string.plan_face_effort), substring = true)).fetchSemanticsNodes().isEmpty(),
@@ -118,7 +109,7 @@ class TodayCoachingTest {
                 )
             }
         }
-        assertTrue("the session-done card appears", waitForAny(hasTestTag("session-done")) == 1)
+        rule.assertCountEventually(hasTestTag("session-done"), 1)
         val next = EventDispatcher.model.value?.next_session
         assertTrue(
             "the next session is a later day's",
@@ -140,11 +131,11 @@ class TodayCoachingTest {
     fun todaysSession_onlyTheCurrentItemCarriesControls_andTheCardHasOneQuestionMark() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
         val session = EventDispatcher.model.value!!.next_session!!
         val open = session.items.filter { it.exercise.isNotEmpty() && !it.done }
         assertTrue("scenario: several open lift items", open.size >= 2)
-        assertTrue(waitForAny(hasTestTag("plan-action-filled")) == 1)
+        rule.assertCountEventually(hasTestTag("plan-action-filled"), 1)
         rule.onAllNodesWithText(str(R.string.plan_skip_exercise)).assertCountEquals(1)
         assertTrue(rule.onAllNodes(tagStartsWith("set-slots:")).fetchSemanticsNodes().size == 1)
         open.drop(1).forEach { item ->
@@ -163,7 +154,7 @@ class TodayCoachingTest {
             )
         }
         val details = hasClickAction() and hasContentDescription(str(R.string.main_details_subject, session.title))
-        assertTrue("the session card has one ?", waitForAny(details) == 1)
+        rule.assertCountEventually(details, 1)
         assertNoViolations()
         rule.onNode(details).performClick()
         rule.waitForIdle()
@@ -181,37 +172,37 @@ class TodayCoachingTest {
     fun moveSession_movesTodaysSessionOffToday() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true)).performClick()
         rule.waitForIdle()
         val targets = rule.onAllNodes(tagStartsWith("move-target:"))
         assertTrue("the picker offers at least one day", targets.fetchSemanticsNodes().isNotEmpty())
         val target = targets[0].fetchSemanticsNode().config[SemanticsProperties.TestTag].removePrefix("move-target:").toLong()
         targets[0].performClick()
-        rule.assertTextCountEventually(str(R.string.main_rest_day_next_overline).uppercase(Locale.US), 1)
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 0)
+        rule.assertCountEventually(hasText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US)), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 0)
         assertTrue(
             "today's plan day reads rest after the move",
             EventDispatcher.model.value?.week_plan?.any {
                 it.epoch_day == EventDispatcher.model.value?.today_epoch_day && it.status == SessionStatus.Rest
             } == true,
         )
-        rule.assertTextCountEventually(str(R.string.main_moved_to, planDateLabel(target)), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_moved_to, planDateLabel(target))), 1)
         rule.onNodeWithText(str(R.string.log_undo)).performClick()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
     }
 
     @Test
     fun skipExercise_confirmsWithUndo() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() && !it.done }
         rule.onAllNodesWithText(str(R.string.plan_skip_exercise))[0].performClick()
-        rule.assertTextCountEventually(str(R.string.plan_skipped), 1)
-        rule.assertTextCountEventually(str(R.string.plan_skipped_msg, first.exercise), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_skipped)), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_skipped_msg, first.exercise)), 1)
         rule.onNodeWithText(str(R.string.log_undo)).performClick()
-        rule.assertTextCountEventually(str(R.string.plan_skipped), 0)
+        rule.assertCountEventually(hasText(str(R.string.plan_skipped)), 0)
         assertTrue(
             "Undo reopened ${first.exercise}",
             EventDispatcher.model.value?.next_session?.items?.first { it.exercise == first.exercise }?.ended_early == false,
@@ -222,23 +213,21 @@ class TodayCoachingTest {
     fun skipExercise_undoMessageSitsAboveTheLogFab() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() && !it.done }
         rule.onAllNodesWithText(str(R.string.plan_skip_exercise))[0].performClick()
-        rule.assertTextCountEventually(str(R.string.plan_skipped_msg, first.exercise), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_skipped_msg, first.exercise)), 1)
         val shown = rule.onNode(hasText(str(R.string.plan_skipped_msg, first.exercise))).getBoundsInRoot()
         val fab = rule.onNode(logFab).getBoundsInRoot()
         assertTrue("the message ($shown) sits above the Log FAB ($fab)", shown.bottom <= fab.top)
     }
 
-    private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
-
     @Test
     fun logFab_isOnTodayOnly() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(7))))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
-        assertTrue("one Log FAB on Today", waitForAny(logFab) == 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
+        rule.assertCountEventually(logFab, 1)
         for (tab in listOf(R.string.main_dest_history, R.string.main_dest_profile)) {
             rule.selectTab(str(tab))
             rule.waitForIdle()
@@ -253,10 +242,9 @@ class TodayCoachingTest {
             listOf(QaHarness.strengthProfile()) + listOf(6, 4, 2).map { QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(it)) },
         )
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
+        rule.scrollTodayToEnd()
         val list = rule.onAllNodes(hasScrollToIndexAction())[0]
-        repeat(12) { list.performTouchInput { swipeUp() } }
-        rule.waitForIdle()
         val lastBottom = list.fetchSemanticsNode().children.maxOf { it.boundsInRoot.bottom }
         val fabTop = with(rule.density) { rule.onNode(logFab).getBoundsInRoot().top.toPx() }
         assertTrue("the last row ($lastBottom px) ends above the Log FAB ($fabTop px)", lastBottom <= fabTop + 1f)
@@ -266,11 +254,11 @@ class TodayCoachingTest {
     fun heroAction_spansThePrescriptionCard() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(Locale.US)), 1)
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() && !it.done }
         val card = rule.onNode(hasTestTag("plan-item:${first.exercise}")).getBoundsInRoot()
         val action = rule.onNode(hasTestTag("plan-action-filled")).getBoundsInRoot()
-        val inset = 14.dp
+        val inset = app.milestone.Space.Card.dp
         assertTrue("start inset ${action.left - card.left}", (action.left - card.left - inset).value in -1f..1f)
         assertTrue("end inset ${card.right - action.right}", (card.right - action.right - inset).value in -1f..1f)
     }
@@ -282,7 +270,7 @@ class TodayCoachingTest {
         // The chip speaks "Harder: <rung>, <target>".
         val harderLead = strPrefix(R.string.plan_calis_chip_cd, str(R.string.plan_calis_harder))
         val harder = hasContentDescription(harderLead, substring = true)
-        assertTrue("a calisthenics item offers a harder rung", waitForAny(harder) >= 1)
+        rule.waitForNode(harder)
         assertNoViolations()
         val chip = rule.onAllNodes(harder)[0]
         val desc = chip.fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)
@@ -290,10 +278,7 @@ class TodayCoachingTest {
         val harderName = desc.substringAfter(harderLead).trimStart().substringBefore(", ")
         assertTrue("the chip names the harder rung: $desc", harderName.isNotBlank())
         chip.performClick()
-        assertTrue(
-            "the plan item became $harderName",
-            waitForAny(hasTestTag("plan-item:$harderName")) >= 1,
-        )
+        rule.waitForNode(hasTestTag("plan-item:$harderName"))
     }
 
     @Test
@@ -312,17 +297,12 @@ class TodayCoachingTest {
         }
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag("this-week"))
         rule.waitForIdle()
-        assertTrue("the THIS WEEK card renders", waitForAny(hasTestTag("this-week")) == 1)
+        rule.assertCountEventually(hasTestTag("this-week"), 1)
         val c = EventDispatcher.model.value?.consistency
         assertTrue("planned vs done is shown for this week", c != null && c.this_week_planned > 0)
         assertTrue("scenario: the core has more than one note to choose from", c!!.notes.size >= 3)
-        val count = ctx.resources.getQuantityString(
-            R.plurals.main_week_done_count,
-            c.this_week_planned,
-            c.this_week_done,
-            c.this_week_planned,
-        )
-        assertTrue("one plain count line: $count", waitForAny(inWeek and hasText(count)) == 1)
+        val count = plural(R.plurals.main_week_done_count, c.this_week_planned, c.this_week_done, c.this_week_planned)
+        rule.assertCountEventually(inWeek and hasText(count), 1)
         val notesOnFace = c.notes.filter { n ->
             rule.onAllNodes(inWeek and hasText(n.summary)).fetchSemanticsNodes().isNotEmpty()
         }
@@ -359,7 +339,7 @@ class TodayCoachingTest {
         )
         rule.launchApp()
         // The resolve action's label is the core's own copy.
-        rule.assertTextCountEventually("I've recovered", 1)
+        rule.assertCountEventually(hasText(resolveLabels().single()), 1)
         val m = EventDispatcher.model.value!!
         val meta = listOfNotNull(m.provisional, m.autoreg_source)
         assertTrue("scenario: the core emits an engine-meta line for this day", meta.isNotEmpty())

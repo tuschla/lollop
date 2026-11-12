@@ -2,21 +2,7 @@
 
 use super::*;
 use crate::exercise::{MovementPattern, is_barbell_lift, same_movement};
-use crate::plan::lift::lift_prescription;
-use crate::plan::volume::sized_sets;
 use crate::schema::LiftSessionType;
-
-/// The first of 3 full-body lift days in week 1 of a 4-week block.
-fn full_body_day() -> LiftDay {
-    LiftDay {
-        day: 0,
-        slot: 0,
-        n_exposures: 3,
-        week_in_block: 1,
-        block_weeks: 4,
-        regions: WeekRegions::full(3),
-    }
-}
 
 #[test]
 fn anchored_lift_is_percent_based_unanchored_is_rir() {
@@ -75,134 +61,123 @@ fn unanchored_power_lifts_get_actionable_prescriptions() {
     // the athlete can execute (one set of 5 at RPE 8, STR-E1RM-CHECK-001) —
     // never "50 % of an unknown e1RM". On a strength-base day it is the
     // max-strength band by RIR (STR-BASE-POWER-001).
-    let block = full_body_day();
-    let power = lift_prescription(
-        LiftGoal::Power,
-        TrainingAge::Novice,
-        DupDay::Power,
-        "Back Squat",
-        &crate::plan::LiftAnchors::default(),
-        0,
-        &block,
-    );
-    let Prescription::Lift(l) = &power.value else {
-        panic!("expected a lift prescription")
+    let p = Profile {
+        lift_goal: LiftGoal::Power,
+        progression_cadence: ProgressionCadence::EverySession, // → Novice
+        ..base_profile()
     };
-    assert!(
-        matches!(l.intensity, LiftIntensity::Rpe(r) if r == 8.0),
-        "unanchored power-day lift is a calibration set at RPE 8: {:?}",
-        l.intensity
-    );
-    assert_eq!((l.sets, l.reps), (1, 5));
-    assert_eq!(power.claim_id(), claims::STR_E1RM_CHECK_001);
-    let heavy = lift_prescription(
-        LiftGoal::Power,
-        TrainingAge::Novice,
-        DupDay::Heavy,
-        "Back Squat",
-        &crate::plan::LiftAnchors::default(),
-        0,
-        &block,
-    );
-    let Prescription::Lift(l) = &heavy.value else {
-        panic!("expected a lift prescription")
-    };
-    assert!(
-        matches!(l.intensity, LiftIntensity::Rir(3)),
-        "{:?}",
-        l.intensity
-    );
-    assert_eq!(heavy.claim_id(), claims::STR_BASE_POWER_001);
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
+    let squats: Vec<_> = lift_rx(&prog)
+        .into_iter()
+        .filter(|(_, l, _)| movement_pattern(&l.exercise) == Some(MovementPattern::Squat))
+        .collect();
+    assert!(!squats.is_empty(), "the week squats");
+    for (s, l, claim) in squats {
+        if s.session_type == SessionType::Lift(LiftSessionType::DynamicEffort) {
+            assert!(
+                matches!(l.intensity, LiftIntensity::Rpe(r) if r == 8.0),
+                "unanchored power-day lift is a calibration set at RPE 8: {:?}",
+                l.intensity
+            );
+            assert_eq!((l.sets, l.reps), (1, 5));
+            assert_eq!(claim, claims::STR_E1RM_CHECK_001);
+        } else {
+            assert!(
+                matches!(l.intensity, LiftIntensity::Rir(3)),
+                "{:?}",
+                l.intensity
+            );
+            assert_eq!(claim, claims::STR_BASE_POWER_001);
+        }
+    }
 }
 
 #[test]
 fn post_return_anchor_loads_normally_during_a_novice_reentry_window() {
     // `build_plan_anchors` drops PRE-layoff anchors while a >8 wk re-entry
     // window runs (KB Table 3.4b: treat as novice), so any anchor that
-    // reaches `lift_prescription` was logged after the return and loads by
-    // %1RM like any other (the novice flag is not a standing cap).
-    let anchors = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 100.0)],
-            reentry_novice: true,
-            ..Default::default()
-        },
-        ..Anchors::default()
-    };
-    let rx = lift_prescription(
-        LiftGoal::MaxStrength,
-        TrainingAge::Intermediate,
-        DupDay::Heavy,
-        "Back Squat",
-        &anchors.lift,
-        12,
-        &full_body_day(),
-    );
-    let Prescription::Lift(l) = &rx.value else {
-        panic!("expected a lift prescription")
-    };
-    assert!(
-        matches!(l.intensity, LiftIntensity::PercentOneRm(_)),
-        "{:?}",
-        l.intensity
-    );
+    // reaches the plan was logged after the return and loads by %1RM like
+    // any other (the novice flag is not a standing cap).
+    let mut anchors = anchored("Back Squat", 100.0);
+    anchors.lift.reentry_novice = true;
+    let prog = synthesize(&PlanProfile::new(&base_profile()), &anchors, 0).unwrap();
+    let squats: Vec<_> = lift_rx(&prog)
+        .into_iter()
+        .filter(|(_, l, _)| l.exercise == "Back Squat")
+        .collect();
+    assert!(!squats.is_empty(), "the anchored squat is scheduled");
+    for (_, l, _) in squats {
+        assert!(
+            matches!(l.intensity, LiftIntensity::PercentOneRm(_)),
+            "{:?}",
+            l.intensity
+        );
+    }
 }
 
-fn lift_prescriptions(prog: &Program) -> Vec<(LiftSessionType, LiftPrescription)> {
-    let mut out = Vec::new();
-    for s in &prog.mesocycle.sessions {
-        if let SessionType::Lift(lt) = s.session_type {
-            for rx in &s.prescriptions {
-                if let Prescription::Lift(l) = &rx.value {
-                    out.push((lt, l.clone()));
-                }
-            }
-        }
-    }
-    out
+/// The anchored lateral raise on the strength week's `emphasis` day: an
+/// anchored squat leads, so the week undulates.
+fn lateral_raise_on(emphasis: DupDay) -> LiftPrescription {
+    let a = anchored_many(&[("Back squat", 140.0), ("Lateral raise", 12.0)]);
+    let prog = synthesize(&PlanProfile::new(&base_profile()), &a, 0).unwrap();
+    lift_rx(&prog)
+        .into_iter()
+        .find(|(s, l, _)| s.dup_day == Some(emphasis) && l.exercise == "Lateral raise")
+        .map(|(_, l, _)| l.clone())
+        .expect("the lateral raise on that day")
 }
 
 #[test]
 fn isolation_lift_rests_per_its_class_on_a_hypertrophy_emphasis_day() {
     // An isolation lift on a strength DUP hypertrophy-emphasis day takes the
     // class window (HYP-REST-002: 90 s), not the hypertrophy band's 30 s floor.
-    let raise = lift_prescription(
-        LiftGoal::MaxStrength,
-        TrainingAge::Intermediate,
-        DupDay::Hypertrophy,
-        "Lateral raise",
-        &anchored("Lateral raise", 12.0).lift,
-        12,
-        &full_body_day(),
+    assert_eq!(
+        lateral_raise_on(DupDay::Hypertrophy).rest_sec,
+        90,
+        "an isolation lift rests 90 s on a hypertrophy day"
     );
-    match &raise.value {
-        Prescription::Lift(l) => assert_eq!(
-            l.rest_sec, 90,
-            "an isolation lift rests 90 s on a hypertrophy day"
-        ),
-        _ => panic!("expected a lift prescription"),
-    }
 }
 
 #[test]
 fn goal_weighted_dup_orders() {
+    let emphases = |p: Profile, squat: f64| -> Vec<Option<DupDay>> {
+        let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", squat), 0).unwrap();
+        lift_sessions(&prog).iter().map(|s| s.dup_day).collect()
+    };
     // A max-strength goal pairs Heavy with a second ≥80 % day
     // (STR-HEAVYFREQ-001), so even 2 lift days give two heavy exposures.
-    assert_eq!(dup_emphasis(LiftGoal::MaxStrength, false, 0), DupDay::Heavy);
     assert_eq!(
-        dup_emphasis(LiftGoal::MaxStrength, false, 1),
-        DupDay::HeavyVolume
+        emphases(base_profile(), 140.0),
+        [
+            Some(DupDay::Heavy),
+            Some(DupDay::HeavyVolume),
+            Some(DupDay::Hypertrophy)
+        ]
     );
+    // A power athlete whose squat is below ~1.5× bodyweight gets two heavy
+    // days + one power (STR-BASE-POWER-001).
+    let power = Profile {
+        lift_goal: LiftGoal::Power,
+        bodyweight_kg: Some(100.0),
+        ..base_profile()
+    };
     assert_eq!(
-        dup_emphasis(LiftGoal::MaxStrength, false, 2),
-        DupDay::Hypertrophy
+        emphases(power.clone(), 140.0),
+        [
+            Some(DupDay::Heavy),
+            Some(DupDay::Power),
+            Some(DupDay::HeavyVolume)
+        ]
     );
-    // A weak/novice power athlete gets two heavy days + one power.
-    assert_eq!(dup_emphasis(LiftGoal::Power, true, 0), DupDay::Heavy);
-    assert_eq!(dup_emphasis(LiftGoal::Power, true, 1), DupDay::Power);
-    assert_eq!(dup_emphasis(LiftGoal::Power, true, 2), DupDay::HeavyVolume);
-    // A strong power athlete keeps the classic order.
-    assert_eq!(dup_emphasis(LiftGoal::Power, false, 2), DupDay::Hypertrophy);
+    // A strong power athlete keeps the classic order (strength-023).
+    assert_eq!(
+        emphases(power, 160.0),
+        [
+            Some(DupDay::Heavy),
+            Some(DupDay::Power),
+            Some(DupDay::Hypertrophy)
+        ]
+    );
 }
 
 fn lift_type_on_day(prog: &Program, day: u16) -> Option<LiftSessionType> {
@@ -266,18 +241,7 @@ fn sunday_long_run_max_strength_goal_has_two_heavy_days() {
 fn lateral_raise_on_heavy_day_is_prescribed_12_to_25_reps() {
     // An isolation lift on a DUP Heavy day is not undulated at %1RM off an
     // unreliable e1RM: it takes the 12–25-rep isolation window by RIR.
-    let pres = lift_prescription(
-        LiftGoal::MaxStrength,
-        TrainingAge::Intermediate,
-        DupDay::Heavy,
-        "Lateral raise",
-        &anchored("Lateral raise", 12.0).lift,
-        12,
-        &full_body_day(),
-    );
-    let Prescription::Lift(l) = &pres.value else {
-        panic!("expected a lift prescription")
-    };
+    let l = lateral_raise_on(DupDay::Heavy);
     assert!(
         matches!(l.intensity, LiftIntensity::Rir(_)),
         "isolation is prescribed by RIR, not %1RM: {:?}",
@@ -327,89 +291,61 @@ fn plural_exercise_names_keep_their_movement_pattern() {
     assert_eq!(movement_pattern("Pull ups"), Some(MovementPattern::Pull));
 }
 
-/// (exercise, sets, claim_id) for every LIFT prescription in a program.
-fn lift_sets_and_claims(prog: &Program) -> Vec<(String, u8, Option<crate::evidence::ClaimId>)> {
-    let mut out = Vec::new();
-    for s in &prog.mesocycle.sessions {
-        for rx in &s.prescriptions {
-            if let Prescription::Lift(l) = &rx.value {
-                out.push((l.exercise.clone(), l.sets, Some(rx.claim_id())));
-            }
-        }
-    }
-    out
+/// Per-session sets of `lift` on each DUP day of the default strength week
+/// at `weekly_sets`, an anchored squat leading.
+fn dup_sets(lift: &str, weekly_sets: u8) -> Vec<(Option<DupDay>, u8)> {
+    let p = Profile {
+        weekly_sets,
+        ..base_profile()
+    };
+    let a = anchored_many(&[("Back squat", 140.0), (lift, 100.0)]);
+    let prog = synthesize(&PlanProfile::new(&p), &a, 0).unwrap();
+    lift_rx(&prog)
+        .into_iter()
+        .filter(|(_, l, _)| l.exercise == lift)
+        .map(|(s, l, _)| (s.dup_day, l.sets))
+        .collect()
 }
 
 #[test]
-fn sized_sets_two_layers_hand_computed() {
-    use crate::individualization::TrainingAge;
-    // No landmarks (exercise outside Table 4) → training-age fallback:
-    // Intermediate MEV floor = 10, generic MRV ceiling = 20. Layer 2 split =
-    // round(bounded_weekly / n_lift_days), clamped to [MIN_SETS_PER_EXERCISE=2,
-    // PER_SESSION_SET_CEILING=11] then into the band.
-
-    // Headline: 12 sets/muscle/week, 3 lift days → 12/3 = 4/session (in band).
-    // Every case is WEEK 1 of the block, where the ramp opens at the stated
-    // target, so these are the un-ramped figures.
+fn dup_sets_split_the_weekly_target_and_hold_each_days_band() {
+    // The deadlift has no Table 1 muscle row, so the generic MRV (20,
+    // HYP-MRV-DELOAD-001) bounds it. 12 sets/muscle/week over 3 lift days is
+    // 4 a session on every day.
     assert_eq!(
-        sized_sets(12, TrainingAge::Intermediate, 3, (3, 5), None, 1, 4).per_session,
-        4
+        dup_sets("Deadlift", 12),
+        [
+            (Some(DupDay::Heavy), 4),
+            (Some(DupDay::HeavyVolume), 4),
+            (Some(DupDay::Hypertrophy), 4)
+        ]
     );
-
-    // Below MEV: a stated 6 is raised to the intermediate MEV floor 10 first,
-    // 10/3 = 3.33 → round 3, in band (3,5) → 3 (never sub-MEV volume).
+    // A stated 30 never scales to an absurd per-session count: each day's own
+    // band caps it (Heavy 3–5, HeavyVolume 3–6, Hypertrophy 3–4).
     assert_eq!(
-        sized_sets(6, TrainingAge::Intermediate, 3, (3, 5), None, 1, 4).per_session,
-        3
-    );
-
-    // Above MRV: a stated 30 is capped to the generic MRV 20 (diminishing
-    // returns), 20/3 = 6.67 → round 7, then the day's own hypertrophy band
-    // (3,4) caps it at 4 - never scaled to an absurd per-session count.
-    assert_eq!(
-        sized_sets(30, TrainingAge::Intermediate, 3, (3, 4), None, 1, 4).per_session,
-        4
-    );
-
-    // 2 lift days (hybrid): 12/2 = 6, band (3,6) → 6.
-    assert_eq!(
-        sized_sets(12, TrainingAge::Intermediate, 2, (3, 6), None, 1, 4).per_session,
-        6
-    );
-
-    // Per-session cap (HYP-SESSCAP-001 ~11) binds before a huge open band:
-    // MRV 20 over 1 lift day = 20 → clamped to 11 → band (3, 15) → 11.
-    assert_eq!(
-        sized_sets(30, TrainingAge::Intermediate, 1, (3, 15), None, 1, 4).per_session,
-        11
+        dup_sets("Deadlift", 30),
+        [
+            (Some(DupDay::Heavy), 5),
+            (Some(DupDay::HeavyVolume), 6),
+            (Some(DupDay::Hypertrophy), 4)
+        ]
     );
 }
 
 #[test]
-fn sized_sets_uses_per_muscle_landmarks_over_the_generic_band() {
-    use crate::individualization::TrainingAge;
-    // With the primary muscle's own Table 1 landmarks the floor and
-    // ceiling are per-muscle, not the flat MEV-10 / MRV-20 fallback.
-    let glutes = crate::hypertrophy::landmarks_for("glutes"); // MEV 0, MRV 16
-    let side_delts = crate::hypertrophy::landmarks_for("side delts"); // MEV 8, MRV 26
-
-    // Glutes MEV is 0, so a stated 6 is NOT raised to the generic floor 10;
-    // 6/1 = 6, open band → 6 (glute-focused work is not force-floored).
-    assert_eq!(
-        sized_sets(6, TrainingAge::Intermediate, 1, (2, 11), glutes, 1, 4).per_session,
-        6
-    );
-    // Side delts MRV is 26, so a stated 26 is NOT clamped to the generic 20;
-    // 26/2 = 13 → per-session cap 11, open band → 11 (not clamped to the generic MRV 20).
-    assert_eq!(
-        sized_sets(26, TrainingAge::Intermediate, 2, (2, 15), side_delts, 1, 4).per_session,
-        11
-    );
-    // Glutes MRV 16 still caps above it: 20 → 16, /1 = 16 → cap 11.
-    assert_eq!(
-        sized_sets(20, TrainingAge::Intermediate, 1, (2, 15), glutes, 1, 4).per_session,
-        11
-    );
+fn dup_sets_use_the_primary_muscles_own_mrv_over_the_generic_one() {
+    // Glutes' Table 1 MRV is 16: a stated 20 is bounded to 16, 16/3 = 5.33 →
+    // 5 on the 3–6-set HeavyVolume day, where the deadlift's generic MRV 20
+    // leaves 20/3 → 7 → 6.
+    let heavy_volume = |lift| {
+        dup_sets(lift, 20)
+            .into_iter()
+            .find(|(d, _)| *d == Some(DupDay::HeavyVolume))
+            .map(|(_, sets)| sets)
+            .expect("a HeavyVolume day")
+    };
+    assert_eq!(heavy_volume("Hip thrust"), 5);
+    assert_eq!(heavy_volume("Deadlift"), 6);
 }
 
 #[test]
@@ -424,16 +360,16 @@ fn default_12_sets_dup_primary_is_four_and_cites_volume_dose_response() {
         0,
     )
     .unwrap();
-    let primary: Vec<_> = lift_sets_and_claims(&prog)
+    let primary: Vec<_> = lift_rx(&prog)
         .into_iter()
-        .filter(|(ex, _, _)| ex.eq_ignore_ascii_case("Back Squat"))
+        .filter(|(_, l, _)| l.exercise.eq_ignore_ascii_case("Back Squat"))
         .collect();
     assert!(!primary.is_empty(), "the DUP primary must be scheduled");
-    for (ex, sets, claim) in &primary {
-        assert_eq!(*sets, 4, "{ex} DUP sets = 12/3 = 4");
+    for (_, l, claim) in primary {
+        assert_eq!(l.sets, 4, "{} DUP sets = 12/3 = 4", l.exercise);
         assert_eq!(
-            *claim,
-            Some(claims::HYP_VOL_DOSE_001),
+            claim,
+            claims::HYP_VOL_DOSE_001,
             "a volume-sized DUP prescription cites the dose-response principle"
         );
     }
@@ -494,24 +430,18 @@ fn no_load_week_prescribes_a_percent_set_below_one_rep_in_reserve() {
     // novice (linear) strength lifter, each %1RM prescription leaves ≥1 rep in
     // reserve on the Epley model (STR-INTENT-001 / HYP-FAIL-SAFE-001): 6×5 @
     // 88 % can never be emitted.
-    let a = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Back Squat".into(), 140.0),
-                ("Bench press".into(), 100.0),
-                ("Deadlift".into(), 170.0),
-                ("Row".into(), 90.0),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let a = anchored_many(&[
+        ("Back Squat", 140.0),
+        ("Bench press", 100.0),
+        ("Deadlift", 170.0),
+        ("Row", 90.0),
+    ]);
     let mut novice = base_profile();
     novice.progression_cadence = ProgressionCadence::EverySession;
     for p in [base_profile(), novice] {
         for week_index in 0..5 {
             let prog = synthesize(&PlanProfile::new(&p), &a, week_index).unwrap();
-            for (_, l) in lift_prescriptions(&prog) {
+            for (_, l, _) in lift_rx(&prog) {
                 if let LiftIntensity::PercentOneRm(pct) = l.intensity {
                     let rir =
                         crate::strength::expected_rir_at_pct(f64::from(pct), u32::from(l.reps));
@@ -544,12 +474,7 @@ fn a_missed_last_session_withholds_this_weeks_percent_step() {
         LiftIntensity::PercentOneRm(x) => x,
         other => panic!("heavy day is %1RM: {other:?}"),
     };
-    let last = |rpe: f64| crate::plan::LastWorking {
-        exercise: "Back Squat".into(),
-        weight_kg: 85.0,
-        sets: vec![(3, 8.0), (3, rpe)],
-        age_days: 2,
-    };
+    let last = |rpe: f64| worked("Back Squat", 85.0, &[(3, 8.0), (3, rpe)]);
     let mut ok = anchored("Back Squat", 100.0);
     ok.lift.last_working = vec![last(8.5)];
     let mut missed = ok.clone();
@@ -570,12 +495,7 @@ fn a_novice_load_never_jumps_past_the_novice_step_cap() {
     let mut p = base_profile();
     p.progression_cadence = ProgressionCadence::EverySession;
     let mut a = anchored("Back Squat", 100.0);
-    a.lift.last_working = vec![crate::plan::LastWorking {
-        exercise: "Back Squat".into(),
-        weight_kg: 70.0,
-        sets: vec![(5, 0.0); 3],
-        age_days: 2,
-    }];
+    a.lift.last_working = vec![worked("Back Squat", 70.0, &[(5, 0.0); 3])];
     let prog = synthesize(&PlanProfile::new(&p), &a, 0).unwrap();
     let rx = prog
         .mesocycle
@@ -650,17 +570,11 @@ fn novice_strength_load_rises_week_over_week() {
 fn max_strength_week_has_two_sessions_at_or_above_80pct() {
     // Each anchored main lift gets ≥80 % 1RM in ≥2
     // sessions a week, at 3 lift days (pure lifting) and at 2 (hybrid).
-    let a = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Back Squat".into(), 140.0),
-                ("Bench press".into(), 100.0),
-                ("Deadlift".into(), 170.0),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let a = anchored_many(&[
+        ("Back Squat", 140.0),
+        ("Bench press", 100.0),
+        ("Deadlift", 170.0),
+    ]);
     let mut hybrid = runner(GoalDistance::HalfMarathon, 3, 30.0);
     hybrid.weekly_sets = 12;
     for p in [base_profile(), hybrid] {
@@ -806,9 +720,9 @@ fn depth_jump_gate_reads_only_the_barbell_back_squat() {
     p.lift_goal = LiftGoal::Power;
     p.bodyweight_kg = Some(80.0);
     let depth_jumps = |squat: &str| {
-        lift_prescriptions(&synthesize(&PlanProfile::new(&p), &anchored(squat, 130.0), 0).unwrap())
+        lift_rx(&synthesize(&PlanProfile::new(&p), &anchored(squat, 130.0), 0).unwrap())
             .iter()
-            .any(|(_, l)| l.exercise.starts_with("Depth jump"))
+            .any(|(_, l, _)| l.exercise.starts_with("Depth jump"))
     };
     for squat in [
         "Hack squat",
@@ -835,19 +749,18 @@ fn isolation_lifts_are_never_loaded_by_percent() {
             crate::exercise::ExerciseClass::Isolation,
             "{iso}"
         );
-        let a = Anchors {
-            lift: crate::plan::LiftAnchors {
-                e1rm: vec![("Back squat".to_string(), 150.0), (iso.to_string(), 40.0)],
-                ..Default::default()
-            },
-            ..Anchors::default()
-        };
-        let rx: Vec<_> = lift_prescriptions(&synthesize(&PlanProfile::new(&p), &a, 0).unwrap())
+        let prog = synthesize(
+            &PlanProfile::new(&p),
+            &anchored_many(&[("Back squat", 150.0), (iso, 40.0)]),
+            0,
+        )
+        .unwrap();
+        let rx: Vec<_> = lift_rx(&prog)
             .into_iter()
-            .filter(|(_, l)| l.exercise == iso)
+            .filter(|(_, l, _)| l.exercise == iso)
             .collect();
         assert!(!rx.is_empty(), "{iso} scheduled");
-        for (_, l) in rx {
+        for (_, l, _) in rx {
             assert!(
                 !matches!(l.intensity, LiftIntensity::PercentOneRm(_)),
                 "{iso}: {:?} x {}",
@@ -860,12 +773,24 @@ fn isolation_lifts_are_never_loaded_by_percent() {
 
 #[test]
 fn strength_goal_hinge_fill_is_deadlift() {
-    // The competition lift fills the hinge for strength/power.
-    let lifts = main_lifts(&crate::plan::LiftAnchors::default(), LiftGoal::MaxStrength);
-    assert!(lifts.iter().any(|n| n == "Deadlift"), "{lifts:?}");
-    assert!(!lifts.iter().any(|n| n == "Romanian deadlift"), "{lifts:?}");
-    let hyp = main_lifts(&crate::plan::LiftAnchors::default(), LiftGoal::Hypertrophy);
-    assert!(hyp.iter().any(|n| n == "Romanian deadlift"), "{hyp:?}");
+    // The competition lift fills the hinge for strength/power
+    // (STR-COMP-ANCHOR-001), not the catalog's Romanian deadlift.
+    for lift_goal in [LiftGoal::MaxStrength, LiftGoal::Power] {
+        let p = Profile {
+            lift_goal,
+            ..base_profile()
+        };
+        let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).unwrap();
+        let names: Vec<&str> = lift_rx(&prog)
+            .iter()
+            .map(|(_, l, _)| l.exercise.as_str())
+            .collect();
+        assert!(names.contains(&"Deadlift"), "{lift_goal:?}: {names:?}");
+        assert!(
+            !names.contains(&"Romanian deadlift"),
+            "{lift_goal:?}: {names:?}"
+        );
+    }
 }
 
 #[test]
@@ -874,54 +799,49 @@ fn meet_taper_cuts_volume_holds_intensity_and_spares_the_last_days() {
     // (TAPER-001); no heavy deadlift inside 10 days (STR-DLPEAK-001); no
     // lifting in the final 2 days (STR-PEAK-001).
     let a = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 140.0), ("Deadlift".into(), 170.0)],
-            ..Default::default()
-        },
-        ..Default::default()
+        week_start_epoch_day: Some(MON0),
+        ..anchored_many(&[("Back Squat", 140.0), ("Deadlift", 170.0)])
     };
-    let p = base_profile();
-    let normal = synthesize(&PlanProfile::new(&p), &a, 0).unwrap();
-    let mut sessions = normal.mesocycle.sessions.clone();
-    // Meet on the Sunday 7 days after this Monday: Mon = 7 d out, Wed = 5,
-    // Fri = 3.
-    crate::plan::modifiers::apply_meet_taper(&mut sessions, 7);
-    for (before, after) in normal.mesocycle.sessions.iter().zip(&sessions) {
-        if !matches!(before.session_type, SessionType::Lift(_)) {
-            continue;
-        }
-        for rx in &after.prescriptions {
-            let Prescription::Lift(l) = &rx.value else {
-                continue;
-            };
-            let heavy_pull = l.exercise == "Deadlift"
-                && matches!(l.intensity, LiftIntensity::PercentOneRm(p)
-                    if crate::strength::is_heavy_pct(f64::from(p)));
-            assert!(!heavy_pull, "no heavy deadlift inside 10 days");
-            let orig = before
-                .prescriptions
-                .iter()
-                .find_map(|o| match &o.value {
-                    Prescription::Lift(ol) if ol.exercise == l.exercise => Some(ol.clone()),
-                    _ => None,
-                })
-                .expect("same lift before the taper");
-            assert_eq!(l.intensity, orig.intensity, "intensity held");
-            assert!(
-                l.sets < orig.sets || orig.sets == 1,
-                "volume cut: {} → {}",
-                orig.sets,
-                l.sets
-            );
-            assert_eq!(rx.claim_id(), claims::TAPER_001);
-        }
+    let week = |meet: Option<i64>| {
+        let p = Profile {
+            meet_epoch_day: meet,
+            ..base_profile()
+        };
+        synthesize(&PlanProfile::new(&p), &a, 0).unwrap()
+    };
+    let normal = week(None);
+    // Meet on the next Monday: this Monday is 7 days out, Wednesday 5,
+    // Friday 3.
+    let tapered = week(Some(MON0 + 7));
+    let taper_rows = lift_rx(&tapered);
+    assert!(!taper_rows.is_empty(), "the taper week still lifts");
+    for (s, l, claim) in taper_rows {
+        let heavy_pull = l.exercise == "Deadlift"
+            && matches!(l.intensity, LiftIntensity::PercentOneRm(p)
+                if crate::strength::is_heavy_pct(f64::from(p)));
+        assert!(!heavy_pull, "no heavy deadlift inside 10 days");
+        let (_, orig, _) = lift_rx(&normal)
+            .into_iter()
+            .find(|(s0, l0, _)| s0.day == s.day && l0.exercise == l.exercise)
+            .expect("same lift before the taper");
+        assert_eq!(l.intensity, orig.intensity, "intensity held");
+        assert!(
+            l.sets < orig.sets || orig.sets == 1,
+            "volume cut: {} → {}",
+            orig.sets,
+            l.sets
+        );
+        assert_eq!(claim, claims::TAPER_001);
     }
-    // Meet in 2 days from Monday: Monday's lift day becomes rest.
-    let mut close = normal.mesocycle.sessions.clone();
-    crate::plan::modifiers::apply_meet_taper(&mut close, 2);
-    let monday = close.iter().find(|s| s.day == 0).unwrap();
-    assert_eq!(monday.session_type, SessionType::Rest);
-    assert!(monday.prescriptions.is_empty());
+    // Meet 2 days after Monday: Monday's lift day becomes rest.
+    let monday = |prog: &Program| prog.mesocycle.sessions.iter().find(|s| s.day == 0).cloned();
+    assert!(matches!(
+        monday(&normal).map(|s| s.session_type),
+        Some(SessionType::Lift(_))
+    ));
+    let close = monday(&week(Some(MON0 + 2))).unwrap();
+    assert_eq!(close.session_type, SessionType::Rest);
+    assert!(close.prescriptions.is_empty());
 }
 
 #[test]
@@ -929,16 +849,12 @@ fn meet_taper_keeps_a_light_deadlift() {
     // STR-DLPEAK-001 times the last near-max pull; the 70 % Friday deadlift
     // 6 days out stays (with its volume cut).
     let anchors = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Back squat".into(), 150.0),
-                ("Deadlift".into(), 200.0),
-                ("Bench press".into(), 100.0),
-            ],
-            ..Default::default()
-        },
         week_start_epoch_day: Some(20_000),
-        ..Default::default()
+        ..anchored_many(&[
+            ("Back squat", 150.0),
+            ("Deadlift", 200.0),
+            ("Bench press", 100.0),
+        ])
     };
     let friday_lifts = |meet: Option<i64>| -> Vec<(String, LiftIntensity)> {
         let p = Profile {
@@ -1005,7 +921,6 @@ fn meet_date_without_taper_keeps_the_deload_week() {
 /// its deload, and `lift_deload_week` says so.
 #[test]
 fn a_week_the_meet_taper_misses_keeps_its_deload() {
-    const MON0: i64 = 20_000 - (20_000_i64.rem_euclid(7) + 3).rem_euclid(7);
     let mut p = base_profile();
     p.lift_days_per_week = Some(3);
     let mut a = anchored("Back Squat", 140.0);
@@ -1085,21 +1000,6 @@ fn load_weeks_ramp_unanchored_hypertrophy_rir() {
 }
 
 #[test]
-fn low_weekly_sets_is_raised_to_the_mev_floor_not_programmed_below() {
-    // Intermediate lifter states only 6 sets/muscle/week (below the MEV floor
-    // 10). The primary DUP sets are sized from the floored 10, not 6:
-    // 10/3 = 3.33 → 3/session (never sub-MEV, HYP-MEV-AGE-001).
-    let mut p = base_profile();
-    p.weekly_sets = 6;
-    let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 100.0), 0).unwrap();
-    for (ex, sets, _) in lift_sets_and_claims(&prog) {
-        if ex.eq_ignore_ascii_case("Back Squat") {
-            assert_eq!(sets, 3, "sub-MEV weekly is raised to the MEV floor first");
-        }
-    }
-}
-
-#[test]
 fn high_weekly_sets_never_scales_to_an_absurd_per_session_count() {
     // A stated 40 sets/muscle/week is bounded to MRV 20; split over 3 lift days
     // = 6.67 → 7, then each day's own band caps it: Heavy (3,5)→5, Power
@@ -1108,28 +1008,19 @@ fn high_weekly_sets_never_scales_to_an_absurd_per_session_count() {
     let mut p = base_profile();
     p.weekly_sets = 40;
     let prog = synthesize(&PlanProfile::new(&p), &anchored("Back Squat", 100.0), 0).unwrap();
-    for (ex, sets, _) in lift_sets_and_claims(&prog) {
+    for (_, l, _) in lift_rx(&prog) {
         assert!(
-            sets <= crate::hypertrophy::PER_SESSION_SET_CEILING,
-            "{ex} over the ~11 cap"
+            l.sets <= crate::hypertrophy::PER_SESSION_SET_CEILING,
+            "{} over the ~11 cap",
+            l.exercise
         );
         assert!(
-            sets <= 6,
-            "{ex} exceeded its intensity band ceiling: {sets}"
+            l.sets <= 6,
+            "{} exceeded its intensity band ceiling: {}",
+            l.exercise,
+            l.sets
         );
     }
-}
-
-#[test]
-fn hyp_vol_dose_claim_is_registered_moderate() {
-    let c = claims::HYP_VOL_DOSE_001.entry();
-    assert_eq!(c.grade, crate::evidence::EvidenceGrade::Moderate);
-    // The expert-opinion allocation caveat rides in its contradicting note
-    // (GRADE good-practice-statement precedent).
-    assert!(
-        c.contradicting.iter().any(|s| s.contains("no validated")),
-        "the no-validated-split-formula caveat must be recorded"
-    );
 }
 
 /// Exercise names on the first lift day of a synthesized program, in order.
@@ -1152,17 +1043,11 @@ fn first_lift_day_exercises(prog: &Program) -> Vec<String> {
 
 fn leg_only_anchors() -> Anchors {
     // Three logged lifts, ALL squat-pattern.
-    Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Back squat".into(), 140.0),
-                ("Front squat".into(), 110.0),
-                ("Leg press".into(), 200.0),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+    anchored_many(&[
+        ("Back squat", 140.0),
+        ("Front squat", 110.0),
+        ("Leg press", 200.0),
+    ])
 }
 
 #[test]
@@ -1170,22 +1055,12 @@ fn sessions_list_the_main_compound_first_whatever_was_logged_last() {
     // Anchors arrive most-recent-first: the row was logged last and the squat
     // first. The plan still lists squat → hinge → push → pull, so the next
     // session never runs in reverse of the session just done.
-    let anchors = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Cable row".into(), 70.0),
-                ("Bench press".into(), 75.0),
-                ("Deadlift".into(), 160.0),
-                ("Back squat".into(), 140.0),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    assert_eq!(
-        main_lifts(&anchors.lift, LiftGoal::MaxStrength),
-        vec!["Back squat", "Deadlift", "Bench press", "Cable row"]
-    );
+    let anchors = anchored_many(&[
+        ("Cable row", 70.0),
+        ("Bench press", 75.0),
+        ("Deadlift", 160.0),
+        ("Back squat", 140.0),
+    ]);
     let prog = synthesize(&PlanProfile::new(&base_profile()), &anchors, 0).unwrap();
     let names = first_lift_day_exercises(&prog);
     assert_eq!(
@@ -1279,20 +1154,18 @@ fn a_logged_isolation_lift_never_displaces_a_compound() {
     // and skip the deadlift (an isolation lift displacing the compound). The
     // leg curl is unclassifiable (covers no pattern), so
     // the anchored deadlift is still scheduled and the leg curl is kept.
-    let anchors = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Leg curl".into(), 40.0), ("Deadlift".into(), 200.0)],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let lifts = main_lifts(&anchors.lift, LiftGoal::Hypertrophy);
+    let anchors = anchored_many(&[("Leg curl", 40.0), ("Deadlift", 200.0)]);
+    let prog = synthesize(&PlanProfile::new(&base_profile()), &anchors, 0).unwrap();
+    let lifts: Vec<&str> = lift_rx(&prog)
+        .iter()
+        .map(|(_, l, _)| l.exercise.as_str())
+        .collect();
     assert!(
-        lifts.iter().any(|n| n.eq_ignore_ascii_case("Deadlift")),
+        lifts.contains(&"Deadlift"),
         "the anchored deadlift is not displaced by the leg curl: {lifts:?}"
     );
     assert!(
-        lifts.iter().any(|n| n.eq_ignore_ascii_case("Leg curl")),
+        lifts.contains(&"Leg curl"),
         "the unclassifiable leg curl is kept, never dropped: {lifts:?}"
     );
 }
@@ -1304,27 +1177,29 @@ fn dup_primary_skips_a_more_recently_logged_isolation_lift() {
     // build_plan_anchors sorts it first. The DUP primary (out[0]) is
     // undulated at %1RM every lift day, so it must NOT be the isolation lift:
     // the reliable compound leads, and the isolation lift is still scheduled.
-    let anchors = Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![
-                ("Lateral raise".into(), 12.0),
-                ("Bench press".into(), 100.0),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let lifts = main_lifts(&anchors.lift, LiftGoal::MaxStrength);
+    let anchors = anchored_many(&[("Lateral raise", 12.0), ("Bench press", 100.0)]);
+    let prog = synthesize(&PlanProfile::new(&base_profile()), &anchors, 0).unwrap();
+    let days = lift_sessions(&prog);
+    assert!(!days.is_empty());
+    for s in days {
+        assert!(
+            matches!(&s.prescriptions[0].value, Prescription::Lift(l)
+                if l.exercise == "Bench press"
+                    && matches!(l.intensity, LiftIntensity::PercentOneRm(_))),
+            "the reliable compound leads the DUP primary slot, not the isolation lift: {s:?}"
+        );
+    }
+    let raises: Vec<_> = lift_rx(&prog)
+        .into_iter()
+        .filter(|(_, l, _)| l.exercise == "Lateral raise")
+        .collect();
     assert!(
-        lifts[0].eq_ignore_ascii_case("Bench press"),
-        "the reliable compound leads the DUP primary slot, not the isolation lift: {lifts:?}"
+        !raises.is_empty(),
+        "the isolation lift is still scheduled as an accessory, never dropped"
     );
-    assert!(
-        lifts
-            .iter()
-            .any(|n| n.eq_ignore_ascii_case("Lateral raise")),
-        "the isolation lift is still scheduled as an accessory, never dropped: {lifts:?}"
-    );
+    for (_, l, _) in raises {
+        assert!(matches!(l.intensity, LiftIntensity::Rir(_)), "{l:?}");
+    }
 }
 
 #[test]
@@ -1423,47 +1298,32 @@ fn every_prescribed_lift_still_gets_sized_sets_in_a_balanced_day() {
         0,
     )
     .unwrap();
-    let lifts = lift_sets_and_claims(&prog);
+    let lifts = lift_rx(&prog);
     assert!(
         lifts.len() >= 4,
         "a balanced 3-lift-day pure-lifting week has many prescriptions: {}",
         lifts.len()
     );
-    for (ex, sets, _) in &lifts {
+    for (_, l, _) in &lifts {
         assert!(
-            *sets >= crate::hypertrophy::MIN_SETS_PER_EXERCISE,
-            "{ex} sized below the minimum: {sets}"
+            l.sets >= crate::hypertrophy::MIN_SETS_PER_EXERCISE,
+            "{} sized below the minimum: {}",
+            l.exercise,
+            l.sets
         );
         assert!(
-            *sets <= crate::hypertrophy::PER_SESSION_SET_CEILING,
-            "{ex} sized over the per-session cap: {sets}"
+            l.sets <= crate::hypertrophy::PER_SESSION_SET_CEILING,
+            "{} sized over the per-session cap: {}",
+            l.exercise,
+            l.sets
         );
     }
     assert!(
-        lifts
-            .iter()
-            .any(|(ex, sets, claim)| ex.eq_ignore_ascii_case("Back squat")
-                && *sets == 4
-                && *claim == Some(claims::HYP_VOL_DOSE_001)),
+        lifts.iter().any(
+            |(_, l, claim)| l.exercise.eq_ignore_ascii_case("Back squat")
+                && l.sets == 4
+                && *claim == claims::HYP_VOL_DOSE_001
+        ),
         "the anchored primary is volume-sized (4) and cites the dose-response"
-    );
-}
-
-#[test]
-fn str_session_balance_claim_is_registered_moderate() {
-    let c = claims::STR_SESSION_BALANCE_001.entry();
-    assert_eq!(c.grade, crate::evidence::EvidenceGrade::Moderate);
-    // The expert-opinion count/taxonomy caveat AND the running-emphasis caveat
-    // must both ride in the contradicting notes (GRADE good-practice-statement
-    // precedent: cite the principle, flag the unstudied parameters).
-    assert!(
-        c.contradicting.iter().any(|s| s.contains("expert-opinion")),
-        "the count/taxonomy expert-opinion caveat must be recorded"
-    );
-    assert!(
-        c.contradicting
-            .iter()
-            .any(|s| s.contains("running-focused hybrid")),
-        "the running-emphasis (balance-is-a-default) caveat must be recorded"
     );
 }

@@ -236,16 +236,6 @@ fn eccentric_rungs_leave_rir() {
 }
 
 #[test]
-fn advance_trigger_is_band_top() {
-    let t = tier(HorizontalPush, 4).unwrap();
-    assert_eq!(t.target.top(), 8);
-    assert_eq!(t.target.floor(), 5);
-    let fl = tier(FrontLever, 0).unwrap();
-    assert_eq!(fl.target.top(), 15);
-    assert!(fl.target.is_timed());
-}
-
-#[test]
 fn rir_band_is_rung_dependent() {
     let s = LiftGoal::MaxStrength;
     // Easy high-rep self-limiting rung → approach failure.
@@ -304,15 +294,14 @@ fn novices_get_the_novice_band_on_every_rep_rung() {
     for goal in [LiftGoal::MaxStrength, LiftGoal::Hypertrophy] {
         let wall = rir_band(HorizontalPush, 0, goal, true).unwrap();
         assert_eq!(wall.value, NOVICE_RIR);
-        assert_eq!(NOVICE_RIR, (2, 3));
         assert_eq!(wall.claim_id(), claims::HYP_RIR_ACC_001);
         assert_eq!(
             rir_band(HorizontalPush, 4, goal, true).unwrap().value,
-            (2, 3)
+            NOVICE_RIR
         );
         // A leave-RIR rung keeps its safety face, never below the novice band.
         let neg = rir_band(VerticalPull, 3, goal, true).unwrap();
-        assert_eq!(neg.value, (2, 3));
+        assert_eq!(neg.value, NOVICE_RIR);
         assert_eq!(neg.claim_id(), claims::CAL_EFAIL_SAFE_001);
     }
 }
@@ -321,18 +310,27 @@ fn novices_get_the_novice_band_on_every_rep_rung() {
 fn nordic_and_one_arm_rungs_are_never_to_failure() {
     // CAL-EFAIL-SAFE-001 names the Nordic; §2.8 discourages failure on
     // one-arm work.
-    for (id, idx) in [
-        (Hinge, 4),
-        (HorizontalPush, 8),
-        (HorizontalPull, 6),
-        (VerticalPull, 6),
-    ] {
-        assert_eq!(tier(id, idx).unwrap().failure, FailurePolicy::LeaveRir(1));
-        let r = rir_band(id, idx, LiftGoal::Hypertrophy, false).unwrap();
-        assert_eq!(r.value, (1, 2));
-        assert_eq!(r.claim_id(), claims::CAL_EFAIL_SAFE_001);
+    let mut found = Vec::new();
+    for l in LADDERS.iter() {
+        for (idx, t) in l.tiers.iter().enumerate() {
+            if !(t.name.contains("Nordic") || t.name.starts_with("One-arm")) {
+                continue;
+            }
+            assert_eq!(t.failure, FailurePolicy::LeaveRir(1), "{}", t.name);
+            let r = rir_band(l.id, idx as u8, LiftGoal::Hypertrophy, false).unwrap();
+            assert_eq!(r.value, (1, 2), "{}", t.name);
+            assert_eq!(r.claim_id(), claims::CAL_EFAIL_SAFE_001, "{}", t.name);
+            found.push(t.name);
+        }
     }
-    assert_eq!(tier(Hinge, 4).unwrap().name, "Assisted Nordic curl");
+    for name in [
+        "Assisted Nordic curl",
+        "One-arm push-up",
+        "One-arm row",
+        "One-arm pull-up",
+    ] {
+        assert!(found.contains(&name), "{name} is no longer a rung");
+    }
 }
 
 #[test]
@@ -517,13 +515,13 @@ fn load_step_is_the_low_end_of_two_to_ten_percent_on_the_plate_grid() {
 
 #[test]
 fn pounds_profile_load_step_lands_on_the_two_and_a_half_lb_grid() {
-    let lb = |kg: f64| kg / 0.45359237;
+    let lb = |kg: f64| kg * crate::plates::LB_PER_KG;
     // No bodyweight: one 2.5 lb plate.
     assert!((lb(load_step_kg(None, 0.0, true).value) - 2.5).abs() < 1e-9);
     // 2.5% of 100 kg = 2.5 kg = 5.51 lb → up to 7.5 lb, never "+5.5 lb".
     assert!((lb(load_step_kg(Some(100.0), 0.0, true).value) - 7.5).abs() < 1e-9);
     // An on-grid load never loses a plate to float error when floored.
-    let five = 5.0 * 0.45359237;
+    let five = 5.0 / crate::plates::LB_PER_KG;
     let floor = crate::plates::floor_added_load_kg;
     assert!((lb(floor(five - crate::plates::added_load_grid_kg(true), true)) - 2.5).abs() < 1e-9);
     assert_eq!(floor(2.4, false), 1.25);
@@ -533,10 +531,8 @@ fn pounds_profile_load_step_lands_on_the_two_and_a_half_lb_grid() {
 fn weighted_ladder_set_yields_system_load_e1rm() {
     // Pull-up: bodyweight + added (CAL-LOAD-PULL-001), Epley at RPE 10.
     let e = system_load_e1rm(VerticalPull, 4, 80.0, 20.0, 5, 10.0).unwrap();
-    assert_eq!(
-        e.value,
-        (crate::strength::e1rm_epley_rpe(100.0, 5, 10.0) * 10.0).round() / 10.0
-    );
+    // 100 kg system load × (1 + 5/30) at RPE 10.
+    assert_eq!(e.value, 116.7);
     assert_eq!(e.claim_id(), claims::CAL_E1RM_001);
     // Unloaded, no fraction, or too many reps → none.
     assert!(system_load_e1rm(VerticalPull, 4, 80.0, 0.0, 5, 10.0).is_none());
@@ -565,9 +561,15 @@ fn ballistic_sets_respect_the_contact_cap() {
 #[test]
 fn effective_load_only_for_measured() {
     let full = tier(HorizontalPush, 4).unwrap();
-    assert_eq!(
-        effective_load_kg(full, 80.0, 0.0),
-        Some((0.64 + 0.75) / 2.0 * 80.0)
+    // Push-up: ~64–75 % BW on the hands (CAL-LOAD-PUSHUP-001), mid 69.5 %.
+    assert!((effective_load_kg(full, 80.0, 0.0).unwrap() - 55.6).abs() < 1e-9);
+    // Added load counts 1:1.
+    assert!(
+        (effective_load_kg(full, 80.0, 10.0).unwrap()
+            - effective_load_kg(full, 80.0, 0.0).unwrap()
+            - 10.0)
+            .abs()
+            < 1e-9
     );
     let inferred = tier(Dip, 3).unwrap();
     assert_eq!(effective_load_kg(inferred, 80.0, 0.0), None);

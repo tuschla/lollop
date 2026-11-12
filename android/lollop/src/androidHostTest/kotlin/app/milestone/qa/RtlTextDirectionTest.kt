@@ -48,8 +48,9 @@ import app.milestone.RunDistanceBars
 import app.milestone.StatusCardFooter
 import app.milestone.TabularFigures
 import app.milestone.Type
+import app.milestone.JvmDefaultsRule
+import app.milestone.typeStyles
 import java.util.Locale
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -73,11 +74,11 @@ class RtlTextDirectionTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
+
     @Before
     fun arabic() = Locale.setDefault(Locale.forLanguageTag("ar"))
-
-    @After
-    fun restore() = Locale.setDefault(Locale.US)
 
     private val plan = "5.5 km"
     private val note = "Back Squat: today's top set beat your recent best. You can add about 4% next time."
@@ -142,14 +143,15 @@ class RtlTextDirectionTest {
     }
 
     /** Canvas-drawn labels (charts, calculator bars) measure with the type scale
-     *  directly, outside any Material Text; they must resolve LTR too. */
+     *  directly, outside any Material Text; they must resolve LTR too: every [Type]
+     *  style, and the stand-alone ones beside it. */
     @Test
     fun typeScale_measuredUnderRtl_resolvesLtr() {
-        val styles: Map<String, TextStyle> = mapOf(
-            "Display" to Type.Display, "Title" to Type.Title, "BannerTitle" to app.milestone.BannerTitleStyle,
-            "Countdown" to app.milestone.CountdownStyle, "KeypadKey" to app.milestone.KeypadKeyStyle, "StatValue" to app.milestone.StatValueStyle,
-            "CardTitle" to Type.CardTitle, "Section" to Type.Section, "Body" to Type.Body,
-            "Caption" to Type.Caption, "Chip" to Type.Chip, "Overline" to Type.Overline,
+        val styles: Map<String, TextStyle> = typeStyles() + mapOf(
+            "BannerTitle" to app.milestone.BannerTitleStyle,
+            "Countdown" to app.milestone.CountdownStyle,
+            "KeypadKey" to app.milestone.KeypadKeyStyle,
+            "StatValue" to app.milestone.StatValueStyle,
             "TabularFigures" to TabularFigures,
         )
         val layouts = mutableMapOf<String, TextLayoutResult>()
@@ -299,7 +301,8 @@ class RtlTextDirectionTest {
             assertTrue("RTL mirrors the thumbs: the end thumb sits left of the start thumb", b.center.x < a.center.x)
             assertTrue("RTL: the kept window between the thumbs is Accent", midwayIsAccent())
         } finally {
-            AppSettings.setShowRouteMaps(androidx.test.core.app.ApplicationProvider.getApplicationContext(), true)
+            // A new process: the app's settings back to their defaults.
+            QaHarness.freshProcess()
         }
     }
 }

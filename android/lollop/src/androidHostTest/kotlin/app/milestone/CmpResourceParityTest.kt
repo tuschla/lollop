@@ -3,7 +3,6 @@ package app.milestone
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.resources.Res
-import app.milestone.resources.allDrawableResources
 import app.milestone.resources.allPluralStringResources
 import app.milestone.resources.allStringArrayResources
 import app.milestone.resources.allStringResources
@@ -74,14 +73,6 @@ class CmpResourceParityTest {
         assertEquals(names(R.string::class.java), Res.allStringResources.keys.toSortedSet())
         assertEquals(names(R.plurals::class.java), Res.allPluralStringResources.keys.toSortedSet())
         assertEquals(names(R.array::class.java), Res.allStringArrayResources.keys.toSortedSet())
-    }
-
-    @Test
-    fun everyUiVectorHasACmpTwin() {
-        // The launcher, splash and notification icons are Android's alone.
-        val androidOnly = setOf("ic_launcher_foreground", "ic_launcher_monochrome", "ic_stat_mark")
-        val vectors = names(R.drawable::class.java).filter { it.startsWith("ic_") && it !in androidOnly }.toSortedSet()
-        assertEquals(vectors, Res.allDrawableResources.keys.toSortedSet())
     }
 
     /** The handles common code passes outside composition (Strings.kt) read the

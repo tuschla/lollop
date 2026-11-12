@@ -859,37 +859,52 @@ pub enum DoubleProgression {
 /// step and restart at the bottom. `sets` = `(reps, rpe)` per working set
 /// (rpe 0 = unrated, which never blocks progression). A logged effort counts
 /// as on target within half a rep of the target RIR (RIR reports are only
-/// ~±1 rep accurate, hyp-020). Reps more than 2 above the top or more than 2
-/// below the bottom mean the load came from another rep scheme → re-derive.
+/// ~±1 rep accurate, hyp-020). A set rated harder than that counts only the
+/// reps it had left at the target effort, so a new block's easier target (3
+/// RIR after a 1-RIR week) asks one rep more than the athlete did at THAT
+/// effort, not at the harder one. Reps more than 2 above the top or more than
+/// 2 below the bottom (at the target effort) mean the load came from another
+/// rep scheme → re-derive.
 pub fn double_progression(
     range: (u8, u8),
     target_rir: u8,
     sets: &[(u32, f64)],
 ) -> Recommended<DoubleProgression> {
     let (bottom, top) = range;
-    let step = match sets.iter().map(|(r, _)| *r).min() {
-        None => DoubleProgression::Hold {
-            target_reps: bottom,
-        },
-        Some(min_reps) => {
+    let target = f64::from(target_rir);
+    let at_target = |&(reps, rpe): &(u32, f64)| {
+        let short = if rpe > 0.0 {
+            target - crate::strength::rpe_to_rir(rpe)
+        } else {
+            0.0
+        };
+        if short > 0.5 {
+            f64::from(reps) - short
+        } else {
+            f64::from(reps)
+        }
+    };
+    let min_reps = sets.iter().map(|(r, _)| *r).min();
+    let min_at_target = sets.iter().map(at_target).reduce(f64::min);
+    let step = match (min_reps, min_at_target) {
+        (Some(min_reps), Some(min_at_target)) => {
             let (bottom32, top32) = (u32::from(bottom), u32::from(top));
-            if min_reps > top32 + 2 || min_reps + 2 < bottom32 {
+            let next = (min_at_target.floor().max(0.0) as u32 + 1).clamp(bottom32, top32) as u8;
+            if min_reps > top32 + 2 || min_at_target + 2.0 < f64::from(bottom) {
                 DoubleProgression::Rederive
-            } else if min_reps >= top32 {
-                let on_target = sets.iter().all(|(_, rpe)| {
-                    *rpe <= 0.0 || crate::strength::rpe_to_rir(*rpe) + 0.5 >= f64::from(target_rir)
-                });
-                if on_target {
-                    DoubleProgression::AddLoad
-                } else {
-                    DoubleProgression::Hold { target_reps: top }
-                }
+            } else if min_reps >= top32
+                && sets.iter().all(|(_, rpe)| {
+                    *rpe <= 0.0 || crate::strength::rpe_to_rir(*rpe) + 0.5 >= target
+                })
+            {
+                DoubleProgression::AddLoad
             } else {
-                DoubleProgression::Hold {
-                    target_reps: (min_reps + 1).clamp(bottom32, top32) as u8,
-                }
+                DoubleProgression::Hold { target_reps: next }
             }
         }
+        _ => DoubleProgression::Hold {
+            target_reps: bottom,
+        },
     };
     Recommended::new(step, claims::HYP_DOUBLEPROG_001)
 }

@@ -14,6 +14,15 @@ fn trim_probe_points() -> Vec<GpsPoint> {
     ]
 }
 
+/// The fix stamps of run `id` (logged at `id`) per recording segment, as the
+/// bridge's `RunTrack` op hands them to the shell.
+fn segment_stamps(model: &Model, id: u64) -> Vec<Vec<i64>> {
+    run_track_segments(model, id, id as i64)
+        .iter()
+        .map(|seg| seg.iter().map(|p| p.observed_at).collect())
+        .collect()
+}
+
 #[test]
 fn trim_run_track_cuts_head_and_tail_and_reshrinks_figures() {
     let app = Engine;
@@ -24,23 +33,24 @@ fn trim_run_track_cuts_head_and_tail_and_reshrinks_figures() {
     )
     .expect_only_render();
     let before = app.view(&model).runs[0].clone();
-    assert_eq!(model.runs[0].track.len(), 5);
+    assert_eq!(segment_stamps(&model, 6_100_001), [[0, 100, 200, 300, 400]]);
 
     // Keep the middle three fixes (t=100,200,300); cut the first and last.
     app.update(trim(6_100_001, 6_100_001, 100, 300), &mut model)
         .expect_only_render();
 
     assert_eq!(
-        model.runs.len(),
+        segment_stamps(&model, 6_100_001),
+        [[100, 200, 300]],
+        "head+tail fixes cut from the route"
+    );
+    let runs = app.view(&model).runs;
+    assert_eq!(
+        runs.len(),
         1,
         "trim edits in place, never adds/removes a run"
     );
-    assert_eq!(
-        model.runs[0].track.len(),
-        3,
-        "head+tail fixes cut from the stored track"
-    );
-    let after = app.view(&model).runs[0].clone();
+    let after = &runs[0];
     // Every derived figure re-derived from the sliced track (content-key memo
     // self-invalidated): distance and splits shrank, HR/spike untouched.
     assert!(
@@ -80,18 +90,20 @@ fn trim_run_track_remaps_segment_starts_across_a_cut() {
         &mut model,
     )
     .expect_only_render();
-    assert_eq!(model.runs[0].track_segment_starts, vec![5]);
+    assert_eq!(
+        segment_stamps(&model, 6_100_002),
+        [vec![0, 10, 20, 30, 40], vec![100, 110, 120, 130, 140]]
+    );
 
     // Keep t in [20,120]: drops raw idx 0,1 (head) and 8,9 (tail); the six
     // survivors are old idx 2,3,4,5,6,7, so the boundary at old idx 5 lands at
     // new idx 3.
     app.update(trim(6_100_002, 6_100_002, 20, 120), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs[0].track.len(), 6, "four fixes cut");
     assert_eq!(
-        model.runs[0].track_segment_starts,
-        vec![3],
-        "boundary remapped to the slice"
+        segment_stamps(&model, 6_100_002),
+        [[20, 30, 40], [100, 110, 120]],
+        "four fixes cut, boundary remapped to the slice"
     );
     // The two-segment route still exports as two <trkseg>s.
     let gpx = export_run_gpx(&model, 6_100_002, 6_100_002);
@@ -111,27 +123,27 @@ fn trim_run_track_rejects_invalid_and_no_op_bounds() {
         &mut model,
     )
     .expect_only_render();
-    let full = model.runs[0].track.clone();
+    let full = export_run_gpx(&model, 6_100_003, 6_100_003);
+    let unchanged = |model: &Model, why: &str| {
+        assert_eq!(export_run_gpx(model, 6_100_003, 6_100_003), full, "{why}");
+    };
 
     // No matching run: untouched.
     app.update(trim(999, 0, 100, 300), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs[0].track, full, "no-match trim changes nothing");
+    unchanged(&model, "no-match trim changes nothing");
     // Inverted range: untouched.
     app.update(trim(6_100_003, 6_100_003, 300, 100), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs[0].track, full, "inverted range changes nothing");
+    unchanged(&model, "inverted range changes nothing");
     // Fewer than two fixes retained: untouched.
     app.update(trim(6_100_003, 6_100_003, 350, 500), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs[0].track, full, "a <2-fix slice changes nothing");
+    unchanged(&model, "a <2-fix slice changes nothing");
     // No-op keeps-everything (not a strict subset): untouched.
     app.update(trim(6_100_003, 6_100_003, -100, 1000), &mut model)
         .expect_only_render();
-    assert_eq!(
-        model.runs[0].track, full,
-        "keeping every fix changes nothing"
-    );
+    unchanged(&model, "keeping every fix changes nothing");
 }
 
 #[test]
@@ -146,16 +158,14 @@ fn two_sequential_trims_compose_by_intersection() {
     // Keep [100,300] → 3 fixes, then [200,300] over the result → 2 fixes.
     app.update(trim(6_100_004, 6_100_004, 100, 300), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs[0].track.len(), 3);
+    assert_eq!(segment_stamps(&model, 6_100_004), [[100, 200, 300]]);
     app.update(trim(6_100_004, 6_100_004, 200, 300), &mut model)
         .expect_only_render();
     assert_eq!(
-        model.runs[0].track.len(),
-        2,
+        segment_stamps(&model, 6_100_004),
+        [[200, 300]],
         "second trim narrows the surviving slice"
     );
-    assert_eq!(model.runs[0].track[0].observed_at, 200);
-    assert_eq!(model.runs[0].track[1].observed_at, 300);
 }
 
 #[test]
@@ -169,7 +179,7 @@ fn trim_then_delete_removes_the_run() {
     .expect_only_render();
     app.update(trim(6_100_005, 6_100_005, 100, 300), &mut model)
         .expect_only_render();
-    assert_eq!(model.runs.len(), 1);
+    assert_eq!(app.view(&model).runs.len(), 1);
     app.update(
         Event::DeleteEntry {
             kind: EntryKind::Run,
@@ -180,9 +190,10 @@ fn trim_then_delete_removes_the_run() {
     )
     .expect_only_render();
     assert!(
-        model.runs.is_empty(),
+        app.view(&model).runs.is_empty(),
         "deleting a trimmed run removes it entirely"
     );
+    assert!(export_run_gpx(&model, 6_100_005, 6_100_005).is_empty());
 }
 
 #[test]
@@ -211,12 +222,10 @@ fn trim_dropping_a_whole_segment_drops_its_boundary() {
     app.update(trim(6_100_006, 6_100_006, 0, 40), &mut model)
         .expect_only_render();
     assert_eq!(
-        model.runs[0].track.len(),
-        5,
-        "only the first segment survives"
+        segment_stamps(&model, 6_100_006),
+        [[0, 10, 20, 30, 40]],
+        "only the first segment survives, its boundary dropped, not left dangling"
     );
-    assert!(
-        model.runs[0].track_segment_starts.is_empty(),
-        "the cut segment's boundary is dropped, not left dangling"
-    );
+    let gpx = export_run_gpx(&model, 6_100_006, 6_100_006);
+    assert_eq!(gpx.matches("<trkseg>").count(), 1);
 }

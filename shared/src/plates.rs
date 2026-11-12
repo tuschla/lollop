@@ -13,7 +13,7 @@ pub(crate) const LB_PER_KG: f64 = 2.2046226218;
 
 /// Kilograms per pound, exactly (the international pound). The calisthenics
 /// added-load grid is stated in it.
-const KG_PER_LB: f64 = 0.45359237;
+pub(crate) const KG_PER_LB: f64 = 0.45359237;
 
 /// A standard bar and the common plate set in one display unit, plates
 /// largest first.

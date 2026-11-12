@@ -3,34 +3,26 @@
 
 use super::*;
 use crate::app::anchors::{
-    AnchorCtx, Layoff, build_last_working, build_plan_anchors, build_run_anchors, build_run_break,
-    build_run_week_km,
+    AnchorCtx, Layoff, build_plan_anchors, build_run_anchors, build_run_week_km,
 };
-use crate::app::calculators::{LoadFigures, build_hr_zones, load_figures, race_band};
-use crate::app::calis_anchors::build_calisthenics_anchors;
+use crate::app::calculators::{build_hr_zones, race_band};
 use crate::app::evidence_views::grade_note_str;
 use crate::app::format::{
-    fmt_clock, fmt_km_or_mi, fmt_mi_of_km, fmt_mss, fmt_u8_range, fmt_weight, fmt_weight_num,
-    mon0_weekday, race_distance_label, race_distance_title, weekday_name,
+    fmt_clock, fmt_km_or_mi, fmt_mss, fmt_weight, fmt_weight_num, mon0_weekday,
+    race_distance_label, race_distance_title,
 };
 use crate::app::guidance::{build_guidance_measured, stated_or_measured_weekly_km};
 use crate::app::lift_audit::to_lift_view;
-use crate::app::logged_days::{DeloadDays, lift_deload_days};
+use crate::app::logged_days::DeloadDays;
 use crate::app::model::{LoggedRun, LoggedSet, RaceQuery};
-use crate::app::plan_views::{
-    BasisPiece, BasisRx, PlanItem, PlanRow, RunAmount, annotate_and_rejudge, apply_last_sets,
-    flatten_prescription, fold_completion_adjustments, fold_item_numbers, plan_session_title,
-    program_name, refresh_item_statuses,
-};
+use crate::app::plan_views::{PlanItem, PlanRow, flatten_prescription, plan_session_title};
 use crate::app::profile_age::whole_years_between;
-use crate::app::readiness::return_step_on;
-use crate::app::reviews::{MessageCtx, feedback_message, target_rir};
 use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
 use crate::app::run_views::{run_card as memo_run_card, split_verdict_view};
-use crate::app::set_index::{NameFacts, SetIndex};
+use crate::app::set_index::SetIndex;
 use crate::app::view_types::{
-    EvidenceTagView, HeadlineKind, ItemSetView, ItemStatus, PaceVariability, PlanIntensity,
-    ProteinTargetKind, RunTargetView, SplitVerdict,
+    EvidenceTagView, HeadlineKind, ItemStatus, PaceVariability, PlanIntensity, ProteinTargetKind,
+    RunTargetView, SplitVerdict,
 };
 use crate::autoreg::SignalGroup;
 use crate::autoreg::tests::input;
@@ -42,16 +34,17 @@ use crate::gps::GpsPoint;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::{Environment, ProgressionCadence};
 use crate::memo::MemoId;
-use crate::plates::{LB_PER_KG, plates_per_side, round_load_grid};
+use crate::plates::{LB_PER_KG, round_load_grid};
 use crate::profile::test_support::base_profile;
 use crate::profile::{CalisEquipment, DistanceUnit, Profile, RecentRace, ResistanceModality};
 use crate::running::{self, GoalDistance};
 use crate::schema::{
-    AdjustmentKind, DeloadTrigger, HealthScreen, LiftIntensity, LiftSessionType, MesoPhase,
-    PainRegion, Prescription, ReadinessSignal, Recommended, RunIntensity, RunSessionType,
-    RunVolume, Rx, RxBasis, SafetyTier, Session, SessionType, ThreeZone, VdotBand, WorkoutType,
+    HealthScreen, LiftIntensity, LiftSessionType, MesoPhase, PainRegion, Prescription,
+    ReadinessSignal, Recommended, RunIntensity, RunSessionType, RunVolume, Rx, RxBasis, SafetyTier,
+    SessionType, ThreeZone, VdotBand, WorkoutType,
 };
 use crate::strength::{self, LiftGoal};
+use crate::test_support::{M_PER_DEG, SplitMix};
 use crate::{hypertrophy, load};
 
 mod activity_log;
@@ -121,7 +114,7 @@ mod youth_activity;
 // added. Routing all test construction through these helpers isolates that
 // churn to one place: adding an optional field edits only the helper
 // body, never the ~30 call sites. Positional args mirror the variant fields.
-fn log_run(
+pub(crate) fn log_run(
     distance_km: f64,
     duration_min: f64,
     hr_pct_max: f64,
@@ -143,25 +136,21 @@ fn log_run(
     }
 }
 
-fn log_run_track(
+pub(crate) fn log_run_track(
     points: Vec<GpsPoint>,
     hr_pct_max: f64,
     longest_recent_km: f64,
     observed_at: i64,
     entry_id: u64,
 ) -> Event {
-    Event::LogRunTrack {
+    log_run_track_seg(
         points,
         hr_pct_max,
         longest_recent_km,
         observed_at,
         entry_id,
-        workout_type: None,
-        session_rpe: None,
-        segment_starts: Vec::new(),
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
-    }
+        Vec::new(),
+    )
 }
 
 /// [`log_run_track`] with explicit pause-bridge boundaries.
@@ -202,7 +191,7 @@ fn trim(
 }
 
 /// A 5 m-accuracy fix on the equator at longitude `lon`, unix-seconds `t`.
-fn gps(lon: f64, t: i64) -> GpsPoint {
+pub(crate) fn gps(lon: f64, t: i64) -> GpsPoint {
     GpsPoint {
         lat: 0.0,
         lon,
@@ -214,17 +203,42 @@ fn gps(lon: f64, t: i64) -> GpsPoint {
 /// A straight eastward GPS track along the equator: `(metres, m/s)` legs
 /// sampled every `step_s` seconds, starting at `t0`.
 fn equator_track(t0: i64, legs: &[(f64, f64)], step_s: i64) -> Vec<GpsPoint> {
-    let m_per_deg = crate::gps::haversine_m(gps(0.0, 0), gps(1.0, 0));
-    let mut pts = vec![gps(0.0, t0)];
-    let (mut lon, mut t) = (0.0_f64, t0);
+    let mut pts = vec![fix(0.0, t0)];
+    let (mut x, mut t) = (0.0_f64, t0);
     for &(metres, speed) in legs {
         let n = (metres / speed / step_s as f64).round() as i64;
         let per = metres / n as f64;
         for _ in 0..n {
-            lon += per / m_per_deg;
+            x += per;
             t += step_s;
-            pts.push(gps(lon, t));
+            pts.push(fix(x, t));
         }
+    }
+    pts
+}
+
+/// A straight GPS track due north from (`lat0`°, 8°E): a fix at `t0`, then
+/// one after each leg of `legs_m` metres, `step_s` seconds apart, every fix
+/// `accuracy_m` accurate.
+fn north_track(
+    lat0: f64,
+    t0: i64,
+    step_s: i64,
+    legs_m: impl IntoIterator<Item = f64>,
+    accuracy_m: f32,
+) -> Vec<GpsPoint> {
+    let at = |lat: f64, t: i64| GpsPoint {
+        lat,
+        lon: 8.0,
+        observed_at: t,
+        accuracy_m,
+    };
+    let (mut lat, mut t) = (lat0, t0);
+    let mut pts = vec![at(lat, t)];
+    for leg in legs_m {
+        lat += leg / M_PER_DEG;
+        t += step_s;
+        pts.push(at(lat, t));
     }
     pts
 }
@@ -254,7 +268,7 @@ pub(in crate::app) fn logged_run(km: f64, minutes: f64, hr: f64, at: i64) -> Log
 /// A `LogSet` of `weight_kg` × `reps` @ `rpe` at unix-seconds `at`, with no
 /// entry id and no timed hold. Test sets go through here (or the wrappers
 /// below) so a new `LogSet` field edits one literal.
-fn log_set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, at: i64) -> Event {
+pub(crate) fn log_set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, at: i64) -> Event {
     Event::LogSet {
         hold_sec: None,
         exercise: exercise.into(),
@@ -267,7 +281,7 @@ fn log_set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, at: i64) -> Even
 }
 
 /// `ev` (a [`log_set`] event) carrying entry id `id`.
-fn with_entry_id(mut ev: Event, id: u64) -> Event {
+pub(crate) fn with_entry_id(mut ev: Event, id: u64) -> Event {
     let Event::LogSet { entry_id, .. } = &mut ev else {
         unreachable!("with_entry_id takes a LogSet")
     };
@@ -275,9 +289,34 @@ fn with_entry_id(mut ev: Event, id: u64) -> Event {
     ev
 }
 
-/// `ev` (a [`log_run`] or [`log_run_track`] event) carrying the optional run
-/// meta: workout tag, session RPE and average HR in bpm.
-fn with_run_meta(
+/// An `AmendRun` of entry `entry_id` (a legacy id-0 row: the one stamped
+/// `fallback`) to `distance_km` in `duration_min` at `hr_pct_max`% HRmax,
+/// stamped `observed_at`, without run meta.
+pub(crate) fn amend_run(
+    entry_id: u64,
+    distance_km: f64,
+    duration_min: f64,
+    hr_pct_max: f64,
+    observed_at: i64,
+    fallback: i64,
+) -> Event {
+    Event::AmendRun {
+        entry_id,
+        distance_km,
+        duration_min,
+        hr_pct_max,
+        longest_recent_km: 0.0,
+        observed_at,
+        observed_at_fallback: fallback,
+        workout_type: None,
+        session_rpe: None,
+        avg_hr_bpm: None,
+    }
+}
+
+/// `ev` (a [`log_run`], [`log_run_track`] or [`amend_run`] event) carrying the
+/// optional run meta: workout tag, session RPE and average HR in bpm.
+pub(crate) fn with_run_meta(
     mut ev: Event,
     tag: Option<WorkoutType>,
     rpe: Option<u8>,
@@ -294,9 +333,15 @@ fn with_run_meta(
         session_rpe,
         avg_hr_bpm,
         ..
+    }
+    | Event::AmendRun {
+        workout_type,
+        session_rpe,
+        avg_hr_bpm,
+        ..
     }) = &mut ev
     else {
-        unreachable!("with_run_meta takes a LogRun or LogRunTrack")
+        unreachable!("with_run_meta takes a LogRun, LogRunTrack or AmendRun")
     };
     *workout_type = tag;
     *session_rpe = rpe;
@@ -307,6 +352,39 @@ fn with_run_meta(
 /// A 5 × `weight_kg` @ RPE 8 set carrying entry id `id`.
 fn log_set_id(exercise: &str, weight_kg: f64, id: u64, at: i64) -> Event {
     with_entry_id(log_set(exercise, weight_kg, 5, 8.0, at), id)
+}
+
+/// A stored set of `weight_kg` × `reps` @ `rpe` at unix-seconds `at`, with no
+/// entry id and no timed hold: the stored twin of [`log_set`].
+fn logged_set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, at: i64) -> LoggedSet {
+    LoggedSet {
+        exercise: exercise.into(),
+        weight_kg,
+        reps,
+        rpe,
+        observed_at: at,
+        entry_id: 0,
+        hold_sec: None,
+    }
+}
+
+/// A `LogActivity` of `minutes` of `kind` at unix-seconds `at`.
+pub(crate) fn log_activity(
+    kind: ActivityKind,
+    minutes: f64,
+    vigorous: bool,
+    strengthening: bool,
+    observed_at: i64,
+    entry_id: u64,
+) -> Event {
+    Event::LogActivity {
+        kind,
+        minutes,
+        vigorous,
+        strengthening,
+        observed_at,
+        entry_id,
+    }
 }
 
 /// An advanced marathon-priority hybrid athlete (5 run days, 50 km/wk).
@@ -322,53 +400,6 @@ fn sample_profile() -> Profile {
     }
 }
 
-/// A distinctive GPS run whose content is unlikely to be pre-cached by any
-/// other test on this thread, so the memo counter delta is meaningful.
-fn probe_run(entry_id: u64) -> LoggedRun {
-    LoggedRun {
-        distance_km: 0.0,
-        duration_min: 0.0,
-        hr_pct_max: 71.0,
-        wire_hr_pct_max: 71.0,
-        longest_recent_km: 3.3,
-        wire_longest_recent_km: 3.3,
-        track: vec![
-            GpsPoint {
-                lat: 12.5,
-                lon: 34.5000,
-                observed_at: 1_000,
-                accuracy_m: 4.0,
-            },
-            GpsPoint {
-                lat: 12.5,
-                lon: 34.5010,
-                observed_at: 1_050,
-                accuracy_m: 4.0,
-            },
-            GpsPoint {
-                lat: 12.5,
-                lon: 34.5020,
-                observed_at: 1_100,
-                accuracy_m: 4.0,
-            },
-            GpsPoint {
-                lat: 12.5,
-                lon: 34.5030,
-                observed_at: 1_150,
-                accuracy_m: 4.0,
-            },
-        ],
-        track_segment_starts: Vec::new(),
-        observed_at: 1_000,
-        entry_id,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
-    }
-}
-
 fn profile_with_health(health: HealthScreen) -> Profile {
     Profile {
         health,
@@ -376,13 +407,8 @@ fn profile_with_health(health: HealthScreen) -> Profile {
     }
 }
 
-/// One run's memoized card, as `view()` derives it.
-fn run_card(r: &LoggedRun) -> RunResultView {
-    let facts = RunFacts::new(std::slice::from_ref(r));
-    memo_run_card(r, facts.keys[0], facts.qc[0].as_deref(), DistanceUnit::Km).view
-}
-
-/// The second-half slowdown percent behind one run's card ([`run_card`]).
+/// The second-half slowdown percent behind one run's memoized card, as
+/// `view()` derives it.
 fn run_split_pct(r: &LoggedRun) -> Option<f64> {
     let facts = RunFacts::new(std::slice::from_ref(r));
     memo_run_card(r, facts.keys[0], facts.qc[0].as_deref(), DistanceUnit::Km).split_pct
@@ -409,11 +435,8 @@ fn log_run_at(km: f64, minutes: f64, hr: f64, at: i64) -> Event {
 }
 
 /// `SetToday` to `epoch_day` at UTC.
-fn set_today_ev(epoch_day: i64) -> Event {
-    Event::SetToday {
-        epoch_day,
-        utc_offset_sec: 0,
-    }
+pub(crate) fn set_today_ev(epoch_day: i64) -> Event {
+    set_today_off_ev(epoch_day, 0)
 }
 
 /// Move the shell's clock to `epoch_day` (UTC).
@@ -431,6 +454,23 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
+}
+
+/// Monday-based weekday of epoch day `d` (1970-01-05, day 4, was a Monday),
+/// computed without the core's `mon0_weekday`.
+fn wd(d: i64) -> i64 {
+    (d - 4).rem_euclid(7)
+}
+
+/// The Monday on or before day `d`.
+fn monday_of(d: i64) -> i64 {
+    d - wd(d)
+}
+
+/// `hour:min` local on local day `d` at `offset` seconds east of UTC, as the
+/// UTC stamp the shell sends.
+fn local_at(d: i64, hour: i64, min: i64, offset: i64) -> i64 {
+    d * DAY_SEC + hour * HOUR + min * 60 - offset
 }
 
 /// A pure-strength profile with no running (guided-setup shape).
@@ -523,23 +563,21 @@ fn running_profile() -> Profile {
     }
 }
 
+/// A `distance_km` run at 6:00/km and 70 % HRmax, stamped midnight UTC of
+/// `day`.
 fn logrun(distance_km: f64, day: i64) -> Event {
-    Event::LogRun {
-        distance_km,
-        duration_min: distance_km * 6.0,
-        hr_pct_max: 70.0,
-        longest_recent_km: 0.0,
-        observed_at: day * DAY_SEC,
-        entry_id: 0,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
-    }
+    logrun_at(distance_km, day * DAY_SEC)
 }
 
-fn planned_long_run_item(model: &Model) -> PlanItem {
-    working_plan(model)
+/// [`logrun`] stamped at unix-seconds `at`.
+fn logrun_at(distance_km: f64, at: i64) -> Event {
+    log_run(distance_km, distance_km * 6.0, 70.0, 0.0, at, 0)
+}
+
+/// The first long run of the week strip, as `view()` shows it.
+fn planned_long_run_item(model: &Model) -> PrescriptionView {
+    Engine
+        .view(model)
         .week_plan
         .into_iter()
         .find(|s| s.title == "Long run")
@@ -582,67 +620,12 @@ fn cal_item(vm: &ViewModel, ladder: Lad) -> Option<PrescriptionView> {
 
 /// The model after replaying a `tests/fixtures/view_snapshot` event log.
 fn snapshot_fixture_model(ndjson: &str) -> Model {
-    let mut model = Model::default();
-    for line in ndjson.lines().filter(|l| !l.trim().is_empty()) {
-        let event: Event = serde_json::from_str(line).expect("fixture line");
-        let _ = Engine.update(event, &mut model);
-    }
-    model
-}
-
-/// A 3 × 5 @ RIR 2 lift item at `load` kg.
-fn lift_item(name: &str, load: f64) -> PlanItem {
-    PlanItem {
-        view: PrescriptionView {
-            exercise: name.into(),
-            sets: 3,
-            reps_low: 5,
-            reps_high: 5,
-            load_kg: Some(load),
-            intensity_label: "RIR 2".into(),
-            target_rpe: Some(8.0),
-            ..PrescriptionView::default()
-        },
-        intensity: PlanIntensity::Rir { rir: 2 },
-        ..PlanItem::default()
-    }
-}
-
-/// Today's next session holding `items`.
-fn session(items: Vec<PlanItem>) -> PlanRow {
-    PlanRow {
-        status: SessionStatus::Next,
-        items,
-        ..PlanRow::default()
-    }
-}
-
-/// The production fold over a hand-built session, in view order: the numeric
-/// fold `flatten_session` gives every row, the hero's `annotate_and_rejudge`,
-/// then `render_basis`; no first-set step.
-fn apply_adjustments_to_session(ns: &mut PlanRow, recommended: &[AdjustmentCall], weight_lb: bool) {
-    let fold = fold_completion_adjustments(recommended);
-    for it in ns.items.iter_mut() {
-        fold_item_numbers(it, fold, weight_lb);
-    }
-    annotate_and_rejudge(ns, recommended, None, weight_lb);
-    for it in ns.items.iter_mut() {
-        render_basis(it, weight_lb);
-    }
-}
-
-/// `view` as a plan item whose structured target is `intensity`.
-fn with_intensity(view: PrescriptionView, intensity: PlanIntensity) -> PlanItem {
-    PlanItem {
-        view,
-        intensity,
-        ..PlanItem::default()
-    }
-}
-
-/// The CTL/ATL/TSB figures behind `view()`'s training-load card.
-fn load_figures_of(model: &Model) -> Option<LoadFigures> {
-    load_figures(model, &ViewCtx::new(model).runs)
+    let events: Vec<Event> = ndjson
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("fixture line"))
+        .collect();
+    replay(&events).1
 }
 
 /// A race prediction as `view()` renders it, with the band it renders from.
@@ -673,14 +656,19 @@ fn race(q: &RaceQuery, longest_logged_km: Option<f64>, unit: DistanceUnit) -> Ra
     }
 }
 
-/// `view()`'s race prediction, with its band.
+/// `view()`'s race prediction, with the band behind it.
 fn race_of(model: &Model) -> Race {
     let q = model.race_query.as_ref().expect("a race query");
-    race(
-        q,
-        longest_logged_run_km(&ViewCtx::new(model).runs),
-        model.distance_unit(),
-    )
+    let band = race_band(q, longest_logged_run_km(&ViewCtx::new(model).runs));
+    Race {
+        view: Engine
+            .view(model)
+            .race_prediction
+            .expect("a race prediction"),
+        agreed: band.agreed,
+        low_sec: band.low_sec,
+        high_sec: band.high_sec,
+    }
 }
 
 /// A pain report of `value`, graded severity 3 when `kind` is given.
@@ -807,53 +795,22 @@ impl XorShift {
     }
 }
 
-/// SplitMix64: a seedable stream; `SplitMix(x).next()` is one step from `x`.
-struct SplitMix(u64);
-
-impl SplitMix {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    /// In `0..n`; `n` = 0 gives 0 without a draw.
-    fn below(&mut self, n: u64) -> u64 {
-        if n == 0 { 0 } else { self.next() % n }
-    }
-
-    /// `next() % n` as an index, in `0..n` (`n` = 0 reads as 1, one draw).
-    fn index(&mut self, n: usize) -> usize {
-        (self.next() % n.max(1) as u64) as usize
-    }
-
-    /// In `lo..=hi`.
-    fn int(&mut self, lo: i64, hi: i64) -> i64 {
-        lo + self.below((hi - lo + 1) as u64) as i64
-    }
-
-    /// In [0, 1).
-    fn unit(&mut self) -> f64 {
-        (self.next() >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    fn chance(&mut self, p: f64) -> bool {
-        self.unit() < p
-    }
-
-    fn pick<T: Clone>(&mut self, xs: &[T]) -> T {
-        xs[self.below(xs.len() as u64) as usize].clone()
-    }
-}
-
 /// `events` replayed on a fresh model.
-fn replay(events: &[Event]) -> (Engine, Model) {
+pub(crate) fn replay(events: &[Event]) -> (Engine, Model) {
     let app = Engine;
     let mut model = Model::default();
     for e in events {
         let _ = app.update(e.clone(), &mut model);
+    }
+    (app, model)
+}
+
+/// [`replay`], failing on any event the core does not take (a render only).
+fn replay_rendering(events: &[Event]) -> (Engine, Model) {
+    let app = Engine;
+    let mut model = Model::default();
+    for e in events {
+        app.update(e.clone(), &mut model).expect_only_render();
     }
     (app, model)
 }
@@ -875,11 +832,7 @@ fn replay_cold(events: Vec<Event>) -> Result<String, String> {
     std::thread::Builder::new()
         .stack_size(32 << 20)
         .spawn(move || {
-            let app = Engine;
-            let mut model = Model::default();
-            for e in events {
-                let _ = app.update(e, &mut model);
-            }
+            let (app, model) = replay(&events);
             vm_json(&app.view(&model))
         })
         .expect("spawn replay thread")
@@ -977,7 +930,7 @@ fn json_diff(a: &str, b: &str) -> String {
 
 /// The full log and its compaction (`compact_event_log`, what the shell
 /// replays after a relaunch) render the same view on cold threads.
-fn assert_compaction_equivalent(name: &str, events: Vec<Event>) {
+pub(crate) fn assert_compaction_equivalent(name: &str, events: Vec<Event>) {
     let full = replay_cold(events.clone()).expect("full replay");
     let compacted = replay_cold(crate::log::compact_event_log(events)).expect("compacted replay");
     assert!(
@@ -988,19 +941,15 @@ fn assert_compaction_equivalent(name: &str, events: Vec<Event>) {
 }
 
 /// `SetToday` to `epoch_day` at UTC offset `utc_offset_sec`.
-fn set_today_off_ev(epoch_day: i64, utc_offset_sec: i64) -> Event {
+pub(crate) fn set_today_off_ev(epoch_day: i64, utc_offset_sec: i64) -> Event {
     Event::SetToday {
         epoch_day,
         utc_offset_sec,
     }
 }
 
-/// A Monday (`long_horizon`'s START, 2026-01-05).
+/// 2026-01-05, a Monday: the first simulated day of every `long_horizon` life.
 const DAY0: i64 = 20_458;
-
-/// Metres per degree of longitude on the equator for the core's haversine
-/// (R = 6 371 000 m), so `x` metres east is `x / M_PER_DEG` degrees.
-const M_PER_DEG: f64 = 6_371_000.0 * std::f64::consts::PI / 180.0;
 
 /// A 5 m-accuracy fix `x_m` metres east of (0, 0) at unix second `t`.
 fn fix(x_m: f64, t: i64) -> GpsPoint {
@@ -1062,4 +1011,92 @@ fn hypertrophy_lifter(lifts: &[(&str, f64, u32, i64)]) -> (Model, i64) {
         }
     }
     (m, DAY0 + 7 * 5 + 3)
+}
+
+/// The env knob `key` as a number (decimal, or hex as `0x…`), if set.
+fn env_u64(key: &str) -> Option<u64> {
+    let s = std::env::var(key).ok()?;
+    let s = s.trim();
+    match s.strip_prefix("0x") {
+        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+        None => s.parse().ok(),
+    }
+}
+
+/// The env knob `key` ([`env_u64`]), or `default` when unset: the case,
+/// step and seed knobs of the seeded sweeps.
+fn env_or(key: &str, default: u64) -> u64 {
+    env_u64(key).unwrap_or(default)
+}
+
+/// A morning check-in at unix-seconds `at` answering sleep, soreness and
+/// mood (1–5); every other item unanswered.
+pub(crate) fn checkin(at: i64, sleep: u8, sore: u8, mood: u8) -> CheckinInput {
+    CheckinInput {
+        observed_at: at,
+        sleep_quality: Some(sleep),
+        soreness: Some(sore),
+        mood: Some(mood),
+        ..CheckinInput::default()
+    }
+}
+
+/// [`checkin`] as the event the shell sends.
+pub(crate) fn checkin_ev(at: i64, sleep: u8, sore: u8, mood: u8) -> Event {
+    Event::SubmitCheckin(checkin(at, sleep, sore, mood))
+}
+
+/// KB Table 1 weekly sets per muscle (extracted/03-hypertrophy.md:520-530):
+/// (muscle, MV, MEV, MAV low, MAV high, MRV "N+").
+const KB_TABLE1: [(&str, u8, u8, u8, u8, u8); 11] = [
+    ("chest", 8, 10, 12, 20, 22),
+    ("back", 8, 10, 14, 22, 25),
+    ("quads", 6, 8, 12, 18, 20),
+    ("hamstrings", 4, 6, 10, 16, 20),
+    ("glutes", 0, 0, 4, 12, 16),
+    ("side delts", 6, 8, 16, 22, 26),
+    ("rear delts", 0, 6, 12, 18, 22),
+    ("biceps", 4, 6, 14, 20, 26),
+    ("triceps", 4, 6, 10, 14, 18),
+    ("calves", 4, 6, 8, 16, 20),
+    ("abs", 0, 0, 10, 16, 20),
+];
+
+/// The shell's History delete of row `(kind, entry_id, observed_at)`
+/// (`HistoryEntry.kt::deleteEventFor`, and the activity list's delete).
+fn delete_of(kind: EntryKind, entry_id: u64, observed_at: i64) -> Event {
+    Event::DeleteEntry {
+        kind,
+        entry_id,
+        observed_at_fallback: observed_at,
+    }
+}
+
+/// Delete History row `(kind, id, at)` ([`delete_of`]), then send `restore`,
+/// the event the caller's Undo logs it again with (the shell's
+/// `restoreEventFor` mirror, or the original log event). `None` when the
+/// delete removed exactly one row and the Undo renders the view byte for
+/// byte as before; else what differed (the first differing JSON path).
+fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, restore: Event) -> Option<String> {
+    let rows = |vm: &ViewModel| match kind {
+        EntryKind::Set => vm.lifts.len(),
+        EntryKind::Run => vm.runs.len(),
+        EntryKind::Activity => vm.activities.len(),
+    };
+    let before = Engine.view(m);
+    let _ = Engine.update(delete_of(kind, id, at), m);
+    let removed = rows(&before) as i64 - rows(&Engine.view(m)) as i64;
+    let _ = Engine.update(restore, m);
+    if removed != 1 {
+        return Some(format!(
+            "deleting {kind:?} {id}@{at} removed {removed} rows"
+        ));
+    }
+    let (before, after) = (vm_json(&before), vm_json(&Engine.view(m)));
+    (before != after).then(|| {
+        format!(
+            "Undo of {kind:?} {id}@{at} changed the view: {}",
+            json_diff(&before, &after)
+        )
+    })
 }

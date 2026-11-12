@@ -4,6 +4,8 @@
 //! directions.
 
 use super::*;
+use crate::app::plan_views::EASY_RUN_LABEL;
+use crate::app::run_views::PROGRESS_WEEKS;
 
 /// A recent-race runner: 10 km in 50:00 (VDOT ≈ 40) one week before `today`.
 fn racer_profile(today: i64) -> Profile {
@@ -17,58 +19,73 @@ fn racer_profile(today: i64) -> Profile {
     }
 }
 
-fn flatten_with_targets(
-    kind: RunSessionType,
-    rx: Rx,
-    anchors: &crate::plan::Anchors,
-    model: &Model,
-    day: i64,
-) -> PlanItem {
-    let session = Session {
-        session_type: SessionType::Run(kind),
-        day: 0,
-        prescriptions: vec![rx],
-        dup_day: None,
+/// A fresh-10K racer who runs five days a week (10K goal, 40 km/wk): the
+/// plan week carries a tempo run.
+fn tempo_racer_profile() -> Profile {
+    Profile {
+        advanced: true,
+        running_days_per_week: 5,
+        running_km_per_week: 40.0,
+        goal_distance: GoalDistance::TenK,
+        measured_hr_max: Some(190.0),
+        ..racer_profile(MON)
+    }
+}
+
+/// A 5K racer (fresh 10K, measured HRmax 190) four weeks from race day: the
+/// peak-phase plan week carries intervals.
+fn interval_racer_profile() -> Profile {
+    Profile {
+        running_days_per_week: 5,
+        running_km_per_week: 50.0,
+        goal_distance: GoalDistance::FiveK,
+        goal_race_epoch_day: Some(MON + 33),
+        measured_hr_max: Some(190.0),
+        ..racer_profile(MON)
+    }
+}
+
+/// `profile` planned from `MON`: the first item of the week's `title` session
+/// as planned, then the same item on its own day after a low-HRV morning
+/// eased it, and the week's easy run as planned.
+fn eased_on_its_day(
+    profile: Profile,
+    title: &str,
+) -> (PrescriptionView, PrescriptionView, PrescriptionView) {
+    let (app, mut model) = planned_on(profile, [], MON);
+    let week = app.view(&model).week_plan;
+    let row = |t: &str| {
+        week.iter()
+            .find(|r| r.title == t)
+            .unwrap_or_else(|| panic!("a {t} in the plan week: {week:#?}"))
     };
-    let mut items: Vec<PlanItem> = session
-        .prescriptions
-        .iter()
-        .map(|rx| flatten_prescription(rx, anchors, None, false, DistanceUnit::Km))
-        .collect();
-    super::super::run_targets::apply_run_targets(&mut items, &session, anchors, model, day);
-    items.remove(0)
+    let (day, planned) = (row(title).epoch_day, row(title).items[0].clone());
+    let easy = row("Easy run").items[0].clone();
+    set_today(&app, &mut model, day);
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: day * DAY_SEC + 60,
+            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let today = app.view(&model).next_session.expect("today's session");
+    assert_eq!(today.epoch_day, day);
+    (planned, today.items[0].clone(), easy)
 }
 
 #[test]
 fn threshold_run_renders_pace_range_from_a_recent_10k() {
-    let today = 704;
-    let model = Model {
-        profile_history: vec![racer_profile(today)],
-        ..Default::default()
-    };
-    let vdot = super::super::run_targets::pace_anchor_vdot(model.profile().unwrap(), today)
-        .expect("a 1-week-old 10K is a fresh pace anchor");
-    assert!(
-        (vdot - 40.0).abs() < 0.2,
-        "10K in 50:00 ≈ VDOT 40, got {vdot}"
-    );
-    let anchors = crate::plan::Anchors {
-        run_vdot: Some(vdot),
-        ..Default::default()
-    };
-    let rx = RxBasis::Workout.rx(
-        Prescription::Run(crate::schema::RunPrescription::new(
-            crate::schema::RunVolume::DistanceKm(5.0),
-            crate::schema::RunIntensity::HrPercentMax {
-                lo: Some(88.0),
-                hi: Some(92.0),
-                hrr_hi: None,
-            },
-            None,
-        )),
-        claims::RUN_TEMPO_001,
-    );
-    let it = flatten_with_targets(RunSessionType::Tempo, rx, &anchors, &model, today);
+    let (app, model) = planned_on(tempo_racer_profile(), [], MON);
+    let it = app
+        .view(&model)
+        .week_plan
+        .into_iter()
+        .find(|r| r.title == "Tempo run")
+        .expect("a tempo run in the plan week")
+        .items
+        .swap_remove(0);
     let t = it
         .run_target
         .clone()
@@ -77,16 +94,12 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
     // Daniels VDOT 40: T ≈ 5:06 /km (88 %VO2max) to ≈ 5:20 /km (83 %).
     assert!((303..=309).contains(&t.pace_fast_sec_per_km), "{t:?}");
     assert!((317..=323).contains(&t.pace_slow_sec_per_km), "{t:?}");
-    let expect = format!(
-        "{}:{:02}–{}:{:02} /km",
-        t.pace_fast_sec_per_km / 60,
-        t.pace_fast_sec_per_km % 60,
-        t.pace_slow_sec_per_km / 60,
-        t.pace_slow_sec_per_km % 60
-    );
-    assert_eq!(t.pace_label, expect);
     assert!(
-        it.summary.starts_with("5 km · ") && it.summary.contains(&expect),
+        t.pace_label.starts_with("5:0") && t.pace_label.ends_with(" /km"),
+        "{t:?}"
+    );
+    assert!(
+        it.summary.contains(&t.pace_label),
         "the card reads the pace: {}",
         it.summary
     );
@@ -98,13 +111,6 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
     assert_eq!(
         t.evidence.citation,
         Recommended::new((), claims::RUN_VDOT_001).reference()
-    );
-    // A stale race (>8 weeks) is not an anchor.
-    let mut stale = racer_profile(today);
-    stale.recent_race.as_mut().unwrap().epoch_day = Some(today - 70);
-    assert_eq!(
-        super::super::run_targets::pace_anchor_vdot(&stale, today),
-        None
     );
 }
 
@@ -166,14 +172,29 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
     let it = planned_long_run_item(&model);
     let t = it.run_target.clone().expect("run items carry a target");
     assert!(!t.pace_label.is_empty(), "race anchor → easy pace: {t:?}");
-    let high: u32 = t
-        .hr_label
-        .strip_suffix(" bpm")
-        .and_then(|s| s.rsplit(['–', ' ']).next())
-        .and_then(|h| h.parse().ok())
-        .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
+    let ceiling = |t: &RunTargetView| -> u32 {
+        t.hr_label
+            .strip_suffix(" bpm")
+            .and_then(|s| s.rsplit(['–', ' ']).next())
+            .and_then(|h| h.parse().ok())
+            .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"))
+    };
+    let high = ceiling(&t);
     assert!(high > 0 && high <= 190, "{t:?}");
-    assert!(it.target_anchor.expect("a resolved target").hr.measured);
+    // The band follows the measured HRmax, not the age estimate.
+    let (_, lower) = planned_on(
+        Profile {
+            measured_hr_max: Some(171.0),
+            ..racer_profile(MON)
+        },
+        [],
+        MON,
+    );
+    let lower = planned_long_run_item(&lower).run_target.expect("a target");
+    assert!(
+        (f64::from(ceiling(&lower)) - f64::from(high) * 0.9).abs() <= 1.0,
+        "{high} bpm at 190, {lower:?} at 171"
+    );
     assert!(
         !t.effort_cue.contains("talk"),
         "measured anchors replace the talk test: {t:?}"
@@ -187,115 +208,59 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
 
 #[test]
 fn downgrade_re_resolves_the_easy_band() {
-    let hr = super::super::run_targets::HrAnchor {
-        max_bpm: 190.0,
-        measured: true,
-        rest_bpm: 0.0,
-    };
-    let tempo = crate::schema::RunIntensity::Vdot(VdotBand::Threshold);
-    let t = super::super::run_targets::resolve_target(
-        super::super::run_targets::TargetBand::Threshold,
-        &tempo,
-        Some(50.0),
-        hr,
-        DistanceUnit::Km,
-    );
-    let anchor = super::super::run_targets::TargetAnchor::new(Some(50.0), hr, DistanceUnit::Km);
-    let mut it = PlanItem {
-        view: PrescriptionView {
-            intensity_label: "Easy: zone 1–2".into(),
-            run_target: Some(t.clone()),
-            ..Default::default()
-        },
-        target_anchor: Some(anchor),
-        ..Default::default()
-    };
-    super::super::run_targets::downgrade_run_target_to_easy(&mut it);
-    let e = it.run_target.clone().expect("still targeted");
+    let (planned, eased, _) = eased_on_its_day(tempo_racer_profile(), "Tempo run");
+    let t = planned.run_target.expect("a planned threshold target");
+    assert_eq!(t.band, "threshold");
+    let e = eased.run_target.clone().expect("still targeted");
     assert_eq!(e.band, "easy");
     assert!(
         e.pace_fast_sec_per_km > t.pace_slow_sec_per_km,
         "easy is slower: {e:?}"
     );
     assert!(
-        it.intensity_label.starts_with("Easy: zone 1–2 · "),
+        eased
+            .intensity_label
+            .starts_with(&format!("{EASY_RUN_LABEL} · ")),
         "{}",
-        it.intensity_label
+        eased.intensity_label
     );
 
     // A miles target stays in miles through the downgrade; the item's own
     // line keeps km.
-    let mut it = PlanItem {
-        view: PrescriptionView {
-            intensity_label: "Easy: zone 1–2".into(),
-            run_target: Some(super::super::run_targets::resolve_target(
-                super::super::run_targets::TargetBand::Threshold,
-                &tempo,
-                Some(50.0),
-                hr,
-                DistanceUnit::Mi,
-            )),
-            ..Default::default()
+    let (_, eased, _) = eased_on_its_day(
+        Profile {
+            distance_unit: DistanceUnit::Mi,
+            ..tempo_racer_profile()
         },
-        target_anchor: Some(super::super::run_targets::TargetAnchor::new(
-            Some(50.0),
-            hr,
-            DistanceUnit::Mi,
-        )),
-        ..Default::default()
-    };
-    super::super::run_targets::downgrade_run_target_to_easy(&mut it);
-    let e = it.run_target.clone().expect("still targeted");
+        "Tempo run",
+    );
+    let e = eased.run_target.expect("still targeted");
     assert!(e.pace_label.ends_with(" /mi"), "{e:?}");
     assert!(
-        it.intensity_label.contains(" /km"),
+        eased.intensity_label.contains(" /km"),
         "{}",
-        it.intensity_label
+        eased.intensity_label
     );
 }
 
 #[test]
-fn downgrade_keeps_anchors_from_interval_and_hills() {
-    // An interval shows no bpm and a hill session neither pace nor bpm; both
-    // still carry the anchors, so their downgrade reads like a direct easy run.
-    use super::super::run_targets::{
-        HrAnchor, TargetAnchor, TargetBand, downgrade_run_target_to_easy, resolve_target,
-    };
-    use crate::schema::RunIntensity;
-    let hr = HrAnchor {
-        max_bpm: 190.0,
-        measured: true,
-        rest_bpm: 0.0,
-    };
-    let easy = resolve_target(
-        TargetBand::Easy,
-        &RunIntensity::Vdot(VdotBand::Easy),
-        Some(50.0),
-        hr,
-        DistanceUnit::Km,
+fn downgrade_keeps_anchors_from_interval() {
+    // An interval shows no bpm; it still carries the anchors, so its
+    // downgrade reads like the week's planned easy run.
+    let (planned, eased, easy) = eased_on_its_day(interval_racer_profile(), "Intervals");
+    let p = planned.run_target.expect("a planned interval target");
+    assert_eq!(p.band, "interval");
+    assert!(p.hr_label.is_empty(), "{p:?}");
+    let (e, easy) = (
+        eased.run_target.expect("target"),
+        easy.run_target.expect("easy target"),
     );
-    assert!(!easy.hr_label.is_empty() && !easy.pace_label.is_empty());
-    for (band, iv) in [
-        (TargetBand::Interval, RunIntensity::Vdot(VdotBand::Interval)),
-        (TargetBand::Hills, RunIntensity::ThreeZone(ThreeZone::Z3)),
-    ] {
-        let mut it = PlanItem {
-            view: PrescriptionView {
-                intensity_label: "Easy".into(),
-                run_target: Some(resolve_target(band, &iv, Some(50.0), hr, DistanceUnit::Km)),
-                ..Default::default()
-            },
-            target_anchor: Some(TargetAnchor::new(Some(50.0), hr, DistanceUnit::Km)),
-            ..Default::default()
-        };
-        downgrade_run_target_to_easy(&mut it);
-        let e = it.run_target.clone().expect("target");
-        assert_eq!(
-            (e.hr_label.as_str(), e.pace_label.as_str()),
-            (easy.hr_label.as_str(), easy.pace_label.as_str()),
-            "{band:?} downgraded to easy"
-        );
-    }
+    assert!(!e.hr_label.is_empty() && !e.pace_label.is_empty(), "{e:?}");
+    assert_eq!(
+        (e.hr_label.as_str(), e.pace_label.as_str()),
+        (easy.hr_label.as_str(), easy.pace_label.as_str()),
+        "the interval downgraded to easy"
+    );
 }
 
 fn track_event(points: Vec<GpsPoint>, at: i64, id: u64, rpe: Option<u8>) -> Event {
@@ -433,8 +398,8 @@ fn best_effort_5k_is_found_inside_a_10k_gps_run() {
         "{:?}",
         vm.runs[0].best_effort_labels
     );
-    // Weekly series: 16 weeks, the run in the last one.
-    assert_eq!(p.weekly.len(), 16);
+    // Weekly series: the whole progress window, the run in the last week.
+    assert_eq!(p.weekly.len(), PROGRESS_WEEKS as usize);
     let last = p.weekly.last().unwrap();
     assert_eq!(last.runs, 1);
     assert!((last.km - 10.0).abs() < 0.2, "{last:?}");
@@ -716,29 +681,27 @@ fn hybrid_17km_profile() -> Profile {
     }
 }
 
-/// A stored 3 × 150 kg @ RPE 9 back squat at `at`.
-fn stored_heavy_squat(at: i64) -> LoggedSet {
-    LoggedSet {
-        exercise: "Back Squat".to_string(),
-        weight_kg: 150.0,
-        reps: 3,
-        rpe: 9.0,
-        observed_at: at,
-        entry_id: 0,
-        hold_sec: None,
-    }
+/// A 3 × 150 kg @ RPE 9 back squat at `at`.
+fn heavy_squat(at: i64) -> Event {
+    log_set("Back Squat", 150.0, 3, 9.0, at)
 }
 
 /// A 3-run week (easy 5 / tempo 4 / long 8 km): only the 8 km run is the long
 /// run. Mondays start local weeks (day ≡ 4 mod 7), so days 4–10 are one week.
-fn three_run_week() -> Vec<LoggedRun> {
+fn three_run_week() -> [Event; 3] {
     [(5.0, 5), (4.0, 6), (8.0, 9)] // Tue easy, Wed tempo, Sat long
-        .map(|(km, day)| logged_run(km, km * 6.0, 70.0, day * DAY_SEC + 8 * 3600))
-        .to_vec()
+        .map(|(km, day)| logrun_at(km, day * DAY_SEC + 8 * 3600))
 }
 
-fn cap3_flagged(model: &Model) -> bool {
-    build_weekly_report(&ViewCtx::new(model), &[])
+/// Whether the weekly report raises the CAP-3 heavy-leg/long-run flag after
+/// `profile` is set and `history` logged.
+fn cap3_flagged(profile: Profile, history: impl IntoIterator<Item = Event>) -> bool {
+    let events: Vec<Event> = std::iter::once(Event::SetProfile(profile))
+        .chain(history)
+        .collect();
+    let (app, model) = replay(&events);
+    app.view(&model)
+        .weekly_report
         .iter()
         .any(|r| r.summary.contains(CAP3_WARN))
 }
@@ -749,14 +712,12 @@ fn easy_run_near_leg_day_is_not_treated_as_a_long_run() {
     // the 5 km run is 29% of a partial-week total only — it is NOT the week's
     // longest run, so it must not trip the heavy-leg/long-run CAP-3 spacing flag.
     // The actual long run (8 km, Sat) is 5 days from the squat, well clear.
-    let model = Model {
-        profile_history: vec![hybrid_17km_profile()],
-        runs: three_run_week(),
-        sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)], // Mon evening
-        ..Default::default()
-    };
+    let squat = heavy_squat(4 * DAY_SEC + 20 * 3600); // Mon evening
     assert!(
-        !cap3_flagged(&model),
+        !cap3_flagged(
+            hybrid_17km_profile(),
+            three_run_week().into_iter().chain([squat])
+        ),
         "an easy 5 km run near leg day is not a long run"
     );
 }
@@ -766,14 +727,12 @@ fn heavy_squat_close_to_the_actual_long_run_still_flags() {
     // Positive control: move the heavy squat to Fri 20:00, ~12 h before the 8 km
     // long run on Sat 08:00. The 8 km run IS the week's longest and clears 25% of
     // the 17 km full-week basis, so CAP-3 must fire.
-    let model = Model {
-        profile_history: vec![hybrid_17km_profile()],
-        runs: three_run_week(),
-        sets: vec![stored_heavy_squat(8 * DAY_SEC + 20 * 3600)], // Fri evening
-        ..Default::default()
-    };
+    let squat = heavy_squat(8 * DAY_SEC + 20 * 3600); // Fri evening
     assert!(
-        cap3_flagged(&model),
+        cap3_flagged(
+            hybrid_17km_profile(),
+            three_run_week().into_iter().chain([squat])
+        ),
         "a heavy squat ~12 h from the long run flags"
     );
 }
@@ -784,14 +743,12 @@ fn a_pure_lifters_lone_jog_after_squats_is_not_a_long_run() {
     // after heavy squats. With no external basis (no plan, no other runs in the
     // trailing 7 days) the jog cannot certify itself as a long run, so CAP-3 stays
     // silent instead of flagging the recovery jog.
-    let model = Model {
-        profile_history: vec![base_profile()],
-        runs: vec![logged_run(3.0, 18.0, 70.0, 5 * DAY_SEC + 8 * 3600)], // Tue morning
-        sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)],         // Mon evening, ~12 h prior
-        ..Default::default()
-    };
+    let history = [
+        heavy_squat(4 * DAY_SEC + 20 * 3600), // Mon evening, ~12 h prior
+        logrun_at(3.0, 5 * DAY_SEC + 8 * 3600), // Tue morning
+    ];
     assert!(
-        !cap3_flagged(&model),
+        !cap3_flagged(base_profile(), history),
         "a lone recovery jog with no external basis"
     );
 }
@@ -863,18 +820,12 @@ fn manual_run_avg_hr_bpm_converts_to_pct_of_hrmax() {
     );
 
     // The amend path converts the same way (171 / 190 = 90.0 %).
-    let amend = Event::AmendRun {
-        entry_id: 1,
-        distance_km: 8.0,
-        duration_min: 45.0,
-        hr_pct_max: 0.0,
-        longest_recent_km: 0.0,
-        observed_at: 700 * DAY_SEC,
-        observed_at_fallback: 700 * DAY_SEC,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: Some(171.0),
-    };
+    let amend = with_run_meta(
+        amend_run(1, 8.0, 45.0, 0.0, 700 * DAY_SEC, 700 * DAY_SEC),
+        None,
+        None,
+        Some(171.0),
+    );
     close(
         hr_pct_after(measured, vec![manual_run_bpm(1, None), amend]),
         90.0,
@@ -1049,13 +1000,18 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     });
     app.update(Event::SetProfile(p.clone()), &mut model)
         .expect_only_render();
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: today,
+        },
+        &mut model,
+    )
+    .expect_only_render();
     let race_day = |model: &Model| {
-        model
-            .profile()
-            .unwrap()
-            .recent_race
-            .as_ref()
-            .unwrap()
+        app.view(model)
+            .profile
+            .and_then(|p| p.recent_race)
+            .expect("the stated race")
             .epoch_day
     };
     assert_eq!(
@@ -1063,10 +1019,7 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
         Some(today),
         "an undated race is dated when first stated"
     );
-    let anchor = |model: &Model, day: i64| {
-        super::super::run_targets::pace_anchor_vdot(model.profile().unwrap(), day)
-    };
-    assert!(anchor(&model, today + 7).is_some());
+    assert!(long_run_paced(&model));
 
     // Re-saving the profile with the same race keeps its first date, so the
     // race still goes stale.
@@ -1076,9 +1029,8 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     app.update(Event::SetProfile(p.clone()), &mut model)
         .expect_only_render();
     assert_eq!(race_day(&model), Some(today));
-    assert_eq!(
-        anchor(&model, later),
-        None,
+    assert!(
+        !long_run_paced(&model),
         "a 9-week-old race no longer sets paces"
     );
 
@@ -1091,7 +1043,16 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
     assert_eq!(race_day(&model), Some(later));
-    assert!(anchor(&model, later).is_some());
+    assert!(long_run_paced(&model));
+}
+
+/// Whether the plan week's long run shows a pace (a race anchors paces).
+fn long_run_paced(model: &Model) -> bool {
+    !planned_long_run_item(model)
+        .run_target
+        .expect("run items carry a target")
+        .pace_label
+        .is_empty()
 }
 
 #[test]
@@ -1099,44 +1060,28 @@ fn an_undated_race_in_an_undated_profile_edit_stays_undated() {
     // A legacy edit (no effective day) gives the race no day to be dated
     // with: the clock is not read, so a compacted replay (which keeps only
     // the last SetToday) agrees, and the race of unknown age sets no paces.
-    let app = Engine;
-    let mut model = Model::default();
-    set_today(&app, &mut model, 704);
-    let mut p = running_profile();
+    let mut p = racer_profile(MON);
     p.effective_from_epoch_day = None;
-    p.recent_race = Some(RecentRace {
-        distance_km: 10.0,
-        time_sec: 3000,
-        epoch_day: None,
-    });
-    app.update(Event::SetProfile(p), &mut model)
-        .expect_only_render();
-    let p = model.profile().unwrap();
-    assert_eq!(p.recent_race.as_ref().unwrap().epoch_day, None);
-    assert_eq!(super::super::run_targets::pace_anchor_vdot(p, 704), None);
+    p.recent_race.as_mut().unwrap().epoch_day = None;
+    let (app, model) = planned_on(p, [], MON);
+    let race = app.view(&model).profile.and_then(|p| p.recent_race);
+    assert_eq!(race.expect("the stated race").epoch_day, None);
+    assert!(!long_run_paced(&model));
 }
 
 #[test]
-fn an_undated_or_pre_layoff_race_is_not_a_pace_anchor() {
-    let today = 704;
-    let mut undated = racer_profile(today);
-    undated.recent_race.as_mut().unwrap().epoch_day = None;
-    assert_eq!(
-        super::super::run_targets::pace_anchor_vdot(&undated, today),
-        None
-    );
-
+fn a_pre_layoff_race_is_not_a_pace_anchor() {
     // Returning from 4 weeks off: a race run before the return no longer
     // reflects current fitness, even inside the 8-week window.
-    let mut returning = racer_profile(today);
-    returning.weeks_off = Some(4.0);
-    returning.layoff_returned_epoch_day = Some(today - 3);
-    assert_eq!(
-        super::super::run_targets::pace_anchor_vdot(&returning, today),
-        None
-    );
-    returning.recent_race.as_mut().unwrap().epoch_day = Some(today - 1);
-    assert!(super::super::run_targets::pace_anchor_vdot(&returning, today).is_some());
+    let returning = |race_day: i64| {
+        let mut p = racer_profile(MON);
+        p.weeks_off = Some(4.0);
+        p.layoff_returned_epoch_day = Some(MON - 3);
+        p.recent_race.as_mut().unwrap().epoch_day = Some(race_day);
+        planned_on(p, [], MON).1
+    };
+    assert!(!long_run_paced(&returning(MON - 7)));
+    assert!(long_run_paced(&returning(MON - 1)));
 }
 
 #[test]

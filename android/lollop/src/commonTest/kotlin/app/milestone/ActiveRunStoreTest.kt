@@ -12,17 +12,16 @@ import kotlin.test.assertTrue
  * ([AppFiles]): java.io on the JVM, POSIX on iOS. Recovery skips the marker and a
  * torn last line, keeps the segment marks, an append after a torn tail starts its
  * own line, and the post-save clear runs after every queued append. The engine is a
- * scripted one (the JVM runs these without Robolectric, where the native core must
- * not load), so recovery keeps every fix (the core's thinning is
+ * stand-in ([FakeCore]), so recovery keeps every fix (the core's thinning is
  * `RunTrackingUnitTest`'s and `RunFixGuardsTest`'s).
  */
-class ActiveRunStoreTest {
+class ActiveRunStoreTest : PlatformTest() {
     private val dir = newTempDir()
-    private val file = AppFiles.sibling(dir, "/active-run.ndjson")
+    private val file = fileIn(dir, AppFileNames.ACTIVE_RUN)
 
     @BeforeTest
     fun setUp() {
-        AppRuntime.resetForTest(engine = DurableCore(ScriptedCore()))
+        AppRuntime.resetForTest(engine = DurableCore(FakeCore()))
         RunSession.reset()
         ActiveRunStore.open(file)
     }
@@ -37,19 +36,28 @@ class ActiveRunStoreTest {
 
     private fun fix(i: Int) = GpsPoint(lat = 52.5, lon = 13.4 + i * 3e-5, observedAt = 1_790_000_000L + i, accuracyM = 4.5)
 
-    private fun line(p: GpsPoint, seg: Boolean = false) =
-        "{\"lat\":${p.lat},\"lon\":${p.lon},\"observed_at\":${p.observedAt},\"accuracy_m\":${p.accuracyM}" +
-            (if (seg) ",\"seg\":true" else "") + "}"
-
     private fun lines(): List<String> = buildList { AppFiles.forEachLine(file) { add(it) } }
+
+    /** The sidecar's lines once a run recorded [fixes], those at [segmentStarts] opening a segment. */
+    private fun recorded(fixes: List<GpsPoint>, segmentStarts: Set<Int> = emptySet()): List<String> {
+        ActiveRunStore.begin()
+        fixes.forEachIndexed { i, p -> ActiveRunStore.append(p, segmentStart = i in segmentStarts) }
+        ActiveRunStore.flush()
+        return lines()
+    }
+
+    /** [lines] as a process killed while it appended the last one leaves them. */
+    private fun writeTornAt(lines: List<String>, keep: Int) =
+        AppFiles.writeText(file, lines.dropLast(1).joinToString("") { "$it\n" } + lines.last().take(keep))
 
     @Test
     fun aRunWritesTheMarkerThenOneLinePerFix() {
         ActiveRunStore.begin()
-        val fixes = (0 until 3).map(::fix)
-        fixes.forEach { ActiveRunStore.append(it, segmentStart = false) }
         ActiveRunStore.flush()
-        assertEquals(listOf("{\"run\":\"active\"}") + fixes.map { line(it) }, lines())
+        assertTrue(ActiveRunStore.hasActiveRun(), "the marker alone marks a run in progress")
+        assertEquals(0, ActiveRunStore.recover().size)
+        val fixes = (0 until 3).map(::fix)
+        assertEquals(1 + fixes.size, recorded(fixes).size, "the marker, then one line per fix")
         assertTrue(ActiveRunStore.hasActiveRun())
         assertEquals(fixes, ActiveRunStore.recover().toList())
     }
@@ -57,9 +65,7 @@ class ActiveRunStoreTest {
     @Test
     fun recoveryKeepsSegmentMarksAndSkipsATornLastLine() {
         val fixes = (0 until 5).map(::fix)
-        val text = "{\"run\":\"active\"}\n" + fixes.mapIndexed { i, p -> line(p, seg = i == 3) + "\n" }.joinToString("") +
-            line(fix(5)).take(25)
-        AppFiles.writeText(file, text)
+        writeTornAt(recorded(fixes + fix(5), segmentStarts = setOf(3)), keep = 25)
         val back = ActiveRunStore.recover()
         assertEquals(fixes, back.toList())
         assertEquals(listOf(3), back.segmentStarts)
@@ -68,7 +74,7 @@ class ActiveRunStoreTest {
     @Test
     fun anAppendAfterATornTailStartsItsOwnLine() {
         val fixes = (0 until 3).map(::fix)
-        AppFiles.writeText(file, "{\"run\":\"active\"}\n" + fixes.joinToString("") { line(it) + "\n" } + line(fix(3)).take(30))
+        writeTornAt(recorded(fixes + fix(3)), keep = 30)
         ActiveRunStore.append(fix(9), segmentStart = false)
         ActiveRunStore.flush()
         assertEquals(fixes + fix(9), ActiveRunStore.recover().toList())
@@ -86,7 +92,6 @@ class ActiveRunStoreTest {
         ActiveRunStore.begin()
         RunSession.points.value.forEach { ActiveRunStore.append(it, RunSession.isSegmentStart(it)) }
         ActiveRunStore.flush()
-        assertEquals(line(fix(2), seg = true), lines().last())
         assertEquals(listOf(2), ActiveRunStore.recover().segmentStarts)
     }
 

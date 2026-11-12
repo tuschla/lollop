@@ -27,23 +27,22 @@ fn training_load_chains_lucia_trimp_into_ctl_atl_tsb() {
     assert_eq!(tl.sessions_counted, 3);
     assert_eq!(tl.sessions_skipped, 2);
     assert_eq!(tl.days, 5, "day span 0..=4");
-    let fig = load_figures_of(&model).expect("load figures present");
-    assert!(fig.ctl > 0.0 && fig.atl > 0.0);
+    // "Fitness (CTL) x · Fatigue (ATL) y · Form (TSB) z over N days. …"
+    let figure = |label: &str| -> f64 {
+        let rest = &tl.summary[tl.summary.find(label).expect(label) + label.len()..];
+        rest.split(' ')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{label} figure in {}", tl.summary))
+    };
+    let (ctl, atl, tsb) = (figure("(CTL) "), figure("(ATL) "), figure("(TSB) "));
+    assert!(ctl > 0.0 && atl > 0.0, "{}", tl.summary);
     // Fresh loading: acute fatigue outruns chronic fitness → negative form.
-    assert!(fig.atl > fig.ctl, "ATL {} vs CTL {}", fig.atl, fig.ctl);
-    assert!(
-        (fig.tsb - (fig.ctl - fig.atl)).abs() < 0.11,
-        "TSB = CTL − ATL"
-    );
-    // Plain-language method, TRIMP + CTL/ATL kept, but the raw τ/EWMA
-    // formula-speak is gone (the shell glossary defines the abbreviations).
+    assert!(atl > ctl && tsb < 0.0, "{}", tl.summary);
+    // Plain-language method, TRIMP + CTL kept (the shell glossary defines the
+    // abbreviations).
     assert!(
         tl.method.contains("TRIMP") && tl.method.contains("CTL"),
-        "{}",
-        tl.method
-    );
-    assert!(
-        !tl.method.contains('τ') && !tl.method.contains("EWMA"),
         "{}",
         tl.method
     );

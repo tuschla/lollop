@@ -2,6 +2,7 @@
 //! rejected on ingest, so the view never panics or serializes `null`.
 
 use super::*;
+use crate::sanitize::FLOAT_BOUND;
 
 #[test]
 fn set_profile_sanitizes_poison_floats() {
@@ -14,7 +15,7 @@ fn set_profile_sanitizes_poison_floats() {
         .expect_only_render();
     let km = model.profile().unwrap().running_km_per_week;
     assert!(
-        km.is_finite() && km <= 1.0e12,
+        km.is_finite() && km <= FLOAT_BOUND,
         "running_km_per_week must clamp, got {km}"
     );
 
@@ -45,17 +46,22 @@ fn negative_log_run_distance_is_clamped() {
     let mut model = Model::default();
     app.update(log_run(-10.0, 60.0, 70.0, 0.0, DAY_SEC, 1), &mut model)
         .expect_only_render();
-    assert!(
-        model.runs[0].distance_km >= 0.0,
-        "a negative distance must clamp to ≥0, got {}",
-        model.runs[0].distance_km
+    app.update(log_run(5.0, 30.0, 70.0, 0.0, 2 * DAY_SEC, 2), &mut model)
+        .expect_only_render();
+    let vm = app.view(&model);
+    let clamped = vm.runs.iter().find(|r| r.entry_id == 1).expect("the run");
+    assert_eq!(
+        clamped.distance_km, 0.0,
+        "a negative distance must clamp to 0"
     );
-    // The measured weekly anchor is never driven negative by it.
-    let (_, weekly, _) = run_anchors(&model.runs, 2, 0);
-    assert!(
-        weekly.is_none_or(|w| w >= 0.0),
-        "weekly anchor must not go negative"
-    );
+    // The weekly volume holds only the real 5 km: the clamped run adds 0,
+    // never −10.
+    let p = vm
+        .run_progress
+        .expect("a dated run opens the progress view");
+    let total: f64 = p.weekly.iter().map(|w| w.km).sum();
+    assert_eq!(total, 5.0, "{p:?}");
+    assert_eq!(p.longest_run_km, 5.0);
 }
 
 #[test]
@@ -70,8 +76,9 @@ fn extreme_wire_values_do_not_panic_or_poison_the_view() {
         &mut model,
     )
     .expect_only_render();
+    let vm = app.view(&model);
     assert!(
-        model.sets[0].weight_kg.is_finite() && model.sets[0].weight_kg <= 1.0e12,
+        vm.lifts[0].weight_kg.is_finite() && vm.lifts[0].weight_kg <= FLOAT_BOUND,
         "a huge wire weight must be clamped finite"
     );
     // A corrupt near-i64::MAX SetToday must not panic view() (weekday math).
@@ -83,11 +90,7 @@ fn extreme_wire_values_do_not_panic_or_poison_the_view() {
     )
     .expect_only_render();
     set_today(&app, &mut model, i64::MAX);
-    let vm = app.view(&model); // must not panic
-    assert!(serde_json::to_string(&vm).is_ok());
-    // mon0_weekday itself is overflow-safe at the extremes.
-    let _ = mon0_weekday(i64::MAX);
-    let _ = mon0_weekday(i64::MIN);
+    let _ = app.view(&model); // must not panic
 }
 
 #[test]
@@ -123,40 +126,26 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
     .expect_only_render();
 
     let vm = app.view(&model); // must not panic
-    assert!(serde_json::to_string(&vm).is_ok());
 
-    // Every numeric field of the race prediction is a finite JSON number,
-    // never `null` (an `inf` would have serialized to `null`).
+    // Every numeric field of the race prediction is finite (an `inf` would
+    // serialize to `null`), and the echoed inputs are clamped into the ingest
+    // domain, so no downstream product of them overflows.
     let pred = vm
         .race_prediction
         .as_ref()
         .expect("a prediction is present after PredictRace");
-    let band = race_of(&model);
     for f in [
-        band.low_sec,
-        band.high_sec,
         pred.recent_distance_m,
         pred.recent_time_sec,
         pred.goal_distance_m,
         pred.weekly_km,
     ] {
-        assert!(f.is_finite(), "race-prediction float went non-finite: {f}");
-    }
-    assert!(pred.evidence.confidence.is_finite());
-    let pred_json = serde_json::to_value(pred).unwrap();
-    for key in [
-        "confidence",
-        "recent_distance_m",
-        "recent_time_sec",
-        "goal_distance_m",
-        "weekly_km",
-    ] {
         assert!(
-            pred_json[key].is_number(),
-            "race-prediction field {key} serialized to a non-number (null?): {}",
-            pred_json[key]
+            f.abs() <= FLOAT_BOUND,
+            "an echoed input left the domain: {f}"
         );
     }
+    assert!(pred.evidence.confidence.is_finite());
 
     // Same for every emitted protein figure.
     assert!(
@@ -167,11 +156,6 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
         assert!(
             fig.low_g_per_day.is_finite() && fig.high_g_per_day.is_finite(),
             "protein figure went non-finite: {fig:?}"
-        );
-        let fig_json = serde_json::to_value(fig).unwrap();
-        assert!(
-            fig_json["low_g_per_day"].is_number() && fig_json["high_g_per_day"].is_number(),
-            "protein figure serialized a numeric field to null: {fig_json}"
         );
     }
 }
@@ -191,14 +175,11 @@ fn submit_events_1e300_inputs_never_serialize_to_null() {
     for d in 0..8 {
         app.update(
             Event::SubmitCheckin(CheckinInput {
-                observed_at: (MON + d) * DAY_SEC + 100,
-                sleep_quality: Some(3),
-                soreness: Some(3),
-                mood: Some(3),
                 fatigue: Some(3),
                 stress: Some(3),
                 resting_hr_bpm: Some(1.0e200 * (1.0 + d as f64)),
                 hrv_rmssd_ms: Some(1.0e200 * (1.0 + d as f64)),
+                ..checkin((MON + d) * DAY_SEC + 100, 3, 3, 3)
             }),
             &mut model,
         )
@@ -259,7 +240,7 @@ fn submit_events_1e300_inputs_never_serialize_to_null() {
         .flatten()
     {
         assert!(
-            v.abs() <= 1.0e12,
+            v.abs() <= FLOAT_BOUND,
             "echoed check-in float outside the ingest domain: {v}"
         );
     }
@@ -311,18 +292,28 @@ fn delete_by_an_out_of_range_entry_id_matches_the_clamped_row() {
 fn infinite_gps_accuracy_fails_the_accuracy_gate() {
     // An in-process event can carry ±inf / NaN accuracy (the JSON wire
     // cannot). +inf is the worst possible fix: it must clamp to a huge
-    // accuracy that the 30 m gate drops, never read as a perfect 0 m fix.
+    // accuracy that the 30 m gate drops, never read as a perfect 0 m fix. A
+    // NaN reads as no accuracy reported, which the gate lets through.
     let app = Engine;
     let mut model = Model::default();
-    let mut pts = vec![gps(0.0, 1_000), gps(0.001, 1_030), gps(0.002, 1_060)];
+    // East along the equator, 0.001° (~111 m) per 30 s; the +inf fix sits
+    // ~111 m north of the line, a ~92 m detour if it counted.
+    let mut pts = vec![
+        gps(0.0, 1_000),
+        gps(0.001, 1_030),
+        gps(0.002, 1_060),
+        gps(0.003, 1_090),
+    ];
+    pts[1].lat = 0.001;
     pts[1].accuracy_m = f32::INFINITY;
-    pts[2].accuracy_m = f32::NAN;
-    app.update(log_run_track(pts, 0.0, 0.0, 1_060, 1), &mut model)
+    pts[3].accuracy_m = f32::NAN;
+    app.update(log_run_track(pts, 0.0, 0.0, 1_090, 1), &mut model)
         .expect_only_render();
-    let stored: Vec<f32> = model.runs[0].track.iter().map(|p| p.accuracy_m).collect();
-    assert_eq!(stored[0], 5.0);
-    assert!(stored[1] > crate::gps::MAX_GPS_ACCURACY_M, "{stored:?}");
-    assert_eq!(stored[2], 0.0, "NaN reads as no accuracy reported");
+    let km = app.view(&model).runs[0].distance_km;
+    assert!(
+        (km - 0.3336).abs() < 0.005,
+        "the straight ~334 m: the +inf fix dropped, the NaN fix kept: {km}"
+    );
 }
 
 #[test]

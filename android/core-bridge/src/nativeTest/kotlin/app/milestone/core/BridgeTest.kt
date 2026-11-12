@@ -15,8 +15,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
@@ -29,16 +31,18 @@ private const val VIEW_FIXTURES = "shared/tests/fixtures/view_snapshot"
 private const val COMPACTION_FIXTURES = "shared/tests/fixtures/compaction"
 private const val SOAK_RUN = "shared/tests/fixtures/device_tracks/soak-e37-20min.events.ndjson"
 
-private const val PROFILE =
-    """{"SetProfile":{"progression_cadence":"EverySession","lift_goal":"MaxStrength",""" +
-        """"goal_distance":"FiveK","concurrent_goal":"Strength","weekly_sets":12,""" +
-        """"running_days_per_week":3,"running_km_per_week":30.0,"advanced":false}}"""
+/** The first [type] line of the core's hybrid snapshot log: an event as the shell writes it. */
+private fun fixtureEvent(type: String): String =
+    readLogLines("$VIEW_FIXTURES/hybrid.events.ndjson").first { it.startsWith("{\"$type\"") }
+
+private val PROFILE = fixtureEvent("SetProfile")
+private val LOG_SET = json(fixtureEvent("LogSet")).jsonObject.getValue("LogSet").jsonObject
 
 private fun setEvent(entryId: Int): String =
-    """{"LogSet":{"exercise":"Back Squat","weight_kg":100.0,"reps":5,"rpe":8.0,""" +
-        """"observed_at":1725904800,"entry_id":$entryId,"hold_sec":null}}"""
+    JsonObject(mapOf("LogSet" to JsonObject(LOG_SET + ("entry_id" to JsonPrimitive(entryId))))).toString()
 
-private fun accepted(answer: ByteArray?): Boolean = answer?.firstOrNull() == '['.code.toByte()
+/** The core applied the event: it answered the effect-request array ([CoreBridge.update]). */
+private fun accepted(answer: ByteArray?): Boolean = answer != null && answer.isNotEmpty() && json(answer) is JsonArray
 
 private fun json(bytes: ByteArray?): JsonElement = json(bytes!!.decodeToString())
 

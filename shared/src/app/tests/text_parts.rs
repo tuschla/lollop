@@ -4,7 +4,9 @@
 //! advice link.
 
 use crate::app::reviews::link_win_advice;
-use crate::app::text_parts::{glossary_spans, is_prose, keep_units, spoken_subject};
+use crate::app::text_parts::{
+    CLAIM_MAX_UNITS, SUBJECT_MAX_UNITS, glossary_spans, is_prose, keep_units, spoken_subject,
+};
 use crate::app::view_types::{AdjustmentView, GlossaryTerm, basis_sentences};
 
 #[test]
@@ -117,28 +119,29 @@ fn glossary_spans_are_utf16_offsets() {
 }
 
 #[test]
-fn spoken_subject_is_the_first_sentence_up_to_60_units() {
+fn spoken_subject_is_the_first_sentence_up_to_the_unit_cap() {
     assert_eq!(
         spoken_subject("New best on Back squat: 120 kg × 5. Your estimated max is up."),
         "New best on Back squat: 120 kg × 5"
     );
     assert_eq!(spoken_subject("Easy run"), "Easy run");
-    let long = "a".repeat(70);
-    assert_eq!(spoken_subject(&long).len(), 60);
-    // Never cut inside a character: 59 units then a two-unit emoji.
-    let astral = format!("{}💪 more", "b".repeat(59));
-    assert_eq!(spoken_subject(&astral), "b".repeat(59));
+    let long = "a".repeat(SUBJECT_MAX_UNITS + 10);
+    assert_eq!(spoken_subject(&long).len(), SUBJECT_MAX_UNITS);
+    // Never cut inside a character: one unit short, then a two-unit emoji.
+    let astral = format!("{}💪 more", "b".repeat(SUBJECT_MAX_UNITS - 1));
+    assert_eq!(spoken_subject(&astral), "b".repeat(SUBJECT_MAX_UNITS - 1));
     // A decimal point is no sentence end.
     assert_eq!(spoken_subject("Run 3.5 km. Then rest."), "Run 3.5 km");
 }
 
 #[test]
-fn a_summary_over_90_utf16_units_is_prose() {
-    assert!(!is_prose(&"a".repeat(90)));
-    assert!(is_prose(&"a".repeat(91)));
+fn a_summary_over_the_claim_cap_in_utf16_units_is_prose() {
+    let cap = CLAIM_MAX_UNITS as usize;
+    assert!(!is_prose(&"a".repeat(cap)));
+    assert!(is_prose(&"a".repeat(cap + 1)));
     // Counted in UTF-16 units, as a shell measures its strings: "×" is one.
-    assert!(!is_prose(&format!("{}×", "a".repeat(89))));
-    assert!(is_prose(&format!("{}💪", "a".repeat(89))));
+    assert!(!is_prose(&format!("{}×", "a".repeat(cap - 1))));
+    assert!(is_prose(&format!("{}💪", "a".repeat(cap - 1))));
 }
 
 #[test]

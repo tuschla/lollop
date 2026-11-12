@@ -3,7 +3,6 @@ package app.milestone
 import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.qa.QaHarness.fixture
 import app.milestone.qa.QaHarness.onAppScope
@@ -136,7 +135,7 @@ class UpgradeFixturesTest {
             assertNotNull("$v: the plan", first.view.program)
             // The first boot may rewrite the log (compaction): the next process reads
             // that rewrite and must still list everything.
-            ProcessDeath.kill(ctx)
+            QaHarness.killProcess()
             val second = bootCore()
             assertFalse("$v: the rewritten log skipped lines", second.stale)
             assertSameHistory("$v after the rewrite", v, second.view)
@@ -152,7 +151,7 @@ class UpgradeFixturesTest {
             QaHarness.reset(ctx)
             installOldLog(v)
             // The old build's prefs: setup was done long ago.
-            ctx.setupPrefs().edit().putBoolean("onboarding_done", true).commit()
+            ctx.setupPrefs().edit().putBoolean(KEY_ONBOARDING_DONE, true).commit()
             val before = QaHarness.logLines(ctx)
             rule.launchApp()
             val model = checkNotNull(EventDispatcher.model.value) { "$v: no model after boot" }
@@ -175,7 +174,7 @@ class UpgradeFixturesTest {
         logFile.parentFile!!.mkdirs()
         logFile.writeBytes(fixture("upgrade/203ab56-plan-removed.log.ndjson"))
         assertTrue("the old rewrite kept no plan line", QaHarness.logLines(ctx).none { EventLog.variantOf(it) in setOf("GeneratePlan", "ClearPlan") })
-        ctx.setupPrefs().edit().putBoolean("onboarding_done", true).putBoolean(KEY_PLAN_CLEARED, true).commit()
+        ctx.setupPrefs().edit().putBoolean(KEY_ONBOARDING_DONE, true).putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         val model = checkNotNull(EventDispatcher.model.value)
         assertEquals("the set", 1, model.lifts.size)
@@ -187,7 +186,7 @@ class UpgradeFixturesTest {
         assertFalse("the legacy pref is gone", ctx.setupPrefs().contains(KEY_PLAN_CLEARED))
 
         // The next launch has only the log.
-        ProcessDeath.kill(ctx)
+        QaHarness.killProcess()
         rule.launchApp()
         assertNull("no plan after a relaunch", checkNotNull(EventDispatcher.model.value).program)
         assertTrue("boot generated a plan", QaHarness.logLines(ctx).none { EventLog.variantOf(it) == "GeneratePlan" })
@@ -212,7 +211,7 @@ class UpgradeFixturesTest {
         assertEquals("oldest entry day (the legacy set)", 20666L, summary.firstDay)
         assertEquals("newest entry day", 20724L, summary.lastDay)
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
-        ProcessDeath.kill(ctx)
+        QaHarness.killProcess()
         val restored = bootCore()
         assertFalse(restored.stale)
         assertFalse("the backup's plan is not removed", restored.view.plan_removed)

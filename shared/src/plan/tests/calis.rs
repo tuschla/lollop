@@ -39,14 +39,6 @@ fn with(anchors: Vec<CalisAnchor>) -> Anchors {
     }
 }
 
-fn lift_days(prog: &Program) -> Vec<&Session> {
-    prog.mesocycle
-        .sessions
-        .iter()
-        .filter(|s| matches!(s.session_type, SessionType::Lift(_)))
-        .collect()
-}
-
 fn calis(rx: &Rx) -> &CalisthenicsPrescription {
     match &rx.value {
         Prescription::Calisthenics(c) => c,
@@ -56,7 +48,7 @@ fn calis(rx: &Rx) -> &CalisthenicsPrescription {
 
 /// The first prescribed item on `ladder` anywhere in the week.
 fn item(prog: &Program, ladder: LadderId) -> Option<&Rx> {
-    lift_days(prog)
+    lift_sessions(prog)
         .into_iter()
         .flat_map(|s| s.prescriptions.iter())
         .find(|p| calis(p).ladder == ladder)
@@ -66,7 +58,7 @@ fn item(prog: &Program, ladder: LadderId) -> Option<&Rx> {
 fn calisthenics_profile_synthesizes_pattern_balanced_ladder_days() {
     let prog = synthesize(&PlanProfile::new(&calis_profile()), &Anchors::default(), 0)
         .expect("a plan is synthesized");
-    let days = lift_days(&prog);
+    let days = lift_sessions(&prog);
     assert_eq!(days.len(), 3, "pure calisthenics = 3 full-body lift days");
     for s in &days {
         assert_eq!(
@@ -101,7 +93,7 @@ fn calisthenics_profile_synthesizes_pattern_balanced_ladder_days() {
 /// Count the week's items per movement family.
 fn family_counts(prog: &Program) -> [usize; 7] {
     let mut n = [0usize; 7];
-    for s in lift_days(prog) {
+    for s in lift_sessions(prog) {
         for p in &s.prescriptions {
             let idx = match calis(p).ladder {
                 LadderId::HorizontalPush => 0,
@@ -138,6 +130,27 @@ fn calisthenics_every_pattern_at_least_twice_weekly() {
     }
 }
 
+/// A stated weekly target below the intermediate MEV (10 sets,
+/// HYP-MEV-AGE-001) is raised to it before the split: two sessions of 5 sets,
+/// never 6/2 = 3.
+#[test]
+fn a_sub_mev_weekly_target_is_raised_to_the_mev_floor() {
+    let p = Profile {
+        weekly_sets: 6,
+        lift_days_per_week: Some(2),
+        ..calis_profile()
+    };
+    let prog = synthesize(&PlanProfile::new(&p), &Anchors::default(), 0).expect("plan");
+    let days = lift_sessions(&prog);
+    assert_eq!(days.len(), 2);
+    for s in days {
+        for rx in &s.prescriptions {
+            let c = calis(rx);
+            assert_eq!(c.sets, 5, "{:?}", c.ladder);
+        }
+    }
+}
+
 #[test]
 fn hybrid_calisthenics_includes_vertical_push() {
     let hybrid = Profile {
@@ -170,7 +183,7 @@ fn no_pull_bar_profile_never_prescribes_vertical_pull() {
         anchor(LadderId::Dip, 3),
     ]);
     let prog = synthesize(&PlanProfile::new(&none), &anchors, 0).expect("plan");
-    for s in lift_days(&prog) {
+    for s in lift_sessions(&prog) {
         for p in &s.prescriptions {
             let c = calis(p);
             assert!(
@@ -223,7 +236,7 @@ fn hypertrophy_goal_gets_6_to_15_reps_at_0_to_1_rir() {
     assert_eq!(c.target, TierTarget::Reps { low: 6, high: 12 });
     assert_eq!(c.rir, (0, 1));
     assert_eq!(push.claim_id(), claims::CAL_GOAL_RIR_001);
-    for s in lift_days(&prog) {
+    for s in lift_sessions(&prog) {
         for p in &s.prescriptions {
             let c = calis(p);
             let t = crate::calisthenics::tier(c.ladder, c.tier).unwrap();
@@ -387,7 +400,7 @@ fn calisthenics_power_day_leads_with_ballistic_items_capped_contacts() {
         ..calis_profile()
     };
     let prog = synthesize(&PlanProfile::new(&power), &Anchors::default(), 0).expect("plan");
-    for s in lift_days(&prog) {
+    for s in lift_sessions(&prog) {
         let first: Vec<LadderId> = s
             .prescriptions
             .iter()
@@ -567,7 +580,7 @@ fn novice_calisthenics_leaves_two_to_three_reps() {
         );
         // Day-0 easy rungs too: no near-failure set on day 1.
         let prog = synthesize(&PlanProfile::new(&novice), &Anchors::default(), 0).expect("plan");
-        for s in lift_days(&prog) {
+        for s in lift_sessions(&prog) {
             for p in &s.prescriptions {
                 let c = calis(p);
                 if !c.target.is_timed() && !c.ballistic {

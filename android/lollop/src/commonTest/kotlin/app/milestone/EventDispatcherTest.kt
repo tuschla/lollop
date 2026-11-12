@@ -9,11 +9,11 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
-import org.junit.Before
-import org.junit.Test
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertSame
 
 /**
  * The process-lifetime [EventDispatcher] consumer: it must survive a throwing
@@ -21,30 +21,35 @@ import org.junit.Test
  * must hear about through [EventDispatcher.notices] — including one raised while
  * no Activity is collecting.
  *
- * The [TestSink.sender] / [TestSink.batchSender] seams make this
- * testable off-device: the real send paths cross the JNI boundary (`Core.send`,
- * unavailable in a plain JVM unit test), so fakes stand in for them here.
+ * The process's send path is a [Sink] of the test's: the dispatcher's units reach
+ * it as they would the core engine ([EngineSink]).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class EventDispatcherTest {
-    private lateinit var realSender: suspend (Event) -> SendResult
-    private lateinit var realBatchSender: suspend (List<Event>) -> SendResult
+class EventDispatcherTest : PlatformTest() {
+    /** The event queue's send path, answering what the test scripts. */
+    private class Sink : EventSink {
+        var sender: suspend (Event) -> SendResult = { error("unexpected send of $it") }
+        var batchSender: suspend (List<Event>) -> SendResult = { error("unexpected batch of $it") }
 
-    @Before
+        override suspend fun send(e: Event): SendResult = sender(e)
+
+        override suspend fun sendAll(events: List<Event>): SendResult = batchSender(events)
+    }
+
+    private val sink = Sink()
+
+    @BeforeTest
     fun setUp() {
         // The consumer runs on AppProcess.scope (Dispatchers.Main.immediate).
         // Install the test Main BEFORE the process starts so its scope dispatches
         // through it; runTest then shares this scheduler.
         Dispatchers.setMain(StandardTestDispatcher())
-        AppRuntime.resetForTest(sink = TestSink)
-        realSender = TestSink.sender
-        realBatchSender = TestSink.batchSender
+        AppRuntime.resetForTest(sink = sink)
     }
 
-    @After
+    @AfterTest
     fun tearDown() {
-        TestSink.sender = realSender
-        TestSink.batchSender = realBatchSender
+        AppRuntime.resetForTest()
         Dispatchers.resetMain()
     }
 
@@ -55,7 +60,7 @@ class EventDispatcherTest {
         var calls = 0
         // First send throws (a malformed view / Core.send blow-up); the second
         // returns a recognizable accepted result.
-        TestSink.sender = { _ ->
+        sink.sender = { _ ->
             calls++
             if (calls == 1) throw RuntimeException("first send blows up")
             good
@@ -74,7 +79,7 @@ class EventDispatcherTest {
         // The core did NOT accept the event (a serde-rejected event / panic
         // envelope): the consumer still publishes the view but must flag it.
         val rejectedView = ViewModel(input_count = 7)
-        TestSink.sender = { _ -> SendResult(rejectedView, accepted = false) }
+        sink.sender = { _ -> SendResult(rejectedView, accepted = false) }
 
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
@@ -92,7 +97,7 @@ class EventDispatcherTest {
     fun aNoticeRaisedWithNoCollectorReachesTheNextCollector() = runTest {
         // Activity recreation: the event lands while nothing collects. The notice
         // must wait for the next collector instead of being dropped.
-        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = false) }
+        sink.sender = { _ -> SendResult(ViewModel(), accepted = false) }
         EventDispatcher.send(Event.SetToday(0L, 0))
         advanceUntilIdle()
 
@@ -108,7 +113,7 @@ class EventDispatcherTest {
     fun anAcceptedButUnpersistedEventRaisesNotSaved() = runTest {
         // Disk full: the core applied the entry in memory, but the log append
         // failed, so it is gone after the next restart and must not look saved.
-        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = true, persisted = false) }
+        sink.sender = { _ -> SendResult(ViewModel(), accepted = true, persisted = false) }
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
         runCurrent()
@@ -124,7 +129,7 @@ class EventDispatcherTest {
     fun aRunOfStaleResultsRaisesOneUnreadablePerRun() = runTest {
         val stale = listOf(false, true, true, true, false, true)
         var i = 0
-        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = true, stale = stale[i++]) }
+        sink.sender = { _ -> SendResult(ViewModel(), accepted = true, stale = stale[i++]) }
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
         runCurrent()
@@ -142,7 +147,7 @@ class EventDispatcherTest {
         val batchView = ViewModel(input_count = 3)
         val batches = mutableListOf<List<Event>>()
         var published = 0
-        TestSink.batchSender = { events ->
+        sink.batchSender = { events ->
             batches += events
             SendResult(batchView, accepted = true)
         }

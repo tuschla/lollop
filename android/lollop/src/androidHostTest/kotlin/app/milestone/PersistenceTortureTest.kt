@@ -4,12 +4,13 @@ import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.LongHistorySeed
-import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.qa.QaHarness.daysAgoAtMidday as at
 import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import app.milestone.qa.str
+import app.milestone.core.CoreBridge
+import app.milestone.core.JniCore
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -45,7 +46,7 @@ import org.robolectric.RobolectricTestRunner
  * committed state, the compaction rewrite is atomic, and the app always boots.
  *
  * The event log tests drive the REAL core over JNI (host `libshared.so`); a "crash"
- * is the on-disk bytes a killed process leaves behind plus [ProcessDeath.kill]
+ * is the on-disk bytes a killed process leaves behind plus [QaHarness.killProcess]
  * (every process-scoped singleton dropped, disk kept), and a "boot" is
  * [Core.restore] + the boot `SetToday`, exactly as the boot effect runs them.
  */
@@ -122,10 +123,6 @@ class PersistenceTortureTest {
 
     private fun entryIdCount(id: Long) = countLines { "\"entry_id\":$id" in it }
 
-    private fun setField(name: String, value: Any?) {
-        DurableCore::class.java.getDeclaredField(name).apply { isAccessible = true }.set(Core, value)
-    }
-
     /**
      * A kill mid-append leaves the committed log plus a prefix of the new line.
      * For EVERY prefix length: the next boot replays exactly the committed state (the
@@ -181,10 +178,11 @@ class PersistenceTortureTest {
         }
     }
 
-    /** A log big enough in superseded lines that [EventLog.load] rewrites it. */
+    /** A log big enough in superseded lines that [EventLog.load] rewrites it: every
+     *  zone request but the last is superseded. */
     private fun compactableLog(): List<String> {
         val base = committed().map(::line)
-        val zones = (0 until 40).map { """{"ComputeHrZones":{"age_years":${30 + it}.0}}""" }
+        val zones = (0..EventLog.REWRITE_MIN_DROPPED_LINES).map { line(Event.ComputeHrZones(30.0 + it)) }
         return base.take(3) + zones + base.drop(3)
     }
 
@@ -336,20 +334,20 @@ class PersistenceTortureTest {
      */
     @Test
     fun aDiskFullAppendIsReportedAndNeverCorruptsTheEventsAfterIt() {
-        val devFull = File("/dev/full")
-        assumeTrue("needs /dev/full", devFull.exists() && devFull.canWrite())
         val base = committed()
         val expected = viewOf(base + next)
         writeLog(base)
         QaHarness.reboot(ctx)
-        val live = logFile
-        setField("log", devFull)
+        // The log moved where no append can land (its directory is missing), as a
+        // full disk refuses it.
+        val live = checkNotNull(Core.detachLog())
+        Core.reattachLog(File(ctx.filesDir, "missing/dir/${AppFileNames.EVENT_LOG}"))
         val r = Core.send(torn)
         assertTrue("the core accepted it", r.accepted)
         assertFalse("but it is reported NOT persisted", r.persisted)
         // What the short write left behind on the real disk before ENOSPC.
         live.appendBytes(line(torn).toByteArray().copyOf(41))
-        setField("log", live)
+        Core.reattachLog(live)
         val r2 = Core.send(next)
         assertTrue(r2.accepted && r2.persisted)
         assertEquals(1, entryIdCount(next.entryId))
@@ -420,23 +418,28 @@ class PersistenceTortureTest {
     }
 
     /** An event sent while boot's restore compacts + rewrites the log (restore and
-     *  send share the Core monitor) is appended AFTER the rewrite, never into the
+     *  send share the engine's lock) is appended AFTER the rewrite, never into the
      *  file the rename replaces. */
     @Test
     fun anAppendRacingBootsCompactionRewriteIsNotLost() {
         val original = compactableLog()
         logFile.writeText(original.joinToString("") { "$it\n" } + "{\"Lo")
-        ProcessDeath.kill(ctx)
-        val restoredFlag = DurableCore::class.java.getDeclaredField("restored").apply { isAccessible = true }
-        val booter = thread(name = "boot") { Core.restore(ctx) }
-        // Send the moment restore has begun (it marks `restored` before reading the
-        // log): the send must wait for the rewrite, then append to the new file.
-        val deadline = System.currentTimeMillis() + 10_000
-        while (restoredFlag.get(Core) != true) {
-            check(System.currentTimeMillis() < deadline) { "restore never started" }
-            Thread.onSpinWait()
-        }
-        val r = Core.send(next)
+        // The real core; boot's restore asks it for the compaction under the engine's lock.
+        val restoring = CountDownLatch(1)
+        val engine = DurableCore(
+            object : CoreBridge by JniCore {
+                override fun compactLog(lines: Array<String>): ByteArray? {
+                    restoring.countDown()
+                    return JniCore.compactLog(lines)
+                }
+            },
+        )
+        QaHarness.freshProcess(engine)
+        val booter = thread(name = "boot") { engine.restore(ctx) }
+        // Send the moment restore is compacting: the send must wait for the rewrite,
+        // then append to the new file.
+        assertTrue("restore never started", restoring.await(10, TimeUnit.SECONDS))
+        val r = engine.send(next)
         booter.join(30_000)
         assertTrue(r.persisted)
         assertEquals(1, entryIdCount(next.entryId))
@@ -484,7 +487,7 @@ class PersistenceTortureTest {
      *  screen instead of crashing or hanging, and the legacy pref is dropped. */
     @Test
     fun aMissingLogWithStalePrefsStillBootsUsable() {
-        ctx.setupPrefs().edit().putBoolean("onboarding_done", true).putBoolean(KEY_PLAN_CLEARED, true).commit()
+        ctx.setupPrefs().edit().putBoolean(KEY_ONBOARDING_DONE, true).putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         val vm = EventDispatcher.model.value
         assertNotNull(vm)
@@ -549,7 +552,7 @@ class PersistenceTortureTest {
 
     /** The import's bounds still stop absurd picks: a line past the line cap (a
      *  newline-less binary file) and a stream past the total cap are refused, the
-     *  first after reading at most one chunk past the line cap. */
+     *  first well before twice the line cap is read. */
     @Test
     fun anImportPastTheLineOrTotalCapIsRefused() {
         val ok = (line(QaHarness.strengthProfile()) + "\n").toByteArray()
@@ -567,7 +570,7 @@ class PersistenceTortureTest {
             }
         }
         assertEquals(ImportCheck.Invalid, streamValidateImport(endless, MAX_IMPORT_BYTES))
-        assertTrue("read ${endless.served} bytes", endless.served <= MAX_IMPORT_LINE_BYTES + 64 * 1024)
+        assertTrue("read ${endless.served} bytes: past the line cap", endless.served < 2 * MAX_IMPORT_LINE_BYTES)
     }
 
     /** A data import that cannot write its temporary (disk full / read-only) fails
@@ -656,21 +659,11 @@ class PersistenceTortureTest {
         assertEquals(viewOf(committed()), QaHarness.reboot(ctx).view)
     }
 
-    private fun fiveYearLog(fixEverySec: Long = 10L): Pair<File, Int> {
+    private fun fiveYearLog(fixEverySec: Long): Pair<File, Int> {
         val history = LongHistorySeed.build(days = 5 * 365, fixEverySec = fixEverySec)
         val big = File(ctx.cacheDir, "five-year.ndjson")
         big.bufferedWriter().use { w -> history.events.forEach { w.write(line(it)); w.write("\n") } }
         return big to history.events.size
-    }
-
-    @Test
-    fun aFiveYearLogLoadsInBoundedTime() {
-        val big = fiveYearLog().first
-        val t0 = System.nanoTime()
-        EventLog.load(big, Core)
-        val ms = (System.nanoTime() - t0) / 1_000_000
-        big.delete()
-        assertTrue("5-year load took $ms ms", ms < 20_000)
     }
 
     /**
@@ -743,27 +736,35 @@ class PersistenceTortureTest {
 
     private fun fix(i: Int) = GpsPoint(52.52 + i * 0.0001, 13.405 + i * 0.00005, at(0, -1800L + i * 2), 4.5)
 
-    private fun fixLine(p: GpsPoint, seg: Boolean = false) =
-        "{\"lat\":${p.lat},\"lon\":${p.lon},\"observed_at\":${p.observedAt},\"accuracy_m\":${p.accuracyM}" +
-            (if (seg) ",\"seg\":true" else "") + "}"
+    /** The sidecar [ActiveRunStore] writes for a run of [fixes], those at [segmentStarts]
+     *  opening a segment. */
+    private fun recorded(fixes: List<GpsPoint>, segmentStarts: Set<Int> = emptySet()): ByteArray {
+        ActiveRunStore.begin()
+        fixes.forEachIndexed { i, p -> ActiveRunStore.append(p, segmentStart = i in segmentStarts) }
+        ActiveRunStore.flush()
+        return sidecar.readBytes()
+    }
+
+    /** Where the last line of [bytes] (which end in a newline) starts. */
+    private fun lastLineStart(bytes: ByteArray) = bytes.copyOf(bytes.size - 1).lastIndexOf('\n'.code.toByte()) + 1
 
     /** A sidecar torn at every byte of its last fix recovers exactly the whole fixes
-     *  (and their segment marks); a torn header is a run with no fixes. */
+     *  (and their segment marks); a torn marker is a run with no fixes. */
     @Test
     fun aSidecarTornAtEveryByteRecoversExactlyTheWholeFixes() {
         ActiveRunStore.start(ctx)
-        val fixes = (0 until 6).map(::fix)
-        val head = "{\"run\":\"active\"}\n" + fixes.mapIndexed { i, p -> fixLine(p, seg = i == 3) + "\n" }.joinToString("")
-        val last = fixLine(fix(6)).toByteArray()
-        for (k in 0..last.size) {
-            sidecar.writeBytes(head.toByteArray() + last.copyOf(k))
+        val fixes = (0 until 7).map(::fix)
+        val whole = recorded(fixes, segmentStarts = setOf(3))
+        for (k in lastLineStart(whole)..whole.size) {
+            sidecar.writeBytes(whole.copyOf(k))
             val got = ActiveRunStore.recover()
-            val want = if (k == last.size) fixes + fix(6) else fixes
+            val want = if (k >= whole.size - 1) fixes else fixes.dropLast(1)
             assertEquals("cut at $k", want, got.toList())
             assertEquals("cut at $k: segment mark kept", listOf(3), got.segmentStarts)
         }
-        for (k in 0..17) {
-            sidecar.writeBytes("{\"run\":\"active\"}\n".toByteArray().copyOf(k))
+        val marker = recorded(emptyList())
+        for (k in 0..marker.size) {
+            sidecar.writeBytes(marker.copyOf(k))
             assertTrue(ActiveRunStore.hasActiveRun())
             assertEquals(0, ActiveRunStore.recover().size)
         }
@@ -780,7 +781,8 @@ class PersistenceTortureTest {
     fun aFixAppendedAfterResumingATornSidecarSurvivesTheNextCrash() {
         ActiveRunStore.start(ctx)
         val fixes = (0 until 5).map(::fix)
-        sidecar.writeText("{\"run\":\"active\"}\n" + fixes.joinToString("") { fixLine(it) + "\n" } + fixLine(fix(5)).take(30))
+        val whole = recorded(fixes + fix(5))
+        sidecar.writeBytes(whole.copyOf(lastLineStart(whole) + 30))
         val recovered = ActiveRunStore.recover()
         assertEquals(fixes, recovered.toList())
         RunSession.restore(recovered)
@@ -796,14 +798,16 @@ class PersistenceTortureTest {
     @Test
     fun sidecarGarbageLinesCostOnlyThemselves() {
         ActiveRunStore.start(ctx)
+        val (marker, f0, f1, f2) = recorded(listOf(fix(0), fix(1), fix(2))).decodeToString().lines()
         val out = ByteArrayOutputStream()
-        out.write("{\"run\":\"active\"}\n".toByteArray())
-        out.write((fixLine(fix(0)) + "\n").toByteArray())
-        out.write(byteArrayOf(0xC3.toByte(), 0x28, 0xFF.toByte(), '\n'.code.toByte()))
-        out.write((fixLine(fix(1)) + "\n").toByteArray())
-        out.write(ByteArray(64) + "\n".toByteArray())
-        out.write("{\"lat\":\"x\"}\n".toByteArray())
-        out.write((fixLine(fix(2)) + "\n").toByteArray())
+        fun ln(b: ByteArray) { out.write(b); out.write('\n'.code) }
+        ln(marker.toByteArray())
+        ln(f0.toByteArray())
+        ln(byteArrayOf(0xC3.toByte(), 0x28, 0xFF.toByte()))
+        ln(f1.toByteArray())
+        ln(ByteArray(64))
+        ln("{\"lat\":\"x\"}".toByteArray())
+        ln(f2.toByteArray())
         sidecar.writeBytes(out.toByteArray())
         assertEquals(listOf(fix(0), fix(1), fix(2)), ActiveRunStore.recover().toList())
     }

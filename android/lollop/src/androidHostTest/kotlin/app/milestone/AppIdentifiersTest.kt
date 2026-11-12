@@ -13,12 +13,12 @@ import org.xml.sax.InputSource
  * The copies of the app's identifiers that live where Kotlin can't be referenced
  * (Android XML, the iOS Info.plists, entitlements and Swift, the iOS CI) match their
  * one definition: [AppFileNames], [RunFileType], [OpenDest] / [OPEN_URL_SCHEME] and
- * the identifiers in iosApp/project.yml. The unit-test working directory is the
- * lollop module.
+ * the identifiers in iosApp/project.yml.
  */
 class AppIdentifiersTest {
 
     private val repo = File(REPO_ROOT)
+    private val android = File(repo, "android/lollop/src/androidMain")
     private val ios = File(repo, "iosApp")
 
     /** Every file and store backup and device transfer leave out, as (domain, path). */
@@ -35,9 +35,9 @@ class AppIdentifiersTest {
 
     @Test
     fun autoBackupLeavesOutTheRegisteredFiles() {
-        val legacy = xml(File("src/androidMain/res/xml/backup_rules.xml"))
+        val legacy = xml(File(android, "res/xml/backup_rules.xml"))
         assertEquals("backup_rules.xml", backupExcluded, rules(legacy))
-        val modern = xml(File("src/androidMain/res/xml/data_extraction_rules.xml"))
+        val modern = xml(File(android, "res/xml/data_extraction_rules.xml"))
         for (section in listOf("cloud-backup", "device-transfer")) {
             val e = children(modern).single { it.tagName == section }
             assertEquals("data_extraction_rules.xml $section", backupExcluded, rules(e))
@@ -53,7 +53,7 @@ class AppIdentifiersTest {
 
     @Test
     fun androidImportFiltersAcceptTheRunFileTypes() {
-        val manifest = xml(File("src/androidMain/AndroidManifest.xml"))
+        val manifest = xml(File(android, "AndroidManifest.xml"))
         val filters = manifest.getElementsByTagName("intent-filter").let { list ->
             (0 until list.length).map { list.item(it) as Element }
         }.filter { f -> children(f).any { it.tagName == "data" && it.hasAttribute("android:mimeType") } }

@@ -301,7 +301,7 @@ pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommende
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::evidence::ContestedId;
+    use crate::evidence::{ContestedId, EvidenceGrade};
 
     #[test]
     fn ordering_forbids_same_session_for_power() {
@@ -330,16 +330,16 @@ mod tests {
             (s.ideal_min_hours, s.ideal_max_hours, s.fallback_min_hours),
             (6, 24, 3)
         );
-        // CAP-3: 24h gap between heavy legs and hard runs.
-        assert!(heavy_leg_run_gap_ok(24.0).value);
-        assert!(!heavy_leg_run_gap_ok(20.0).value);
+        // CAP-3: a full gap between heavy legs and hard runs.
+        assert!(heavy_leg_run_gap_ok(HEAVY_LEG_RUN_GAP_H).value);
+        assert!(!heavy_leg_run_gap_ok(HEAVY_LEG_RUN_GAP_H - 1.0).value);
     }
 
     #[test]
     fn endurance_frequency_cap_is_three_and_cites_the_cautious_default() {
         assert_eq!(endurance_frequency_cap().value, 3);
-        assert!(endurance_frequency_ok(3).value);
-        assert!(!endurance_frequency_ok(4).value);
+        assert!(endurance_frequency_ok(ENDURANCE_FREQUENCY_CAP_DAYS).value);
+        assert!(!endurance_frequency_ok(ENDURANCE_FREQUENCY_CAP_DAYS + 1).value);
         assert_eq!(endurance_frequency_cap().claim_id(), claims::HYB_RUNCAP_001);
     }
 
@@ -440,14 +440,14 @@ mod tests {
         );
         // CAP-8 says Weak-Moderate; registered at the Weak floor.
         let cho = claims::HYB_CHO_001.entry();
-        assert!((cho.confidence_score() - 0.40).abs() < f32::EPSILON);
+        assert_eq!(cho.grade, EvidenceGrade::Weak);
         // Energy availability: ExpertOpinion (File 10 Section E, uncited).
         let ea = claims::HYB_EA_001.entry();
         assert!(ea.safety_critical);
-        assert!((ea.confidence_score() - 0.30).abs() < f32::EPSILON);
+        assert_eq!(ea.grade, EvidenceGrade::ExpertOpinion);
         // Tendon: Weak, an evidence gap drives the conservatism (Baar 2014).
         let tendon = claims::HYB_TENDON_001.entry();
         assert!(tendon.safety_critical);
-        assert!((tendon.confidence_score() - 0.40).abs() < f32::EPSILON);
+        assert_eq!(tendon.grade, EvidenceGrade::Weak);
     }
 }

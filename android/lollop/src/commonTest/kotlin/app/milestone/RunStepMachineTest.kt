@@ -1,10 +1,10 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The guided-run step machine (URH-1): pure, so every cue boundary is pinned here. */
 class RunStepMachineTest {
@@ -14,7 +14,7 @@ class RunStepMachineTest {
     @Test
     fun sixBy800WithJogRecovery_advancesOnDistance() {
         val m = machine(RunStructureView(reps = 6, rep_m = 800, recovery_m = 400))
-        assertEquals("6 reps + 5 recoveries", 11, m.steps.size)
+        assertEquals(11, m.steps.size, "6 reps + 5 recoveries")
         assertEquals(RunStep(RunStepKind.Rep, 1, 6, distanceM = 800), m.progress().step)
 
         // Time alone never ends a distance rep.
@@ -75,7 +75,7 @@ class RunStepMachineTest {
         assertFalse(m.advance(199_000L, 500.0, paused = false))
         assertTrue(m.advance(200_000L, 520.0, paused = false))
         assertEquals(RunStep(RunStepKind.Rep, 2, 2, distanceM = 400), m.progress().step)
-        assertEquals("the second rep starts where the recovery ended", 400, m.progress().remainingM)
+        assertEquals(400, m.progress().remainingM, "the second rep starts where the recovery ended")
     }
 
     @Test
@@ -140,7 +140,7 @@ class RunStepMachineTest {
         )
         val m = RunStepMachine(steps, 0L, 0.0)
         assertTrue(m.advance(600_000L, 2_000.0, paused = false))
-        assertEquals("the main step is open", RunStep(RunStepKind.Main), m.progress().step)
+        assertEquals(RunStep(RunStepKind.Main), m.progress().step, "the main step is open")
         assertNull(m.progress().remainingSec)
         assertNull(m.progress().remainingM)
         // An open step never ends on its own.
@@ -148,7 +148,7 @@ class RunStepMachineTest {
         assertEquals(RunStepKind.Main, m.progress().step?.kind)
         assertTrue(m.skip(6_000_000L, 20_000.0, paused = false))
         assertEquals(RunStepKind.CoolDown, m.progress().step?.kind)
-        assertEquals("the cool-down starts at the skip", 300, m.progress().remainingSec)
+        assertEquals(300, m.progress().remainingSec, "the cool-down starts at the skip")
     }
 
     @Test

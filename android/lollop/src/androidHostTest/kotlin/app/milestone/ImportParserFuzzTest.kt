@@ -45,8 +45,8 @@ import org.robolectric.RobolectricTestRunner
  * finite in-range fixes the core accepts with finite figures, and the same input
  * gives the same answer.
  *
- * `IMPORT_FUZZ_ITERS=<n>` sets the mutations per seed; `IMPORT_FUZZ_SEED=<n>` replays
- * one case.
+ * Every case is a fixed seed (`Random(case)`), so a failure message's case number
+ * replays it.
  */
 @RunWith(RobolectricTestRunner::class)
 class ImportParserFuzzTest {
@@ -63,8 +63,8 @@ class ImportParserFuzzTest {
         QaHarness.teardown()
     }
 
-    private val iters = System.getenv("IMPORT_FUZZ_ITERS")?.toIntOrNull() ?: 250
-    private val onlyCase = System.getenv("IMPORT_FUZZ_SEED")?.toLongOrNull()
+    /** Mutations per seed. */
+    private val iters = 250
 
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "import-fuzz").apply { isDaemon = true } }
 
@@ -293,17 +293,16 @@ class ImportParserFuzzTest {
         var runsOk = 0
         for (i in 0 until iters) {
             val case = base + i
-            if (onlyCase != null && onlyCase != case) continue
             val rnd = Random(case)
             val bytes = if (xml && rnd.nextBoolean()) mutateXml(rnd, String(seed)).toByteArray() else mutateBytes(rnd, seed)
             val out = try {
-                check("$name case $case (IMPORT_FUZZ_SEED=$case)", bytes)
+                check("$name case $case", bytes)
             } catch (e: AssertionError) {
                 throw AssertionError("${e.message}\n  input head: ${String(bytes.copyOf(minOf(bytes.size, 300)))}", e)
             }
             if (out is Out.Runs) runsOk++
         }
-        if (onlyCase == null) assertTrue("$name: some mutants still import ($runsOk)", runsOk > 0)
+        assertTrue("$name: some mutants still import ($runsOk)", runsOk > 0)
     }
 
     @Test
@@ -334,12 +333,11 @@ class ImportParserFuzzTest {
             val seed = fixture(name)
             for (i in 0 until iters) {
                 val case = 0x6310_0000L + si * 0x10_0000L + i
-                if (onlyCase != null && onlyCase != case) continue
                 val rnd = Random(case)
                 val bytes = mutateBytes(rnd, seed)
                 // Keep the FIT magic half the time so the FIT reader, not the sniff, judges it.
                 if (rnd.nextBoolean() && bytes.size >= 12) ".FIT".toByteArray().copyInto(bytes, 8)
-                check("fit $name case $case (IMPORT_FUZZ_SEED=$case)", bytes)
+                check("fit $name case $case", bytes)
             }
         }
     }

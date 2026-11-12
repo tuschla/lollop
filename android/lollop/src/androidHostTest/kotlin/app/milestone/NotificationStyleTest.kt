@@ -51,9 +51,10 @@ class NotificationStyleTest {
 
     @After
     fun tearDown() {
-        resetRest(app)
         SessionReminder.setEnabled(app, false)
-        AppSettings.setTheme(app, AppTheme.Paper)
+        // A fresh install's settings (theme, system accent) in a fresh process.
+        app.getSharedPreferences(AppFileNames.SETTINGS_STORE, 0).edit().clear().commit()
+        resetRest(app)
         RuntimeEnvironment.setQualifiers("+notnight")
     }
 
@@ -112,7 +113,7 @@ class NotificationStyleTest {
     fun liveUpdatesShowOnTheLockScreenWithoutASound() {
         // An install from before: both Live Updates on IMPORTANCE_LOW channels, which
         // System UI's default "hide silent notifications" kept off the lock screen.
-        for (old in listOf("run_tracking", "rest_countdown")) {
+        for (old in listOf(RunTrackingService.RETIRED_CHANNEL, RestAlarmPlatform.RETIRED_CHANNEL_COUNTDOWN)) {
             nm.createNotificationChannel(NotificationChannel(old, old, NotificationManager.IMPORTANCE_LOW))
         }
         val service = Robolectric.buildService(RunTrackingService::class.java).create()
@@ -124,8 +125,8 @@ class NotificationStyleTest {
                 assertNull("$id: no sound", ch.sound)
                 assertFalse("$id: no vibration", ch.shouldVibrate())
             }
-            assertNull("the low run channel is gone", nm.getNotificationChannel("run_tracking"))
-            assertNull("the low rest channel is gone", nm.getNotificationChannel("rest_countdown"))
+            assertNull("the low run channel is gone", nm.getNotificationChannel(RunTrackingService.RETIRED_CHANNEL))
+            assertNull("the low rest channel is gone", nm.getNotificationChannel(RestAlarmPlatform.RETIRED_CHANNEL_COUNTDOWN))
         } finally {
             service.destroy()
         }

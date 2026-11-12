@@ -1,81 +1,62 @@
 use super::*;
+use crate::gps::{MAX_FIX_GAP_SEC, unix_to_rfc3339_utc as iso};
 use crate::import::time::parse_import_time_sec;
-use crate::import::xml::{declares_dtd, decode_utf16};
+use crate::import::xml::{MAX_IMPORT_XML_DEPTH, SNIFF_BYTES, decode_utf16};
+use crate::test_support::fit_writer::{ENUM, FIT_EPOCH, FitWriter, I32, U8, U32, semi};
+use crate::test_support::{M_PER_DEG, SplitMix};
 
-/// Metres → degrees of latitude (1° ≈ 111.2 km).
-fn deg(metres: f64) -> f64 {
-    metres / 111_195.0
-}
-
-fn raw(lat: f64, lon: f64, t: i64, hr: Option<i32>) -> RawFix {
-    RawFix {
-        lat,
-        lon,
-        time_sec: t,
-        hr_bpm: hr,
-        accuracy_m: None,
-    }
-}
-
-fn raw_run(segments: Vec<Vec<RawFix>>) -> RawRun {
-    RawRun {
-        segments,
-        sport: None,
-        logged_at_sec: None,
-    }
-}
-
-/// A track ending at `end`: `metres_per_fix` apart, one fix per 10 s, heading
-/// north from the equator.
-fn track(end: i64, metres_per_fix: f64, fixes: usize) -> Vec<Vec<RawFix>> {
-    let start = end - (fixes as i64 - 1) * 10;
-    vec![
-        (0..fixes)
-            .map(|k| {
-                raw(
-                    k as f64 * deg(metres_per_fix),
-                    0.0,
-                    start + k as i64 * 10,
-                    None,
-                )
-            })
-            .collect(),
-    ]
-}
-
-/// An easy 6:00 /km run: 27.8 m every 10 s for 10 minutes.
-fn easy_run(end: i64) -> Vec<Vec<RawFix>> {
-    track(end, 27.8, 61)
-}
-
-/// One fix of a seeded wandering 1 Hz run.
+/// One fix of a test file.
 #[derive(Clone, Copy)]
 struct Fix {
     lat: f64,
     lon: f64,
     t: i64,
-    hr: i32,
+    hr: Option<i32>,
+}
+
+/// A fix without a heart-rate sample.
+fn at(lat: f64, lon: f64, t: i64) -> Fix {
+    Fix {
+        lat,
+        lon,
+        t,
+        hr: None,
+    }
+}
+
+/// A track ending at `end`: `metres_per_fix` apart, one fix per 10 s, heading
+/// north from the equator.
+fn track(end: i64, metres_per_fix: f64, fixes: usize) -> Vec<Fix> {
+    let start = end - (fixes as i64 - 1) * 10;
+    (0..fixes)
+        .map(|k| {
+            at(
+                k as f64 * metres_per_fix / M_PER_DEG,
+                0.0,
+                start + k as i64 * 10,
+            )
+        })
+        .collect()
+}
+
+/// An easy 6:00 /km run: 27.8 m every 10 s for 10 minutes.
+fn easy_run(end: i64) -> Vec<Fix> {
+    track(end, 27.8, 61)
 }
 
 /// A seeded wandering 1 Hz run at ~3 m/s.
 fn run(n: usize, t0: i64, seed: u64) -> Vec<Fix> {
-    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-    let mut next = || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        (state >> 11) as f64 / (1u64 << 53) as f64
-    };
+    let mut rng = SplitMix(seed);
     let (mut lat, mut lon) = (47.37, 8.54);
     (0..n)
         .map(|k| {
-            lat += 3.0 * (0.9 + 0.2 * next()) / 111_195.0;
-            lon += (k as f64 * 0.05).sin() * 1.5 / 75_000.0;
+            lat += 3.0 * (0.9 + 0.2 * rng.unit()) / M_PER_DEG;
+            lon += (k as f64 * 0.05).sin() * 1.5 / (M_PER_DEG * lat.to_radians().cos());
             Fix {
                 lat,
                 lon,
                 t: t0 + k as i64,
-                hr: 120 + (k % 40) as i32,
+                hr: Some(120 + (k % 40) as i32),
             }
         })
         .collect()
@@ -83,25 +64,8 @@ fn run(n: usize, t0: i64, seed: u64) -> Vec<Fix> {
 
 const T0: i64 = 1_750_000_000;
 
-/// RFC 3339 UTC, as java.time's `Instant.toString` writes whole seconds.
-fn iso(t: i64) -> String {
-    let days = t.div_euclid(86_400);
-    let tod = t.rem_euclid(86_400);
-    let (y, mo, d) = crate::day::civil_from_days(days);
-    let sign = match y {
-        10_000.. => "+",
-        ..0 => "-",
-        _ => "",
-    };
-    format!(
-        "{sign}{:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        y.unsigned_abs(),
-        tod / 3600,
-        tod % 3600 / 60,
-        tod % 60
-    )
-}
-
+/// A GPX 1.1 document: one `<trk>` (typed `kind`) of `segments`, each fix
+/// with an `<hdop>0.9</hdop>` when `hdop` and its heart rate when it has one.
 fn gpx(segments: &[Vec<Fix>], kind: Option<&str>, hdop: bool) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"fuzz\" \
@@ -125,41 +89,49 @@ fn gpx(segments: &[Vec<Fix>], kind: Option<&str>, hdop: bool) -> String {
             if hdop {
                 s += "<hdop>0.9</hdop>";
             }
-            s += &format!(
-                "<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>{}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>\n",
-                f.hr
-            );
+            if let Some(hr) = f.hr {
+                s += &format!(
+                    "<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>{hr}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions>"
+                );
+            }
+            s += "</trkpt>\n";
         }
         s += "</trkseg>\n";
     }
     s + "</trk>\n</gpx>\n"
 }
 
+/// A TCX document: one `<Activity>` per `(sport, laps)`, one `<Lap>` and
+/// `<Track>` per lap (an empty lap writes an empty track).
 fn tcx(activities: &[(&str, Vec<Vec<Fix>>)]) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<TrainingCenterDatabase \
          xmlns=\"http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2\">\n<Activities>\n",
     );
     for (sport, laps) in activities {
-        s += &format!(
-            "<Activity Sport=\"{sport}\"><Id>{}</Id>\n",
-            iso(laps[0][0].t)
-        );
+        let first = laps
+            .iter()
+            .flatten()
+            .next()
+            .expect("an activity with a fix");
+        s += &format!("<Activity Sport=\"{sport}\"><Id>{}</Id>\n", iso(first.t));
         for lap in laps {
             s += &format!(
                 "<Lap StartTime=\"{}\"><TotalTimeSeconds>1</TotalTimeSeconds><Track>\n",
-                iso(lap[0].t)
+                iso(lap.first().unwrap_or(first).t)
             );
             for f in lap {
                 s += &format!(
                     "<Trackpoint><Time>{}</Time><Position><LatitudeDegrees>{}</LatitudeDegrees>\
-                     <LongitudeDegrees>{}</LongitudeDegrees></Position><HeartRateBpm><Value>{}</Value>\
-                     </HeartRateBpm></Trackpoint>\n",
+                     <LongitudeDegrees>{}</LongitudeDegrees></Position>",
                     iso(f.t),
                     f.lat,
-                    f.lon,
-                    f.hr
+                    f.lon
                 );
+                if let Some(hr) = f.hr {
+                    s += &format!("<HeartRateBpm><Value>{hr}</Value></HeartRateBpm>");
+                }
+                s += "</Trackpoint>\n";
             }
             s += "</Track></Lap>\n";
         }
@@ -168,56 +140,36 @@ fn tcx(activities: &[(&str, Vec<Vec<Fix>>)]) -> String {
     s + "</Activities>\n</TrainingCenterDatabase>\n"
 }
 
-fn fit_crc(data: &[u8]) -> u16 {
-    const T: [u16; 16] = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
-        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
-    ];
-    let mut crc: u16 = 0;
-    for &b in data {
-        let mut tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[(b & 0xF) as usize];
-        tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[((b >> 4) & 0xF) as usize];
-    }
-    crc
+/// The `record` fields every test FIT writes: timestamp, position_lat,
+/// position_long, heart_rate (0xFF, the invalid value, without a sample).
+const FIT_RECORD: [(u8, u8, u8); 4] = [(253, 4, U32), (0, 4, I32), (1, 4, I32), (3, 1, U8)];
+
+/// A FIT `record` body for `f` with `extra` fields after [`FIT_RECORD`]'s.
+fn fit_record(f: &Fix, extra: &[u8]) -> Vec<u8> {
+    let mut body = ((f.t - FIT_EPOCH) as u32).to_le_bytes().to_vec();
+    body.extend_from_slice(&semi(f.lat).to_le_bytes());
+    body.extend_from_slice(&semi(f.lon).to_le_bytes());
+    body.push(f.hr.map_or(0xFF, |hr| hr as u8));
+    body.extend_from_slice(extra);
+    body
 }
 
-fn semi(d: f64) -> i32 {
-    (d * 2_147_483_648.0 / 180.0).round() as i32
+/// Close `w` with a session of `sport` (1 running, 2 cycling) at the end, as
+/// devices write it.
+fn finish_with_session(mut w: FitWriter, sport: u8) -> Vec<u8> {
+    w.def(15, 18, false, &[(5, 1, ENUM), (6, 1, ENUM)], &[]);
+    w.msg(15, &[sport, 0]);
+    w.finish(true)
 }
 
-/// A FIT activity of `fixes`: record = timestamp, lat, lon, heart_rate; a
-/// session with `sport` (1 running, 2 cycling) at the end, as devices write it.
+/// A FIT activity of `fixes` and a session with `sport`.
 fn fit(fixes: &[Fix], sport: u8) -> Vec<u8> {
-    let mut d = vec![0x40, 0, 0];
-    d.extend_from_slice(&20u16.to_le_bytes());
-    d.push(4);
-    d.extend_from_slice(&[253, 4, 0x86, 0, 4, 0x85, 1, 4, 0x85, 3, 1, 0x02]);
+    let mut w = FitWriter::default();
+    w.def(0, 20, false, &FIT_RECORD, &[]);
     for f in fixes {
-        d.push(0);
-        d.extend_from_slice(&((f.t - 631_065_600) as u32).to_le_bytes());
-        d.extend_from_slice(&semi(f.lat).to_le_bytes());
-        d.extend_from_slice(&semi(f.lon).to_le_bytes());
-        d.push(f.hr as u8);
+        w.msg(0, &fit_record(f, &[]));
     }
-    d.extend_from_slice(&[0x41, 0, 0]);
-    d.extend_from_slice(&18u16.to_le_bytes());
-    d.push(2);
-    d.extend_from_slice(&[5, 1, 0, 6, 1, 0]);
-    d.extend_from_slice(&[1, sport, 0]);
-    let mut f = vec![14u8, 0x20];
-    f.extend_from_slice(&2132u16.to_le_bytes());
-    f.extend_from_slice(&(d.len() as u32).to_le_bytes());
-    f.extend_from_slice(b".FIT");
-    let c = fit_crc(&f);
-    f.extend_from_slice(&c.to_le_bytes());
-    f.extend_from_slice(&d);
-    let c = fit_crc(&f);
-    f.extend_from_slice(&c.to_le_bytes());
-    f
+    finish_with_session(w, sport)
 }
 
 /// The file's verdict as runs, or the reason (and sport) it was refused.
@@ -245,75 +197,73 @@ fn one_run(bytes: &[u8]) -> ImportedRun {
     runs.remove(0)
 }
 
-fn built(segments: Vec<Vec<RawFix>>) -> Result<ImportedRun, ImportRefusal> {
-    build_run(&raw_run(segments)).map_err(|Refused(reason, _)| reason)
+/// [`gpx`] of one segment, untyped, without hdop.
+fn plain_gpx(fixes: &[Fix]) -> String {
+    gpx(&[fixes.to_vec()], None, false)
 }
 
-fn fix_at(t: i64) -> RawFix {
-    raw(0.0, 0.0, t, None)
-}
-
-fn fixes(times: &[i64]) -> Vec<RawFix> {
-    times.iter().map(|&t| fix_at(t)).collect()
+/// A 300-fix TCX run of two laps whose second lap starts `gap` seconds after
+/// the first one's last fix: its points and segment starts.
+fn two_laps(gap: i64) -> (usize, Vec<u32>) {
+    let a = run(300, T0, 2);
+    let shift = gap - (a[150].t - a[149].t);
+    let second: Vec<Fix> = a[150..]
+        .iter()
+        .map(|f| Fix {
+            t: f.t + shift,
+            ..*f
+        })
+        .collect();
+    let r = one_run(tcx(&[("Running", vec![a[..150].to_vec(), second])]).as_bytes());
+    (r.points.len(), r.segment_starts)
 }
 
 #[test]
 fn consecutive_autolap_tracks_merge_into_one_segment() {
-    // Lap 2's first fix is 1 s after lap 1's last: an autolap, not a pause.
-    let merged =
-        tcx::merge_tcx_tracks(vec![fixes(&[1000, 1001, 1002]), fixes(&[1003, 1004, 1005])]);
-    assert_eq!(merged.len(), 1);
-    assert_eq!(merged[0].len(), 6);
+    // A lap starting 0 s up to the live recorder's segment-break gap after the
+    // previous one is an autolap, not a pause.
+    for gap in [0, 1, MAX_FIX_GAP_SEC] {
+        assert_eq!(two_laps(gap), (300, vec![]), "gap {gap} s");
+    }
 }
 
 #[test]
-fn a_real_pause_still_splits_the_segment() {
-    let merged = tcx::merge_tcx_tracks(vec![fixes(&[1000, 1001, 1002]), fixes(&[1302, 1303])]);
-    assert_eq!(merged.iter().map(Vec::len).collect::<Vec<_>>(), [3, 2]);
-}
-
-#[test]
-fn a_backwards_clock_step_between_tracks_splits() {
-    assert_eq!(
-        tcx::merge_tcx_tracks(vec![fixes(&[2000, 2001]), fixes(&[1500, 1501])]).len(),
-        2
-    );
-}
-
-#[test]
-fn a_zero_gap_between_tracks_merges() {
-    assert_eq!(
-        tcx::merge_tcx_tracks(vec![fixes(&[10, 11]), fixes(&[11, 12])]).len(),
-        1
-    );
+fn a_real_pause_or_a_backwards_clock_step_still_splits_the_segment() {
+    for gap in [MAX_FIX_GAP_SEC + 1, 300, -100] {
+        assert_eq!(two_laps(gap), (300, vec![150]), "gap {gap} s");
+    }
 }
 
 #[test]
 fn empty_tracks_are_skipped() {
-    let merged = tcx::merge_tcx_tracks(vec![vec![], fixes(&[10, 11]), vec![]]);
-    assert_eq!(merged.iter().map(Vec::len).collect::<Vec<_>>(), [2]);
+    // Empty laps around and between two autolaps neither split nor add fixes.
+    let a = run(300, T0, 2);
+    let laps = vec![vec![], a[..150].to_vec(), vec![], a[150..].to_vec(), vec![]];
+    let r = one_run(tcx(&[("Running", laps)]).as_bytes());
+    assert_eq!((r.points.len(), r.segment_starts), (300, vec![]));
 }
 
 #[test]
 fn hr_is_kept_only_as_a_finite_plausible_bpm() {
-    let cases: &[(&str, Option<i32>)] = &[
-        ("120", Some(120)),
-        (" 155 ", Some(155)),
-        ("155.7", Some(155)),
-        ("20", Some(20)),
-        ("250", Some(250)),
-        ("19", None),
-        ("251", None),
-        ("1000000000", None),
-        ("0", None),
-        ("-40", None),
-        ("Infinity", None),
-        ("-Infinity", None),
-        ("NaN", None),
-        ("", None),
-        ("abc", None),
+    let (lo, hi) = (*PLAUSIBLE_HR_BPM.start(), *PLAUSIBLE_HR_BPM.end());
+    let cases: Vec<(String, Option<i32>)> = vec![
+        ("120".into(), Some(120)),
+        (" 155 ".into(), Some(155)),
+        ("155.7".into(), Some(155)),
+        (lo.to_string(), Some(lo)),
+        (hi.to_string(), Some(hi)),
+        ((lo - 1).to_string(), None),
+        ((hi + 1).to_string(), None),
+        ("1000000000".into(), None),
+        ("0".into(), None),
+        ("-40".into(), None),
+        ("Infinity".into(), None),
+        ("-Infinity".into(), None),
+        ("NaN".into(), None),
+        ("".into(), None),
+        ("abc".into(), None),
     ];
-    for (raw, want) in cases {
+    for (raw, want) in &cases {
         assert_eq!(hr_bpm(raw), *want, "{raw:?}");
     }
 }
@@ -321,21 +271,33 @@ fn hr_is_kept_only_as_a_finite_plausible_bpm() {
 #[test]
 fn hdop_converts_to_metres_and_anything_else_is_unknown() {
     // accuracy ≈ hdop × 5 m (nominal 1-sigma UERE). Missing, garbage or
-    // non-positive hdop is unknown, never 0.
-    let cases: &[(&str, Option<f64>)] = &[
-        ("1.0", Some(5.0)),
-        ("2.5", Some(12.5)),
-        (" 0.8 ", Some(4.0)),
-        ("", None),
-        ("abc", None),
-        ("0", None),
-        ("-1", None),
-        ("NaN", None),
-        ("Infinity", None),
-    ];
-    for (raw, want) in cases {
-        let got = kt_to_double(kt_trim(raw)).and_then(gps::hdop_accuracy_m);
-        assert_eq!(got.map(|a| (a * 1e6).round() / 1e6), *want, "{raw:?}");
+    // non-positive hdop is unknown: the QC bound, never 0.
+    let pts = run(300, T0, 1);
+    let first_accuracy = |hdop: Option<&str>| {
+        let doc = gpx(std::slice::from_ref(&pts), Some("running"), hdop.is_some());
+        let doc = doc.replacen(
+            "<hdop>0.9</hdop>",
+            &format!("<hdop>{}</hdop>", hdop.unwrap_or_default()),
+            1,
+        );
+        one_run(doc.as_bytes()).points[0].accuracy_m
+    };
+    assert_eq!(first_accuracy(Some("2.5")), 12.5);
+    assert_eq!(first_accuracy(Some(" 0.8 ")), 4.0);
+    for unknown in [
+        None,
+        Some(""),
+        Some("abc"),
+        Some("0"),
+        Some("-1"),
+        Some("NaN"),
+        Some("Infinity"),
+    ] {
+        assert_eq!(
+            first_accuracy(unknown),
+            gps::MAX_GPS_ACCURACY_M,
+            "{unknown:?}"
+        );
     }
 }
 
@@ -469,29 +431,24 @@ fn utf16_decodes_exactly_as_the_jdk() {
 
 #[test]
 fn a_dtd_in_the_prolog_is_found_past_declarations_and_comments() {
-    assert!(declares_dtd(
-        "<?xml version=\"1.0\"?>\n<!-- c --> <!DOCTYPE gpx><gpx/>"
-    ));
-    assert!(!declares_dtd("<?xml version=\"1.0\"?><gpx/><!DOCTYPE gpx>"));
-    assert!(!declares_dtd("<!-- <!DOCTYPE gpx> --><gpx/>"));
-    assert!(!declares_dtd("<?xml version=\"1.0\""));
+    let doc = gpx(&[run(300, T0, 1)], Some("running"), true);
+    let body = doc.split_once("?>\n").unwrap().1;
+    let after_comment = format!("<?xml version=\"1.0\"?>\n<!-- c --> <!DOCTYPE gpx>{body}");
+    assert_eq!(refused(after_comment.as_bytes()), ImportRefusal::Damaged);
+    // A DTD only inside a comment declares none.
+    let commented = format!("<!-- <!DOCTYPE gpx> -->{body}");
+    assert_eq!(one_run(commented.as_bytes()).points.len(), 300);
 }
 
-fn fix_lon(t: i64, lon: f64, accuracy_m: Option<f64>) -> RawFix {
-    RawFix {
-        accuracy_m,
-        ..raw(0.0, lon, t, None)
-    }
+/// Two fixes 0.0054° (≈ 600 m) apart in 200 s on the equator: past the keep
+/// threshold at a running pace.
+fn short_run() -> Vec<Fix> {
+    vec![at(0.0, 0.0, 1000), at(0.0, 0.0054, 1200)]
 }
 
 #[test]
 fn unknown_accuracy_gets_the_qc_bound_never_a_fabricated_good_fix() {
-    // 0.0054° ≈ 600 m in 200 s: past the keep threshold at a running pace.
-    let run = built(vec![vec![
-        fix_lon(1000, 0.0, None),
-        fix_lon(1200, 0.0054, None),
-    ]])
-    .unwrap();
+    let run = one_run(plain_gpx(&short_run()).as_bytes());
     assert_eq!(run.points.len(), 2);
     assert!(
         run.points
@@ -502,49 +459,58 @@ fn unknown_accuracy_gets_the_qc_bound_never_a_fabricated_good_fix() {
 
 #[test]
 fn a_real_accuracy_passes_through_unchanged() {
-    let run = built(vec![vec![
-        fix_lon(1000, 0.0, Some(8.0)),
-        fix_lon(1200, 0.0054, Some(12.5)),
-    ]])
-    .unwrap();
+    // A FIT `gps_accuracy` (field 31, whole metres) per record.
+    let mut w = FitWriter::default();
+    let mut fields = FIT_RECORD.to_vec();
+    fields.push((31, 1, U8));
+    w.def(0, 20, false, &fields, &[]);
+    for (k, acc) in [8, 12].into_iter().enumerate() {
+        let f = at(0.0, k as f64 * 0.0054, T0 + 200 * k as i64);
+        w.msg(0, &fit_record(&f, &[acc]));
+    }
+    let run = one_run(&finish_with_session(w, 1));
     assert_eq!(
         run.points.iter().map(|p| p.accuracy_m).collect::<Vec<_>>(),
-        [8.0, 12.5]
+        [8.0, 12.0]
     );
+}
+
+/// A fix on the equator at `lon` with heart rate `hr`.
+fn hr_fix(lon: f64, t: i64, hr: Option<i32>) -> Fix {
+    Fix {
+        hr,
+        ..at(0.0, lon, t)
+    }
 }
 
 #[test]
 fn the_hr_average_is_time_weighted_so_a_long_held_sample_dominates() {
     // The first sample is held 300 s, the second 5 s: a plain mean (142.5)
     // would sit ~27 bpm below the long-held one.
-    let run = built(vec![vec![
-        raw(0.0, 0.000, 1000, Some(170)),
-        raw(0.0, 0.005, 1300, Some(115)),
-        raw(0.0, 0.00502, 1305, None),
-    ]])
-    .unwrap();
+    let run = one_run(
+        plain_gpx(&[
+            hr_fix(0.000, 1000, Some(170)),
+            hr_fix(0.005, 1300, Some(115)),
+            hr_fix(0.00502, 1305, None),
+        ])
+        .as_bytes(),
+    );
     let avg = run.avg_hr_bpm.unwrap();
     assert!((avg - 170.0).abs() < 1.0, "{avg}");
 }
 
 #[test]
 fn evenly_spaced_hr_samples_match_the_plain_mean() {
-    let run = built(vec![vec![
-        raw(0.0, 0.0000, 1000, Some(100)),
-        raw(0.0, 0.0030, 1100, Some(120)),
-        raw(0.0, 0.0060, 1200, Some(140)),
-    ]])
-    .unwrap();
-    assert_eq!(run.avg_hr_bpm, Some(120.0));
-    assert_eq!(
-        built(vec![vec![
-            fix_lon(1000, 0.0, None),
-            fix_lon(1200, 0.0054, None)
-        ]])
-        .unwrap()
-        .avg_hr_bpm,
-        None
+    let run = one_run(
+        plain_gpx(&[
+            hr_fix(0.0000, 1000, Some(100)),
+            hr_fix(0.0030, 1100, Some(120)),
+            hr_fix(0.0060, 1200, Some(140)),
+        ])
+        .as_bytes(),
     );
+    assert_eq!(run.avg_hr_bpm, Some(120.0));
+    assert_eq!(one_run(plain_gpx(&short_run()).as_bytes()).avg_hr_bpm, None);
 }
 
 #[test]
@@ -651,137 +617,126 @@ fn strava_compound_ride_and_ski_types_are_recognised() {
 
 #[test]
 fn a_ride_named_by_its_file_is_refused_by_name() {
-    let mut ride = raw_run(vec![vec![
-        fix_lon(1000, 0.0, None),
-        fix_lon(1200, 0.0054, None),
-    ]]);
-    ride.sport = Some("Biking".into());
+    let ride = gpx(&[short_run()], Some("Biking"), false);
     assert_eq!(
-        build_run(&ride),
-        Err(Refused(ImportRefusal::NotARun, Some("cycling".into())))
+        verdict(ride.as_bytes()),
+        Err((ImportRefusal::NotARun, Some("cycling".into())))
     );
 }
 
 #[test]
 fn a_file_named_logged_at_stamp_is_kept_only_when_it_follows_the_track() {
-    let at = |logged_at_sec| {
-        let mut run = raw_run(vec![vec![
-            fix_lon(1000, 0.0, None),
-            fix_lon(1200, 0.0054, None),
-        ]]);
-        run.logged_at_sec = logged_at_sec;
-        build_run(&run).unwrap().observed_at
-    };
+    // lollop's own export names the run's logged-at stamp.
+    let points: Vec<GpsPoint> = short_run()
+        .iter()
+        .map(|f| GpsPoint {
+            lat: f.lat,
+            lon: f.lon,
+            observed_at: f.t,
+            accuracy_m: 5.0,
+        })
+        .collect();
+    let stamped =
+        |logged_at| one_run(gps::export_gpx(&points, "run", &[], logged_at).as_bytes()).observed_at;
     // A standing-still finish or a trimmed end: the run's stamp follows its last fix.
-    assert_eq!(at(Some(1500)), 1500);
+    assert_eq!(stamped(Some(1500)), 1500);
     // None, one before the track ends, or one days later: the last fix.
-    assert_eq!(at(None), 1200);
-    assert_eq!(at(Some(1100)), 1200);
-    assert_eq!(at(Some(1200 + 3 * 86_400)), 1200);
+    assert_eq!(stamped(None), 1200);
+    assert_eq!(stamped(Some(1100)), 1200);
+    assert_eq!(stamped(Some(1200 + 3 * 86_400)), 1200);
 }
 
 #[test]
 fn an_implausibly_fast_track_is_refused() {
     // 12 m/s ≈ 1:23 /km, far faster than the 2:50 /km gate: a ride or a drive.
     assert_eq!(
-        built(track(10_000, 120.0, 61)),
-        Err(ImportRefusal::ImplausiblePace)
+        refused(plain_gpx(&track(10_000, 120.0, 61)).as_bytes()),
+        ImportRefusal::ImplausiblePace
     );
-    assert!(built(easy_run(20_000)).is_ok());
+    assert!(verdict(plain_gpx(&easy_run(20_000)).as_bytes()).is_ok());
 }
 
 #[test]
 fn a_fragment_under_the_keep_threshold_is_too_short() {
     // A 13 s, 3 m blip; 0.6 km in 2:30; and two 80 s pieces split by a long
     // pause (the bridge counts neither distance nor time, so 2:40 in all).
-    let blip = vec![vec![
-        raw(0.0, 0.0, 9_987, None),
-        raw(deg(3.0), 0.0, 10_000, None),
-    ]];
-    let split = vec![
+    let blip = vec![vec![at(0.0, 0.0, 9_987), at(3.0 / M_PER_DEG, 0.0, 10_000)]];
+    let piece = |from: i64, t0: i64| -> Vec<Fix> {
         (0..9)
-            .map(|k| raw(k as f64 * deg(30.0), 0.0, 40_000 + k * 10, None))
-            .collect(),
-        (0..9)
-            .map(|k| raw((100 + k) as f64 * deg(30.0), 0.0, 41_000 + k * 10, None))
-            .collect(),
-    ];
-    for segments in [blip, track(20_000, 40.0, 16), split] {
-        assert_eq!(built(segments), Err(ImportRefusal::TooShort));
+            .map(|k| at((from + k) as f64 * 30.0 / M_PER_DEG, 0.0, t0 + k * 10))
+            .collect()
+    };
+    let split = vec![piece(0, 40_000), piece(100, 41_000)];
+    for segments in [blip, vec![track(20_000, 40.0, 16)], split] {
+        assert_eq!(
+            refused(gpx(&segments, None, false).as_bytes()),
+            ImportRefusal::TooShort
+        );
     }
     // Just over both thresholds: kept.
-    assert!(built(track(50_000, 30.0, 20)).is_ok());
+    assert!(verdict(plain_gpx(&track(50_000, 30.0, 20)).as_bytes()).is_ok());
 }
 
 #[test]
 fn the_gate_judges_moving_pace_so_stops_cannot_hide_a_speed() {
-    let point = |lat: f64, t: i64| GpsPoint {
-        lat,
-        lon: 0.0,
-        observed_at: t,
-        accuracy_m: 5.0,
-    };
     // 3:20 /km (5 m/s) is a fast but real run.
-    let brisk: Vec<GpsPoint> = (0..61)
-        .map(|k| point(k as f64 * deg(50.0), 10_000 + k * 10))
+    let brisk: Vec<Fix> = (0..61)
+        .map(|k| at(k as f64 * 50.0 / M_PER_DEG, 0.0, 10_000 + k * 10))
         .collect();
-    assert!(!LegTotals::of(&brisk, &[]).implausibly_fast());
+    assert!(verdict(plain_gpx(&brisk).as_bytes()).is_ok());
     // 2:30 /km while moving, standing still every other 10 s: 5:00 /km
     // elapsed, but the moving pace is what counts.
-    let stop_start: Vec<GpsPoint> = (0..41)
-        .map(|k| point(((k + 1) / 2) as f64 * deg(66.7), 1_000 + k * 10))
+    let stop_start: Vec<Fix> = (0..41)
+        .map(|k| at(((k + 1) / 2) as f64 * 66.7 / M_PER_DEG, 0.0, 1_000 + k * 10))
         .collect();
-    assert!(LegTotals::of(&stop_start, &[]).implausibly_fast());
+    assert_eq!(
+        refused(plain_gpx(&stop_start).as_bytes()),
+        ImportRefusal::ImplausiblePace
+    );
 }
 
 #[test]
 fn untimed_and_out_of_range_fixes_are_dropped_before_the_gates() {
-    let mut segments = easy_run(20_000);
-    segments[0][3].time_sec = 0;
-    segments[0][4].lat = 91.0;
-    segments[0][5].lon = -180.5;
-    assert_eq!(built(segments).unwrap().points.len(), 58);
+    let mut fixes = easy_run(20_000);
+    fixes[4].lat = 91.0;
+    fixes[5].lon = -180.5;
+    let untimed = plain_gpx(&fixes).replacen(&format!("<time>{}</time>", iso(fixes[3].t)), "", 1);
+    assert_eq!(one_run(untimed.as_bytes()).points.len(), 58);
+    let no_times =
+        plain_gpx(&[at(0.0, 0.0, 1000), at(0.0, 0.1, 1200)]).replace("<time>", "<time>x");
+    assert_eq!(refused(no_times.as_bytes()), ImportRefusal::NoTimestamps);
     assert_eq!(
-        built(vec![vec![fix_lon(0, 0.0, None), fix_lon(0, 0.1, None)]]),
-        Err(ImportRefusal::NoTimestamps)
-    );
-    assert_eq!(
-        built(vec![vec![fix_lon(1000, 0.0, None)]]),
-        Err(ImportRefusal::NoTrack)
+        refused(plain_gpx(&[at(0.0, 0.0, 1000)]).as_bytes()),
+        ImportRefusal::NoTrack
     );
 }
 
 #[test]
 fn a_single_gnss_teleport_is_dropped_and_a_jump_never_returned_from_is_kept() {
-    let mut segments = easy_run(20_000);
-    segments[0][30].lat = 10.0;
-    let run = built(segments).unwrap();
+    let mut fixes = easy_run(20_000);
+    fixes[30].lat = 10.0;
+    let run = one_run(plain_gpx(&fixes).as_bytes());
     assert_eq!(run.points.len(), 60);
     assert!(run.points.iter().all(|p| p.lat < 1.0));
     // A car ride: the track never comes back, so the jump stays and the pace gate judges it.
     let mut drive = easy_run(30_000);
-    for f in &mut drive[0][31..] {
+    for f in &mut drive[31..] {
         f.lat += 0.5;
     }
-    assert_eq!(built(drive), Err(ImportRefusal::ImplausiblePace));
+    assert_eq!(
+        refused(plain_gpx(&drive).as_bytes()),
+        ImportRefusal::ImplausiblePace
+    );
 }
 
 #[test]
 fn a_huge_track_is_decimated_with_its_boundaries_and_ends() {
-    let fixes: Vec<RawFix> = (0..20_000)
-        .map(|k| raw(k as f64 * deg(3.0), 0.0, T0 + k, None))
+    let fixes: Vec<Fix> = (0..20_000)
+        .map(|k| at(k as f64 * 3.0 / M_PER_DEG, 0.0, T0 + k))
         .collect();
     let (a, b) = fixes.split_at(12_345);
-    let run = built(vec![
-        a.to_vec(),
-        b.iter()
-            .map(|f| RawFix {
-                time_sec: f.time_sec + 600,
-                ..*f
-            })
-            .collect(),
-    ])
-    .unwrap();
+    let b: Vec<Fix> = b.iter().map(|f| Fix { t: f.t + 600, ..*f }).collect();
+    let run = one_run(gpx(&[a.to_vec(), b], None, false).as_bytes());
     assert!(
         run.points.len() <= gps::TRACK_DECIMATION_CAP as usize + 2,
         "{}",
@@ -802,7 +757,7 @@ fn each_gpx_track_is_its_own_run_with_its_own_sport() {
             .map(|k| {
                 format!(
                     "<trkpt lat=\"{}\" lon=\"8.54\"><time>{}</time></trkpt>",
-                    lat0 + k as f64 * deg(mps),
+                    lat0 + k as f64 * mps / M_PER_DEG,
                     iso(t0 + k as i64)
                 )
             })
@@ -813,12 +768,7 @@ fn each_gpx_track_is_its_own_run_with_its_own_sport() {
         "<?xml version=\"1.0\"?><gpx version=\"1.1\"><trk><type>running</type><trkseg>{}</trkseg></trk>\
          <trk><type>cycling</type><trkseg>{}</trkseg></trk></gpx>",
         trkpts(3000, 47.37, T0, 3.33),
-        trkpts(720, 47.37 + deg(3000.0 * 3.33), ride_start, 7.0)
-    );
-    let runs = gpx::parse_gpx_runs(&doc).unwrap();
-    assert_eq!(
-        runs.iter().map(|r| r.sport.as_deref()).collect::<Vec<_>>(),
-        [Some("running"), Some("cycling")]
+        trkpts(720, 47.37 + 3000.0 * 3.33 / M_PER_DEG, ride_start, 7.0)
     );
     let imported = verdict(doc.as_bytes()).unwrap();
     assert_eq!(
@@ -840,9 +790,16 @@ fn a_file_that_is_neither_fit_nor_gpx_nor_tcx_is_refused_from_its_header() {
         ImportRefusal::WrongType
     );
     assert_eq!(refused(b""), ImportRefusal::WrongType);
-    // The root must sit in the first 4 KB.
-    let late = format!("<!--{}--><gpx></gpx>", "x".repeat(5000));
-    assert_eq!(refused(late.as_bytes()), ImportRefusal::WrongType);
+    // The root's `<gpx` must sit whole in the first SNIFF_BYTES.
+    let root_at = |at: usize| format!("<!--{}--><gpx></gpx>", "x".repeat(at - 7));
+    assert_eq!(
+        refused(root_at(SNIFF_BYTES - 3).as_bytes()),
+        ImportRefusal::WrongType
+    );
+    assert_eq!(
+        refused(root_at(SNIFF_BYTES - 4).as_bytes()),
+        ImportRefusal::NoTrack
+    );
 }
 
 #[test]
@@ -953,17 +910,23 @@ fn a_tcx_activity_is_a_run_and_its_courses_never_join_it() {
 
 #[test]
 fn a_stray_trkpt_after_the_trkseg_or_outside_the_trk_is_ignored() {
-    let doc = "<gpx><trk><trkseg>\
-        <trkpt lat=\"10.0\" lon=\"20.0\"><time>2020-01-01T00:00:00Z</time></trkpt>\
-        <trkpt lat=\"10.1\" lon=\"20.1\"><time>2020-01-01T00:00:01Z</time></trkpt>\
-        </trkseg><trkpt lat=\"10.2\" lon=\"20.2\"><time>2020-01-01T00:00:02Z</time></trkpt></trk>\
-        <trkpt lat=\"10.3\" lon=\"20.3\"><time>2020-01-01T00:00:03Z</time></trkpt></gpx>";
-    let runs = gpx::parse_gpx_runs(doc).unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(
-        runs[0].segments.iter().map(Vec::len).collect::<Vec<_>>(),
-        [2]
-    );
+    // Two plausible next fixes of the run, one after its `</trkseg>` and one
+    // after its `</trk>`: neither joins it.
+    let pts = run(300, T0, 4);
+    let last = pts[299];
+    let stray = |k: i64| {
+        format!(
+            "<trkpt lat=\"{}\" lon=\"{}\"><time>{}</time></trkpt>\n",
+            last.lat + 3.0 * k as f64 / M_PER_DEG,
+            last.lon,
+            iso(last.t + k)
+        )
+    };
+    let doc = gpx(std::slice::from_ref(&pts), Some("running"), true)
+        .replacen("</trkseg>\n", &format!("</trkseg>\n{}", stray(1)), 1)
+        .replacen("</trk>\n", &format!("</trk>\n{}", stray(2)), 1);
+    let r = one_run(doc.as_bytes());
+    assert_eq!((r.points.len(), r.observed_at), (300, last.t));
 }
 
 #[test]
@@ -971,14 +934,7 @@ fn a_route_only_or_a_standing_still_file_ends_in_its_own_reason() {
     let route_only = "<?xml version=\"1.0\"?><gpx version=\"1.1\"><rte><rtept lat=\"47.0\" lon=\"8.0\"/>\
         <rtept lat=\"47.1\" lon=\"8.1\"/></rte></gpx>";
     assert_eq!(refused(route_only.as_bytes()), ImportRefusal::NoTrack);
-    let still: Vec<Fix> = (0..600)
-        .map(|k| Fix {
-            lat: 47.0,
-            lon: 8.0,
-            t: T0 + 10 * k,
-            hr: 120,
-        })
-        .collect();
+    let still: Vec<Fix> = (0..600).map(|k| at(47.0, 8.0, T0 + 10 * k)).collect();
     assert_eq!(
         refused(gpx(&[still], None, true).as_bytes()),
         ImportRefusal::TooShort
@@ -1224,8 +1180,8 @@ fn deeply_nested_and_giant_elements_finish_quickly() {
         )
     };
     assert_eq!(refused(nested(100_000).as_bytes()), ImportRefusal::Damaged);
-    // Depth 64 reads; 65 is refused.
-    let at = |depth: usize| {
+    // The deepest nesting the reader allows reads; one level more is refused.
+    let nested_to = |depth: usize| {
         base.replacen(
             "<trk>",
             &format!(
@@ -1236,8 +1192,11 @@ fn deeply_nested_and_giant_elements_finish_quickly() {
             1,
         )
     };
-    assert!(verdict(at(64).as_bytes()).is_ok());
-    assert_eq!(refused(at(65).as_bytes()), ImportRefusal::Damaged);
+    assert!(verdict(nested_to(MAX_IMPORT_XML_DEPTH).as_bytes()).is_ok());
+    assert_eq!(
+        refused(nested_to(MAX_IMPORT_XML_DEPTH + 1).as_bytes()),
+        ImportRefusal::Damaged
+    );
     let giant = base.replacen(
         "<name>t</name>",
         &format!("<name>{}</name>", "n".repeat(4_000_000)),
@@ -1278,7 +1237,11 @@ fn assert_sane(v: &ImportVerdict) {
                 .all(|&s| (1..r.points.len()).contains(&(s as usize)))
         );
         assert!(r.observed_at > 0);
-        assert!(r.avg_hr_bpm.is_none_or(|hr| (20.0..=250.0).contains(&hr)));
+        let (lo, hi) = (*PLAUSIBLE_HR_BPM.start(), *PLAUSIBLE_HR_BPM.end());
+        assert!(
+            r.avg_hr_bpm
+                .is_none_or(|hr| (f64::from(lo)..=f64::from(hi)).contains(&hr))
+        );
     }
 }
 
@@ -1323,8 +1286,9 @@ fn mutants_always_end_in_sane_runs_or_a_named_reason() {
     for (name, seed) in &seeds {
         let mut imported = 0;
         for case in 0..iters {
-            let mut rng = Rng(case.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ name.len() as u64 | 1);
-            let bytes = if seed.get(8..12) == Some(b".FIT") || rng.below(2) == 0 {
+            let mut rng =
+                SplitMix(case.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ name.len() as u64 | 1);
+            let bytes = if seed.get(8..12) == Some(b".FIT") || rng.index(2) == 0 {
                 mutate_bytes(&mut rng, seed)
             } else {
                 mutate_xml(&mut rng, std::str::from_utf8(seed).unwrap()).into_bytes()
@@ -1344,54 +1308,43 @@ fn mutants_always_end_in_sane_runs_or_a_named_reason() {
     }
 }
 
-struct Rng(u64);
-
-impl Rng {
-    fn below(&mut self, n: usize) -> usize {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        (self.0 % n.max(1) as u64) as usize
-    }
-}
-
-fn mutate_bytes(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
+fn mutate_bytes(rng: &mut SplitMix, seed: &[u8]) -> Vec<u8> {
     const INTERESTING: [u8; 12] = [
         0, 1, 0x0C, 0x0E, 0x20, 0x26, 0x3C, 0x3E, 0x40, 0x7F, 0x80, 0xFF,
     ];
     let mut b = seed.to_vec();
-    for _ in 0..1 + rng.below(4) {
+    for _ in 0..1 + rng.index(4) {
         let n = b.len().max(1);
-        match rng.below(7) {
+        match rng.index(7) {
             0 if !b.is_empty() => {
-                let k = rng.below(b.len());
-                b[k] ^= 1 << rng.below(8);
+                let k = rng.index(b.len());
+                b[k] ^= 1 << rng.index(8);
             }
             1 if !b.is_empty() => {
-                let k = rng.below(b.len());
-                b[k] = INTERESTING[rng.below(INTERESTING.len())];
+                let k = rng.index(b.len());
+                b[k] = INTERESTING[rng.index(INTERESTING.len())];
             }
             2 => {
-                let k = rng.below(b.len() + 1);
-                let junk: Vec<u8> = (0..1 + rng.below(8))
-                    .map(|_| rng.below(256) as u8)
+                let k = rng.index(b.len() + 1);
+                let junk: Vec<u8> = (0..1 + rng.index(8))
+                    .map(|_| rng.index(256) as u8)
                     .collect();
                 b.splice(k..k, junk);
             }
             3 if !b.is_empty() => {
-                let k = rng.below(b.len());
-                let end = (k + 1 + rng.below(16)).min(b.len());
+                let k = rng.index(b.len());
+                let end = (k + 1 + rng.index(16)).min(b.len());
                 b.drain(k..end);
             }
             4 if !b.is_empty() => {
-                let k = rng.below(b.len());
-                let copy = b[k..(k + 1 + rng.below(128)).min(b.len())].to_vec();
-                let at = rng.below(b.len() + 1);
+                let k = rng.index(b.len());
+                let copy = b[k..(k + 1 + rng.index(128)).min(b.len())].to_vec();
+                let at = rng.index(b.len() + 1);
                 b.splice(at..at, copy);
             }
-            5 => b.truncate(rng.below(n + 1)),
+            5 => b.truncate(rng.index(n + 1)),
             _ if b.len() > 1 => {
-                let (k, j) = (rng.below(b.len()), rng.below(b.len()));
+                let (k, j) = (rng.index(b.len()), rng.index(b.len()));
                 b.swap(k, j);
             }
             _ => {}
@@ -1400,7 +1353,7 @@ fn mutate_bytes(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
     b
 }
 
-fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
+fn mutate_xml(rng: &mut SplitMix, doc: &str) -> String {
     const WEIRD_NUMBERS: [&str; 13] = [
         "NaN",
         "Infinity",
@@ -1442,16 +1395,16 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
         "&",
     ];
     let mut s = doc.to_owned();
-    for _ in 0..1 + rng.below(3) {
-        s = match rng.below(9) {
+    for _ in 0..1 + rng.index(3) {
+        s = match rng.index(9) {
             0 | 1 => {
                 // A weird value in some coordinate or time.
                 let field =
-                    ["lat=\"", "lon=\"", "<time>", "<Time>", "<LatitudeDegrees>"][rng.below(5)];
+                    ["lat=\"", "lon=\"", "<time>", "<Time>", "<LatitudeDegrees>"][rng.index(5)];
                 let weird = if field.contains("ime") {
-                    WEIRD_TIMES[rng.below(11)]
+                    WEIRD_TIMES[rng.index(11)]
                 } else {
-                    WEIRD_NUMBERS[rng.below(13)]
+                    WEIRD_NUMBERS[rng.index(13)]
                 };
                 let close = if field.ends_with('"') { "\"" } else { "<" };
                 let mut out = String::with_capacity(s.len());
@@ -1462,7 +1415,7 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
                         .find(close)
                         .map_or(rest.len(), |e| value_start + e);
                     out += &rest[..value_start];
-                    out += if rng.below(8) == 0 {
+                    out += if rng.index(8) == 0 {
                         weird
                     } else {
                         &rest[value_start..value_end]
@@ -1483,8 +1436,8 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
                     "Activity",
                     "time",
                     "Time",
-                ][rng.below(9)];
-                let from = rng.below(s.len());
+                ][rng.index(9)];
+                let from = rng.index(s.len());
                 match (
                     s[from..].find(&format!("<{tag}")).map(|k| from + k),
                     None::<usize>,
@@ -1501,7 +1454,7 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
             }
             3 => {
                 // Nest an extra element of the same kind, closed at the end.
-                let tag = ["trkseg", "trk", "gpx", "Track", "Activity", "Lap"][rng.below(6)];
+                let tag = ["trkseg", "trk", "gpx", "Track", "Activity", "Lap"][rng.index(6)];
                 match s.find(&format!("<{tag}")) {
                     Some(k) => format!(
                         "{}<{tag}>{}",
@@ -1514,11 +1467,11 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
             4 => s.replace('\n', "\r\n"),
             5 => format!("\u{FEFF}{s}"),
             6 => {
-                let mut k = rng.below(s.len() + 1);
+                let mut k = rng.index(s.len() + 1);
                 while !s.is_char_boundary(k) {
                     k -= 1;
                 }
-                format!("{}{}{}", &s[..k], SNIPPETS[rng.below(10)], &s[k..])
+                format!("{}{}{}", &s[..k], SNIPPETS[rng.index(10)], &s[k..])
             }
             7 => s
                 .replacen(
@@ -1532,7 +1485,7 @@ fn mutate_xml(rng: &mut Rng, doc: &str) -> String {
                     1,
                 ),
             _ => {
-                let mut k = rng.below(s.len() + 1);
+                let mut k = rng.index(s.len() + 1);
                 while !s.is_char_boundary(k) {
                     k -= 1;
                 }
@@ -1621,29 +1574,22 @@ fn the_logged_at_extension_and_the_tracks_type_are_read_only_where_they_belong()
     // A core-shaped export (namespace declared, extension before <trkseg>) plus
     // a Garmin-style <type> inside <extensions> and a <link><type>: the stamp is
     // read, the nested types are not the track's sport.
-    let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
+    let fixes: String = (0..240).step_by(10).map(fix_line).collect();
+    let doc = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="x" xmlns="http://www.topografix.com/GPX/1/1" xmlns:lollop="urn:lollop:gpx:1" xmlns:gx="urn:other">
   <trk>
     <name>n</name>
-    <link href="http://x"><type>text/html</type></link>
     <extensions><gx:meta><type>cycling</type></gx:meta><lollop:logged_at>2026-09-21T14:20:18Z</lollop:logged_at></extensions>
+    <link href="http://x"><type>text/html</type></link>
     <trkseg>
-      <trkpt lat="0" lon="0"><time>2026-09-21T14:13:20Z</time></trkpt>
-      <trkpt lat="0" lon="0.001"><time>2026-09-21T14:13:50Z</time></trkpt>
-    </trkseg>
+{fixes}    </trkseg>
   </trk>
-</gpx>"#;
-    let runs = gpx::parse_gpx_runs(doc).unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].sport, None);
-    assert_eq!(
-        runs[0].logged_at_sec,
-        Some(parse_import_time_sec("2026-09-21T14:20:18Z"))
+</gpx>"#
     );
-    assert_eq!(
-        runs[0].segments.iter().map(Vec::len).collect::<Vec<_>>(),
-        [2]
-    );
+    let r = one_run(doc.as_bytes());
+    assert_eq!(r.observed_at, 1_790_000_418, "2026-09-21T14:20:18Z");
+    assert_eq!((r.points.len(), r.segment_starts), (24, vec![]));
     assert_eq!(non_run_sport(Some("mountainbiking")), Some("cycling"));
 }
 

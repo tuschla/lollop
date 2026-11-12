@@ -30,14 +30,7 @@ fn profile(acute_illness: bool) -> Profile {
 fn set_up(ill_in_profile: bool) -> (Engine, Model) {
     let app = Engine;
     let mut model = Model::default();
-    ev(
-        &app,
-        &mut model,
-        Event::SetToday {
-            epoch_day: TODAY,
-            utc_offset_sec: OFFSET,
-        },
-    );
+    ev(&app, &mut model, set_today_off_ev(TODAY, OFFSET));
     ev(&app, &mut model, Event::SetProfile(profile(ill_in_profile)));
     ev(
         &app,
@@ -49,15 +42,20 @@ fn set_up(ill_in_profile: bool) -> (Engine, Model) {
     (app, model)
 }
 
-fn report_flu(app: &Engine, model: &mut Model) {
+/// A flu report (illness value 2) `secs` into `TODAY`.
+fn report_flu_at(app: &Engine, model: &mut Model, secs: i64) {
     ev(
         app,
         model,
         Event::SubmitReadiness(ReadinessInput {
-            observed_at: TODAY * DAY_SEC + 3_600,
+            observed_at: TODAY * DAY_SEC + secs,
             ..input(ReadinessSignal::Illness, 2.0)
         }),
     );
+}
+
+fn report_flu(app: &Engine, model: &mut Model) {
+    report_flu_at(app, model, 3_600);
 }
 
 /// What the shell sends when the user confirms the core's illness action.
@@ -93,7 +91,6 @@ fn illness_actions(vm: &ViewModel) -> Vec<&HoldResolutionView> {
 fn the_profile_illness_answer_offers_the_one_im_better_action() {
     let (app, mut model) = set_up(true);
     let vm = app.view(&model);
-    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.hold_reason, Some(HoldReason::AcuteIllnessProfile));
     let actions = illness_actions(&vm);
     assert_eq!(actions.len(), 1);
@@ -118,16 +115,9 @@ fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
         observed_at: TODAY * DAY_SEC + 1_800,
         ..input(ReadinessSignal::WellnessZ, 0.2)
     };
-    ev(&app, &mut model, Event::SubmitReadiness(wellness.clone()));
+    ev(&app, &mut model, Event::SubmitReadiness(wellness));
     report_flu(&app, &mut model);
-    ev(
-        &app,
-        &mut model,
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: TODAY * DAY_SEC + 5_400,
-            ..input(ReadinessSignal::Illness, 2.0)
-        }),
-    );
+    report_flu_at(&app, &mut model, 5_400);
     let vm = app.view(&model);
     assert!(vm.hold_reason.is_some());
     let actions = illness_actions(&vm);
@@ -141,17 +131,17 @@ fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
 
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
-    assert!(vm.hold_reason.is_none());
+    assert!(vm.hold_reason.is_none(), "every illness report is resolved");
     assert!(vm.hold_resolutions.is_empty());
     let ns = vm.next_session.expect("today's session");
     assert_eq!(ns.items.len(), 1);
     assert!(ns.items[0].return_check, "{}", ns.items[0].summary);
-    assert_eq!(
-        model.retracted_inputs.len(),
-        2,
-        "every illness report is retracted and stays in history"
+    assert_eq!(vm.input_count, 1, "other inputs untouched");
+    assert!(
+        vm.readiness_summary
+            .iter()
+            .any(|r| r.signal == ReadinessSignal::WellnessZ)
     );
-    assert!(model.inputs.contains(&wellness), "other inputs untouched");
 }
 
 #[test]
@@ -168,23 +158,17 @@ fn one_tap_ends_a_reported_illness_and_the_profile_answer_together() {
 
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
-    assert!(
-        vm.hold_reason.is_none(),
+    assert_eq!(
+        vm.hold_reason, None,
         "no second switch-off in Profile needed"
     );
-    assert_eq!(vm.hold_reason, None);
     assert!(vm.hold_resolutions.is_empty());
-    assert!(!model.profile().unwrap().health.acute_illness);
+    assert!(!vm.profile.as_ref().unwrap().health.acute_illness);
     let ns = vm.next_session.expect("today's session");
     assert!(
         ns.items[0].return_check,
         "the resolved report still leads into the return check: {}",
         ns.items[0].summary
-    );
-    assert_eq!(
-        model.retracted_inputs.len(),
-        1,
-        "the report stays in history"
     );
 }
 

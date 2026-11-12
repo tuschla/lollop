@@ -23,7 +23,7 @@ internal fun indexOfExercise(candidates: List<String>, name: String): Int {
 }
 
 /** How many quick-pick chips show with nothing (or an exact pick) typed. */
-private const val QuickPickBase = 6
+internal const val QuickPickBase = 6
 /** How many filtered matches show while typing. */
 private const val QuickPickFiltered = 8
 

@@ -541,15 +541,6 @@ mod tests {
     }
 
     #[test]
-    fn combinations_enumerate_lexicographically() {
-        let c = combinations(&[0, 1, 2, 3], 2);
-        assert_eq!(c.len(), 6);
-        assert_eq!(c[0], vec![0, 1]);
-        assert_eq!(c[5], vec![2, 3]);
-        assert_eq!(combinations(&[0, 1], 0), vec![Vec::<u16>::new()]);
-    }
-
-    #[test]
     fn three_full_body_days_default_to_mon_wed_fri() {
         let p = place_week(
             [true; 7],

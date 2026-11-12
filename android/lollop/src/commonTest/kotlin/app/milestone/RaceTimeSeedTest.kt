@@ -1,8 +1,8 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The race predictor form seeds its "MM"/"SS" keypad buffers from the core's
@@ -41,7 +41,7 @@ class RaceTimeSeedTest {
         // assert the seconds buffer stays in 0..59 for every reachable time.
         for (t in 0..7200) {
             val (_, sec) = raceTimeSeed(t + 0.7)
-            assertTrue("seconds out of range for $t", sec.toInt() in 0..59)
+            assertTrue(sec.toInt() in 0..59, "seconds out of range for $t")
         }
     }
 }

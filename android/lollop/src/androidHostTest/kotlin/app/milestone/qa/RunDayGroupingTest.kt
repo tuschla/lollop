@@ -31,7 +31,7 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.TimeZone
-import org.junit.After
+import app.milestone.JvmDefaultsRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -57,21 +57,16 @@ class RunDayGroupingTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
+
     private val utc = kotlinx.datetime.TimeZone.UTC
-    private val savedZone = TimeZone.getDefault()
-    private val savedLocale = Locale.getDefault()
 
     @Before
     fun setUp() {
         // runTitle and the date chip read the device zone/locale; pin both.
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         Locale.setDefault(Locale.US)
-    }
-
-    @After
-    fun tearDown() {
-        TimeZone.setDefault(savedZone)
-        Locale.setDefault(savedLocale)
     }
 
     private fun at(y: Int, mo: Int, d: Int, h: Int, mi: Int): Long =

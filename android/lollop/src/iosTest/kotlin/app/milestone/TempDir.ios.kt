@@ -13,3 +13,5 @@ actual fun newTempDir(): AppPath {
     }
     return AppPath(path)
 }
+
+actual fun fileIn(dir: AppPath, name: String): AppPath = AppPath("${dir.path}/$name")

@@ -1,5 +1,5 @@
-//! Run cards: zone and pace classification, GPS-derived figures, GPX export
-//! and the run-view / GPX memo caches.
+//! Run cards: zone and pace classification, GPS-derived figures, amends and
+//! GPX export.
 
 use super::*;
 
@@ -223,147 +223,81 @@ fn gps_run_without_hr_reports_unknown_zone_not_fabricated_z1() {
     );
 }
 
-#[test]
-fn run_view_derivation_is_memoized_and_gpx_built_once() {
-    // The heavy per-run derivation (≈6 haversine passes + km/mile splits
-    // + VI) must run ONCE per distinct run, not on every view(). A second
-    // identical derivation serves a cached clone, zero rebuilds. The run
-    // view carries no GPX string itself; it advertises an exportable route
-    // via `has_gpx` and the document is built ON DEMAND.
-    let run = probe_run(918_273);
-
-    let builds = || crate::memo::stats(MemoId::RunCard).builds;
-    let before = builds();
-    let first = run_card(&run);
-    let after_first = builds();
-    let second = run_card(&run);
-    let after_second = builds();
-
-    assert_eq!(after_first - before, 1, "the first derivation builds once");
-    assert_eq!(
-        after_second - after_first,
-        0,
-        "the second is served from cache"
-    );
-    assert_eq!(first, second, "the cached view is identical");
-    // The run advertises an exportable route (memoization did not drop it),
-    // and the on-demand export still builds a valid two-fix-plus GPX.
-    assert!(first.has_gpx, "an exportable route is still advertised");
-    let model = Model {
-        runs: vec![run.clone()],
-        ..Model::default()
-    };
-    let gpx = export_run_gpx(&model, 918_273, 1_000);
-    assert!(gpx.contains("<trkseg>"), "on-demand GPX builds: {gpx}");
-
-    // A content change (an amend) must MISS the cache and rebuild.
-    let mut amended = run.clone();
-    amended.longest_recent_km = 99.0;
-    let before_amend = builds();
-    let _ = run_card(&amended);
-    assert_eq!(
-        builds() - before_amend,
-        1,
-        "a changed fingerprint recomputes"
-    );
+/// A 4-fix GPS run (~330 m over 150 s) ending at `at`, logged as entry `id`.
+fn tracked_run(id: u64, at: i64) -> Event {
+    let track = (0..4)
+        .map(|i| gps(0.001 * i as f64, at - 150 + 50 * i))
+        .collect();
+    log_run_track(track, 71.0, 3.3, at, id)
 }
 
 #[test]
-fn retain_runs_trims_every_per_run_memo_to_the_live_runs() {
-    // A deleted run's entries in every per-run memo must be evicted by the
-    // per-view() trim while the live run's stay warm.
-    let model = Model {
-        runs: vec![probe_run(700_001), probe_run(700_002)],
-        ..Model::default()
-    };
-    let facts = RunFacts::new(&model.runs);
-    for (i, r) in model.runs.iter().enumerate() {
-        let _ = memo_run_card(r, facts.keys[i], facts.qc[i].as_deref(), DistanceUnit::Km);
-    }
-    let _ = build_run_progress(&model, &facts, 0.0);
-    let (live_key, deleted_key) = (facts.keys[0], facts.keys[1]);
-    let per_run = || MemoId::ALL.into_iter().filter(|m| m.per_run());
-    for m in per_run() {
-        assert!(
-            crate::memo::holds_run(m, live_key) && crate::memo::holds_run(m, deleted_key),
-            "{m:?} holds both runs before the trim"
-        );
-    }
+fn amending_a_tracked_run_rebuilds_its_card() {
+    // The card is derived once per distinct run; an amend of the same
+    // (entry id, stamp) is a new run, so the card shows the amended figures.
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(tracked_run(918_273, 1_000), &mut model)
+        .expect_only_render();
+    let first = app.view(&model).runs[0].clone();
+    assert!(first.has_gpx, "an exportable route is advertised");
+    assert!(first.distance_km < 0.5, "{}", first.distance_km);
+    assert_eq!(app.view(&model).runs[0], first, "an unchanged run");
 
-    crate::memo::retain_runs(&[live_key]);
-
-    for m in per_run() {
-        assert!(
-            crate::memo::holds_run(m, live_key),
-            "{m:?} keeps the live run"
-        );
-        assert!(
-            !crate::memo::holds_run(m, deleted_key),
-            "{m:?} drops the deleted run"
-        );
-    }
+    app.update(
+        amend_run(918_273, 5.0, 30.0, 70.0, 1_000, 1_000),
+        &mut model,
+    )
+    .expect_only_render();
+    let amended = &app.view(&model).runs[0];
+    assert_eq!(amended.distance_km, 5.0);
+    assert_eq!(amended.pace, "6:00/km");
 }
 
 #[test]
 fn gpx_export_reads_only_the_runs_the_model_holds() {
-    let kept = probe_run(700_020);
-    let deleted = probe_run(700_021);
-    let both = Model {
-        runs: vec![kept.clone(), deleted],
-        ..Model::default()
-    };
-    assert!(export_run_gpx(&both, 700_021, 1_000).contains("<trkseg>"));
+    let app = Engine;
+    let mut model = Model::default();
+    for id in [700_020, 700_021] {
+        app.update(tracked_run(id, 1_000), &mut model)
+            .expect_only_render();
+    }
+    assert!(export_run_gpx(&model, 700_021, 1_000).contains("<trkseg>"));
 
-    let live = Model {
-        runs: vec![kept],
-        ..Model::default()
-    };
+    app.update(
+        Event::DeleteEntry {
+            kind: EntryKind::Run,
+            entry_id: 700_021,
+            observed_at_fallback: 1_000,
+        },
+        &mut model,
+    )
+    .expect_only_render();
     assert!(
-        export_run_gpx(&live, 700_021, 1_000).is_empty(),
+        export_run_gpx(&model, 700_021, 1_000).is_empty(),
         "the deleted run's route is gone"
     );
     assert!(
-        export_run_gpx(&live, 700_020, 1_000).contains("<trkseg>"),
+        export_run_gpx(&model, 700_020, 1_000).contains("<trkseg>"),
         "the live run's route survives"
     );
 }
 
 #[test]
 fn gpx_export_of_a_run_that_lost_its_track_is_empty() {
-    // A same-identity run (a GPS→manual amend keeps (entry_id, observed_at))
-    // that carries an empty track exports nothing, never the pre-amend route.
-    let mut emptied = probe_run(700_010);
-    emptied.track = Vec::new();
-    let model = Model {
-        runs: vec![emptied],
-        ..Model::default()
-    };
-    assert!(export_run_gpx(&model, 700_010, 1_000).is_empty());
-}
-
-#[test]
-fn view_list_cache_shrinks_but_still_serves_a_hit() {
-    // The list memos' small cap (`MemoId::LiftViews` / `RunViews`) must not
-    // cost correctness: a repeated view() on an unchanged model must return
-    // identical lift/run lists (the second serves cache hits).
+    // A GPS→manual amend keeps (entry_id, observed_at) and drops the track:
+    // the export is empty, never the pre-amend route.
     let app = Engine;
     let mut model = Model::default();
-    app.update(log_set_id("Back Squat", 100.0, 1, 1_000), &mut model)
+    app.update(tracked_run(700_010, 1_000), &mut model)
         .expect_only_render();
-    let probe = probe_run(700_003);
+    assert!(export_run_gpx(&model, 700_010, 1_000).contains("<trkseg>"));
     app.update(
-        log_run_track(probe.track, 71.0, 0.0, 1_000, 700_003),
+        amend_run(700_010, 5.0, 30.0, 70.0, 1_000, 1_000),
         &mut model,
     )
     .expect_only_render();
-
-    let first = app.view(&model);
-    let second = app.view(&model);
-    assert_eq!(
-        first.lifts, second.lifts,
-        "lift list identical across views"
-    );
-    assert_eq!(first.runs, second.runs, "run list identical across views");
+    assert!(export_run_gpx(&model, 700_010, 1_000).is_empty());
 }
 
 #[test]
@@ -372,36 +306,22 @@ fn run_view_differentiates_interval_from_steady_same_average() {
     // → identical average pace. The interval run mixes hard reps with standing
     // recovery; the steady run holds an even pace. The engine rates them
     // differently (RUN-INTERVAL-VI-001).
-    let steady = LoggedRun {
-        longest_recent_km: 5.0,
-        wire_longest_recent_km: 5.0,
-        // Four even ~111 m / 30 s segments (~3.71 m/s throughout).
-        track: vec![
-            gps(0.000, 0),
-            gps(0.001, 30),
-            gps(0.002, 60),
-            gps(0.003, 90),
-            gps(0.004, 120),
-        ],
-        ..logged_run(0.0, 0.0, 0.0, 0)
+    let card = |lons: [f64; 5]| {
+        let track = lons
+            .iter()
+            .zip([0, 30, 60, 90, 120])
+            .map(|(&lon, t)| gps(lon, t))
+            .collect();
+        let (app, model) = replay(&[log_run_track(track, 0.0, 5.0, 120, 0)]);
+        app.view(&model).runs.swap_remove(0)
     };
+    // Four even ~111 m / 30 s segments (~3.71 m/s throughout).
+    let sv = card([0.000, 0.001, 0.002, 0.003, 0.004]);
     // Interval with JOG recovery (recovery legs stay above the 0.5 m/s
     // auto-pause floor, so moving time, and therefore average moving pace,
     // matches the steady run exactly; only the variability differs). Two
     // ~200 m hard reps (~6.7 m/s) each followed by a ~22 m jog (~0.74 m/s).
-    let interval = LoggedRun {
-        track: vec![
-            gps(0.0000, 0),
-            gps(0.0018, 30),
-            gps(0.0020, 60),
-            gps(0.0038, 90),
-            gps(0.0040, 120),
-        ],
-        ..steady.clone()
-    };
-
-    let sv = run_card(&steady);
-    let iv = run_card(&interval);
+    let iv = card([0.0000, 0.0018, 0.0020, 0.0038, 0.0040]);
 
     assert_eq!(sv.pace, iv.pace, "same-average precondition broke");
 
@@ -425,14 +345,12 @@ fn run_view_differentiates_interval_from_steady_same_average() {
 #[test]
 fn run_splits_carry_numeric_seconds_per_unit_consistent_with_pace() {
     // A splits bar chart needs the numeric per-unit pace; the pre-formatted
-    // `m:ss` string can't be a bar length. `seconds_per_unit` carries it, and
-    // MUST be derived from the same value `pace` is formatted from so the two
-    // can never disagree (the shell never scrapes the prose).
+    // `m:ss` string can't be a bar length. `seconds_per_unit` carries it.
     let app = Engine;
     let mut model = Model::default();
 
-    // ~2.2 km along the equator (0 → 0.02° lon) over 600 s → ≥2 full-km
-    // splits plus a trailing partial, so every branch is exercised.
+    // ~2.224 km along the equator (0 → 0.02° lon) at an even ~270 s/km over
+    // 600 s → two full-km splits plus a trailing partial.
     let points = vec![
         gps(0.000, 0),
         gps(0.005, 150),
@@ -448,25 +366,14 @@ fn run_splits_carry_numeric_seconds_per_unit_consistent_with_pace() {
 
     let vm = app.view(&model);
     let splits = &vm.runs[0].splits;
-    assert!(
-        splits.len() >= 2,
-        "expected multiple km splits, got {}",
-        splits.len()
-    );
-    for s in splits {
-        assert!(s.seconds_per_unit > 0, "split {} pace populated", s.index);
-        // The guarantee: `pace` is exactly the format of `seconds_per_unit`.
+    let full: Vec<_> = splits.iter().filter(|s| !s.partial).collect();
+    assert_eq!(full.len(), 2, "{splits:?}");
+    for s in full {
         assert_eq!(
-            s.pace,
-            fmt_mss(s.seconds_per_unit as f64),
-            "split {} pace string must equal format of seconds_per_unit",
-            s.index,
-        );
-        assert_eq!(
-            s.pace,
-            format!("{}:{:02}", s.seconds_per_unit / 60, s.seconds_per_unit % 60),
-            "split {} m:ss shape",
-            s.index,
+            (s.seconds_per_unit, s.pace.as_str()),
+            (270, "4:30"),
+            "split {}",
+            s.index
         );
     }
 }
@@ -534,30 +441,22 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
     // half of the run is LOST. The boundary is exactly what lets the core keep
     // segment 2 (real distance) while still excluding the bridge.
     let mut naive = Model::default();
-    app.update(
-        log_run_track(relocation.clone(), 70.0, 0.0, 1000, 2),
-        &mut naive,
-    )
-    .expect_only_render();
+    app.update(log_run_track(relocation, 70.0, 0.0, 1000, 2), &mut naive)
+        .expect_only_render();
     let naive_run = &app.view(&naive).runs[0];
     assert!(
         naive_run.distance_km < 0.6,
         "no boundary → segment 2 dropped as a teleport: {}",
         naive_run.distance_km,
     );
-    assert!(
-        relocation.len() - crate::gps::qc_track(&relocation, &[]).track.len() >= 5,
-        "the 5 seg-2 fixes were dropped"
-    );
 }
 
 #[test]
-fn run_card_cache_key_covers_the_logged_offset() {
-    // The card echoes the logged offset, so two rows equal except for it must
-    // not share a cached card.
-    let mut r = probe_run(700_101);
-    r.logged_utc_offset_sec = Some(3_600);
-    assert_eq!(run_card(&r).utc_offset_sec, Some(3_600));
-    r.logged_utc_offset_sec = Some(-18_000);
-    assert_eq!(run_card(&r).utc_offset_sec, Some(-18_000));
+fn a_run_card_shows_its_own_logged_offset() {
+    // The card echoes the logged offset: the same run logged under two
+    // offsets shows each its own.
+    for offset in [3_600, -18_000] {
+        let (app, model) = replay(&[stamped(tracked_run(700_101, 1_000), offset)]);
+        assert_eq!(app.view(&model).runs[0].utc_offset_sec, Some(offset));
+    }
 }

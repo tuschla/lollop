@@ -1,7 +1,6 @@
 package app.milestone.qa
 
 import android.content.Context
-import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -21,7 +20,6 @@ import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isRoot
-import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -31,7 +29,6 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
@@ -166,9 +163,9 @@ class UxInvariantTest {
         rule.onNode(hasTestTag("loop-exercise") and hasText("Back Squat")).assertIsDisplayed()
         val change = rule.onNode(hasClickAction() and hasContentDescription(str(R.string.log_change_exercise_cd, "Back Squat")))
             .fetchSemanticsNode()
-        val minPx = with(rule.density) { 48.dp.toPx() }
+        val minPx = with(rule.density) { UxInvariants.MIN_TOUCH.toPx() }
         assertTrue(
-            "Change target ${change.size} is under 48dp",
+            "Change target ${change.size} is under ${UxInvariants.MIN_TOUCH}",
             change.size.width >= minPx - 0.5f && change.size.height >= minPx - 0.5f,
         )
         assertTrue(rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty())
@@ -178,7 +175,7 @@ class UxInvariantTest {
     fun logChooser_meetsEveryInvariant() {
         seedAnchoredLifter()
         rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log))).performClick()
+        rule.onNode(logFab).performClick()
         rule.assertCountEventually(hasText(str(R.string.main_log_set_title)), 1)
         assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
     }
@@ -190,7 +187,7 @@ class UxInvariantTest {
         // opens, with no scroll; Report pain stays offered.
         QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile()))
         rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log))).performClick()
+        rule.onNode(logFab).performClick()
         val trackRunRow = hasText(str(R.string.main_track_run_title)) and hasClickAction()
         rule.assertCountEventually(trackRunRow, 1)
         rule.waitForIdle()
@@ -239,7 +236,7 @@ class UxInvariantTest {
         seedAnchoredLifter()
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
-        rule.selectHistoryFilter(str(R.string.main_segment_lifts))
+        rule.selectTab(str(R.string.main_segment_lifts))
         rule.scrollToText("Back Squat")
         assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
     }
@@ -272,7 +269,7 @@ class UxInvariantTest {
         val vm = EventDispatcher.model.value!!
         val meta = listOfNotNull(vm.provisional, vm.autoreg_source)
         assertTrue("scenario carries an engine-meta disclosure", meta.isNotEmpty())
-        rule.assertTextCountEventually(str(R.string.main_todays_session).uppercase(java.util.Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_todays_session).uppercase(java.util.Locale.US)), 1)
         // Engine meta is never on the face: it sits in the session card's "?" panel.
         meta.forEach { rule.onAllNodesWithText(it.summary).assertCountEquals(0) }
         val title = vm.next_session!!.title
@@ -430,97 +427,4 @@ class UxInvariantTest {
 
     private fun Rect.encloses(inner: Rect): Boolean =
         inner.left >= left - 1f && inner.top >= top - 1f && inner.right <= right + 1f && inner.bottom <= bottom + 1f
-
-    /** The layout itself dropped text: lines beyond maxLines or below a height clip
-     *  (both in [TextLayoutResult.didOverflowHeight]), an ellipsis, or an unwrapped
-     *  line wider than the box it got. */
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width)
-}
-
-/**
- * Drives the guided setup along the Both path with real taps, screen by screen.
- */
-internal object GuidedSetupWalk {
-    /** One wizard screen: its caption while Next is disabled (null = never gated)
-     *  and the taps that answer it. */
-    class Screen(val name: String, @StringRes val gateCaption: Int?, val answer: (ComposeTestRule) -> Unit)
-
-    /** The longest walk: Both + calisthenics (adds the placement screen) + a race
-     *  goal (adds race details), so every wizard screen is visited. */
-    val bothPath = listOf(
-        Screen("train", R.string.setup_need_train) { choose(it, R.string.setup_modality_both_title) },
-        Screen("lift-goal", R.string.setup_need_goal) {
-            choose(it, R.string.setup_liftgoal_strength)
-            choose(it, R.string.setup_modality_calis_title)
-        },
-        Screen("placement", null) {
-            choose(it, R.string.setup_place_push_full)
-            choose(it, R.string.setup_place_pull_many)
-            choose(it, R.string.setup_equip_bar)
-        },
-        Screen("run-goal", R.string.setup_need_goal) { choose(it, R.string.setup_goaldist_10k) },
-        // A recent 5K in 26:15, typed on the pinned keypad.
-        Screen("race", null) { choose(it, R.string.setup_goaldist_5k); key(it, '2'); key(it, '6'); key(it, '1'); key(it, '5') },
-        Screen("lead", R.string.setup_need_lead) { choose(it, R.string.setup_bothpriority_liftlean_title) },
-        // Five days, then five ticked weekdays (fewer would block Next). The day
-        // count is a figure and the weekday short names come from java.time.
-        Screen("days", R.string.setup_days_pick_hint) {
-            choose(it, "5")
-            listOf("Mon", "Tue", "Thu", "Sat", "Sun").forEach { d -> choose(it, d) }
-        },
-        // Lifting and running levels are separate groups with the same titles.
-        Screen("level", R.string.setup_need_level) {
-            chooseNth(it, R.string.setup_level_intermediate_title, 0)
-            chooseNth(it, R.string.setup_level_intermediate_title, 1)
-        },
-        Screen("run-now", null) { key(it, '2'); key(it, '5') },
-        // The birthday needs an answer (here a date typed in the picker's date
-        // field: 12 Mar 1991); bodyweight and sex stay unanswered.
-        Screen("about", R.string.setup_about_pick_hint) { pickBirthday(it, "03121991") },
-        Screen("health", null) {},
-        Screen("review", null) {},
-    )
-
-    /** Walk from the first screen; [onArrive] runs on each screen before it is
-     *  answered. Stops on arrival at [stopAt] (or at the review, before Finish). */
-    fun walk(rule: ComposeTestRule, stopAt: String? = null, onArrive: (Screen) -> Unit = {}) {
-        for (screen in bothPath) {
-            rule.waitForIdle()
-            onArrive(screen)
-            if (screen.name == stopAt || screen === bothPath.last()) return
-            screen.answer(rule)
-            rule.waitForIdle()
-            rule.onNode(hasText(str(R.string.setup_btn_next)) and hasClickAction()).performClick()
-        }
-    }
-
-    private fun choose(rule: ComposeTestRule, text: String) {
-        rule.onNode(hasText(text) and hasClickAction()).performScrollTo().performClick()
-        rule.waitForIdle()
-    }
-
-    private fun choose(rule: ComposeTestRule, @StringRes label: Int) = choose(rule, str(label))
-
-    private fun chooseNth(rule: ComposeTestRule, @StringRes label: Int, n: Int) {
-        rule.onAllNodes(hasText(str(label)) and hasClickAction())[n].performScrollTo().performClick()
-        rule.waitForIdle()
-    }
-
-    /** Open the birthday picker, type [digits] into its date field (the picker
-     *  opens in typed-date mode, US order MMDDYYYY) and confirm. */
-    private fun pickBirthday(rule: ComposeTestRule, digits: String) {
-        choose(rule, R.string.setup_birthday_pick)
-        rule.onAllNodes(hasSetTextAction())[0].performTextInput(digits)
-        rule.waitForIdle()
-        rule.onNode(hasText(str(R.string.log_ok)) and hasClickAction()).performClick()
-        rule.waitForIdle()
-    }
-
-    private fun key(rule: ComposeTestRule, k: Char) {
-        rule.onNode(hasText(k.toString()) and hasClickAction()).performClick()
-        rule.waitForIdle()
-    }
 }

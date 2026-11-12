@@ -6,7 +6,7 @@
 # PASS/FAIL checks and captured evidence (UI-tree XML, screenshots, event logs).
 #
 #   locale      per-app locale switches while open and mid-editor (de-DE, ar RTL,
-#               ja) and mid-run; the Auto distance unit follows the locale
+#               ja) and mid-run; the profile's distance unit stays through them
 #   time        24 h vs 12 h, clock change mid-day, time-zone change across
 #               midnight (backgrounded / foregrounded), TZ + clock jump mid-run
 #   appearance  dark/light toggle mid-editor, font scale 0.85/1.3/2.0 and display
@@ -39,13 +39,13 @@
 # GPS is fed with `adb emu geo fix` (scripts/emu-scenarios/feeder.py, 1 Hz,
 # constant 3 m/s ellipse). The device clock is pinned to Mon 2026-09-21 08:00
 # Europe/Berlin before every scenario. Outputs: ~/.cache/emu-scenarios/ or --out
-# (REPORT.md, checks.tsv, measurements.tsv, logcat.txt, shots/, ui/, logs/).
+# (REPORT.md, checks.tsv, observations.tsv, logcat.txt, shots/, ui/, logs/).
 # Exit status 0 when no check FAILed. The emulator is stopped at the end unless
 # --keep-emulator (or it was already running when the script started).
 # Needs: Android SDK (emulator, adb, build-tools d8), JDK (javac; gradle once for
 # the 5-year seed, cached in ~/.cache/emu-scenarios/seed/), cargo (the core's
-# figures of the time scenario's saved run), python3 + Pillow;
-# tesseract with a Latin-script language for the ar bidi check (else INFO/skip).
+# figures of the time scenario's saved run), python3 + Pillow, and tesseract with
+# a Latin-script language (the locale scenario's OCR checks).
 # One full run takes ~40 min.
 set -uo pipefail
 
@@ -77,7 +77,6 @@ mkdir -p "$OUT"
 find "$OUT" -mindepth 1 -maxdepth 1 ! -name seed ! -name probe -exec rm -rf {} +
 out_init "$OUT"
 mkdir -p "$OUT"/{seed,probe}
-: >"$OUT/measurements.tsv"
 
 # reset_app [LOG]: wipe the app and boot it on LOG (default: the seed_basic log,
 # 2 run days, a squat and a 5 km run on Sun SEED_DAY, so Today, Mon RUN_DAY, is an
@@ -100,36 +99,59 @@ editor_chip() {
   return 1
 }
 
-dismiss_crash_dialog() { wait_text eq "Close app" 3 && tap_node eq "Close app"; return 0; }
+# dismiss_crash_dialog PID: after `am crash`, answer the crash dialog with "Close
+# app" and wait until the crashed process PID is gone. The dialog shows for a crash
+# within 2 min of the app's previous one (AppErrors MIN_CRASH_INTERVAL), and the
+# process lives until it is answered: its kill then finishes every activity it
+# hosts, a launch's new MainActivity included, so a launch must wait for it.
+dismiss_crash_dialog() {
+  if wait_text eq "Close app" 3; then tap_node eq "Close app"; fi
+  wait_for 10 pid_released "$1" || log "crashed process $1 still running"
+}
 resumed_and_recording() { [[ "$(sidecar_points)" -gt "$1" ]] && svc_fg; }
 
 set_locale() { sh_ cmd locale set-app-locales "$APP_ID" ${1:+--locales "$1"} >/dev/null; ui_settled; }
-plan_unit() { node_label re '^[0-9.]+ (mi|km)$' | awk '{print $NF}'; }
+# A figure and its unit: the app keeps them together with a no-break space.
+FIG_UNIT='^[0-9.]+[ \u00a0]'
+plan_unit() { local l; l="$(node_label re "${FIG_UNIT}(mi|km)\$")"; echo "${l##*[!a-z]}"; }
+# set_distance_unit mi|km: Profile › Distance units, then back to Today.
+set_distance_unit() {
+  tap_nav "${STR[main_dest_profile]}"
+  scroll_to eq "${STR[main_label_distance_units]}" 6 && tap_node eq "${STR[main_unit_$1]}" && wait_for 5 selected "${STR[main_unit_$1]}"
+  tap_nav "${STR[main_dest_today]}"
+}
 # ocr_check SCENARIO NAME EVIDENCE-TAG MODE TEXT: the rendered (OCR) text of the
-# node equals its logical text (whitespace-collapsed). Needs tesseract + PIL;
-# without them the check is reported INFO/skipped.
+# node equals its logical text (whitespace-collapsed).
 ocr_check() {
   local r rc
   r="$(python3 "$HELP/ocr.py" "$OUT/shots/$3.png" "$OUT/ui/$3.xml" "$4" "$5" "$OUT/logs" 2>/dev/null)"; rc=$?
-  if [[ $rc -eq 3 ]]; then check INFO "$1" "$2" "skipped: tesseract with a Latin-script language not installed"; return; fi
+  if [[ $rc -eq 3 ]]; then check FAIL "$1" "$2" "tesseract with a Latin-script language not installed"; return; fi
   local logical="${r%%$'\t'*}" seen="${r#*$'\t'}"
   expect "$1" "$2" "tree text '$logical' · rendered (OCR of $3.png) '$seen'" test -n "$r" -a "$logical" = "$seen"
+}
+# no_overflow SCENARIO CONFIG: no text node of the screen lies outside it.
+no_overflow() {
+  local x; x="$(dump_ui | q overflow | head -5 | tr '\n' ';')"
+  expect "$1" "$2: no text node outside the screen" "${x:-none}" test -z "$x"
 }
 
 sc_locale() {
   local S=locale u pid0 W rr p n0 n1 x
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  # The distance unit is the profile's: miles here, so that a unit that followed
+  # a locale (de-DE's km) would show.
+  set_distance_unit mi
   evidence locale-01-en-today
   u="$(plan_unit)"
-  expect $S "en-US: Auto distance unit is miles" "plan distance unit '$u'" test "$u" = mi
+  expect $S "the profile's distance unit (mi) shows" "plan distance unit '$u'" test "$u" = mi
   pid0="$(app_pid)"
   set_locale de-DE
   evidence locale-02-de-today
-  ocr_check $S "de-DE: plan distance renders as written (OCR control)" locale-02-de-today re '^[0-9.]+ (km|mi)$'
+  ocr_check $S "de-DE: plan distance renders as written (OCR control)" locale-02-de-today re "${FIG_UNIT}(km|mi)\$"
   expect $S "de-DE applied while open, same process" "pid $pid0 → $(app_pid), focus $(focus)" \
     test "$(app_pid)" = "$pid0" -a -n "$pid0"
   u="$(plan_unit)"
-  expect $S "de-DE: Auto distance unit switches to km" "plan distance unit '$u' (Units.kt localeDistanceUnit)" test "$u" = km
+  expect $S "de-DE: the profile's distance unit stays (mi)" "plan distance unit '$u'" test "$u" = mi
 
   mark locale-mid-editor
   set_locale en-US
@@ -138,7 +160,7 @@ sc_locale() {
   set_locale de-DE
   evidence locale-04-de-editor
   expect $S "editor survives a de-DE switch with its values" "122.5 kg · 5 reps · 2 left still selected" editor_has_values 122.5
-  check INFO $S "de-DE weight rendering" "$(node_label pre "${STR[log_field_weight]}, ") · $(node_label re '^[0-9]+([.,][0-9]+)?$')"
+  observe $S "de-DE weight rendering" "$(node_label pre "${STR[log_field_weight]}, ") · $(node_label re '^[0-9]+([.,][0-9]+)?$')"
   tap_log_set
   pull_log "$OUT/logs/locale-de.ndjson"
   x="$(EV lastset "$OUT/logs/locale-de.ndjson")"
@@ -152,14 +174,14 @@ sc_locale() {
   evidence locale-06-ar-today
   # The app ships English strings only but declares supportsRtl: in an RTL locale
   # an English value must still read left-to-right ("5.5 km", not "km 5.5").
-  ocr_check $S "ar: English plan distance renders left-to-right" locale-06-ar-today re '^[0-9.]+ (km|mi)$'
-  check INFO $S "ar: coach-note paragraph as rendered" "$(python3 "$HELP/ocr.py" "$OUT/shots/locale-06-ar-today.png" "$OUT/ui/locale-06-ar-today.xml" re '^[A-Z].*\.$' "$OUT/logs" 2>/dev/null | tr '\t' '|')"
+  ocr_check $S "ar: English plan distance renders left-to-right" locale-06-ar-today re "${FIG_UNIT}(km|mi)\$"
+  observe $S "ar: coach-note paragraph as rendered (tree|OCR)" "$(python3 "$HELP/ocr.py" "$OUT/shots/locale-06-ar-today.png" "$OUT/ui/locale-06-ar-today.xml" re '^[A-Z].*\.$' "$OUT/logs" 2>/dev/null | tr '\t' '|')"
   read -r W _ <<<"$(screen_size)"
   rr="$(find_node eq "${STR[main_dest_today]}")"; read -r -a p <<<"${rr:-0 0}"
   expect $S "ar: bottom navigation mirrored (Today on the right)" "Today nav centre x=${p[0]} of $W" test "${p[0]}" -gt $((W / 2))
   rr="$(find_node eq "${STR[main_log]}")"; read -r -a p <<<"${rr:-9999 0}"
   expect $S "ar: Log FAB mirrored to the left" "Log FAB centre x=${p[0]} of $W" test "${p[0]}" -lt $((W / 2))
-  check INFO $S "ar: text nodes outside the screen" "$(dump_ui | q overflow | head -5 | tr '\n' ';')"
+  no_overflow $S ar
 
   mark locale-ja
   set_locale ja-JP
@@ -167,7 +189,7 @@ sc_locale() {
   evidence locale-07-ja-today
   tap_nav "${STR[main_dest_history]}"; evidence locale-08-ja-history
   tap_nav "${STR[main_dest_profile]}"; evidence locale-09-ja-profile
-  check INFO $S "ja: text nodes outside the screen" "$(dump_ui | q overflow | head -5 | tr '\n' ';')"
+  no_overflow $S ja
   tap_nav "${STR[main_dest_today]}"
 
   mark locale-mid-run
@@ -190,7 +212,7 @@ sc_locale() {
   stop_feeder
   set_locale ""
   u="$(plan_unit)"
-  check INFO $S "locale reset to system" "plan distance unit '$u'"
+  expect $S "locale reset to the system's: the profile's distance unit stays (mi)" "plan distance unit '$u'" test "$u" = mi
 }
 
 sc_time() {
@@ -225,7 +247,7 @@ sc_time() {
   ui_settled
   evidence time-05-berlin-foreground
   x="$(node_label pre "${STR[main_a11y_today_prefix]}")"
-  check INFO $S "TZ Tokyo → Berlin while foregrounded (no resume)" "week strip '$x' (device local $(sh_ "date '+%a %H:%M'"))"
+  observe $S "TZ Tokyo → Berlin while foregrounded (no resume): week strip" "'$x' (device local $(sh_ "date '+%a %H:%M'"))"
   home; launch; ui_settled
   x="$(node_label pre "${STR[main_a11y_today_prefix]}")"
   expect $S "after a resume the strip follows the device day again" "week strip '$x'" \
@@ -261,9 +283,9 @@ sc_time() {
     core_s="$( [[ -f "$core" ]] && jfield moving_s <"$core")"
     expect $S "saved run: one track, the core's moving seconds from its fixes ≈ recorded" "$facts; core moving_s ${core_s:-n/a (logs/time-run-core-cargo.log)}" \
       python3 -c "import json,sys;f=json.loads(sys.argv[1]);sys.exit(0 if f['tracks']==1 and sys.argv[2] and abs(float(sys.argv[2])-$rec)<=30 else 1)" "$facts" "$core_s"
-    check INFO $S "saved run first→last fix span (includes the +1 h wall-clock jump)" "${wall}s; process $pid0 → $(app_pid)"
-    tap_nav "${STR[main_dest_history]}"; scroll_to re '^[0-9.]+ (mi|km) · ' 6; evidence time-08-history
-    x="$(node_label re '^[0-9.]+ (mi|km) · ')"
+    observe $S "saved run first→last fix span (includes the +1 h wall-clock jump)" "${wall}s; process $pid0 → $(app_pid)"
+    tap_nav "${STR[main_dest_history]}"; scroll_to re "${FIG_UNIT}(mi|km) · " 6; evidence time-08-history
+    x="$(node_label re "${FIG_UNIT}(mi|km) · ")"
     rs="$(duration "${x##* · }")"
     expect $S "History row moving time equals the finish sheet" "row '$x' (${rs}s) vs finish '$FINISH' (${ms}s)" \
       eval '[[ $ms -ge 0 && "$rs" == "$ms" ]]'
@@ -335,7 +357,7 @@ sc_appearance() {
   adb_ shell wm density 560; adb_ shell settings put system font_scale 2.0; ui_settled
   evidence appearance-worst-today
   expect $S "font 2.0 + density 560: set editor logs a set" "Log set button on screen and tappable" editor_logs_a_set worst
-  check INFO $S "font 2.0 + density 560: text nodes outside the screen" "$(dump_ui | q overflow | head -5 | tr '\n' ';')"
+  no_overflow $S "font 2.0 + density 560"
   adb_ shell wm density reset; adb_ shell settings put system font_scale 1.0
 }
 
@@ -348,7 +370,7 @@ sc_perms() {
   mark perms-revoke-location
   adb_ shell pm revoke "$APP_ID" android.permission.ACCESS_FINE_LOCATION
   adb_ shell pm revoke "$APP_ID" android.permission.ACCESS_COARSE_LOCATION
-  wait_for 8 app_gone && check INFO $S "revoking location kills the process (platform)" "pid gone"
+  wait_for 8 app_gone && observe $S "revoking location kills the process (platform)" "pid gone"
   launch
   expect $S "relaunch after revoke offers to resume the run" "'${STR[main_resume_run_title]}' dialog" wait_text eq "${STR[main_resume_run_title]}" 20
   evidence perms-01-resume-prompt
@@ -376,7 +398,7 @@ sc_perms() {
   if ! start_run; then check FAIL $S "start second run" "tracker Start not reachable"; stop_feeder; return; fi
   sleep 15; n0="$(sidecar_points)"
   adb_ shell pm revoke "$APP_ID" android.permission.POST_NOTIFICATIONS
-  wait_for 8 app_gone && check INFO $S "revoking notifications kills the process (platform)" "pid gone"
+  wait_for 8 app_gone && observe $S "revoking notifications kills the process (platform)" "pid gone"
   launch
   expect $S "relaunch after notification revoke offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
   tap_node eq "${STR[track_action_resume]}"; sleep 15
@@ -398,7 +420,8 @@ sc_power() {
   adb_ shell dumpsys battery unplug
   adb_ shell settings put global low_power 1
   sh_ dumpsys power | grep -iE "battery ?saver|mSettingBatterySaver|low_power" >"$OUT/logs/power-state.txt"
-  check INFO $S "battery saver state" "settings low_power=$(sh_ settings get global low_power); $(grep -m2 -i 'saver' "$OUT/logs/power-state.txt" | tr -s ' ' | tr '\n' ';')"
+  expect $S "battery saver on" "settings low_power=$(sh_ settings get global low_power); $(grep -m2 -i 'saver' "$OUT/logs/power-state.txt" | tr -s ' ' | tr '\n' ';')" \
+    test "$(sh_ settings get global low_power)" = 1
   adb_ shell am force-stop "$APP_ID"; launch
   expect $S "cold launch under battery saver renders Today" "Today hero within 30 s" wait_text pre "${STR[main_todays_session]}" 30
   evidence power-01-today
@@ -441,8 +464,8 @@ sc_death() {
   open_set_editor && editor_fill
   home
   adb_ shell am kill "$APP_ID"
-  if wait_for 5 app_gone; then check INFO $S "am kill of the backgrounded app" "process gone"
-  else check FAIL $S "am kill of the backgrounded app" "pid $(app_pid) still alive"; fi
+  wait_for 5 app_gone
+  expect $S "am kill ends the backgrounded app's process" "pid '$(app_pid)'" app_gone
   launch; wait_text eq "${STR[log_field_exercise]}" 15
   evidence death-01-editor-restored
   expect $S "set editor restored with its values after process death" "122.5 kg · 5 · 2 left" editor_has_values 122.5
@@ -451,8 +474,9 @@ sc_death() {
   mark death-editor-crash
   l0="$(log_lines)"
   open_set_editor && editor_fill
+  pid0="$(app_pid)"
   adb_ shell am crash "$APP_ID"
-  dismiss_crash_dialog
+  dismiss_crash_dialog "$pid0"
   launch; wait_for 15 app_up
   l1="$(log_lines)"
   evidence death-02-after-crash
@@ -472,9 +496,9 @@ sc_death() {
     eval '[[ "$(app_pid)" == "$pid0" ]] && svc_fg'
 
   mark death-run-am-crash
-  n0="$(sidecar_points)"; tc="$(dev_now)"
+  n0="$(sidecar_points)"; tc="$(dev_now)"; pid0="$(app_pid)"
   adb_ shell am crash "$APP_ID"
-  dismiss_crash_dialog
+  dismiss_crash_dialog "$pid0"
   launch
   expect $S "relaunch after am crash mid-run offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
   evidence death-03-resume-prompt
@@ -491,8 +515,8 @@ sc_death() {
   if start_run; then
     sleep 15; n0="$(sidecar_points)"; pid0="$(app_pid)"
     adb_ shell kill -9 "$pid0"
-    wait_for 5 eval '[[ "$(app_pid)" != "$pid0" ]]'
-    check INFO $S "SIGKILL mid-run (low-memory-killer stand-in)" "pid $pid0 → '$(app_pid)'"
+    wait_for 10 pid_released "$pid0"
+    expect $S "SIGKILL mid-run (low-memory-killer stand-in) ends the process" "pid $pid0 → '$(app_pid)'" pid_released "$pid0"
     launch
     expect $S "relaunch after SIGKILL mid-run offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
     tap_node eq "${STR[track_action_resume]}"
@@ -539,21 +563,20 @@ sc_lowmem() {
 }
 
 sc_update() {
-  local S=update m0 m1 u r x
+  local S=update m0 m1 u r x ok
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
-  tap_nav "${STR[main_dest_profile]}"
-  scroll_to eq "${STR[main_label_distance_units]}" 6 && tap_node eq "${STR[main_unit_km]}" && wait_for 5 selected "${STR[main_unit_km]}"
-  tap_nav "${STR[main_dest_today]}"
+  # Miles: the seed's profile has the core's default, km.
+  set_distance_unit mi
   open_set_editor && editor_fill && tap_log_set; close_editor
   pull_log "$OUT/logs/update-before.ndjson"; m0="$(md5sum <"$OUT/logs/update-before.ndjson" | cut -c1-12)"
-  r="$(install_apk "$APK" -r)"
-  check INFO $S "install -r over the running app" "$r; pid after: '$(app_pid)'"
+  r="$(install_apk "$APK" -r)"; ok=$?
+  expect $S "install -r over the running app" "'$r'; pid after: '$(app_pid)'" test "$ok" -eq 0
   pull_log "$OUT/logs/update-after.ndjson"; m1="$(md5sum <"$OUT/logs/update-after.ndjson" | cut -c1-12)"
   expect $S "event log byte-identical across the update" "md5 $m0 → $m1 ($(grep -c . "$OUT/logs/update-after.ndjson") lines)" test "$m0" = "$m1"
   launch
   expect $S "app boots after the update" "Today rendered" wait_text pre "${STR[main_todays_session]}" 30
   u="$(plan_unit)"; evidence update-01-after
-  expect $S "settings survive the update (distance unit km)" "plan distance unit '$u'" test "$u" = km
+  expect $S "settings survive the update (distance unit mi)" "plan distance unit '$u'" test "$u" = mi
 
   mark update-mid-run
   start_feeder update
@@ -611,7 +634,7 @@ import_backup() {
 }
 
 sc_backup() {
-  local S=backup f x
+  local S=backup f
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   open_set_editor && editor_fill && tap_log_set; close_editor
   pull_log "$OUT/logs/backup-device.ndjson"
@@ -624,7 +647,7 @@ sc_backup() {
     cmp -s "$OUT/logs/backup-device.canon" "$OUT/logs/backup-exported.canon"
   mark backup-clear
   adb_ shell am force-stop "$APP_ID"; adb_ shell pm clear "$APP_ID" >/dev/null
-  grant_perms; pin_clock "$RUN_DAY"; launch
+  grant_perms; pin_clock "$RUN_DAY"; launch_up
   if wait_text eq "${STR[setup_skip]}" 15; then tap_node eq "${STR[setup_skip]}"; wait_gone eq "${STR[setup_skip]}" 10; fi
   expect $S "cleared app starts empty" "log lines $(log_lines)" test "$(log_lines)" -le 1
   import_backup "$f" clear
@@ -635,8 +658,6 @@ sc_backup() {
     cmp -s "$OUT/logs/backup-device.canon" "$OUT/logs/backup-imported.canon"
   tap_nav "${STR[main_dest_today]}"
   expect $S "imported data drives Today again" "Today's session rendered" wait_text pre "${STR[main_todays_session]}" 15
-  x="$(EV lastset "$OUT/logs/backup-imported.ndjson")"
-  check INFO $S "last imported set" "$x"
 }
 
 FIVE="$OUT/seed/five-year.ndjson"
@@ -673,20 +694,20 @@ boot_long() {
       t1=$(date +%s%N)
       wait_for 5 _displayed; ms="$(displayed_ms)"
       all="$all ${ms:-?}"
-      measure longlog "$tag cold start #$i: Displayed (ms)" "${ms:-n/a}$([[ $i -eq 1 ]] && echo ' (heap sampler running)')"
-      measure longlog "$tag cold start #$i: launch → Today hero in UI dump (ms, ±2 s dump latency)" "$(( (t1 - t0) / 1000000 ))"
+      observe longlog "$tag cold start #$i: Displayed (ms)" "${ms:-n/a}$([[ $i -eq 1 ]] && echo ' (heap sampler running)')"
+      observe longlog "$tag cold start #$i: launch → Today hero in UI dump (ms, ±2 s dump latency)" "$(( (t1 - t0) / 1000000 ))"
     else
       all="$all FAIL"
-      measure longlog "$tag cold start #$i" "Today never rendered in 90 s (focus $(focus))"
+      observe longlog "$tag cold start #$i" "Today never rendered in 90 s (focus $(focus))"
     fi
     if [[ -n "$hp" ]]; then touch "$hs.stop"; wait "$hp"; hp=""; fi
   done
   sleep 8
   sh_ dumpsys meminfo "$APP_ID" >"$OUT/logs/meminfo-${tag// /_}.txt"
   read -r -a M <<<"$(python3 "$HELP/parse.py" meminfo pss java native <"$OUT/logs/meminfo-${tag// /_}.txt")"
-  measure longlog "$tag meminfo after settle: TOTAL PSS / Java heap / Native heap (MB)" "$(( ${M[0]:-0} / 1024 )) / $(( ${M[1]:-0} / 1024 )) / $(( ${M[2]:-0} / 1024 ))"
+  observe longlog "$tag meminfo after settle: TOTAL PSS / Java heap / Native heap (MB)" "$(( ${M[0]:-0} / 1024 )) / $(( ${M[1]:-0} / 1024 )) / $(( ${M[2]:-0} / 1024 ))"
   read -r -a M <<<"$(awk 'BEGIN{d=0;n=0} {if ($1>d) d=$1; if ($2>n) n=$2} END{printf "%d %d %d", d/1024, n/1024, NR}' "$hs")"
-  measure longlog "$tag peak Heap Alloc during cold start #1: Java (Dalvik) / Native (MB, $((M[2])) samples)" "${M[0]} / ${M[1]}"
+  observe longlog "$tag peak Heap Alloc during cold start #1: Java (Dalvik) / Native (MB, $((M[2])) samples)" "${M[0]} / ${M[1]}"
   JAVA_PEAK_MB="${M[0]}"
   LAST_STARTS="$all"
 }
@@ -697,7 +718,7 @@ longest_rx() {
   python3 - "$FIVE" <<'PY'
 import json, sys
 km = max(e["LogRun"]["distance_km"] for e in map(json.loads, open(sys.argv[1])) if isinstance(e, dict) and "LogRun" in e)
-print(f"^({int(km)}(\\.[0-9]+)? km|{int(km / 1.609344)}(\\.[0-9]+)? mi)$")
+print(f"^({int(km)}(\\.[0-9]+)?[ \\u00a0]km|{int(km / 1.609344)}(\\.[0-9]+)?[ \\u00a0]mi)$")
 PY
 }
 history_longest_ok() {
@@ -741,18 +762,18 @@ backup_cycle() {
   app_up || launch
   expect $S "$1: after the import attempt the app boots onto the full log" "log lines $(log_lines) (before $l0)" \
     eval 'wait_text pre "${STR[main_todays_session]}" 60 && [[ $(log_lines) -ge $((l0 * 98 / 100)) ]]'
-  [[ "$(sh_ ls -la "$APP_FILES" | grep -c "$EVENT_LOG_FILE.import")" == 0 ]] ||
-    check INFO $S "$1: leftover temp file" "$(sh_ ls -la "$APP_FILES" | grep import)"
+  expect $S "$1: the import leaves no temp file" "$(sh_ ls -la "$APP_FILES" | grep import)" \
+    eval '[[ "$(sh_ ls -la "$APP_FILES" | grep -c "$EVENT_LOG_FILE.import")" == 0 ]]'
 }
 sc_longlog() {
   local S=longlog orig lim med
   gen_five_year || { check FAIL $S "5-year seed" "generation failed, see logs/seed-gradle.log"; return; }
-  measure $S "5-year log" "$(tr '\n' ' ' <"$FIVE.facts")"
+  observe $S "5-year log" "$(tr '\n' ' ' <"$FIVE.facts")"
   { javac --release 11 -d "$OUT/probe" "$HELP/HeapProbe.java" &&
     "$(build_tool d8)" --min-api 26 --output "$OUT/probe" "$OUT/probe/HeapProbe.class" &&
     adb_ push "$OUT/probe/classes.dex" /data/local/tmp/heapprobe.dex >/dev/null; } ||
     check FAIL $S "HeapProbe built and pushed" "javac / d8 / adb push failed"
-  check INFO $S "default heap limit" "dalvik.vm.heapgrowthlimit $(sh_ getprop dalvik.vm.heapgrowthlimit); ART maxMemory $(heap_probe) MB"
+  observe $S "default heap limit" "dalvik.vm.heapgrowthlimit $(sh_ getprop dalvik.vm.heapgrowthlimit); ART maxMemory $(heap_probe) MB"
   # Baseline: the small seed's cold start, for scale.
   reset_app >/dev/null
   boot_long "small seed"
@@ -760,7 +781,8 @@ sc_longlog() {
   reset_app "$FIVE" >/dev/null
   boot_long "5-year"
   med="$(median3 "$LAST_STARTS")"
-  check INFO $S "5-year log cold start (debug APK)" "Displayed ms:$LAST_STARTS (median ${med:-n/a}); debug build on an emulator, not a phone-speed figure"
+  expect $S "5-year log boots to Today (3 cold starts)" "Displayed ms:$LAST_STARTS (median ${med:-n/a}; debug APK on an emulator, not a phone-speed figure)" \
+    eval '! grep -q FAIL <<<"$LAST_STARTS"'
   evidence longlog-today
   history_longest_ok; expect $S "History shows the 5-year log's longest run" "record '$LONGEST'" test -n "$LONGEST"
   evidence longlog-history

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use super::bridge::{CoreBridge, Input, answer};
 use super::ops::Op;
 use crate::envelope::ErrorKind;
+use crate::test_support::M_PER_DEG;
 
 fn call(core: &CoreBridge, op: Op, input: &[u8]) -> Vec<u8> {
     core.call(op.code(), Input::Bytes(Cow::Borrowed(input)))
@@ -39,6 +40,46 @@ fn profile() -> Value {
             "advanced": false
         }
     })
+}
+
+/// [`profile`] with `extra`'s keys added to its `SetProfile` body.
+fn profile_with(extra: Value) -> Value {
+    let mut event = profile();
+    for (key, value) in extra.as_object().expect("an object of profile keys") {
+        event["SetProfile"][key] = value.clone();
+    }
+    event
+}
+
+/// The view after one `SubmitReview` with `fields` on top of the shell's
+/// always-sent keys.
+fn reviewed(fields: Value) -> Value {
+    let mut review = json!({
+        "bone_pain_red_flag": false,
+        "compulsive_flag": false,
+        "overtraining_signal_count": 0,
+        "bad_day": false
+    });
+    for (key, value) in fields.as_object().expect("an object of review keys") {
+        review[key] = value.clone();
+    }
+    let core = CoreBridge::new();
+    let requests = send(&core, &json!({ "SubmitReview": review }));
+    assert!(
+        requests.as_array().is_some_and(|a| !a.is_empty()),
+        "an accepted review emits a Render request: {fields}"
+    );
+    view(&core)
+}
+
+/// The summaries of `view[key]`'s adjustment rows.
+fn summaries(view: &Value, key: &str) -> Vec<String> {
+    view[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} array"))
+        .iter()
+        .map(|a| a["summary"].as_str().unwrap_or_default().to_owned())
+        .collect()
 }
 
 #[test]
@@ -110,9 +151,12 @@ fn android_shaped_review_with_omitted_option_fields_is_accepted() {
     );
 
     let view = view(&core);
-    assert!(
-        view["feedback"].is_object(),
-        "a review carrying a completed lift should surface session feedback"
+    // A lift met at its target RIR reads as mastery; without the `lift`
+    // object the review is a bare "Session logged" note.
+    assert_eq!(
+        view["feedback"]["category"], "PositiveMastery",
+        "the lift reached the review: {}",
+        view["feedback"]
     );
 }
 
@@ -141,42 +185,50 @@ fn android_shaped_run_review_context_reaches_the_bridge() {
     );
 
     let view = view(&core);
+    // Drift over 10 % on a cool steady run is a pacing correction; without the
+    // `decoupling` object (or its context flag) the review has nothing to say.
+    assert_eq!(
+        view["feedback"]["category"], "CorrectiveProcess",
+        "{}",
+        view["feedback"]
+    );
     assert!(
-        view["feedback"].is_object(),
-        "a run-review carrying decoupling context should surface session feedback"
+        view["feedback"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("drift hit 12%")),
+        "{}",
+        view["feedback"]
     );
 }
 
 #[test]
 fn android_shaped_week_fatigue_review_round_trips_the_bridge() {
-    let core = CoreBridge::new();
-    // The week-fatigue review fields as the shell sends them, guarding the
-    // snake_case wire names against a rename silently dropping the trigger on
-    // the boundary. The two-failed-session→Deload mapping is pinned in the
-    // app tests; here the wire shape round-trips the Bridge (Render emitted,
-    // view still serializes).
-    let event = json!({
-        "SubmitReview": {
-            "bone_pain_red_flag": false,
-            "compulsive_flag": false,
-            "overtraining_signal_count": 0,
-            "failed_key_sessions": 2,
-            "weekly_velocity_drop_m_s": 0.08,
-            "rpe_load_gap_sessions": 2,
-            "bad_day": false
-        }
-    });
-    let requests = send(&core, &event);
-    assert!(
-        requests.as_array().is_some_and(|a| !a.is_empty()),
-        "an accepted week-fatigue review must emit a Render request"
-    );
-
-    let view = view(&core);
-    assert!(
-        view["adjustments"].is_array(),
-        "view still renders an adjustments array after a week-fatigue review"
-    );
+    // Each week-fatigue field as the shell sends it, one review per field, so
+    // a renamed snake_case key (serde would ignore it) loses its lighter week.
+    // The exact fatigue→deload mapping is pinned in the app tests.
+    for (field, value, lighter_week) in [
+        (
+            "failed_key_sessions",
+            json!(2),
+            "Lighter week: 25% fewer sets",
+        ),
+        (
+            "weekly_velocity_drop_m_s",
+            json!(0.08),
+            "Lighter week: 50% fewer sets",
+        ),
+        (
+            "rpe_load_gap_sessions",
+            json!(2),
+            "Lighter week: 50% fewer sets",
+        ),
+    ] {
+        let rows = summaries(&reviewed(json!({ field: value })), "review_adjustments");
+        assert!(
+            rows.iter().any(|s| s.starts_with(lighter_week)),
+            "{field}: {rows:?}"
+        );
+    }
 }
 
 #[test]
@@ -238,9 +290,14 @@ fn android_shaped_graded_pain_readiness_round_trips_the_bridge() {
     );
 
     let view = view(&core);
+    // Graded tendon pain at 3/10, stable: train around it, never the bare
+    // pain report's hold. A dropped `pain` object would pause training.
+    assert!(view["hold_reason"].is_null(), "{}", view["hold_reason"]);
+    let rows = summaries(&view, "adjustments");
     assert!(
-        view["adjustments"].is_array(),
-        "view still renders an adjustments array after a graded pain report"
+        rows.iter()
+            .any(|s| s.starts_with("Tendon pain (Left knee): keep the exercises")),
+        "{rows:?}"
     );
 }
 
@@ -280,29 +337,19 @@ fn android_shaped_health_screen_profile_round_trips_the_bridge() {
     // exact gate→tier mapping is pinned in the app tests. Old profiles
     // WITHOUT these fields are covered by the profile tests above (serde
     // defaults).
-    let event = json!({
-        "SetProfile": {
-            "progression_cadence": "EverySession",
-            "lift_goal": "MaxStrength",
-            "goal_distance": "FiveK",
-            "concurrent_goal": "Strength",
-            "weekly_sets": 12,
-            "running_days_per_week": 3,
-            "running_km_per_week": 30.0,
-            "advanced": false,
-            "female": true,
-            "high_load_block": false,
-            "health": {
-                "youth": false,
-                "parq_positive": true,
-                "medically_cleared": false,
-                "pregnant": false,
-                "pregnancy_warning_sign": false,
-                "injury_or_rehab": false,
-                "reds_signal": false
-            }
+    let event = profile_with(json!({
+        "female": true,
+        "high_load_block": false,
+        "health": {
+            "youth": false,
+            "parq_positive": true,
+            "medically_cleared": false,
+            "pregnant": false,
+            "pregnancy_warning_sign": false,
+            "injury_or_rehab": false,
+            "reds_signal": false
         }
-    });
+    }));
     let requests = send(&core, &event);
     assert!(
         requests.as_array().is_some_and(|a| !a.is_empty()),
@@ -310,9 +357,18 @@ fn android_shaped_health_screen_profile_round_trips_the_bridge() {
     );
 
     let view = view(&core);
+    assert_eq!(view["profile"]["female"], true);
+    assert_eq!(view["profile"]["health"]["parq_positive"], true);
+    // A positive PAR-Q defers training to a doctor's OK.
     assert!(
-        view["guidance"].is_array(),
-        "view still renders guidance after a health-screen profile"
+        view["guidance"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|g| {
+                g["section"] == "Safety"
+                    && g["subject"] == "One of your health answers needs a doctor's OK first"
+            })),
+        "{}",
+        view["guidance"]
     );
 }
 
@@ -347,8 +403,10 @@ fn core_panic_resets_the_bridge_and_the_next_event_is_processed() {
         "the event after a reset is processed, not an error envelope: {requests}"
     );
     assert!(
-        view(&core)["guidance"].is_array(),
-        "view must render on the fresh bridge after a caught panic"
+        view(&core)["guidance"]
+            .as_array()
+            .is_some_and(|g| !g.is_empty()),
+        "the replayed profile reached the fresh core"
     );
 }
 
@@ -440,21 +498,6 @@ fn lift_view_json_carries_the_pr_marker() {
     // First set of the exercise: nothing to beat; the heavier second set is a PR.
     assert_eq!(lifts[0]["e1rm_pr"], false);
     assert_eq!(lifts[1]["e1rm_pr"], true);
-}
-
-#[test]
-fn additive_view_sections_present_with_serde_defaults() {
-    let core = CoreBridge::new();
-    // Pins additive ViewModel sections: they must serialize under these exact
-    // keys.
-    let view = view(&core);
-    assert!(view["weekly_report"].is_array(), "weekly_report key");
-    assert!(view["lift_audit"].is_array(), "lift_audit key");
-    // Option fields serialize as null-or-object, never missing.
-    let keys = view.as_object().expect("view object");
-    for key in ["training_load", "provisional", "trend", "autoreg_source"] {
-        assert!(keys.contains_key(key), "missing view key {key}");
-    }
 }
 
 #[test]
@@ -591,103 +634,65 @@ fn lift_view_json_carries_the_e1rm_cross_check_object() {
 
 #[test]
 fn android_shaped_extended_review_fields_round_trip_the_bridge() {
-    let core = CoreBridge::new();
-    // The additive review fields must survive the Bridge under these
-    // snake_case names: a drift would silently drop the whole review on
-    // replay.
-    let event = json!({
-        "SubmitReview": {
-            "bone_pain_red_flag": false,
-            "compulsive_flag": false,
-            "overtraining_signal_count": 0,
-            "mcv_delta_m_s": -0.1,
-            "hrv_suppressed_days": 3,
-            "hypertrophy_deload_triggers": 2,
-            "trend_direction": "down",
-            "performance_down": true,
-            "low_recovery": true,
-            "planned_hard": true,
-            "bad_day": false
-        }
-    });
-    let requests = send(&core, &event);
+    // The additive review fields under their snake_case names: each one's
+    // adjustment or trend row is what a rename (silently ignored by serde)
+    // would lose.
+    let view = reviewed(json!({
+        "mcv_delta_m_s": -0.1,
+        "hrv_suppressed_days": 3,
+        "hypertrophy_deload_triggers": 2,
+        "trend_direction": "down",
+        "performance_down": true,
+        "low_recovery": true,
+        "planned_hard": true
+    }));
+    let rows = summaries(&view, "review_adjustments");
+    for (field, row) in [
+        ("mcv_delta_m_s", "Bar speed down more than 0.06 m/s"),
+        ("hrv_suppressed_days", "HRV has been below your normal"),
+        ("hypertrophy_deload_triggers", "2+ signs of doing too much"),
+    ] {
+        assert!(rows.iter().any(|s| s.starts_with(row)), "{field}: {rows:?}");
+    }
     assert!(
-        requests.as_array().is_some_and(|a| !a.is_empty()),
-        "an accepted review-shape event emits a Render request"
-    );
-
-    let view = view(&core);
-    assert!(view["review_adjustments"].is_array());
-    assert!(
-        view.as_object().expect("view object").contains_key("trend"),
-        "trend key rendered after a trend-carrying review"
+        view["trend"]["summary"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("Performance is down, likely from training load")),
+        "trend_direction, performance_down, low_recovery: {}",
+        view["trend"]
     );
 }
 
 #[test]
 fn android_shaped_extended_profile_fields_round_trip_the_bridge() {
     let core = CoreBridge::new();
-    let event = json!({
-        "SetProfile": {
-            "progression_cadence": "EverySession",
-            "lift_goal": "MaxStrength",
-            "goal_distance": "FiveK",
-            "concurrent_goal": "Strength",
-            "weekly_sets": 12,
-            "running_days_per_week": 3,
-            "running_km_per_week": 30.0,
-            "advanced": false,
-            "environment": "Heat",
-            "env_temp_c": 30.0,
-            "weeks_off": 6.0,
-            "bodyweight_kg": 80.0
-        }
-    });
+    let event = profile_with(json!({
+        "environment": "Heat",
+        "env_temp_c": 30.0,
+        "weeks_off": 6.0,
+        "bodyweight_kg": 80.0
+    }));
     let requests = send(&core, &event);
     assert!(
         requests.as_array().is_some_and(|a| !a.is_empty()),
         "an accepted profile-shape event emits a Render request"
     );
 
-    // The env→guidance mapping is pinned in the app tests; here the wire
-    // shape is accepted and the echoed profile carries the new keys.
-    let view = view(&core);
-    let profile = view["profile"].as_object().expect("profile echoed");
-    for key in [
-        "environment",
-        "env_temp_c",
-        "env_altitude_m",
-        "weeks_off",
-        "bodyweight_kg",
-    ] {
-        assert!(profile.contains_key(key), "profile key {key} missing");
-    }
+    // The env→guidance mapping is pinned in the app tests; here each new key
+    // reaches the core under its wire name, as the echoed profile shows.
+    let profile = &view(&core)["profile"];
+    assert_eq!(profile["environment"], "Heat");
+    assert_eq!(profile["env_temp_c"], 30.0);
+    assert_eq!(profile["weeks_off"], 6.0);
+    assert_eq!(profile["bodyweight_kg"], 80.0);
 }
 
 #[test]
-fn readiness_summary_headline_and_signal_groups_serialize() {
-    let core = CoreBridge::new();
-    // Pins the additive KB-honest readiness wire shape: the per-signal
-    // summary array, the core-owned today headline (always an object with
-    // a kind), and the static signal→group metadata the shell's red-flag
-    // picker fence consumes.
-    let view = view(&core);
-    assert!(
-        view["readiness_summary"].is_array(),
-        "readiness_summary key"
-    );
-    let headline = view["today_headline"]
-        .as_object()
-        .expect("today_headline object");
-    assert!(
-        !headline["kind"].as_str().unwrap().is_empty(),
-        "headline always carries a kind"
-    );
-    for key in ["summary", "grade", "citation", "confidence"] {
-        assert!(headline.contains_key(key), "headline key {key}");
-    }
+fn signal_groups_fence_pain_as_a_red_flag() {
+    // The static signal→group metadata the shell's red-flag picker fence
+    // consumes: pain is a red flag, never a plain metric.
+    let view = view(&CoreBridge::new());
     let groups = view["signal_groups"].as_array().expect("signal_groups");
-    assert_eq!(groups.len(), 15, "one row per readiness signal");
     assert!(
         groups
             .iter()
@@ -817,7 +822,7 @@ fn parse_run_file_answers_the_runs_to_log() {
     let gpx = crate::gps::export_gpx(
         &(0..300)
             .map(|k| crate::gps::GpsPoint {
-                lat: 47.0 + f64::from(k) * 3.0 / 111_195.0,
+                lat: 47.0 + f64::from(k) * 3.0 / M_PER_DEG,
                 lon: 8.0,
                 observed_at: 1_750_000_000 + i64::from(k),
                 accuracy_m: 5.0,
@@ -876,15 +881,17 @@ fn run_track_answers_a_runs_route_fixes_by_segment() {
 #[test]
 fn malformed_event_is_dropped_without_panicking() {
     let core = CoreBridge::new();
+    send(&core, &profile());
+    let before = call(&core, Op::View, b"");
     // Simulates a stale/forward-incompatible log line hitting replay: an
-    // unknown variant must not unwind across the FFI boundary, and the view
-    // must still serialize cleanly afterwards.
+    // unknown variant must not unwind across the FFI boundary, and leaves the
+    // core as it was.
     let out = call(&core, Op::Update, br#"{"NoSuchEventVariant":{}}"#);
     assert!(out.is_empty(), "a rejected event yields no effect requests");
-
-    assert!(
-        view(&core)["guidance"].is_array(),
-        "view still renders after a bad event"
+    assert_eq!(
+        call(&core, Op::View, b""),
+        before,
+        "the core is unchanged after a bad event"
     );
 }
 
@@ -909,7 +916,7 @@ fn run_track(entry_id: u64) -> Value {
         .map(|t| {
             json!({
                 "lat": 0.0,
-                "lon": f64::from(t) * 3.0 / 111_194.926_644_558_7,
+                "lon": f64::from(t) * 3.0 / M_PER_DEG,
                 "observed_at": 1_000 + i64::from(t),
                 "accuracy_m": 5.0
             })

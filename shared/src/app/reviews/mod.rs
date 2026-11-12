@@ -23,8 +23,3 @@ pub(super) use session_feedback::{
 };
 pub(super) use split::{merged_review, review_adjustment_expired, review_age_days};
 pub(super) use trend::build_trend;
-
-#[cfg(test)]
-pub(super) use exec::target_rir;
-#[cfg(test)]
-pub(super) use session_feedback::{MessageCtx, feedback_message};

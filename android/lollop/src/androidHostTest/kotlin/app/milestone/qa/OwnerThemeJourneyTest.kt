@@ -6,21 +6,16 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppFileNames
 import app.milestone.AppTheme
-import app.milestone.EventDispatcher
 import app.milestone.R
-import java.io.File
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Before
@@ -95,14 +90,10 @@ class OwnerThemeJourneyTest {
 
     @Test
     fun freshInstall_startsOnPaperWithSystemAccent_andThemeChoiceCouplesTheAccent() {
-        assertFalse(File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
+        assertFalse(QaHarness.logFile(ctx).exists())
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule)
-        rule.onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performClick()
-        rule.waitUntil(30_000) {
-            rule.onAllNodesWithText(str(R.string.main_dest_profile)).fetchSemanticsNodes().isNotEmpty() &&
-                EventDispatcher.model.value?.profile != null
-        }
+        rule.finishSetup()
         rule.waitForIdle()
         openProfile()
 

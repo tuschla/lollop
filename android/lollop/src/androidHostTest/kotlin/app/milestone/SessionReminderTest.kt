@@ -26,7 +26,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.TimeZone
-import kotlinx.datetime.toKotlinTimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,6 +34,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -56,7 +56,9 @@ class SessionReminderTest {
     private val res get() = app.resources
     private val nm get() = app.getSystemService(NotificationManager::class.java)
     private val am get() = app.getSystemService(AlarmManager::class.java)
-    private val savedZone: TimeZone = TimeZone.getDefault()
+
+    @get:Rule val jvmDefaults = JvmDefaultsRule()
+
     private val today get() = todayEpochDay()
     private val zone get() = ZoneId.systemDefault().id
 
@@ -74,7 +76,6 @@ class SessionReminderTest {
     @After
     fun tearDown() {
         SessionReminder.setEnabled(app, false)
-        TimeZone.setDefault(savedZone)
         TestClock.offsetMillis = 0L
         RunSession.markStopped()
     }
@@ -112,40 +113,22 @@ class SessionReminderTest {
     }
 
     @Test
-    fun nextFireIsTheNextLocalTimeInTheZone() {
-        val berlin = ZoneId.of("Europe/Berlin").toKotlinTimeZone()
-        val m = 7 * 60 + 30
-        assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T06:00", "Europe/Berlin"), m, berlin))
-        // At or after the time: tomorrow.
-        assertEquals(millis("2026-10-30T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T07:30", "Europe/Berlin"), m, berlin))
-        assertEquals(millis("2026-10-30T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T21:00", "Europe/Berlin"), m, berlin))
-        // The same instant in another zone: that zone's 07:30.
-        val ny = ZoneId.of("America/New_York").toKotlinTimeZone()
-        assertEquals(millis("2026-10-29T07:30", "America/New_York"), SessionReminder.nextFireMillis(millis("2026-10-29T06:00", "Europe/Berlin"), m, ny))
-        // A time the spring-forward jump skips moves forward by the gap.
-        assertEquals(millis("2026-03-29T03:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-03-29T01:00", "Europe/Berlin"), 2 * 60 + 30, berlin))
-    }
-
-    @Test
     fun offByDefaultWithNoAlarm() {
         app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().clear().commit()
-        assertEquals(SessionReminderSetting(false, 7 * 60 + 30), SessionReminder.setting(app))
+        assertEquals(SessionReminderSetting(false, SessionReminder.DEFAULT_MINUTE_OF_DAY), SessionReminder.setting(app))
         SessionReminder.reschedule(app)
         assertTrue(alarms().isEmpty())
     }
 
     @Test
     fun switchingOnSetsOneInexactAlarmAtTheTimeAndOffRemovesIt() {
-        val before = AppClock.nowMillis()
+        // Thursday 06:00 in Berlin: the next 07:30 is this morning's.
+        TestClock.offsetMillis = millis("2026-10-29T06:00", "Europe/Berlin") - System.currentTimeMillis()
         SessionReminder.setEnabled(app, true)
         val a = alarms().single()
         assertEquals(AlarmManager.RTC_WAKEUP, a.type)
         assertTrue("allowed while idle", a.isAllowWhileIdle)
-        val expected = setOf(
-            SessionReminder.nextFireMillis(before, 7 * 60 + 30, ZoneId.systemDefault().toKotlinTimeZone()),
-            SessionReminder.nextFireMillis(AppClock.nowMillis(), 7 * 60 + 30, ZoneId.systemDefault().toKotlinTimeZone()),
-        )
-        assertTrue("trigger ${a.triggerAtTime} is the next 07:30", a.triggerAtTime in expected)
+        assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), a.triggerAtTime)
         val op = shadowOf(a.operation)
         assertTrue(op.isBroadcastIntent)
         assertTrue("immutable", op.flags and PendingIntent.FLAG_IMMUTABLE != 0)
@@ -153,15 +136,16 @@ class SessionReminderTest {
         assertEquals(AndroidReminder.ACTION_FIRE, op.savedIntent.action)
 
         SessionReminder.setMinuteOfDay(app, 18 * 60 + 15)
-        val b = alarms().single()
-        val now = AppClock.nowMillis()
-        assertEquals(SessionReminder.nextFireMillis(now, 18 * 60 + 15, ZoneId.systemDefault().toKotlinTimeZone()), b.triggerAtTime)
+        assertEquals(millis("2026-10-29T18:15", "Europe/Berlin"), alarms().single().triggerAtTime)
         assertEquals(18 * 60 + 15, SessionReminder.setting(app).minuteOfDay)
+        // A time already past today: tomorrow's.
+        SessionReminder.setMinuteOfDay(app, 5 * 60)
+        assertEquals(millis("2026-10-30T05:00", "Europe/Berlin"), alarms().single().triggerAtTime)
 
         SessionReminder.setEnabled(app, false)
         assertTrue(alarms().isEmpty())
         SessionReminder.setEnabled(app, true)
-        assertEquals(18 * 60 + 15, SessionReminder.setting(app).minuteOfDay)
+        assertEquals(5 * 60, SessionReminder.setting(app).minuteOfDay)
     }
 
     @Test

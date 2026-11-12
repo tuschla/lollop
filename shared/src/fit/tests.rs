@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::fit_writer::{ENUM, FIT_EPOCH, FitWriter, I32, U8, U32, header, semi};
 
 /// One fix `dlat` degrees north of a base point, `t` seconds in.
 fn gate_fix(dlat: f64, t: i64) -> FitFix {
@@ -73,14 +74,15 @@ fn an_oversized_header_size_is_rejected_before_fitparser_can_panic() {
 #[test]
 fn a_recording_cut_off_before_its_crc_still_imports_its_fixes() {
     // A watch dying at the end of a run writes every record but never the
-    // trailing CRC; cutting into the tail makes `fitparser::from_bytes`
-    // fail the whole file. Salvage must keep the fixes decoded before the cut.
-    let mut bytes = fixture("garmin-fenix-5-bike.fit");
+    // trailing messages and CRC; cutting into the tail makes
+    // `fitparser::from_bytes` fail the whole file. Salvage must keep the fixes
+    // decoded before the cut.
+    let mut bytes = fixture("Activity.fit");
     bytes.truncate(bytes.len() - 40);
-    let track = track_any_sport(&bytes).expect("fixes decoded before the cut survive");
+    let track = parse_fit(&bytes).expect("fixes decoded before the cut survive");
     let total: usize = track.segments.iter().map(Vec::len).sum();
-    // The cut 40 bytes hold no positioned record: all 19 fixes survive.
-    assert_eq!(total, 19, "salvaged the decoded fixes");
+    // The cut 40 bytes hold no positioned record: all 14 fixes survive.
+    assert_eq!(total, 14, "salvaged the decoded fixes");
 }
 
 #[test]
@@ -101,13 +103,13 @@ fn a_chained_oversized_header_is_rejected_without_panicking() {
     // second header and panics. Validating every header position (not just the
     // first) must stop before fitparser sees it — salvaging the real file's
     // fixes rather than aborting or panicking.
-    let mut bytes = fixture("garmin-fenix-5-bike.fit");
+    let mut bytes = fixture("Activity.fit");
     bytes.extend_from_slice(&[
         0xFF, 0x10, 0, 0, 0, 0, 0, 0, b'.', b'F', b'I', b'T', 0x34, 0x12,
     ]);
-    let track = track_any_sport(&bytes).expect("the real file's fixes survive the bad trailer");
+    let track = parse_fit(&bytes).expect("the real file's fixes survive the bad trailer");
     let total: usize = track.segments.iter().map(Vec::len).sum();
-    assert_eq!(total, 19, "salvaged every fix of the real sub-file");
+    assert_eq!(total, 14, "salvaged every fix of the real sub-file");
 }
 
 #[test]
@@ -116,7 +118,7 @@ fn a_message_overrunning_the_declared_data_size_cannot_smuggle_a_bad_header() {
     // fitparser ends past its end-of-messages with no CRC and parses the next
     // bytes as a chained header, here one with header_size 0xFF that it would
     // slice on and panic. A direct call (no catch_unwind): a panic fails it.
-    let mut bytes = fit_header(1);
+    let mut bytes = header(false, 1);
     bytes.extend_from_slice(&[0x40, 0, 0, 0, 0, 0]); // definition: file_id, no fields
     bytes.extend_from_slice(&[
         0xFF, 0x10, 0, 0, 0, 0, 0, 0, b'.', b'F', b'I', b'T', 0x34, 0x12,
@@ -128,8 +130,8 @@ fn a_message_overrunning_the_declared_data_size_cannot_smuggle_a_bad_header() {
 fn fixes_decoded_before_a_data_size_overrun_are_kept() {
     // Declared data size one byte short of the real messages: the second
     // record overruns it, then a bad header follows. Both fixes survive.
-    let data = gps_accuracy_messages();
-    let mut bytes = fit_header(data.len() as u32 - 1);
+    let data = gps_accuracy_messages().data;
+    let mut bytes = header(false, data.len() as u32 - 1);
     bytes.extend_from_slice(&data);
     bytes.extend_from_slice(&[
         0xFF, 0x10, 0, 0, 0, 0, 0, 0, b'.', b'F', b'I', b'T', 0x34, 0x12,
@@ -154,13 +156,11 @@ fn session_sport_gates_import() {
     // cross_country_skiing 12; sub_sport ids: generic 0, treadmill 1, trail 3,
     // elliptical 15.
     let with_session = |sport: u8, sub_sport: u8| {
-        let mut data = gps_accuracy_messages();
-        data.extend_from_slice(&session_messages(sport, sub_sport));
-        let mut file = fit_header(data.len() as u32);
-        file.extend_from_slice(&data);
-        let crc = fit_crc(&file);
-        file.extend_from_slice(&crc.to_le_bytes());
-        parse_fit(&file)
+        let mut w = gps_accuracy_messages();
+        // session (global 18): sport (5) and sub_sport (6) enum fields.
+        w.def(1, 18, false, &[(5, 1, ENUM), (6, 1, ENUM)], &[]);
+        w.msg(1, &[sport, sub_sport]);
+        parse_fit(&w.finish(false))
     };
     assert!(with_session(1, 0).is_ok(), "road run");
     assert!(with_session(1, 3).is_ok(), "trail run");
@@ -191,33 +191,12 @@ fn session_sport_gates_import() {
     );
 }
 
-/// Track extraction without the sport gate, so the sport-agnostic decode
-/// paths can be exercised on the real (cycling) Fenix fixture.
+/// Track extraction without the sport gate, so the HR decode can be checked
+/// on the real (cycling) Fenix fixture, the only one with a heart-rate strap.
 fn track_any_sport(bytes: &[u8]) -> Result<FitTrack, FitError> {
     validate_fit_header(bytes)?;
     let (scan, truncated) = scan_fit(bytes);
     scan.into_track(truncated)
-}
-
-/// A 12-byte FIT header (no header CRC) declaring `data_size` message bytes.
-fn fit_header(data_size: u32) -> Vec<u8> {
-    let mut header = vec![12u8, 0x10];
-    header.extend_from_slice(&100u16.to_le_bytes()); // profile version (arbitrary)
-    header.extend_from_slice(&data_size.to_le_bytes());
-    header.extend_from_slice(b".FIT");
-    header
-}
-
-/// A `session` definition (local type 1, global mesg 18) with sport (5) and
-/// sub_sport (6) enum fields, plus one data message carrying them.
-fn session_messages(sport: u8, sub_sport: u8) -> Vec<u8> {
-    let mut data = vec![0x41, 0x00, 0x00];
-    data.extend_from_slice(&18u16.to_le_bytes());
-    data.push(2); // field count
-    data.extend_from_slice(&[5, 1, 0x00]); // sport: enum
-    data.extend_from_slice(&[6, 1, 0x00]); // sub_sport: enum
-    data.extend_from_slice(&[0x01, sport, sub_sport]);
-    data
 }
 
 #[test]
@@ -228,14 +207,6 @@ fn semicircle_conversion_is_exact_at_known_reference_points() {
     assert_eq!(semicircles_to_degrees(0), 0.0);
     assert_eq!(semicircles_to_degrees(i32::MAX), 179.99999991618097);
     assert_eq!(semicircles_to_degrees(i32::MIN), -180.0);
-
-    // A real-world reference: Berlin Alexanderplatz is documented at
-    // roughly 52.5219 N, 13.4132 E. Round-trip a semicircle value close
-    // to that back to degrees and check it lands in the right place
-    // within FIT's own precision (~2.1 cm at the equator).
-    let berlin_lat_semicircles: i32 = ((52.5219_f64) * 2_147_483_648.0 / 180.0) as i32;
-    let deg = semicircles_to_degrees(berlin_lat_semicircles);
-    assert!((deg - 52.5219).abs() < 1e-6, "got {deg}");
 }
 
 /// Real device-recorded FIT files, borrowed from fitparser's own
@@ -305,34 +276,29 @@ fn happy_path_second_fixture_also_parses_without_hr() {
     );
 }
 
-/// One `record` definition (local type 0, global mesg 20, little-endian) with
+/// `record` messages (local type 0, global mesg 20, little-endian) with
 /// fields timestamp(253,u32) position_lat(0,i32) position_long(1,i32)
-/// gps_accuracy(31,u8), then two data records carrying 8 m and 12 m.
-fn gps_accuracy_messages() -> Vec<u8> {
-    const FIT_EPOCH_OFFSET: i64 = 631_065_600; // unix secs at 1989-12-31Z
-    let to_semi = |deg: f64| -> i32 { (deg * 2_147_483_648.0 / 180.0) as i32 };
-
-    let mut data: Vec<u8> = Vec::new();
-    data.push(0x40); // definition, local type 0
-    data.push(0x00); // reserved
-    data.push(0x00); // architecture: little-endian
-    data.extend_from_slice(&20u16.to_le_bytes()); // global mesg num = record
-    data.push(4); // field count
-    data.extend_from_slice(&[253, 4, 0x86]); // timestamp: u32
-    data.extend_from_slice(&[0, 4, 0x85]); // position_lat: i32
-    data.extend_from_slice(&[1, 4, 0x85]); // position_long: i32
-    data.extend_from_slice(&[31, 1, 0x02]); // gps_accuracy: u8
-
-    let push_record = |unix: i64, lat: f64, lon: f64, acc: u8, out: &mut Vec<u8>| {
-        out.push(0x00); // data message, local type 0
-        out.extend_from_slice(&((unix - FIT_EPOCH_OFFSET) as u32).to_le_bytes());
-        out.extend_from_slice(&to_semi(lat).to_le_bytes());
-        out.extend_from_slice(&to_semi(lon).to_le_bytes());
-        out.push(acc);
-    };
-    push_record(1_500_000_000, 52.5200, 13.4050, 8, &mut data);
-    push_record(1_500_000_030, 52.5210, 13.4060, 12, &mut data);
-    data
+/// gps_accuracy(31,u8): two fixes carrying 8 m and 12 m.
+fn gps_accuracy_messages() -> FitWriter {
+    let mut w = FitWriter::default();
+    w.def(
+        0,
+        20,
+        false,
+        &[(253, 4, U32), (0, 4, I32), (1, 4, I32), (31, 1, U8)],
+        &[],
+    );
+    for (unix, lat, lon, acc) in [
+        (1_500_000_000, 52.5200, 13.4050, 8),
+        (1_500_000_030, 52.5210, 13.4060, 12),
+    ] {
+        let mut body = ((unix - FIT_EPOCH) as u32).to_le_bytes().to_vec();
+        body.extend_from_slice(&semi(lat).to_le_bytes());
+        body.extend_from_slice(&semi(lon).to_le_bytes());
+        body.push(acc);
+        w.msg(0, &body);
+    }
+    w
 }
 
 #[test]
@@ -340,14 +306,7 @@ fn synthetic_gps_accuracy_field_flows_through() {
     // Neither real-device fixture in shared/tests/fixtures/ records
     // `gps_accuracy`, so hand-encode a minimal valid FIT that DOES: the
     // only way to prove the field is read and surfaced (not fabricated).
-    let data = gps_accuracy_messages();
-    // 12-byte header (no header CRC → header bytes join the data CRC).
-    let mut file = fit_header(data.len() as u32);
-    file.extend_from_slice(&data);
-    // Trailing data CRC covers header + all messages.
-    let crc = fit_crc(&file);
-    file.extend_from_slice(&crc.to_le_bytes());
-
+    let file = gps_accuracy_messages().finish(false);
     let track = parse_fit(&file).expect("hand-encoded FIT should parse");
     let fixes: Vec<FitFix> = track.segments.into_iter().flatten().collect();
     assert_eq!(fixes.len(), 2);

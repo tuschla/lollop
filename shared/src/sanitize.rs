@@ -24,7 +24,7 @@ pub(crate) trait Sanitize {
 /// on every launch (the event is replayed from the log). ±1e12 keeps any
 /// downstream product inside f64 range and covers every real kg / km / min /
 /// bpm value.
-const FLOAT_BOUND: f64 = 1.0e12;
+pub(crate) const FLOAT_BOUND: f64 = 1.0e12;
 
 /// The one float rule: NaN reads as 0 (an absent reading), magnitudes clamp
 /// to [`FLOAT_BOUND`], and `-0.0` becomes `+0.0` so no view prints "-0".

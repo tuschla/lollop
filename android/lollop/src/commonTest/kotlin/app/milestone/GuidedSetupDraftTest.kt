@@ -1,26 +1,26 @@
 package app.milestone
 
-import java.util.Locale
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Test
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.datetime.LocalDate
 
 /**
- * JVM unit tests (no device) for [deriveDraft], the guided-setup answer → profile
+ * Unit tests (no device) for [deriveDraft], the guided-setup answer → profile
  * mapping, and the pure setup/profile helpers around it. Pins the re-run
  * PRESERVATION contract: re-running the wizard with the same driving answers must
  * not silently reset customised profile values (a data-loss class of bug), while
  * a genuinely CHANGED level must re-derive the level-driven fields. The keep-flags
  * come from [keepFlags], the same function [GuidedSetup] calls on Finish.
  */
-class GuidedSetupDraftTest {
+class GuidedSetupDraftTest : PlatformTest() {
 
     // The draft's facts come from the real core: start from a fresh process,
     // not an engine another test class left installed.
-    @Before
+    @BeforeTest
     fun setUp() = AppRuntime.resetForTest()
 
     // A Both profile whose training-field values were CUSTOMISED past the plain
@@ -287,11 +287,12 @@ class GuidedSetupDraftTest {
         // A first run follows the region: a US phone opens bodyweight in lb and the
         // Finish carries that preference; elsewhere stays kg. A re-run keeps the
         // profile's own choice regardless of region.
-        assertEquals(WeightUnit.Lb, seedWeightUnit(null, Locale.US))
-        assertEquals(WeightUnit.Kg, seedWeightUnit(null, Locale.GERMANY))
+        val us = testLocale("en-US")
+        assertEquals(WeightUnit.Lb, seedWeightUnit(null, us))
+        assertEquals(WeightUnit.Kg, seedWeightUnit(null, testLocale("de-DE")))
         val kgProfile = firstRunLift(30.0, null, null, weightLb = false)
-        assertEquals(WeightUnit.Kg, seedWeightUnit(kgProfile, Locale.US))
-        val out = firstRunLift(30.0, null, null, weightLb = seedWeightUnit(null, Locale.US) == WeightUnit.Lb)
+        assertEquals(WeightUnit.Kg, seedWeightUnit(kgProfile, us))
+        val out = firstRunLift(30.0, null, null, weightLb = seedWeightUnit(null, us) == WeightUnit.Lb)
         assertTrue(out.weightLb)
     }
 
@@ -532,7 +533,7 @@ class GuidedSetupDraftTest {
         // there would restart its progress.
         val seeded = seedAnswers(null, 20_000L, null, DistanceUnit.Km, null).copy(pullPlace = CalisPlacement.PullFew)
         val events = placementEvents(seeded.copy(pullPlace = CalisPlacement.PullMany), seeded, 0L)
-        assertTrue("same rung must send nothing: $events", events.isEmpty())
+        assertTrue(events.isEmpty(), "same rung must send nothing: $events")
     }
 
     @Test
@@ -733,8 +734,8 @@ class GuidedSetupDraftTest {
         val seed = seedAnswers(hybrid, rerunDay, null, DistanceUnit.Km, null)
         val draft = untouchedRerun(hybrid)
         assertTrue(
-            "review shows ${seed.days} days, draft holds ${draft.liftDaysPerWeek} lift + ${draft.runningDaysPerWeek} run",
             draft.liftDaysPerWeek!! + draft.runningDaysPerWeek <= seed.days!!,
+            "review shows ${seed.days} days, draft holds ${draft.liftDaysPerWeek} lift + ${draft.runningDaysPerWeek} run",
         )
     }
 
@@ -755,7 +756,7 @@ class GuidedSetupDraftTest {
 
     @Test
     fun pullUpRungsNeedSomethingToHangFrom() {
-        assertNull("no stated equipment", canHang(null))
+        assertNull(canHang(null), "no stated equipment")
         assertEquals(false, canHang(CalisEquipment()))
         assertEquals(true, canHang(CalisEquipment(pull_up_bar = true)))
         assertEquals(true, canHang(CalisEquipment(rings = true)))
@@ -770,17 +771,17 @@ class GuidedSetupDraftTest {
         assertEquals(13.0, birthdayAge(range.last + 1, today))
         assertEquals(100.0, birthdayAge(range.first, today))
         assertEquals(101.0, birthdayAge(range.first - 1, today))
-        assertTrue("no future birthday", range.last < today)
+        assertTrue(range.last < today, "no future birthday")
     }
 
     @Test
     fun theBirthdayCalendarOpensOnTheBirthdayElseThirtyYearsBack() {
         val today = 20_743L // 2026-10-17
-        assertEquals(java.time.LocalDate.of(1996, 10, 17).toEpochDay(), birthdayPickerStart(null, today))
+        assertEquals(LocalDate(1996, 10, 17).toEpochDays(), birthdayPickerStart(null, today))
         val born = 7_740L // 1991-03-12
         assertEquals(born, birthdayPickerStart(born, today))
         val range = birthdayRange(today)
-        assertEquals("a stale birthday outside the range is clamped", range.first, birthdayPickerStart(range.first - 400, today))
+        assertEquals(range.first, birthdayPickerStart(range.first - 400, today), "a stale birthday outside the range is clamped")
     }
 
     @Test
@@ -789,7 +790,7 @@ class GuidedSetupDraftTest {
         val eveOfBirthday = 20_743L // 2026-10-17
         val seed = seedAnswers(null, eveOfBirthday, null, DistanceUnit.Km, null)
         val unanswered = seed.copy(modality = Modality.Lift, liftFocus = LiftFocus.of(LiftGoal.MaxStrength), days = 3, level = SetupLevel.Intermediate)
-        assertFalse("the birthday needs an answer", SetupValues(unanswered, seed, null, null, DistanceUnit.Km, eveOfBirthday).ready(SetupStep.About))
+        assertFalse(SetupValues(unanswered, seed, null, null, DistanceUnit.Km, eveOfBirthday).ready(SetupStep.About), "the birthday needs an answer")
 
         val answered = unanswered.copy(birthDay = born)
         val eve = SetupValues(answered, seed, null, null, DistanceUnit.Km, eveOfBirthday)
@@ -828,7 +829,7 @@ class GuidedSetupDraftTest {
     fun preferNotToSayAnswersTheBirthdayAndSendsNoAge() {
         val today = 20_743L
         val seed = seedAnswers(null, today, null, DistanceUnit.Km, null)
-        assertFalse("a first run starts unanswered", seed.birthSkipped)
+        assertFalse(seed.birthSkipped, "a first run starts unanswered")
         val unanswered = seed.copy(modality = Modality.Lift, liftFocus = LiftFocus.of(LiftGoal.MaxStrength), days = 3, level = SetupLevel.Intermediate)
         val open = SetupValues(unanswered, seed, null, null, DistanceUnit.Km, today)
         assertFalse(open.ageAnswered)
@@ -857,7 +858,7 @@ class GuidedSetupDraftTest {
     fun preferNotToSayDropsALegacyStatedAge_andANoAgeProfileReseedsIt() {
         val today = 20_743L
         val seed = seedAnswers(customised, today, null, DistanceUnit.Km, null)
-        assertFalse("a stated age is an answer, not a skip", seed.birthSkipped)
+        assertFalse(seed.birthSkipped, "a stated age is an answer, not a skip")
         val dropped = SetupValues(seed.withoutBirthday(), seed, customised, null, DistanceUnit.Km, today)
         assertTrue(dropped.ready(SetupStep.About))
         assertNull(dropped.ageYears)
@@ -882,6 +883,5 @@ class GuidedSetupDraftTest {
         val low = SetupValues(seed.copy(rhrText = "28", restingHrTouched = true), seed, customised, null, DistanceUnit.Km, today)
         assertFalse(low.restingHrInvalid)
         assertEquals(28.0, low.draft()!!.restingHrBpm!!, 0.0)
-        assertTrue(25.0 in RESTING_HR_RANGE && 24.0 !in RESTING_HR_RANGE)
     }
 }

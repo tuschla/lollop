@@ -17,10 +17,9 @@ use crate::strength::LiftGoal;
 /// would be the previous Sunday's.
 const MON: i64 = 704 * DAY + 12 * 3600;
 
-/// Weekly-report row text the tests match on.
+/// Weekly-report row phrases the tests tell the long-run rows apart by.
 const OVER_TWICE_DAILY: &str = "more than twice your average daily distance";
 const SHARE_CAP_FROM_64KM: &str = "The 25% limit applies from 64 km a week";
-const OVER_SHARE_CAP: &str = "over the 25% limit";
 
 fn run(km: f64, minutes: f64, hr_pct: f64, wt: Option<WorkoutType>, at: i64) -> LoggedRun {
     LoggedRun {
@@ -65,9 +64,10 @@ fn weekly_report_uses_run_day_average() {
         ..Default::default()
     };
     let report = build_weekly_report(&ViewCtx::new(&model), &[]);
+    let rows = long_run_rows(&report);
     assert!(
-        !report.iter().any(|r| r.summary.contains(OVER_TWICE_DAILY)),
-        "run-day average must not flag a 15 km long run for a 3-day/30 km runner: {report:#?}"
+        rows.len() == 1 && rows[0].contains(SHARE_CAP_FROM_64KM),
+        "run-day average must read a 15 km long run for a 3-day/30 km runner as informational: {report:#?}"
     );
 }
 
@@ -90,17 +90,10 @@ fn tempo_counts_as_threshold_not_interval() {
     };
     let report = build_weekly_report(&ViewCtx::new(&model), &[]);
     assert!(
-        report
-            .iter()
-            .any(|r| r.summary.contains("Threshold running")
-                && r.summary.contains("is over 10% of the week's distance")),
+        report.iter().any(|r| r
+            .summary
+            .starts_with("Threshold running 6.0 km is over 10% of the week's distance")),
         "the tempo run must be charged as threshold volume: {report:#?}"
-    );
-    assert!(
-        !report
-            .iter()
-            .any(|r| r.summary.contains("Interval running") && r.summary.contains("is over")),
-        "a correctly executed tempo must not trip the interval cap: {report:#?}"
     );
 }
 
@@ -178,30 +171,18 @@ fn repetition_hr_row_reads_cleanly() {
         .iter()
         .find(|r| r.summary.starts_with("Repetition"))
         .expect("repetition row present");
+    // Equal %HRmax bounds collapse to one figure, and the pace-governed band
+    // carries no bpm figure.
     assert!(
-        !rep.summary.contains("inf"),
-        "no literal inf: {}",
-        rep.summary
-    );
-    assert!(
-        !rep.summary.contains("bpm"),
-        "no bpm figure on a pace-governed band: {}",
+        rep.summary.starts_with("Repetition: 100% of HRmax · ")
+            && rep.summary.ends_with(" · go by pace, not heart rate"),
+        "{}",
         rep.summary
     );
     assert!(
         rep.why.basis.contains("at least 100% of VO2max"),
         "open VO2max ceiling renders as a floor in the basis: {}",
         rep.why.basis
-    );
-    assert!(
-        !rep.summary.contains("100–100"),
-        "equal %HRmax bounds collapse to one figure: {}",
-        rep.summary
-    );
-    assert!(
-        rep.summary.contains("go by pace, not heart rate"),
-        "repetition is pace-governed: {}",
-        rep.summary
     );
 }
 
@@ -217,11 +198,10 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
         ..Default::default()
     };
     let report = build_weekly_report(&ViewCtx::new(&model()), &[]);
+    let rows = long_run_rows(&report);
     assert!(
-        report
-            .iter()
-            .any(|r| r.summary.contains(SHARE_CAP_FROM_64KM)),
-        "a sub-64 km long run within 2× daily average is informational: {report:#?}"
+        rows.len() == 1 && rows[0].contains(SHARE_CAP_FROM_64KM),
+        "a sub-64 km long run within 2× daily average is one informational row: {report:#?}"
     );
     let miles = miles_report(model());
     assert!(
@@ -229,10 +209,6 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
             && r.summary
                 .contains("The 25% limit applies from 40 mi a week")),
         "a miles profile reads the row in miles: {miles:#?}"
-    );
-    assert!(
-        !report.iter().any(|r| r.summary.contains(OVER_SHARE_CAP)),
-        "it must not be flagged as a cap violation: {report:#?}"
     );
 }
 
@@ -253,15 +229,10 @@ fn hybrid_report_uses_the_capped_run_day_count() {
     // 30 km / 5 stated days = 6 km/day → 2× = 12 km would flag the 13 km long
     // run; capped to the 3-day hybrid concurrency count (10 km/day, 2× = 20
     // km) it does not, reading as the sub-64 km informational note instead.
+    let rows = long_run_rows(&report);
     assert!(
-        report
-            .iter()
-            .any(|r| r.summary.contains(SHARE_CAP_FROM_64KM)),
+        rows.len() == 1 && rows[0].contains(SHARE_CAP_FROM_64KM),
         "the report must average over the capped run-day count: {report:#?}"
-    );
-    assert!(
-        !report.iter().any(|r| r.summary.contains(OVER_TWICE_DAILY)),
-        "the capped denominator must not flag the long run: {report:#?}"
     );
 }
 
@@ -283,9 +254,10 @@ fn run_dated_tomorrow_does_not_count_in_this_week() {
         report.iter().any(|r| r.summary.contains("20.0 km")),
         "only the four runs through today count (20 km), not the future run: {report:#?}"
     );
-    assert!(
-        !report.iter().any(|r| r.summary.contains(OVER_SHARE_CAP)),
-        "the future 15 km long run must not create a cap violation: {report:#?}"
+    assert_eq!(
+        long_run_rows(&report),
+        ["Long run 5.0 km is 25% of the week (usual share 25–30%)"],
+        "the long run is a 5 km run through today, not the future 15 km one: {report:#?}"
     );
 }
 
@@ -314,39 +286,18 @@ fn low_mileage_long_run_over_2x_daily_average_is_one_row() {
         ..Default::default()
     };
     let report = build_weekly_report(&ViewCtx::new(&model()), &[]);
-    assert_eq!(
-        long_run_rows(&report),
-        [
-            "Long run 14.0 km is 70% of the week and more than twice your average daily distance (6.7 km)."
-        ],
+    let rows = long_run_rows(&report);
+    assert!(
+        rows.len() == 1
+            && rows[0].starts_with("Long run 14.0 km is 70% of the week")
+            && rows[0].contains(OVER_TWICE_DAILY)
+            && rows[0].contains("(6.7 km)"),
         "{report:#?}"
     );
     let miles = miles_report(model());
-    assert_eq!(
-        long_run_rows(&miles),
-        [
-            "Long run 8.7 mi is 70% of the week and more than twice your average daily distance (4.2 mi)."
-        ],
+    let rows = long_run_rows(&miles);
+    assert!(
+        rows.len() == 1 && rows[0].starts_with("Long run 8.7 mi") && rows[0].contains("(4.2 mi)"),
         "{miles:#?}"
-    );
-}
-
-// At 64 km a week and up the 25% share cap applies, stated once.
-#[test]
-fn high_mileage_long_run_over_the_share_cap_is_one_row() {
-    let model = Model {
-        profile_history: vec![profile_with_run_days(3, 70.0)],
-        runs: vec![
-            run(30.0, 180.0, 75.0, None, MON),
-            run(20.0, 120.0, 75.0, None, MON + DAY),
-            run(20.0, 120.0, 75.0, None, MON + 2 * DAY),
-        ],
-        ..Default::default()
-    };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
-    assert_eq!(
-        long_run_rows(&report),
-        ["Long run 30.0 km is 43% of the week: over the 25% limit for one run."],
-        "{report:#?}"
     );
 }

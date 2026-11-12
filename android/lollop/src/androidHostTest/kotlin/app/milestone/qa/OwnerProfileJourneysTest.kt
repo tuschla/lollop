@@ -29,9 +29,7 @@ import app.milestone.ParqQuestion
 import app.milestone.ProfileDraft
 import app.milestone.R
 import app.milestone.draftFacts
-import app.milestone.epochDayLabel
 import app.milestone.train_blocked
-import java.time.LocalDate
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -66,17 +64,6 @@ class OwnerProfileJourneysTest {
 
     private val doNotTrain get() = str(R.string.main_do_not_train)
 
-    /** 35 on the pinned Monday 2026-09-21. */
-    private val adultBirthday = LocalDate.of(1991, 3, 12).toEpochDay()
-    private val adultDigits = "03121991"
-
-    /** 15 on the pinned Monday. */
-    private val youthBirthday = LocalDate.of(2011, 3, 15).toEpochDay()
-    private val youthDigits = "03152011"
-
-    /** The pill/row text for a birthday: "Born Mar 12, 1991 · 35". */
-    private fun born(day: Long, age: Int) = str(R.string.setup_birthday_value, epochDayLabel(day), age)
-
     private fun profileWith(health: HealthScreen = HealthScreen(), birthDay: Long? = null, age: Double = 30.0): Event =
         QaHarness.strengthProfile().copy(health = health, birthEpochDay = birthDay, ageYears = age)
 
@@ -95,14 +82,14 @@ class OwnerProfileJourneysTest {
         val seen = mutableListOf<String>()
         val headers = everyday + planAnswers + header(R.string.main_overline_danger_zone)
         val list = rule.onAllNodes(hasScrollToNodeAction())[0]
-        var i = 0
-        while (runCatching { list.performScrollToIndex(i) }.isSuccess) {
+        val rows = list.fetchSemanticsNode().config[SemanticsProperties.CollectionInfo].rowCount
+        for (i in 0 until rows) {
+            list.performScrollToIndex(i)
             rule.waitForIdle()
             headers.filter { it !in seen }
                 .mapNotNull { h -> rule.onAllNodes(hasText(h)).fetchSemanticsNodes().firstOrNull()?.let { h to it.boundsInRoot.top } }
                 .sortedBy { it.second }
                 .forEach { seen += it.first }
-            i++
         }
         val at = seen.indexOf(planAnswers)
         assertTrue("every section is listed: $seen", seen.containsAll(headers))
@@ -134,8 +121,8 @@ class OwnerProfileJourneysTest {
         QaHarness.seedLog(ctx, listOf(profileWith(birthDay = youthBirthday, age = 15.0)))
         rule.launchApp()
         // The calm Today card, never the red DO NOT TRAIN banner.
-        rule.assertTextCountEventually(str(R.string.main_hold_youth_title).uppercase(Locale.US), 1)
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(str(R.string.main_hold_youth_title).uppercase(Locale.US)), 1)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         assertEquals(HoldReason.Youth, EventDispatcher.model.value!!.hold_reason)
 
         rule.onNode(hasText(str(R.string.main_hold_check_age)) and hasClickAction()).performClick()
@@ -192,8 +179,8 @@ class OwnerProfileJourneysTest {
     fun pregnancyHold_todayCardCarriesOnlyWhatTheBannerLeavesOut() {
         QaHarness.seedLog(ctx, listOf(profileWith(health = HealthScreen(pregnant = true), birthDay = adultBirthday, age = 35.0)))
         rule.launchApp()
-        rule.assertTextCountEventually(doNotTrain, 1)
-        rule.assertTextCountEventually(str(R.string.main_hold_reason_pregnancy), 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_hold_reason_pregnancy)), 1)
         // One SAFETY card with the activity reference, not the banner's "won't plan" again.
         rule.assertCountEventually(hasText(str(R.string.main_chip_safety)), 1)
         rule.assertCountEventually(hasText("150 minutes", substring = true), 1)
@@ -205,8 +192,8 @@ class OwnerProfileJourneysTest {
         val health = HealthScreen(pregnant = true, pregnancy_warning_sign = true)
         QaHarness.seedLog(ctx, listOf(profileWith(health = health, birthDay = adultBirthday, age = 35.0)))
         rule.launchApp()
-        rule.assertTextCountEventually(doNotTrain, 1)
-        rule.assertTextCountEventually(str(R.string.main_hold_reason_pregnancy_warning), 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_hold_reason_pregnancy_warning)), 1)
         rule.waitForIdle()
         assertEquals(0, rule.onAllNodes(hasText(str(R.string.main_chip_safety))).fetchSemanticsNodes().size)
         // The core's own warning instruction stays behind the banner's closed "?":
@@ -220,7 +207,7 @@ class OwnerProfileJourneysTest {
     private fun reviewHealthLands(health: HealthScreen) {
         QaHarness.seedLog(ctx, listOf(profileWith(health = health, birthDay = adultBirthday, age = 35.0)))
         rule.launchApp()
-        rule.assertTextCountEventually(doNotTrain, 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
         rule.onNode(hasText(str(R.string.main_hold_review_health)) and hasClickAction()).performClick()
     }
 
@@ -230,14 +217,14 @@ class OwnerProfileJourneysTest {
         rule.walkLiftSetup(birthdayDigits = null)
         val next = hasText(str(R.string.setup_btn_next)) and hasClickAction()
         rule.onNode(next).assertIsNotEnabled()
-        rule.assertTextCountEventually(str(R.string.setup_about_pick_hint), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_about_pick_hint)), 1)
 
         rule.pickBirthday(str(R.string.setup_birthday_pick), "01012030")
-        rule.assertTextCountEventually(str(R.string.setup_birthday_pick), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_birthday_pick)), 1)
         rule.onNode(next).assertIsNotEnabled()
 
-        assertTrue("the picker took the date", rule.pickBirthday(str(R.string.setup_birthday_pick), adultDigits))
-        rule.assertTextCountEventually(born(adultBirthday, 35), 1)
+        assertTrue("the picker took the date", rule.pickBirthday(str(R.string.setup_birthday_pick), ADULT_BIRTHDAY_DIGITS))
+        rule.assertCountEventually(hasText(born(adultBirthday, 35)), 1)
         rule.onNode(next).assertIsEnabled()
         rule.setupNext()
         rule.setupNext()
@@ -261,21 +248,21 @@ class OwnerProfileJourneysTest {
         rule.waitForIdle()
 
         val change = str(R.string.setup_birthday_change)
-        assertTrue("the picker took the date", rule.pickBirthday(change, youthDigits))
+        assertTrue("the picker took the date", rule.pickBirthday(change, YOUTH_BIRTHDAY_DIGITS))
 
         rule.waitForState { EventDispatcher.model.value?.hold_reason == HoldReason.Youth }
         // The under-18 pause pins nothing over Profile: no DO NOT TRAIN banner.
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         assertTrue(EventDispatcher.model.value!!.train_blocked)
         assertEquals(youthBirthday, EventDispatcher.model.value!!.profile!!.birth_epoch_day)
         rule.onAllNodesWithText(born(youthBirthday, 15), substring = true).fetchSemanticsNodes()
             .let { assertTrue("the Age row shows the new birthday", it.isNotEmpty()) }
 
         rule.waitUntilDisplayed(birthdayPill())
-        assertTrue("the picker took the date", rule.pickBirthday(change, adultDigits))
+        assertTrue("the picker took the date", rule.pickBirthday(change, ADULT_BIRTHDAY_DIGITS))
 
         rule.waitForState { EventDispatcher.model.value?.train_blocked == false }
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         rule.selectTab(str(R.string.main_dest_today))
         rule.waitForState { EventDispatcher.model.value?.next_session != null }
         rule.assertCountEventually(sessionShown(), 1)

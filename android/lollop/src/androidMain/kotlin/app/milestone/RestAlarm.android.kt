@@ -26,8 +26,8 @@ internal actual object RestAlarmPlatform {
     internal const val CHANNEL_COUNTDOWN = "rest_live"
 
     /** The countdown's channel before it moved to [ensureLiveChannel] (IMPORTANCE_LOW). */
-    private const val RETIRED_CHANNEL_COUNTDOWN = "rest_countdown"
-    private const val CHANNEL_DONE = "rest_done"
+    internal const val RETIRED_CHANNEL_COUNTDOWN = "rest_countdown"
+    internal const val CHANNEL_DONE = "rest_done"
     // The rest-end alarm's identity: its request code, [ACTION_REST_END] and
     // [RestEndReceiver]. A new rest replaces the alarm, cancel finds it.
     internal const val ACTION_REST_END = "app.milestone.action.REST_END"

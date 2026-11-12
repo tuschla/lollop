@@ -47,7 +47,6 @@ class QuickTileRefreshTest {
     fun setUp() {
         // A new process: the features' collectors bind this test's Application.
         AppRuntime.resetForTest(clock = TestClock)
-        RunSession.reset()
         File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         val statusBar = checkNotNull(ctx.getSystemService(StatusBarManager::class.java))
         val iface = Class.forName("com.android.internal.statusbar.IStatusBarService")
@@ -67,7 +66,7 @@ class QuickTileRefreshTest {
 
     @After
     fun tearDown() {
-        RunSession.reset()
+        AppRuntime.resetForTest(clock = TestClock)
         File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 

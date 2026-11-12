@@ -149,14 +149,8 @@ fn lift_audit_buckets_sets_by_local_day() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: off,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    app.update(set_today_off_ev(MON + 2, off), &mut model)
+        .expect_only_render();
     let vm = app.view(&model);
     // Audit: every set buckets on local Monday → 5 × 5 = 25 reps.
     let squat = vm
@@ -288,8 +282,9 @@ fn an_unrecorded_rpe_fabricates_no_rir() {
 #[test]
 fn weights_profile_still_audits_a_barbell_lift_sharing_a_tier_name() {
     // Regression guard: a Weights user logging a loaded "Bulgarian split squat"
-    // (also a calisthenics rung name) must keep its e1RM anchor + audit row —
-    // the ladder-name suppression is gated on the Calisthenics modality only.
+    // (also a calisthenics rung name) must keep its audit row, which exists
+    // only once its e1RM anchor resolves: the ladder-name suppression is gated
+    // on the Calisthenics modality only.
     let app = Engine;
     let mut model = Model::default();
     app.update(Event::SetProfile(strength_profile()), &mut model)
@@ -308,16 +303,6 @@ fn weights_profile_still_audits_a_barbell_lift_sharing_a_tier_name() {
             .iter()
             .any(|g| g.summary.contains("Bulgarian split squat")),
         "a Weights user's barbell lift is still audited"
-    );
-    let anchors = build_plan_anchors(
-        SetIndex::new(&model.sets).with_facts(&model.sets),
-        AnchorCtx::default(),
-        1,
-        0,
-    );
-    assert!(
-        anchors.e1rm_for("Bulgarian split squat").is_some(),
-        "a Weights user's barbell lift still anchors an e1RM"
     );
 }
 

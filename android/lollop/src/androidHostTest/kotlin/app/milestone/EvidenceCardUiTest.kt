@@ -1,13 +1,12 @@
 package app.milestone
 
-import android.content.Context
 import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.test.core.app.ApplicationProvider
+import app.milestone.qa.str
 import java.util.Locale
 import org.junit.Rule
 import org.junit.Test
@@ -25,10 +24,6 @@ class EvidenceCardUiTest {
 
     @get:Rule
     val rule = createComposeRule()
-
-    private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-
-    private fun str(@StringRes id: Int, vararg args: Any): String = ctx.getString(id, *args)
 
     /** The grade badge text: the human label, uppercased like every chip. */
     private fun badge(@StringRes id: Int): String = str(id).uppercase(Locale.US)

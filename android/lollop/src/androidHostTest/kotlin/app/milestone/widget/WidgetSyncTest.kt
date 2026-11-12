@@ -6,12 +6,12 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppFileNames
 import app.milestone.EventDispatcher
+import app.milestone.JvmDefaultsRule
 import app.milestone.qa.QaHarness
 import app.milestone.qa.lastScenario
 import app.milestone.qa.launchMain
 import app.milestone.qa.waitForBoot
 import java.io.File
-import java.util.Locale
 import java.util.TimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -31,9 +31,10 @@ class WidgetSyncTest {
     @get:Rule
     val rule = createEmptyComposeRule()
 
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
+
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val savedLocale: Locale = Locale.getDefault()
-    private val savedZone: TimeZone = TimeZone.getDefault()
 
     @Before
     fun setUp() {
@@ -44,8 +45,6 @@ class WidgetSyncTest {
     @After
     fun tearDown() {
         QaHarness.teardown()
-        TimeZone.setDefault(savedZone)
-        Locale.setDefault(savedLocale)
     }
 
     /**
@@ -75,7 +74,9 @@ class WidgetSyncTest {
 
     /** The midnight tick marks yesterday's snapshot stale; the model the process
      *  holds is still yesterday's, so nothing rewrites it until the app sets the
-     *  new day: the widget keeps "Open lollop to update". */
+     *  new day: the widget keeps "Open lollop to update". The mark gives
+     *  [WidgetSurfaces] no [WidgetSnapshotStore.staleMarks] tick, its only cue to
+     *  derive the snapshot again without a new model. */
     @Test
     fun theMidnightMarkLeavesYesterdaysSnapshotStale() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -84,14 +85,14 @@ class WidgetSyncTest {
         rule.waitUntil(10_000) { WidgetSnapshotStore.read(ctx) != null }
         val before = checkNotNull(WidgetSnapshotStore.read(ctx))
         val revision = WidgetSnapshotStore.revision.value
+        val marks = WidgetSnapshotStore.staleMarks.value
+        val model = EventDispatcher.model.value
 
         assertTrue(WidgetSnapshotStore.markStale(ctx, force = false, today = before.epochDay + 1))
-        val until = System.currentTimeMillis() + 2_000
-        while (System.currentTimeMillis() < until) {
-            shadowOf(Looper.getMainLooper()).idle()
-            Thread.sleep(20)
-        }
+        shadowOf(Looper.getMainLooper()).idle()
 
+        assertEquals("no cue to derive it again", marks, WidgetSnapshotStore.staleMarks.value)
+        assertSame("no new model was published", model, EventDispatcher.model.value)
         assertEquals(before.copy(stale = true), WidgetSnapshotStore.read(ctx))
         assertEquals("one write: the stale mark", revision + 1, WidgetSnapshotStore.revision.value)
     }

@@ -5,13 +5,11 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ScrollState
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import app.milestone.qa.QaHarness
 import app.milestone.qa.launchApp
+import app.milestone.qa.screenTexts
 import app.milestone.qa.selectTab
 import app.milestone.qa.str
 import androidx.test.core.app.ApplicationProvider
@@ -45,10 +43,8 @@ class LocaleNumberTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private val savedLocale: Locale = Locale.getDefault()
-
-    @After
-    fun restoreLocale() = Locale.setDefault(savedLocale)
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
 
@@ -248,7 +244,7 @@ class LocaleNumberTest {
 
     private fun volumeShown(figure: String): Boolean {
         val volume = ctx.getString(R.string.history_session_volume, figure, "kg")
-        return rule.shownTexts().any { volume in it }
+        return rule.screenTexts().any { volume in it }
     }
 
     @Test
@@ -256,7 +252,7 @@ class LocaleNumberTest {
     fun sessionVolume_groupsThousandsWithANarrowSpace_inEnglish() {
         Locale.setDefault(Locale.US)
         showSessionSheet()
-        assertTrue("4 690 kg lifted: ${rule.shownTexts()}", volumeShown("4\u202F690"))
+        assertTrue("4 690 kg lifted: ${rule.screenTexts()}", volumeShown("4\u202F690"))
     }
 
     /** On a German, Turkish or Brazilian phone the session sheet's volume groups
@@ -267,8 +263,8 @@ class LocaleNumberTest {
     fun sessionVolume_neverUsesAPointOrCommaAsAThousandsMark_inGerman() {
         Locale.setDefault(Locale.GERMANY)
         showSessionSheet()
-        assertTrue("the set rows use '.' as the decimal point: ${rule.shownTexts()}", rule.shownTexts().any { "234.5" in it })
-        assertTrue("4 690 kg lifted (not 4.690 or 4,690): ${rule.shownTexts()}", volumeShown("4\u202F690"))
+        assertTrue("the set rows use '.' as the decimal point: ${rule.screenTexts()}", rule.screenTexts().any { "234.5" in it })
+        assertTrue("4 690 kg lifted (not 4.690 or 4,690): ${rule.screenTexts()}", volumeShown("4\u202F690"))
     }
 
     private companion object {
@@ -284,10 +280,6 @@ class LocaleNumberTest {
 
 private fun foreignDigits(s: String): String = s.filter { Character.isDigit(it) && it !in '0'..'9' }
 
-private fun SemanticsNodeInteractionsProvider.shownTexts(): List<String> =
-    onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true).fetchSemanticsNodes()
-        .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
-
 /**
  * The real app over the real core on phones set to other locales: Today, History
  * and Profile with a seeded lift + run history, every visible text collected.
@@ -300,13 +292,14 @@ class LocaleNumberAppTest {
     @get:Rule
     val rule = createEmptyComposeRule()
 
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
+
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val savedLocale: Locale = Locale.getDefault()
 
     @After
     fun tearDown() {
         QaHarness.teardown()
-        Locale.setDefault(savedLocale)
     }
 
     private fun history(): List<Event> {
@@ -330,10 +323,10 @@ class LocaleNumberAppTest {
         Locale.setDefault(locale)
         QaHarness.seedLog(ctx, history())
         rule.launchApp()
-        val out = rule.shownTexts().toMutableList()
+        val out = rule.screenTexts().toMutableList()
         for (tab in listOf(R.string.main_dest_history, R.string.main_dest_profile)) {
             rule.selectTab(str(tab))
-            out += rule.shownTexts()
+            out += rule.screenTexts()
         }
         return out
     }

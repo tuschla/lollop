@@ -4,86 +4,63 @@
 
 use super::*;
 
-/// Two distinct local days (offset 0), 3 clean top-of-band "Full push-up"
-/// sets each → 2 consecutive qualifying sessions → `advance_ready` true with
-/// no pain gate. HorizontalPush rung 4 is reps 5–8, so reps=8 is the band top
-/// and rpe 8.0 (RIR 2) is clean.
-fn two_qualifying_pushup_sessions() -> Vec<LoggedSet> {
-    let mut sets = Vec::new();
-    for (day, base_id) in [(100i64, 0u64), (101, 10)] {
-        for i in 0..3u64 {
-            sets.push(LoggedSet {
-                hold_sec: None,
-                exercise: "Full push-up".into(),
-                weight_kg: 0.0,
-                reps: 8,
-                rpe: 8.0,
-                observed_at: day * DAY_SEC + i as i64,
-                entry_id: base_id + i,
-            });
+/// The core-ladder rung today after three 45 s front-plank holds on each of
+/// two days, with a plank day logged without hold seconds between them when
+/// `gap`.
+fn core_rung_after_two_plank_days(gap: bool) -> String {
+    let (app, mut model) = planned_calisthenics();
+    let mut days = vec![(MON - 5, true), (MON - 1, true)];
+    if gap {
+        days.insert(1, (MON - 3, false));
+    }
+    for (day, held) in days {
+        for k in 0..3 {
+            let at = day * DAY_SEC + 18 * HOUR + k * 120;
+            let set = if held {
+                cal_hold("Front plank", 45, 7.0, at)
+            } else {
+                log_set("Front plank", 0.0, 1, 7.0, at)
+            };
+            app.update(set, &mut model).expect_only_render();
         }
     }
-    sets
-}
-
-/// Calisthenics anchors for the two-day push-up fixture (days 100–101), as of
-/// day 101 on a strength goal.
-fn pushup_anchors(
-    sets: &[LoggedSet],
-    inputs: &[ReadinessInput],
-) -> Vec<crate::calisthenics::progression::CalisAnchor> {
-    build_calisthenics_anchors(
-        sets.iter()
-            .map(|s| (s, crate::calisthenics::tier_by_name(&s.exercise))),
-        &[],
-        inputs,
-        crate::strength::LiftGoal::MaxStrength,
-        Some(101),
-        0,
-    )
+    cal_item(&app.view(&model), Lad::Core)
+        .expect("a core item")
+        .exercise
 }
 
 /// A plank day logged without hold seconds is neutral: it neither counts as a
 /// failed hold nor breaks the 2-for-2 run of the plank days around it.
 #[test]
 fn a_plank_day_without_hold_seconds_does_not_break_the_advance() {
-    let plank = |day: i64, hold: Option<u16>, id: u64| -> Vec<LoggedSet> {
-        (0..3)
-            .map(|k| LoggedSet {
-                hold_sec: hold,
-                exercise: "Plank".into(),
-                weight_kg: 0.0,
-                reps: if hold.is_some() { 0 } else { 1 },
-                rpe: 7.0,
-                observed_at: day * DAY_SEC + 18 * HOUR + k * 120,
-                entry_id: id + k as u64,
-            })
-            .collect()
-    };
-    let anchors = |sets: &[LoggedSet]| {
-        build_calisthenics_anchors(
-            sets.iter()
-                .map(|s| (s, crate::calisthenics::tier_by_name(&s.exercise))),
-            &[],
-            &[],
-            crate::strength::LiftGoal::MaxStrength,
-            Some(104),
-            0,
-        )
-    };
-    let control = [plank(100, Some(45), 0), plank(104, Some(45), 10)].concat();
-    let with_gap = [
-        plank(100, Some(45), 0),
-        plank(102, None, 20),
-        plank(104, Some(45), 10),
-    ]
-    .concat();
-    let want = anchors(&control);
-    assert!(
-        want.iter().any(|a| a.advance_ready),
-        "two 45 s plank days advance the core ladder: {want:?}"
+    assert_eq!(
+        core_rung_after_two_plank_days(false),
+        "Long-lever plank",
+        "two clean 45 s plank days advance the core ladder"
     );
-    assert_eq!(anchors(&with_gap), want);
+    assert_eq!(core_rung_after_two_plank_days(true), "Long-lever plank");
+}
+
+/// Today's horizontal-push rung after two past days of 3 clean top-of-band
+/// Full push-up sets (rung 4, 5–8 reps at RIR 2) and then `reports`.
+fn push_rung_after_two_qualifying_days(reports: &[ReadinessInput]) -> String {
+    let (app, mut model) = planned_calisthenics();
+    for day in [MON - 3, MON - 2] {
+        for k in 0..3 {
+            app.update(
+                log_set("Full push-up", 0.0, 8, 8.0, day * DAY_SEC + k * 60),
+                &mut model,
+            )
+            .expect_only_render();
+        }
+    }
+    for r in reports {
+        app.update(Event::SubmitReadiness(r.clone()), &mut model)
+            .expect_only_render();
+    }
+    cal_item(&app.view(&model), Lad::HorizontalPush)
+        .expect("a horizontal-push item")
+        .exercise
 }
 
 #[test]
@@ -355,24 +332,24 @@ fn calisthenics_hold_set_round_trips_renders_and_yields_no_e1rm() {
         .expect("the bench row renders");
     assert_eq!(bench.tonnage_kg, 500.0);
 
-    // A ladder-named hold set never anchors an e1RM; a barbell set still does.
-    let anchors = build_plan_anchors(
-        SetIndex::new(&model.sets).with_facts(&model.sets),
-        AnchorCtx {
-            calisthenics: true,
-            ..Default::default()
-        },
-        0,
-        0,
-    );
-    assert!(
-        anchors.e1rm_for("Front plank").is_none(),
-        "no e1RM for a hold set"
-    );
-    assert!(
-        anchors.e1rm_for("Bench").is_some(),
-        "a barbell set still anchors an e1RM"
-    );
+    // A hold set never anchors an e1RM, even under a barbell lift's name and
+    // load; the same set logged for reps does.
+    let squat_load = |hold_sec: Option<u16>| {
+        let mut set = log_set("Back Squat", 100.0, 1, 8.0, (MON - 1) * DAY_SEC);
+        if let Event::LogSet { hold_sec: h, .. } = &mut set {
+            *h = hold_sec;
+        }
+        let (app, model) = planned_on(strength_profile(), [set], MON);
+        app.view(&model)
+            .week_plan
+            .iter()
+            .flat_map(|s| &s.items)
+            .find(|i| i.exercise.eq_ignore_ascii_case("Back squat"))
+            .expect("a squat item")
+            .load_kg
+    };
+    assert_eq!(squat_load(Some(30)), None, "no e1RM for a hold set");
+    assert!(squat_load(None).is_some(), "a set for reps anchors one");
 }
 
 #[test]
@@ -435,41 +412,32 @@ fn amending_only_hold_sec_refreshes_the_lift_summary() {
 
 #[test]
 fn a_downgrade_on_a_calisthenics_hold_shows_no_zero_reps_or_rir_advice() {
-    // Folding a DowngradeSession (e.g. an HRV downgrade) onto a
-    // timed-hold calisthenics item renders hold-appropriate copy — never
-    // "×0" (reps_low is 0 for a hold) and never RIR / "reps in reserve"
-    // advice; a dynamic item still shows its rep RANGE.
-    let hold = PrescriptionView {
-        exercise: "Tuck front lever".into(),
-        sets: 4,
-        reps_low: 0,
-        reps_high: 0,
-        load_kg: None,
-        intensity_label: "clean hold, stop before your form breaks".into(),
-        rep_volume: "5–15 s hold".into(),
-        timed_hold: true,
-        ..Default::default()
-    };
-    let dynamic = PrescriptionView {
-        exercise: "Full push-up".into(),
-        sets: 3,
-        reps_low: 5,
-        reps_high: 8,
-        load_kg: None,
-        intensity_label: "RIR 1–2".into(),
-        timed_hold: false,
-        ..Default::default()
-    };
-    let mut ns = PlanRow {
-        items: vec![hold.into(), dynamic.into()],
-        ..Default::default()
-    };
-    let recs = vec![AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001)];
-    apply_adjustments_to_session(&mut ns, &recs, false);
-    let h = &ns.items[0];
+    // A multi-day HRV downgrade on a calisthenics day renders hold-appropriate
+    // copy on a timed hold: never "×0" (a hold has no reps) and never RIR /
+    // "reps in reserve" advice; a dynamic item still shows its rep RANGE.
+    let (app, mut model) = planned_calisthenics();
+    let streak = crate::autoreg::HRV_ESCALATE_STREAK;
+    for d in 0..i64::from(streak) {
+        app.update(
+            Event::SubmitReadiness(ReadinessInput {
+                observed_at: (MON - d) * DAY_SEC + 60,
+                streak,
+                ..input(ReadinessSignal::HrvLnRmssd, -2.0)
+            }),
+            &mut model,
+        )
+        .expect_only_render();
+    }
+    let ns = app.view(&model).next_session.expect("today's session");
+    assert_eq!(ns.status, SessionStatus::Adjusted);
+    let h = ns
+        .items
+        .iter()
+        .find(|it| it.exercise == "Dead hang")
+        .expect("a timed hold today");
     assert!(!h.summary.contains("×0"), "no ×0 on a hold: {}", h.summary);
     assert!(
-        h.summary.contains("5–15 s hold"),
+        h.summary.contains("30 s hold"),
         "the hold volume renders: {}",
         h.summary
     );
@@ -479,11 +447,15 @@ fn a_downgrade_on_a_calisthenics_hold_shows_no_zero_reps_or_rir_advice() {
         "hold copy carries no RIR advice: {}",
         h.intensity_label
     );
-    // The dynamic item still renders its rep range (never ×0).
+    let dynamic = ns
+        .items
+        .iter()
+        .find(|it| it.exercise == "Wall push-up")
+        .expect("a dynamic rung today");
     assert!(
-        ns.items[1].summary.contains("3×5–8"),
+        dynamic.summary.contains("5×8–12"),
         "dynamic rep range renders: {}",
-        ns.items[1].summary
+        dynamic.summary
     );
 }
 
@@ -592,43 +564,31 @@ fn calisthenics_prescription_views_carry_hold_and_added_prefill() {
 
 #[test]
 fn cap_rpe_caps_a_calisthenics_rir_band() {
-    // CapRpe must cap a "RIR lo–hi" dynamic rung off the STRUCTURED field
-    // (not by parsing the label), raising both ends and resyncing the prefill
-    // RPE to the new conservative (high) bound.
-    let dynamic = PlanItem {
-        view: PrescriptionView {
-            exercise: "Full push-up".into(),
-            sets: 3,
-            reps_low: 5,
-            reps_high: 8,
-            intensity_label: "RIR 1–2".into(),
-            target_rpe: Some(crate::strength::rir_to_rpe(2.0)),
-            ..Default::default()
-        },
-        intensity: PlanIntensity::RirRange { lo: 1, hi: 2 },
-        ..Default::default()
-    };
-    let mut ns = PlanRow {
-        items: vec![dynamic],
-        ..Default::default()
-    };
-    apply_adjustments_to_session(
-        &mut ns,
-        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
-        false,
+    // The e1RM gate's RPE cap raises both ends of a "RIR lo–hi" dynamic rung
+    // and resyncs the prefill RPE to the new conservative (high) bound; a
+    // timed hold it skips keeps its copy and gets no cap note.
+    let (app, mut model) = planned_calisthenics();
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: MON * DAY_SEC + 60,
+            ..input(ReadinessSignal::EstimatedOneRm, 0.93)
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let ns = app.view(&model).next_session.expect("today's session");
+    let push = ns
+        .items
+        .iter()
+        .find(|it| it.exercise == "Wall push-up")
+        .expect("a dynamic rung today");
+    assert_eq!(
+        push.intensity_label, "RIR 1–2",
+        "both ends of RIR 0–1 shift up by the cap"
     );
     assert_eq!(
-        ns.items[0].intensity_label, "RIR 2–3",
-        "both band ends shift up by the cap"
-    );
-    assert_eq!(
-        ns.items[0].intensity,
-        PlanIntensity::RirRange { lo: 2, hi: 3 },
-        "the structured band is capped, not just the label"
-    );
-    assert_eq!(
-        ns.items[0].target_rpe,
-        Some(crate::strength::rir_to_rpe(3.0)),
+        push.target_rpe,
+        Some(8.0),
         "the prefill RPE resyncs to the new conservative (high) bound"
     );
     assert_eq!(
@@ -636,72 +596,32 @@ fn cap_rpe_caps_a_calisthenics_rir_band() {
         SessionStatus::Adjusted,
         "a real rung change marks the session adjusted"
     );
-}
-
-#[test]
-fn cap_rpe_over_a_holds_only_session_does_not_mark_adjusted() {
-    // CapRpe skips prose/hold items; a holds-only session is a genuine
-    // no-op and must NOT show an "adjusted" chip over an unchanged top-end.
-    let hold = PrescriptionView {
-        exercise: "Tuck front lever".into(),
-        sets: 4,
-        timed_hold: true,
-        rep_volume: "5–15 s hold".into(),
-        intensity_label: "clean hold, stop before your form breaks".into(),
-        ..Default::default()
-    };
-    let mut ns = PlanRow {
-        items: vec![hold.into()],
-        ..Default::default()
-    };
-    apply_adjustments_to_session(
-        &mut ns,
-        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
-        false,
-    );
-    assert_ne!(
-        ns.status,
-        SessionStatus::Adjusted,
-        "a holds-only CapRpe is a no-op, not 'adjusted'"
-    );
-    assert!(
-        ns.adjustment.is_none(),
-        "no adjustment chip when nothing changed"
-    );
-    assert_eq!(
-        ns.items[0].intensity_label, "clean hold, stop before your form breaks",
-        "the hold copy is untouched"
-    );
-    assert!(
-        ns.items[0].adjusted_note.is_empty(),
-        "no cap note on an unchanged hold"
-    );
+    let hold = ns
+        .items
+        .iter()
+        .find(|it| it.exercise == "Dead hang")
+        .expect("a timed hold today");
+    assert_eq!(hold.intensity_label, "hold until you almost can't");
+    assert!(hold.adjusted_note.is_empty(), "{}", hold.adjusted_note);
 }
 
 #[test]
 fn doms_only_inputs_leave_calisthenics_advance_ready() {
     // A Doms report is normal training discomfort (File 08 Table 4.1
     // "continue") and must NOT freeze ladder progression.
-    let sets = two_qualifying_pushup_sessions();
-    let base = pushup_anchors(&sets, &[]);
-    let ready = |anchors: &[crate::calisthenics::progression::CalisAnchor]| {
-        anchors
-            .iter()
-            .find(|a| a.ladder == crate::schema::LadderId::HorizontalPush)
-            .expect("push-up anchor")
-            .advance_ready
-    };
-    assert!(ready(&base), "baseline (no pain) is ready to advance");
-
-    let doms = vec![pain_row(
+    assert_eq!(
+        push_rung_after_two_qualifying_days(&[]),
+        "Decline push-up",
+        "top-of-band on 2 sessions advances the tier"
+    );
+    let doms = pain_row(
         1.0,
         Some(crate::schema::PainKind::Doms),
-        200 * DAY_SEC,
-    )];
-    let with_doms = pushup_anchors(&sets, &doms);
-    assert!(
-        ready(&with_doms),
-        "a DOMS report must not freeze advance_ready"
+        (MON - 1) * DAY_SEC,
+    );
+    assert_eq!(
+        push_rung_after_two_qualifying_days(&[doms]),
+        "Decline push-up"
     );
 }
 
@@ -710,27 +630,16 @@ fn a_pain_clear_after_pain_re_enables_calisthenics_advance() {
     // An active pain report freezes advance; a later pain-CLEAR row
     // (value 0, the LATEST reading) re-opens it; an "any Pain signal ever"
     // gate would never re-enable.
-    let sets = two_qualifying_pushup_sessions();
-    let ready = |anchors: &[crate::calisthenics::progression::CalisAnchor]| {
-        anchors
-            .iter()
-            .find(|a| a.ladder == crate::schema::LadderId::HorizontalPush)
-            .expect("push-up anchor")
-            .advance_ready
-    };
-
-    let pain = vec![pain_row(1.0, None, 200 * DAY_SEC)];
-    assert!(
-        !ready(&pushup_anchors(&sets, &pain)),
+    let pain = pain_row(1.0, None, (MON - 2) * DAY_SEC + HOUR);
+    assert_eq!(
+        push_rung_after_two_qualifying_days(std::slice::from_ref(&pain)),
+        "Full push-up",
         "active pain freezes advance"
     );
-
-    let cleared = vec![
-        pain_row(1.0, None, 200 * DAY_SEC),
-        pain_row(0.0, None, 201 * DAY_SEC),
-    ];
-    assert!(
-        ready(&pushup_anchors(&sets, &cleared)),
+    let clear = pain_row(0.0, None, (MON - 1) * DAY_SEC);
+    assert_eq!(
+        push_rung_after_two_qualifying_days(&[pain, clear]),
+        "Decline push-up",
         "a pain-clear re-enables advance"
     );
 }

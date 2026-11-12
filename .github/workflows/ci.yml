@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The emulator smoke job is expensive (boots a real AVD), so it runs only on
-  # demand and weekly, never on every push/PR.
+  # The emulator smoke and the full-length test modes are expensive, so they run
+  # only on demand and weekly, never on every push/PR.
   workflow_dispatch:
   schedule:
     - cron: "0 4 * * 1" # Mondays 04:00 UTC
@@ -113,6 +113,40 @@ jobs:
       - name: Lint (library + app shell)
         working-directory: android
         run: ./gradlew --no-daemon :lollop:lint :app:lintDebug
+
+  deep:
+    name: Full-length test modes (weekly)
+    # The modes too long for every push: the 1–3-year simulated lives and every
+    # copy-sweep pairing (Rust, release), the full accessibility crawl and the
+    # longer history at the tracker's fix cadence (Kotlin). Every push runs the
+    # same tests at their short sizes.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: ./.github/actions/setup
+        with:
+          rust: "true"
+
+      - name: Cache Robolectric Android runtimes
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
+
+      - name: Full simulated lives + copy sweep (Rust, release)
+        env:
+          LONG_HORIZON_FULL: "1"
+          COPY_SWEEP_FULL: "1"
+        run: cargo test --release --locked -p shared -- long_horizon copy_invariants
+
+      - name: Full accessibility crawl + long history UI (Kotlin)
+        working-directory: android
+        env:
+          A11Y_FULL: "1"
+          LOLLOP_LONG_UI: "1"
+        run: ./gradlew --no-daemon :lollop:testAndroidHostTest --tests '*AccessibilityAuditTest' --tests '*LongHistoryUiTest'
 
   emulator-smoke:
     name: Android on-device smoke (emulator)

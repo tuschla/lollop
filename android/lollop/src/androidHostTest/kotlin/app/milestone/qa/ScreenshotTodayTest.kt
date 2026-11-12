@@ -1,22 +1,18 @@
 package app.milestone.qa
 
 import android.content.Context
-import android.os.Looper
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
-import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
@@ -26,17 +22,14 @@ import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
 import app.milestone.LiftGoal
 import app.milestone.LiftResultView
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SessionPlanView
 import app.milestone.TestClock
 import app.milestone.overtrainingWeekEdgeLabels
 import java.io.File
-import java.time.Duration
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -45,7 +38,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
 
 /**
  * Screenshot baselines for the Today coaching surfaces and the logging flows the
@@ -69,18 +61,14 @@ class ScreenshotTodayTest {
     }
 
     @After
-    fun tearDown() = QaHarness.teardown()
-
-    private fun waitForText(text: String, substring: Boolean = false) = rule.waitForNode(hasText(text, substring = substring))
-
-    private fun scrollTodayTo(matcher: SemanticsMatcher) {
-        rule.onNode(hasScrollToNodeAction()).performScrollToNode(matcher)
-        rule.waitForIdle()
+    fun tearDown() {
+        releaseClock()
+        QaHarness.teardown()
     }
 
-    /** Swipe Today's lazy list to its end (extra swipes clamp, so the final
-     *  position is the same every run). */
-    private fun scrollTodayToEnd() {
+    /** Swipe Today's lazy list to its end, the way a thumb does (extra swipes clamp,
+     *  so the final position is the same every run; the baselines were recorded so). */
+    private fun swipeTodayToEnd() {
         repeat(10) {
             rule.onAllNodes(hasScrollToIndexAction())[0].performTouchInput { swipeUp() }
             rule.waitForIdle()
@@ -89,49 +77,17 @@ class ScreenshotTodayTest {
 
     private val todayStartSec get() = QaHarness.daysAgoAtMidday(0) - 43_200L
 
-    /** The athlete's squat as they'd type it, sentence case (the core keeps
-     *  user-entered names verbatim, so captures read "Back squat"). */
-    private val SQUAT = "Back squat"
-
     private fun squat(observedAt: Long): Event =
-        Event.LogSet(SQUAT, 120.0, 3, 8.0, observedAt, observedAt * 1000)
+        Event.LogSet(TYPED_SQUAT, 120.0, 3, 8.0, observedAt, observedAt * 1000)
 
     private fun todaysSets(exercise: String): List<LiftResultView> =
         EventDispatcher.model.value!!.lifts.filter { it.exercise == exercise && it.observed_at >= todayStartSec }
 
-    private fun openChooser() {
-        rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).performClick()
-        rule.waitForIdle()
-        waitForText(str(R.string.main_log_set_title))
-    }
-
-    /** Anchored squat plus prior accessory sets, so the item faces carry plates,
-     *  an effort line and "Last:" lines. */
-    private fun seedStrengthWithHistory() {
-        val prior = QaHarness.daysAgoAtMidday(2)
-        QaHarness.seedLog(
-            ctx,
-            listOf(
-                QaHarness.strengthProfile(),
-                squat(prior - 1_800),
-                Event.LogSet("Row", 60.0, 8, 7.0, prior, prior * 1000),
-                Event.LogSet("Bench press", 60.0, 8, 7.0, prior + 600, prior * 1000 + 1),
-                Event.LogSet("Romanian deadlift", 80.0, 8, 7.0, prior + 1200, prior * 1000 + 2),
-            ),
-        )
-    }
-
-    private fun hypertrophyProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
+    private fun hypertrophyProfile(): Event = QaHarness.strengthProfile().copy(
         liftGoal = LiftGoal.Hypertrophy,
-        goalDistance = GoalDistance.General,
         concurrentGoal = ConcurrentGoal.Hypertrophy,
         weeklySets = 14,
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        advanced = false,
         bodyweightKg = 80.0,
-        ageYears = 30.0,
     )
 
     private val thisMorning get() = todayStartSec + 8 * 3_600L
@@ -139,9 +95,9 @@ class ScreenshotTodayTest {
     private fun plan(mode: DarkMode, fontScale: Float? = null) {
         useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
-        seedStrengthWithHistory()
+        seedStrengthWithHistory(ctx)
         rule.launchApp()
-        waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
+        rule.waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
         val tag = if (fontScale != null) "fs130-" else ""
         rule.shot("today-plan-top-$tag${mode.suffix}")
         if (fontScale != null) return
@@ -151,7 +107,7 @@ class ScreenshotTodayTest {
         rule.shot("today-plan-evidence-${mode.suffix}")
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_hide_details), substring = true)).performClick()
         rule.waitForIdle()
-        scrollTodayToEnd()
+        swipeTodayToEnd()
         rule.shot("today-plan-bottom-${mode.suffix}")
     }
 
@@ -172,7 +128,7 @@ class ScreenshotTodayTest {
         session.items.filter { it.exercise.isNotEmpty() }.forEachIndexed { i, item ->
             val reps = maxOf(item.reps_low, item.reps_high, 1)
             // Over its prescription: heavier than the prior best.
-            val kg = (item.load_kg ?: item.suggested_load_kg ?: 60.0) + if (item.exercise == SQUAT) 5.0 else 0.0
+            val kg = (item.load_kg ?: item.suggested_load_kg ?: 60.0) + if (item.exercise == TYPED_SQUAT) 5.0 else 0.0
             repeat(maxOf(item.sets, 1)) { k ->
                 EventDispatcher.send(
                     Event.LogSet(item.exercise, kg, reps, 8.0, now - 3_000 + i * 300 + k * 60, ++id, holdSec = null),
@@ -183,7 +139,7 @@ class ScreenshotTodayTest {
         rule.waitForState { EventDispatcher.model.value!!.lifts.count { it.observed_at >= todayStartSec } == sent }
         rule.waitForNode(hasTestTag("session-done"))
         rule.shot("today-sessiondone-top-${mode.suffix}")
-        scrollTodayToEnd()
+        swipeTodayToEnd()
         rule.shot("today-sessiondone-bottom-${mode.suffix}")
     }
 
@@ -200,15 +156,15 @@ class ScreenshotTodayTest {
             listOf(QaHarness.strengthProfile(), Event.GeneratePlan(start)) +
                 doneDays.mapIndexed { i, d ->
                     val at = QaHarness.daysAgoAtMidday(d)
-                    Event.LogSet(SQUAT, 100.0 + i, 5, 8.0, at, at * 1000)
+                    Event.LogSet(TYPED_SQUAT, 100.0 + i, 5, 8.0, at, at * 1000)
                 },
         )
         rule.launchApp()
-        scrollTodayTo(hasTestTag("this-week"))
+        rule.scrollTodayTo(hasTestTag("this-week"))
         rule.shot("today-consistency-${mode.suffix}")
         // The Progress card: the squat's best set per session, captioned
         // "<exercise> · estimated max" (matched by its fixed tail).
-        scrollTodayTo(hasText(str(R.string.main_e1rm_title, "").trim(), substring = true))
+        rule.scrollTodayTo(hasText(str(R.string.main_e1rm_title, "").trim(), substring = true))
         rule.shot("today-progress-${mode.suffix}")
     }
 
@@ -224,10 +180,10 @@ class ScreenshotTodayTest {
         )
         rule.launchApp()
         // The resolve action's label is the core's own copy.
-        waitForText("I'm pain-free now")
+        rule.waitForText("I'm pain-free now")
         rule.shot("today-painhold-${mode.suffix}")
         rule.onNodeWithText("I'm pain-free now").performClick()
-        waitForText(str(R.string.main_resolve_hold_confirm))
+        rule.waitForText(str(R.string.main_resolve_hold_confirm))
         rule.shot("today-painhold-confirm-${mode.suffix}")
     }
 
@@ -244,8 +200,8 @@ class ScreenshotTodayTest {
         )
         rule.launchApp()
         // The resolve action's label is the core's own copy.
-        waitForText("I've recovered")
-        scrollTodayTo(hasText("I've recovered"))
+        rule.waitForText("I've recovered")
+        rule.scrollTodayTo(hasText("I've recovered"))
         rule.shot("today-holdcard-${mode.suffix}")
     }
 
@@ -295,7 +251,7 @@ class ScreenshotTodayTest {
             TestClock.offsetMillis += (pick.epoch_day - today) * 86_400_000L
             rule.launchApp()
         }
-        waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
+        rule.waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
         rule.waitForNode(hasTestTag("plan-item:run"))
         rule.shot("today-run-top-${mode.suffix}")
     }
@@ -308,15 +264,15 @@ class ScreenshotTodayTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(hypertrophyProfile()))
         rule.launchApp()
-        waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
+        rule.waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
         rule.shot("today-hypertrophy-top-${mode.suffix}")
         val section = hasText(str(R.string.main_muscle_volume_title).uppercase(Locale.US), substring = true) and hasClickAction()
-        scrollTodayTo(section)
+        rule.scrollTodayTo(section)
         rule.onNode(section).performClick()
         rule.waitForIdle()
         // To the end of Today so the whole expanded table, its last rows included,
         // sits clear of the Log button.
-        scrollTodayToEnd()
+        swipeTodayToEnd()
         rule.shot("today-hypertrophy-volume-${mode.suffix}")
     }
 
@@ -326,7 +282,7 @@ class ScreenshotTodayTest {
 
     private fun moveDialog(mode: DarkMode) {
         useDarkMode(mode)
-        seedStrengthWithHistory()
+        seedStrengthWithHistory(ctx)
         rule.launchApp()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true)).performClick()
         rule.waitForNode(SemanticsMatcher("testTag starts with move-target:") {
@@ -349,7 +305,7 @@ class ScreenshotTodayTest {
         }
         rule.waitForNode(target)
         rule.onAllNodes(target)[0].performClick()
-        waitForText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US))
+        rule.waitForText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US))
         rule.shot("today-restday-${mode.suffix}")
     }
 
@@ -373,7 +329,7 @@ class ScreenshotTodayTest {
             },
         )
         rule.launchApp()
-        waitForText(str(R.string.main_restart_hrv_baseline))
+        rule.waitForText(str(R.string.main_restart_hrv_baseline))
         rule.shot("today-hrv-suspended-${mode.suffix}")
     }
 
@@ -381,39 +337,22 @@ class ScreenshotTodayTest {
 
     @Test fun hrvSuspendedDark() = hrvSuspended(DarkMode.Dark)
 
-    /**
-     * Freeze the loop's rest readout at [secondsAfterSet] into the running rest
-     * (the rest-alarm's start, else the newest squat set): pin [AppClock], then
-     * let the readout's 1 s ticker fire on both the compose clock and the main
-     * looper so its last read is the pinned instant. The readout then holds until
-     * another virtual second passes.
-     */
-    private fun pinRestReadout(secondsAfterSet: Long) {
-        val startMillis = app.milestone.RestAlarm.running.value?.startMillis
-            ?: (todaysSets(SQUAT).maxOf { it.observed_at } * 1_000L)
-        rule.mainClock.autoAdvance = false
-        try {
-            TestClock.offsetMillis = startMillis + secondsAfterSet * 1_000L - System.currentTimeMillis()
-            rule.mainClock.advanceTimeBy(1_000L)
-            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
-        } finally {
-            rule.mainClock.autoAdvance = true
-        }
-        rule.waitForIdle()
-    }
+    /** The running rest's start, else the newest squat set's stamp. */
+    private fun restStartMillis(): Long = app.milestone.RestAlarm.running.value?.startMillis
+        ?: (todaysSets(TYPED_SQUAT).maxOf { it.observed_at } * 1_000L)
 
     private fun setLoopRest(mode: DarkMode, fontScale: Float? = null) {
         useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        rule.openLoopFor(SQUAT)
-        rule.onNodeWithTag("editor-primary").performClick()
-        waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
+        rule.openLoopFor(TYPED_SQUAT)
+        rule.tapEditorPrimary()
+        rule.waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
         rule.waitForNode(hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true))
         rule.waitForNode(hasText(str(R.string.log_undo)))
-        rule.waitForState { todaysSets(SQUAT).isNotEmpty() }
-        pinRestReadout(25)
+        rule.waitForState { todaysSets(TYPED_SQUAT).isNotEmpty() }
+        rule.holdClockInRest(restStartMillis(), secondsIn = 25)
         val tag = if (fontScale != null) "fs130-" else ""
         rule.shot("log-setloop-rest-$tag${mode.suffix}")
     }
@@ -430,17 +369,17 @@ class ScreenshotTodayTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        rule.openLoopFor(SQUAT)
-        rule.onNodeWithTag("editor-primary").performClick()
-        waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
-        rule.waitForState { todaysSets(SQUAT).isNotEmpty() }
+        rule.openLoopFor(TYPED_SQUAT)
+        rule.tapEditorPrimary()
+        rule.waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
+        rule.waitForState { todaysSets(TYPED_SQUAT).isNotEmpty() }
         // The ± chip's "+2.5" is a figure, not a string resource.
         rule.onNodeWithText("+2.5").performClick()
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
-        waitForText(str(R.string.log_finish_unsaved_title))
-        // The loop's rest readout shows under the dialog: pin it to the rest's first
+        rule.waitForText(str(R.string.log_finish_unsaved_title))
+        // The loop's rest readout shows under the dialog: hold it in the rest's first
         // second, whatever time the steps above took.
-        pinRestReadout(0)
+        rule.holdClockInRest(restStartMillis(), secondsIn = 0)
         rule.waitForNode(hasContentDescription(str(R.string.log_rest_left_cd, "3:00")))
         rule.shot("log-finish-unsaved-${mode.suffix}")
     }
@@ -453,9 +392,9 @@ class ScreenshotTodayTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
-        waitForText(str(R.string.log_weekly_signs_q))
+        rule.waitForText(str(R.string.log_weekly_signs_q))
         rule.shot("log-weekly-top-${mode.suffix}")
         rule.onNodeWithText(str(R.string.log_weekly_sign_sleep)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
@@ -479,10 +418,8 @@ class ScreenshotTodayTest {
             listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Illness, 1.0, thisMorning)),
         )
         rule.launchApp()
-        openChooser()
-        rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-        rule.waitForNode(hasTestTag("checkin-sleep"))
-        waitForText(str(R.string.log_illness_q))
+        rule.openMorningCheckin()
+        rule.waitForText(str(R.string.log_illness_q))
         rule.shot("log-checkin-illness-${mode.suffix}")
     }
 
@@ -496,7 +433,7 @@ class ScreenshotTodayTest {
         useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         rule.shot("log-chooser-calis-top-${mode.suffix}")
         rule.onNode(hasText(str(R.string.log_chooser_more)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasText(str(R.string.main_advanced_signal_title)) and hasClickAction()).performScrollTo()

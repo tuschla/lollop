@@ -1,8 +1,6 @@
 package app.milestone.qa
 
 import android.content.Context
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -45,8 +43,6 @@ class ScreenshotTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    private val logButton get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
-
     private fun openToday() {
         QaHarness.seedLog(
             ctx,
@@ -71,7 +67,7 @@ class ScreenshotTest {
     @Test fun setEditorDark() { useDarkMode(DarkMode.Dark); openToday(); openEditor(); rule.shot("set-editor-dark") }
 
     @Test fun painTriageLight() {
-        useDarkMode(DarkMode.Light); openToday(); openChooser()
+        useDarkMode(DarkMode.Light); openToday(); rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_report_pain)).performScrollTo().performClick()
         rule.waitForIdle()
         rule.pickRating("pain-severity", 6)
@@ -82,14 +78,6 @@ class ScreenshotTest {
 
     @Test fun setLoopDark() { useDarkMode(DarkMode.Dark); openToday(); openLoop(); rule.shot("set-loop-dark") }
 
-    private fun openChooser() {
-        rule.onNode(logButton).performClick()
-        rule.waitForIdle()
-        rule.waitUntil(5_000) {
-            rule.onAllNodesWithText(str(R.string.main_log_set_title)).fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
     private fun openLoop() {
         rule.onAllNodesWithText(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true)[0].performClick()
         rule.waitUntil(5_000) {
@@ -98,7 +86,7 @@ class ScreenshotTest {
     }
 
     private fun openEditor() {
-        openChooser()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_log_set_title)).performClick()
         rule.waitForIdle()
         rule.waitUntil(5_000) {

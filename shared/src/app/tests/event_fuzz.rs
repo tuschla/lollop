@@ -25,6 +25,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
+use crate::event::entry::activity_is_valid;
 use crate::log::compact_event_log;
 use crate::schema::{LadderId, PainDetail, PainKind, PainTrend};
 
@@ -79,28 +80,12 @@ impl Rng {
     }
 }
 
-fn env_iters(default: usize) -> usize {
-    std::env::var("FUZZ_ITERS")
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(default)
-}
-
-fn env_seed() -> Option<u64> {
-    let s = std::env::var("FUZZ_SEED").ok()?;
-    let s = s.trim();
-    match s.strip_prefix("0x") {
-        Some(hex) => u64::from_str_radix(hex, 16).ok(),
-        None => s.parse().ok(),
-    }
-}
-
 /// Run `case` over `FUZZ_ITERS` (else `default`) seeds derived from `salt`,
 /// or the one `FUZZ_SEED`; fail naming every failing seed (first 5).
 fn run_cases(name: &str, salt: u64, default: usize, case: impl Fn(u64) -> Result<(), String>) {
-    let seeds: Vec<u64> = match env_seed() {
+    let seeds: Vec<u64> = match env_u64("FUZZ_SEED") {
         Some(s) => vec![s],
-        None => (0..env_iters(default) as u64)
+        None => (0..env_or("FUZZ_ITERS", default as u64))
             .map(|i| SplitMix(salt ^ i.wrapping_mul(0x2545_f491_4f6c_dd1d)).next())
             .collect(),
     };
@@ -127,11 +112,7 @@ fn run_cases(name: &str, salt: u64, default: usize, case: impl Fn(u64) -> Result
 fn short(e: &Event) -> String {
     let mut s = serde_json::to_string(e).unwrap_or_else(|err| format!("<unserializable: {err}>"));
     if s.len() > 400 {
-        let mut cut = 400;
-        while !s.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        s.truncate(cut);
+        s.truncate(char_floor(&s, 400));
         s.push('…');
     }
     s
@@ -1743,7 +1724,7 @@ fn check_numbers(vm: &ViewModel) -> Result<(), String> {
         }
     }
     for a in &vm.activities {
-        if !(a.minutes > 0.0 && a.minutes <= 600.0) {
+        if !activity_is_valid(a.minutes) {
             return Err(format!("activity {} shows {} min", a.entry_id, a.minutes));
         }
     }
@@ -1790,7 +1771,7 @@ fn check_step(prev: &ViewModel, e: &Event, next: &ViewModel, model: &Model) -> R
         Event::LogSet { .. } => (0..=1).contains(&dl) && dr == 0 && da == 0,
         Event::LogRun { .. } | Event::LogRunTrack { .. } => dr == 1 && dl == 0 && da == 0,
         Event::LogActivity { minutes, .. } => {
-            let valid = minutes.is_finite() && *minutes > 0.0 && *minutes <= 600.0;
+            let valid = activity_is_valid(*minutes);
             da == i64::from(valid) && dl == 0 && dr == 0
         }
         Event::DeleteEntry { kind, .. } => {
@@ -1981,16 +1962,7 @@ fn fuzz_absurd_values_never_break_the_view() {
     );
 }
 
-/// `HistoryDetail.kt::deleteEventFor` (and the activity list's delete).
-fn delete_of(kind: EntryKind, entry_id: u64, observed_at: i64) -> Event {
-    Event::DeleteEntry {
-        kind,
-        entry_id,
-        observed_at_fallback: observed_at,
-    }
-}
-
-/// `HistoryDetail.kt::restoreEventFor` for a set.
+/// `HistoryEntry.kt::restoreEventFor` for a set.
 fn restore_lift(v: &LiftResultView) -> Event {
     Event::LogSet {
         exercise: v.exercise.clone(),
@@ -2003,7 +1975,7 @@ fn restore_lift(v: &LiftResultView) -> Event {
     }
 }
 
-/// `HistoryDetail.kt::loggedHrPctMax`: a bpm entry sends 0 and lets the core
+/// `HistoryEntry.kt::loggedHrPctMax`: a bpm entry sends 0 and lets the core
 /// derive the percentage again.
 fn logged_hr_pct(v: &RunResultView) -> f64 {
     if v.avg_hr_bpm.is_some() {
@@ -2013,89 +1985,29 @@ fn logged_hr_pct(v: &RunResultView) -> f64 {
     }
 }
 
-/// `restoreEventFor` for a run without a route.
-fn restore_manual_run(v: &RunResultView) -> Event {
-    Event::LogRun {
-        distance_km: v.distance_km,
-        duration_min: v.duration_min,
-        hr_pct_max: logged_hr_pct(v),
-        longest_recent_km: 0.0,
-        observed_at: v.observed_at,
-        entry_id: v.entry_id,
-        workout_type: v.workout_type,
-        session_rpe: v.session_rpe,
-        avg_hr_bpm: v.avg_hr_bpm,
-        utc_offset_sec: v.utc_offset_sec,
+/// `HistoryEntry.kt::restoreEventFor` for a run: a hand-entered run as
+/// shown; a GPS run (a route, or a track QC left unmeasurable) rebuilt from
+/// the segments of the core's `RunTrack` op (`run_track_segments`, what
+/// `DurableCore.runTrack` fetches). `None` when fewer than two fixes come
+/// back, where the shell offers no Undo.
+fn restore_run(model: &Model, v: &RunResultView) -> Option<Event> {
+    if !v.has_gpx && !v.gps_unmeasurable {
+        return Some(Event::LogRun {
+            distance_km: v.distance_km,
+            duration_min: v.duration_min,
+            hr_pct_max: logged_hr_pct(v),
+            longest_recent_km: 0.0,
+            observed_at: v.observed_at,
+            entry_id: v.entry_id,
+            workout_type: v.workout_type,
+            session_rpe: v.session_rpe,
+            avg_hr_bpm: v.avg_hr_bpm,
+            utc_offset_sec: v.utc_offset_sec,
+        });
     }
-}
-
-/// `YouthActivity.kt::restoreActivityEvent`.
-fn restore_activity(a: &ActivityResultView) -> Event {
-    Event::LogActivity {
-        kind: a.kind,
-        minutes: a.minutes,
-        vigorous: a.vigorous,
-        strengthening: a.strengthening,
-        observed_at: a.observed_at,
-        entry_id: a.entry_id,
-    }
-}
-
-/// `YYYY-MM-DDTHH:MM:SSZ` → unix seconds (Hinnant's days-from-civil).
-fn rfc3339_to_unix(s: &str) -> i64 {
-    let n = |a: usize, b: usize| s[a..b].parse::<i64>().expect("GPX time digits");
-    let (y, m, d) = (n(0, 4), n(5, 7), n(8, 10));
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146_097 + doe - 719_468) * DAY_SEC + n(11, 13) * 3600 + n(14, 16) * 60 + n(17, 19)
-}
-
-/// The core's GPX document parsed the way `Gpx.kt` reads it: one fix list per
-/// `<trkseg>`, accuracy = `<hdop>` × 5 m, else the 30 m import sentinel.
-fn parse_gpx(doc: &str) -> Vec<Vec<GpsPoint>> {
-    doc.split("<trkseg>")
-        .skip(1)
-        .map(|seg| {
-            seg.split("<trkpt ")
-                .skip(1)
-                .map(|pt| {
-                    let attr = |name: &str| {
-                        let key = format!("{name}=\"");
-                        let s = pt.find(&key).expect("trkpt attribute") + key.len();
-                        let e = s + pt[s..].find('"').expect("closing quote");
-                        pt[s..e].parse::<f64>().expect("numeric attribute")
-                    };
-                    let tag = |name: &str| {
-                        let open = format!("<{name}>");
-                        let s = pt.find(&open)? + open.len();
-                        let e = s + pt[s..].find('<')?;
-                        Some(&pt[s..e])
-                    };
-                    GpsPoint {
-                        lat: attr("lat"),
-                        lon: attr("lon"),
-                        observed_at: rfc3339_to_unix(tag("time").expect("trkpt time")),
-                        accuracy_m: tag("hdop")
-                            .and_then(|h| h.trim().parse::<f64>().ok())
-                            .filter(|h| h.is_finite() && *h > 0.0)
-                            .map_or(30.0, |h| (h * 5.0) as f32),
-                    }
-                })
-                .collect()
-        })
-        .collect()
-}
-
-/// `restoreEventFor` for a GPS run (a route, or a track QC left unmeasurable):
-/// the fixes rebuilt from the core's own GPX export of `model`'s run; `None`
-/// when fewer than two fixes come back, where the shell offers no Undo.
-fn restore_gps_run(model: &Model, v: &RunResultView) -> Option<Event> {
     let mut points = Vec::new();
     let mut segment_starts = Vec::new();
-    for seg in parse_gpx(&export_run_gpx(model, v.entry_id, v.observed_at)) {
+    for seg in run_track_segments(model, v.entry_id, v.observed_at) {
         if seg.is_empty() {
             continue;
         }
@@ -2116,6 +2028,59 @@ fn restore_gps_run(model: &Model, v: &RunResultView) -> Option<Event> {
         avg_hr_bpm: v.avg_hr_bpm,
         utc_offset_sec: v.utc_offset_sec,
     })
+}
+
+/// `YouthActivity.kt::restoreActivityEvent`.
+fn restore_activity(a: &ActivityResultView) -> Event {
+    Event::LogActivity {
+        kind: a.kind,
+        minutes: a.minutes,
+        vigorous: a.vigorous,
+        strengthening: a.strengthening,
+        observed_at: a.observed_at,
+        entry_id: a.entry_id,
+    }
+}
+
+/// The run's GPX document (the run sheet's Share, `export_run_gpx`) names the
+/// fixes its Undo re-logs ([`restore_run`]): one `<trkseg>` per recording
+/// segment, and every `lat`/`lon` decimal reads back (correctly rounded, as
+/// any GPX reader parses it) to the same `f64`, bit for bit.
+fn gpx_names_the_track(model: &Model, v: &RunResultView) -> Result<(), String> {
+    let doc = export_run_gpx(model, v.entry_id, v.observed_at);
+    let segments = run_track_segments(model, v.entry_id, v.observed_at);
+    let attr = |pt: &str, key: &str| -> Option<f64> {
+        let s = pt.find(key)? + key.len();
+        pt[s..s + pt[s..].find('"')?].parse().ok()
+    };
+    let exported: Vec<Option<(f64, f64)>> = doc
+        .split("<trkpt ")
+        .skip(1)
+        .map(|pt| attr(pt, "lat=\"").zip(attr(pt, "lon=\"")))
+        .collect();
+    let fixes: Vec<(f64, f64)> = segments.iter().flatten().map(|p| (p.lat, p.lon)).collect();
+    let trksegs = doc
+        .split("<trkseg>")
+        .skip(1)
+        .filter(|s| s.contains("<trkpt "))
+        .count();
+    let moved = exported.iter().zip(&fixes).position(|(e, f)| {
+        !e.is_some_and(|(lat, lon)| {
+            lat.to_bits() == f.0.to_bits() && lon.to_bits() == f.1.to_bits()
+        })
+    });
+    if trksegs != segments.len() || exported.len() != fixes.len() || moved.is_some() {
+        return Err(format!(
+            "the GPX of run {}@{} names other fixes than its track: {trksegs} vs {} segments, \
+             {} vs {} fixes, first moved fix {moved:?}",
+            v.entry_id,
+            v.observed_at,
+            segments.len(),
+            exported.len(),
+            fixes.len()
+        ));
+    }
+    Ok(())
 }
 
 /// A shell-shaped history replayed into a live model on this thread.
@@ -2164,22 +2129,20 @@ impl Row<'_> {
     }
 }
 
-fn json_value(json: &str) -> serde_json::Value {
-    serde_json::from_str(json).expect("view parses")
-}
-
-/// Up to three delete → Undo rounds on random History rows (GPS runs only
-/// when `gps`, otherwise sets, hand-entered runs and activities): each must
-/// remove exactly the row, and its Undo must render the view from before.
-/// GPS routes come back through the core's GPX at full (shortest round-trip)
-/// precision, so the live tracker's raw doubles survive the Undo. Every float
-/// sum and tie the view shows is taken in log order (time, then `entry_id`),
-/// never storage order, so an Undo (the row re-pushed at the tail) must render
-/// the view EXACTLY: no float or text tolerance.
+/// Up to three delete → Undo rounds on random History rows (GPS routes only
+/// when `gps`, otherwise sets, hand-entered runs, GPS runs QC left
+/// unmeasurable and activities), each Undo the shell's `restoreEventFor`
+/// event ([`undo_diff`]). A GPS run comes back from the core's own fixes
+/// ([`restore_run`]), so the live tracker's raw doubles survive the Undo,
+/// and a route's shared GPX must name those same fixes
+/// ([`gpx_names_the_track`]). Every float sum and tie the view shows is
+/// taken in log order (time, then `entry_id`), never storage order, so an
+/// Undo (the row re-pushed at the tail) must render the view EXACTLY: no
+/// float or text tolerance.
 fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
-    let mut before = app.view(&model);
     for round in 0..3 {
+        let before = app.view(&model);
         let mut rows: Vec<Row> = Vec::new();
         let runs = before.runs.iter();
         if gps {
@@ -2195,32 +2158,22 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let row = rows.swap_remove(g.rng.below(rows.len() as u64) as usize);
         let restore = match &row {
             Row::Lift(v) => Some(restore_lift(v)),
-            Row::Run(v) if gps || v.gps_unmeasurable => restore_gps_run(&model, v),
-            Row::Run(v) => Some(restore_manual_run(v)),
+            Row::Run(v) => {
+                if v.has_gpx {
+                    gpx_names_the_track(&model, v).map_err(|e| format!("round {round}: {e}"))?;
+                }
+                restore_run(&model, v)
+            }
             Row::Activity(a) => Some(restore_activity(a)),
         };
         let Some(restore) = restore else { continue };
         let (id, at) = row.id();
-        let kind = row.kind();
-        let before_json = vm_json(&before);
-        let _ = app.update(delete_of(kind, id, at), &mut model);
-        let mid = app.view(&model);
-        if Row::count(kind, &mid) + 1 != Row::count(kind, &before) {
+        if let Some(d) = undo_diff(&mut model, row.kind(), id, at, restore.clone()) {
             return Err(format!(
-                "round {round}: deleting {kind:?} {id}@{at} did not remove exactly one row"
-            ));
-        }
-        let _ = app.update(restore.clone(), &mut model);
-        let after = app.view(&model);
-        let after_json = vm_json(&after);
-        let diff = value_diff(&json_value(&before_json), &json_value(&after_json), 0.0);
-        if let Some(d) = diff {
-            return Err(format!(
-                "round {round}: delete + Undo of {kind:?} {id}@{at} changed the view: {d} (undo event {})",
+                "round {round}: {d} (undo event {})",
                 short(&restore)
             ));
         }
-        before = after;
     }
     Ok(())
 }
@@ -2367,10 +2320,10 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
         let _ = app.update(undo.clone(), &mut model);
         let after = app.view(&model);
         let after_json = vm_json(&after);
-        let diff = value_diff(&json_value(&before_json), &json_value(&after_json), 0.0);
-        if let Some(d) = diff {
+        if after_json != before_json {
             return Err(format!(
-                "round {round}: edit + Undo changed the view: {d} (edit {}, undo {})",
+                "round {round}: edit + Undo changed the view: {} (edit {}, undo {})",
+                json_diff(&before_json, &after_json),
                 short(&edit),
                 short(&undo)
             ));
@@ -2665,8 +2618,9 @@ fn delete_and_undo_run(app: &Engine, model: &mut Model, id: u64) -> (RunResultVi
             .expect("run row")
     };
     let before = row(app.view(model));
+    let restore = restore_run(model, &before).expect("a hand-entered run restores");
     let _ = app.update(delete_of(EntryKind::Run, id, before.observed_at), model);
-    let _ = app.update(restore_manual_run(&before), model);
+    let _ = app.update(restore, model);
     (before, row(app.view(model)))
 }
 
@@ -2805,14 +2759,11 @@ fn compaction_keeps_the_date_of_an_undated_race() {
         set_today_ev(BASE_DAY + 7),
     ];
     for log in [events.clone(), compact_event_log(events.clone())] {
-        let app = Engine;
-        let mut model = Model::default();
-        for e in log {
-            let _ = app.update(e, &mut model);
-        }
-        let day = model
-            .profile()
-            .and_then(|p| p.recent_race.as_ref())
+        let (app, model) = replay(&log);
+        let day = app
+            .view(&model)
+            .profile
+            .and_then(|p| p.recent_race)
             .and_then(|r| r.epoch_day);
         assert_eq!(day, Some(BASE_DAY), "the re-sent race keeps its first day");
     }
@@ -2940,20 +2891,42 @@ fn undo_of_a_deleted_set_keeps_the_lift_audit_name() {
     );
 }
 
+/// A live-recorded run (the tracker's raw doubles, here an uneven 3 s track
+/// at about 4:10/km) keeps its card, pace included, through delete + Undo:
+/// the shell re-logs the core's own fixes, and the run's shared GPX names
+/// those same fixes bit for bit. When Undo went through a GPX rounded to 7
+/// decimals, a fuzz-found track moved from "4:07/km" to "4:06/km"; that seed
+/// is replayed too.
 #[test]
 fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
-    // Fuzz seed whose live-precision track lands on a pace rounding edge:
-    // "4:07/km" before the delete, "4:06/km" after the Undo.
+    let t0 = BASE_DAY * DAY_SEC + 8 * 3600;
+    let legs = (0..400).map(|i| 12.0 + (f64::from(i) * 0.37).sin());
+    let at = t0 + 3 * 400;
+    let mut model = Model::default();
+    let _ = Engine.update(
+        log_run_track(north_track(48.1, t0, 3, legs, 5.0), 0.0, 0.0, at, 41),
+        &mut model,
+    );
+    let row = Engine.view(&model).runs[0].clone();
+    assert!(
+        row.has_gpx && row.pace.contains("/km"),
+        "fixture: a paced route: {}",
+        row.summary
+    );
+    gpx_names_the_track(&model, &row).unwrap_or_else(|m| panic!("{m}"));
+    let restore = restore_run(&model, &row).expect("the route's fixes come back for Undo");
+    let diff = undo_diff(&mut model, EntryKind::Run, 41, at, restore);
+    assert!(diff.is_none(), "{}", diff.unwrap_or_default());
+    assert_eq!(Engine.view(&model).runs[0].pace, row.pace);
     undo_delete_case(0x8983_8f5b_2a87_82d5, true).unwrap_or_else(|m| panic!("{m}"));
 }
 
+/// A GPS run whose fixes all fail QC ("GPS signal too poor") came back from
+/// Undo as a 0 km manual run, with another card (fuzz seed
+/// 0x1b7c7ac2de61f20e, replayed too). The core's `RunTrack` now hands out its
+/// recorded fixes, so the shell re-logs it as the same tracked run.
 #[test]
 fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
-    // Fuzz seed 0x1b7c7ac2de61f20e: a GPS run whose fixes all fail QC ("GPS
-    // signal too poor") came back from Undo as a 0 km manual run, with another
-    // card. The core now exports its recorded fixes for Undo, so the shell
-    // re-logs it as the same tracked run.
-    undo_delete_case(0x1b7c_7ac2_de61_f20e, false).unwrap_or_else(|m| panic!("{m}"));
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
     let still = |i: i64| GpsPoint {
         lat: 48.1,
@@ -2961,19 +2934,17 @@ fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
         observed_at: at - 60 + i * 30,
         accuracy_m: 5.0,
     };
-    let app = Engine;
     let mut model = Model::default();
-    let _ = app.update(
+    let _ = Engine.update(
         log_run_track(vec![still(0), still(1)], 0.0, 0.0, at, 31),
         &mut model,
     );
-    let before = app.view(&model);
-    let row = before.runs[0].clone();
+    let row = Engine.view(&model).runs[0].clone();
     assert!(row.gps_unmeasurable && !row.has_gpx, "{}", row.summary);
-    let restore = restore_gps_run(&model, &row).expect("the recorded fixes export for Undo");
-    let _ = app.update(delete_of(EntryKind::Run, 31, at), &mut model);
-    let _ = app.update(restore, &mut model);
-    assert_eq!(vm_json(&before), vm_json(&app.view(&model)));
+    let restore = restore_run(&model, &row).expect("the recorded fixes come back for Undo");
+    let diff = undo_diff(&mut model, EntryKind::Run, 31, at, restore);
+    assert!(diff.is_none(), "{}", diff.unwrap_or_default());
+    undo_delete_case(0x1b7c_7ac2_de61_f20e, false).unwrap_or_else(|m| panic!("{m}"));
 }
 
 #[test]

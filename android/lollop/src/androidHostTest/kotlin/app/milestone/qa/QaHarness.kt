@@ -32,6 +32,7 @@ import app.milestone.setupPrefs
 import app.milestone.todayEpochDay
 import app.milestone.toJson
 import app.milestone.utcOffsetSec
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -81,8 +82,8 @@ object QaHarness {
         // screenshots carry stable dates.
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
         TestClock.offsetMillis = PINNED_NOW_MILLIS - System.currentTimeMillis()
+        TestClock.frozenAtMillis = null
         freshProcess(engine = null)
-        injectCoreLatency()
 
         // The rest's alarm, notifications and saved rest outlive a process.
         app.milestone.RestAlarm.cancel(ctx)
@@ -118,33 +119,13 @@ object QaHarness {
     }
 
     /**
-     * Race finder, off by default: with `QA_CORE_LATENCY_MS=<n>` in the test JVM's
-     * environment, every queued core send (single and batch) holds its result back
-     * n ms AFTER the core applied it, off the main looper. The event is then in the
-     * durable log while the UI still shows the previous model, which is what a
-     * loaded JVM does on a slow view build. A test that syncs on the log (or on
-     * nothing) and then expects the new model on screen fails under it; sync on
-     * the published [EventDispatcher.model] instead. Run with `--rerun`: Gradle
-     * does not see an environment change.
-     */
-    private fun injectCoreLatency() {
-        val ms = System.getenv("QA_CORE_LATENCY_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: return
-        val send = TestSink.sender
-        val sendAll = TestSink.batchSender
-        TestSink.sender = { e -> send(e).also { lag(ms) } }
-        TestSink.batchSender = { es -> sendAll(es).also { lag(ms) } }
-    }
-
-    private suspend fun lag(ms: Long) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(ms) }
-
-    /**
      * Close the launched Activity at the END of a test (valid lifecycle point,
      * unlike closing it during the next test's setup). Prevents boot effects and
      * the process-scoped event consumer of finished tests from accumulating and
      * starving the single-thread dispatcher when the whole suite runs together.
      */
     fun teardown() {
-        runCatching { lastScenario?.close() }
+        lastScenario?.close()
         lastScenario = null
     }
 
@@ -352,8 +333,14 @@ object QaHarness {
     }
 }
 
-internal fun ComposeTestRule.waitForNode(matcher: SemanticsMatcher, timeoutMs: Long = 15_000) =
-    waitUntil(timeoutMs) { onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+/** Wait until a node matches [matcher]; on timeout, fail naming what is on screen instead. */
+internal fun ComposeTestRule.waitForNode(matcher: SemanticsMatcher, timeoutMs: Long = 15_000) {
+    try {
+        waitUntil(timeoutMs) { onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+    } catch (e: ComposeTimeoutException) {
+        throw AssertionError("no node $matcher within ${timeoutMs}ms; on screen: ${screenTexts()}", e)
+    }
+}
 
 internal fun ComposeTestRule.countOf(matcher: SemanticsMatcher): Int = onAllNodes(matcher).fetchSemanticsNodes().size
 

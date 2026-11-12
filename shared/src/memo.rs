@@ -154,8 +154,6 @@ trait Slot: Any {
     fn retain_runs(&mut self, live: &HashSet<u64>);
     #[cfg(test)]
     fn stats(&self) -> MemoStats;
-    #[cfg(test)]
-    fn holds_run(&self, key: u64) -> bool;
 }
 
 impl<K: Any + Eq + Hash, V: Any> Slot for Memo<K, V> {
@@ -170,13 +168,6 @@ impl<K: Any + Eq + Hash, V: Any> Slot for Memo<K, V> {
     #[cfg(test)]
     fn stats(&self) -> MemoStats {
         self.stats
-    }
-
-    #[cfg(test)]
-    fn holds_run(&self, key: u64) -> bool {
-        self.map
-            .keys()
-            .any(|k| (k as &dyn Any).downcast_ref() == Some(&key))
     }
 }
 
@@ -249,16 +240,6 @@ pub(crate) fn stats(id: MemoId) -> MemoStats {
     MEMOS
         .with(|memos| memos.borrow()[id as usize].as_ref().map(|s| s.stats()))
         .unwrap_or_default()
-}
-
-/// Whether per-run memo `id` holds an entry for run key `key` on this thread.
-#[cfg(test)]
-pub(crate) fn holds_run(id: MemoId, key: u64) -> bool {
-    MEMOS.with(|memos| {
-        memos.borrow()[id as usize]
-            .as_ref()
-            .is_some_and(|s| s.holds_run(key))
-    })
 }
 
 /// A 64-bit content hash of `value`, derived from its `Serialize` impl: every

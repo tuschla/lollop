@@ -38,10 +38,6 @@ kotlin {
         }
 
         withHostTest {
-            // Plain-JVM tests (no Robolectric) reach android.util.Log through
-            // PlatformLog when the code under test logs a failure; the framework
-            // stubs throw unless unmocked calls return defaults.
-            isReturnDefaultValues = true
             // Robolectric (the offline UI tests) needs the merged Android
             // resources + manifest to inflate the real theme, strings, and the
             // MainActivity Compose tree on the JVM.

@@ -66,19 +66,10 @@ class ThemeContrastTest {
     @Test
     fun onAccentText_clearsAaOnAccentFill() {
         // OnAccent is the palette's bgTop at full opacity (primary action
-        // labels, the "Today's plan" row, selected choice cells/chips).
+        // labels, the "Today's plan" row, selected choice cells/chips, and the
+        // SOLID accent fill of every segmented control's selected segment).
         for ((variant, p) in variants()) {
             assertAa(variant, "onAccent (bgTop) on accent", p.bgTop, p.accent)
-        }
-    }
-
-    @Test
-    fun selectedSegmentLabel_clearsAaOnSolidAccentSegment() {
-        // The selected segment of every segmented control (Lifts | Runs, kg | lb,
-        // Focus, …) is a SOLID Accent fill with an OnAccent label, never a tint
-        // or an outline ring.
-        for ((variant, p) in variants()) {
-            assertAa(variant, "onAccent label on selected segment fill", p.bgTop, p.accent)
         }
     }
 
@@ -182,41 +173,31 @@ class ThemeContrastTest {
         }
     }
 
-    @Test
-    fun dangerSubtext_clearsAaOnDangerSurface() {
-        assertAa("all themes", "DangerOn on danger", DangerOn, StatusColors().danger)
-    }
+    /** The status colours each mode draws with ([LocalStatusColors] in [LollopTheme]). */
+    private val statusModes = listOf("light" to StatusColors(), "dark" to DarkStatusColors)
 
     @Test
     fun safetyBannerText_clearsAaOnDangerSurface() {
-        // The DO-NOT-TRAIN banner's title, actions and summary are OnStatusFill; its
-        // captions (reason, "paused" line, grade, citation) are DangerOn.
-        val danger = StatusColors().danger
-        assertAa("all themes", "OnStatusFill on danger", OnStatusFill, danger)
-        assertAa("all themes", "DangerOn on danger", DangerOn, danger)
+        // The DO-NOT-TRAIN banner (SafetyBanner) fills with the mode's
+        // `LocalStatusColors.danger`; its title, actions and summary are
+        // OnStatusFill, its captions (reason, "paused" line, grade, citation) DangerOn.
+        for ((mode, s) in statusModes) {
+            assertAa(mode, "OnStatusFill on danger", OnStatusFill, s.danger)
+            assertAa(mode, "DangerOn on danger", DangerOn, s.danger)
+        }
     }
 
     @Test
     fun statusFillLabels_clearAaOnEveryStatusFill() {
         // Chips and marks on the fixed fills: warn, the evidence grades, and the
-        // done/slot fill (evidenceStrong).
-        val s = StatusColors()
-        for ((name, fill) in listOf(
-            "warn" to s.warn, "evidenceStrong" to s.evidenceStrong, "evidenceModerate" to s.evidenceModerate,
-            "evidenceWeak" to s.evidenceWeak, "evidenceExpert" to s.evidenceExpert, "evidenceUnknown" to s.evidenceUnknown,
-        )) {
-            assertAa("all themes", "OnStatusFill on $name", OnStatusFill, fill)
-        }
-    }
-
-    @Test
-    fun translucentWhiteCaption_failsAaOnDangerSurface() {
-        // Why banner captions use DangerOn: white at 0.7–0.8 alpha composited on
-        // the danger fill drops below 4.5:1.
-        val danger = StatusColors().danger
-        for (alpha in listOf(0.7f, 0.8f)) {
-            val fg = Color.White.copy(alpha = alpha).compositeOver(danger)
-            assertTrue("white @ $alpha on danger unexpectedly clears AA", contrastRatio(fg, danger) < WCAG_AA_NORMAL)
+        // done/slot fill (evidenceStrong), in each mode's status colours.
+        for ((mode, s) in statusModes) {
+            for ((name, fill) in listOf(
+                "warn" to s.warn, "evidenceStrong" to s.evidenceStrong, "evidenceModerate" to s.evidenceModerate,
+                "evidenceWeak" to s.evidenceWeak, "evidenceExpert" to s.evidenceExpert, "evidenceUnknown" to s.evidenceUnknown,
+            )) {
+                assertAa(mode, "OnStatusFill on $name", OnStatusFill, fill)
+            }
         }
     }
 
@@ -224,13 +205,9 @@ class ThemeContrastTest {
     fun typeScale_isReadableAtDefaultFontSize() {
         // The 4.5:1 pairs above assume the documented sizes: running text (Body,
         // Caption) ≥ 14sp, and no style (labels, overlines, legends) under 12sp.
-        val styles = mapOf(
-            "Display" to Type.Display, "Title" to Type.Title, "Section" to Type.Section,
-            "Body" to Type.Body, "Caption" to Type.Caption, "Chip" to Type.Chip,
-            "Overline" to Type.Overline,
-        )
-        for ((name, style) in styles) {
-            assertTrue("$name is ${style.fontSize}, floor is 12sp", style.fontSize.value >= 12f)
+        // Every style [Type] declares is checked, including ones added later.
+        for ((name, style) in typeStyles()) {
+            assertTrue("Type.$name is ${style.fontSize}, floor is 12sp", style.fontSize.value >= 12f)
         }
         assertTrue("Body is ${Type.Body.fontSize}", Type.Body.fontSize.value >= 16f)
         assertTrue("Caption is ${Type.Caption.fontSize}", Type.Caption.fontSize.value >= 14f)

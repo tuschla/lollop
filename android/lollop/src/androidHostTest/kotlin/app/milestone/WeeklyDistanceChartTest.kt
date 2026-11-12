@@ -10,9 +10,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
-import app.milestone.DistanceUnit
-import app.milestone.MilestoneTheme
-import app.milestone.WeeklyDistanceChart
+import app.milestone.qa.strPrefix
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -34,13 +32,16 @@ class WeeklyDistanceChartTest {
     /** Monday-start weeks: epoch day 20_004 is a Monday. */
     private fun weeks(kmAt: (Int) -> Double) = (0 until 16).associate { i -> 20_004L + i * 7L to kmAt(i) }
 
+    /** "Week of": the per-week node's description and the readout share the string. */
+    private val weekOf get() = strPrefix(R.string.history_weekly_bar_value)
+
     /** Taps the middle week's bar (its per-week node sits over the bar). */
     private fun tapMiddle() {
-        rule.onAllNodes(hasContentDescription("Week of", substring = true))[8].performTouchInput { click(center) }
+        rule.onAllNodes(hasContentDescription(weekOf, substring = true))[8].performTouchInput { click(center) }
         rule.waitForIdle()
     }
 
-    private fun readouts() = rule.onAllNodes(hasText("Week of", substring = true)).fetchSemanticsNodes().size
+    private fun readouts() = rule.onAllNodes(hasText(weekOf, substring = true)).fetchSemanticsNodes().size
 
     /** Shows the chart for [first]; with [second], first taps the middle bar once
      *  (the gesture coroutine starts lazily on the first pointer event, so without

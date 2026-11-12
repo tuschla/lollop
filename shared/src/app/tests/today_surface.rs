@@ -1,230 +1,208 @@
-//! Today's surface facts (`today_surface::mark_today`): the day's state, the
+//! Today's surface facts as the view carries them: the day's state, each run
 //! session's run item and the repeat marks the shell's card stack reads
 //! instead of comparing card text.
 
 use super::*;
-use crate::app::today_surface::mark_today;
-use crate::app::view_types::{
-    HeadlineKind, RunTargetView, SessionStatus, TodayHeadlineView, TodayState,
-};
-use crate::schema::{LiftSessionType, RunSessionType};
+use crate::app::today_surface::GUIDED_LIFT_DAYS;
+use crate::app::view_types::{HeadlineKind, SessionStatus, TodayState};
 
-const DAY: i64 = 20_400;
+fn state(app: &Engine, model: &Model) -> TodayState {
+    app.view(model).today_surface.state
+}
 
-fn day(
-    epoch_day: i64,
-    session_type: SessionType,
-    status: SessionStatus,
-    items: Vec<PrescriptionView>,
-) -> SessionPlanView {
-    SessionPlanView {
-        epoch_day,
-        title: format!("S{epoch_day}"),
-        session_type,
-        status,
-        items,
-        ..SessionPlanView::default()
+/// Log `day`'s prescribed lift sets until its week-strip row reads done.
+fn finish_lift_day(app: &Engine, model: &mut Model, day: i64) {
+    for _ in 0..40 {
+        let row = day_row(app, model, day);
+        if row.status == SessionStatus::Done {
+            return;
+        }
+        for it in row
+            .items
+            .iter()
+            .filter(|i| !i.done && !i.exercise.is_empty())
+        {
+            let reps = u32::from(it.reps_low.max(1));
+            let load = it.load_kg.unwrap_or(100.0);
+            app.update(
+                log_set(&it.exercise, load, reps, 8.0, day * DAY_SEC + 10 * HOUR),
+                model,
+            )
+            .expect_only_render();
+        }
     }
-}
-
-fn lift_day(epoch_day: i64, status: SessionStatus) -> SessionPlanView {
-    let item = PrescriptionView {
-        exercise: "Back squat".into(),
-        done: status.is_done(),
-        ..PrescriptionView::default()
-    };
-    day(
-        epoch_day,
-        SessionType::Lift(LiftSessionType::MaxEffort),
-        status,
-        vec![item],
-    )
-}
-
-fn vm(next: Option<SessionPlanView>, week: Vec<SessionPlanView>) -> ViewModel {
-    ViewModel {
-        today_epoch_day: Some(DAY),
-        profile: Some(base_profile()),
-        next_session: next,
-        week_plan: week,
-        ..ViewModel::default()
-    }
-}
-
-fn marked(mut v: ViewModel, model: &Model) -> ViewModel {
-    mark_today(&mut v, model);
-    v
+    panic!("day {day} should complete");
 }
 
 #[test]
 fn todays_state_is_the_widgets_and_todays_gates() {
-    let m = Model::default();
-    let state = |v: ViewModel| marked(v, &m).today_surface.state;
-    let today = lift_day(DAY, SessionStatus::Next);
-    assert_eq!(
-        state(vm(Some(today.clone()), vec![today.clone()])),
-        TodayState::Session
-    );
-    // A hold wins over any plan.
-    let held = ViewModel {
-        hold_reason: Some(HoldReason::Pain),
-        ..vm(Some(today.clone()), vec![today])
-    };
-    assert_eq!(state(held), TodayState::Paused);
     // No plan: setup without a profile, else the plan prompt.
-    assert_eq!(state(vm(None, vec![])), TodayState::NoPlan);
-    let fresh = ViewModel {
-        profile: None,
-        ..vm(None, vec![])
-    };
-    assert_eq!(state(fresh), TodayState::Setup);
-    // Today's session done: next_session moved on, today's row says what was done.
-    let next = lift_day(DAY + 2, SessionStatus::Next);
-    let done = lift_day(DAY, SessionStatus::Done);
-    assert_eq!(
-        state(vm(Some(next.clone()), vec![done, next.clone()])),
-        TodayState::Done
-    );
-    // A plan rest day, or no plan day today at all.
-    let rest = day(DAY, SessionType::Rest, SessionStatus::Rest, vec![]);
-    let v = marked(vm(Some(next.clone()), vec![rest, next.clone()]), &m);
-    assert_eq!(v.today_surface.state, TodayState::Rest);
-    assert!(v.today_surface.rest_today);
-    let v = marked(vm(Some(next.clone()), vec![next]), &m);
-    assert_eq!(v.today_surface.state, TodayState::Rest);
-    assert!(!v.today_surface.rest_today);
+    let app = Engine;
+    let mut model = Model::default();
+    assert_eq!(state(&app, &model), TodayState::Setup);
+    app.update(Event::SetProfile(strength_profile()), &mut model)
+        .expect_only_render();
+    assert_eq!(state(&app, &model), TodayState::NoPlan);
+
+    // Today (MON) is the plan's first session; once its sets are logged the
+    // hero moves on and today's row says what was done.
+    let (app, mut model) = planned_strength_model(true);
+    assert_eq!(state(&app, &model), TodayState::Session);
+    finish_lift_day(&app, &mut model, MON);
+    assert_eq!(state(&app, &model), TodayState::Done);
+    app.update(Event::ClearPlan, &mut model)
+        .expect_only_render();
+    assert_eq!(state(&app, &model), TodayState::NoPlan);
+
+    // A hold wins over any plan.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReadiness(pain_row(1.0, None, MON * DAY_SEC + HOUR)),
+        &mut model,
+    )
+    .expect_only_render();
+    assert_eq!(state(&app, &model), TodayState::Paused);
+
+    // A plan rest day, or no plan day today at all (before the plan starts).
+    let (app, mut model) = planned_strength_model(true);
+    assert_eq!(day_row(&app, &model, MON + 1).status, SessionStatus::Rest);
+    set_today(&app, &mut model, MON + 1);
+    let surface = app.view(&model).today_surface;
+    assert_eq!(surface.state, TodayState::Rest);
+    assert!(surface.rest_today);
+    set_today(&app, &mut model, MON - 1);
+    let surface = app.view(&model).today_surface;
+    assert_eq!(surface.state, TodayState::Rest);
+    assert!(!surface.rest_today);
 }
 
 #[test]
 fn the_guide_shows_until_three_days_with_a_logged_lift() {
-    let at = |d: i64| d * DAY_SEC + 10 * 3600;
-    let mut events = vec![
-        log_set("Back squat", 100.0, 5, 8.0, at(DAY - 5)),
-        log_set("Bench", 60.0, 5, 8.0, at(DAY - 5)),
-        log_set("Back squat", 100.0, 5, 8.0, at(DAY - 3)),
-        // An undated set belongs to no day.
-        log_set("Row", 50.0, 8, 8.0, 0),
-    ];
-    let (_, model) = replay(&events);
-    assert!(marked(vm(None, vec![]), &model).today_surface.show_guide);
-    events.push(log_set("Deadlift", 140.0, 3, 8.0, at(DAY - 1)));
-    let (_, model) = replay(&events);
-    assert!(!marked(vm(None, vec![]), &model).today_surface.show_guide);
+    let at = |d: i64| d * DAY_SEC + 10 * HOUR;
+    let day = 20_400;
+    // One logged day short of the guided count: one of those days holds two
+    // sets, and an undated set belongs to no day.
+    let mut events: Vec<Event> = (1..GUIDED_LIFT_DAYS as i64)
+        .map(|k| log_set("Back squat", 100.0, 5, 8.0, at(day - 2 * k)))
+        .collect();
+    events.push(log_set("Bench", 60.0, 5, 8.0, at(day - 2)));
+    events.push(log_set("Row", 50.0, 8, 8.0, 0));
+    let (app, model) = replay(&events);
+    assert!(app.view(&model).today_surface.show_guide);
+    events.push(log_set("Deadlift", 140.0, 3, 8.0, at(day - 1)));
+    let (app, model) = replay(&events);
+    assert!(!app.view(&model).today_surface.show_guide);
 }
 
 #[test]
 fn a_run_sessions_run_item_is_its_first_open_item_with_a_target() {
-    let plain = PrescriptionView::default();
-    let targeted = PrescriptionView {
-        run_target: Some(RunTargetView::default()),
-        ..PrescriptionView::default()
-    };
-    let done = PrescriptionView {
-        done: true,
-        run_target: Some(RunTargetView::default()),
-        ..PrescriptionView::default()
-    };
-    let run = |items| {
-        day(
-            DAY,
-            SessionType::Run(RunSessionType::Easy),
-            SessionStatus::Next,
-            items,
-        )
-    };
-    let item_of = |s: SessionPlanView| {
-        let v = marked(vm(Some(s.clone()), vec![s]), &Model::default());
-        (v.next_session.unwrap().run_item, v.week_plan[0].run_item)
-    };
-    assert_eq!(
-        item_of(run(vec![done.clone(), plain.clone(), targeted])),
-        (Some(2), Some(2))
-    );
-    assert_eq!(item_of(run(vec![done.clone(), plain])), (Some(1), Some(1)));
-    assert_eq!(item_of(run(vec![done])), (None, None));
-    assert_eq!(item_of(lift_day(DAY, SessionStatus::Next)), (None, None));
-}
-
-fn adjustment(summary: &str, citation: &str) -> AdjustmentView {
-    AdjustmentView {
-        summary: summary.into(),
-        evidence: EvidenceTagView {
-            citation: citation.into(),
-            ..EvidenceTagView::default()
-        },
-        ..AdjustmentView::default()
+    let (app, mut model) = planned_on(running_profile(), [], MON);
+    let vm = app.view(&model);
+    let ns = vm.next_session.as_ref().expect("today's run");
+    assert!(matches!(ns.session_type, SessionType::Run(_)));
+    assert_eq!(ns.run_item, Some(0));
+    assert!(ns.items[0].run_target.is_some());
+    for s in &vm.week_plan {
+        let expected = matches!(s.session_type, SessionType::Run(_)).then_some(0);
+        assert_eq!(s.run_item, expected, "day {}", s.epoch_day);
     }
+    // Today's run logged: no open item is left to track.
+    app.update(logrun_at(5.0, MON * DAY_SEC + 8 * HOUR), &mut model)
+        .expect_only_render();
+    assert_eq!(day_row(&app, &model, MON).run_item, None);
+
+    // A lifting session has no run item.
+    let (app, model) = planned_strength_model(true);
+    assert_eq!(app.view(&model).next_session.unwrap().run_item, None);
 }
 
 #[test]
 fn a_return_check_item_owns_its_sessions_adjustment() {
-    let adj = adjustment("Return check after illness", "Schwellnus 2022");
-    let check = PrescriptionView {
-        return_check: true,
-        ..PrescriptionView::default()
-    };
-    let mut s = lift_day(DAY, SessionStatus::Adjusted);
-    s.adjustment = Some(adj.clone());
-    s.items = vec![check];
-    let v = marked(vm(Some(s.clone()), vec![s.clone()]), &Model::default());
-    assert!(v.next_session.unwrap().adjustment_on_item);
-    s.items = vec![PrescriptionView::default()];
-    let v = marked(vm(Some(s.clone()), vec![s]), &Model::default());
-    assert!(!v.next_session.unwrap().adjustment_on_item);
+    // Recovered from a flu: today's session is the return check, and its
+    // card states the adjustment itself.
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: POS_MON * DAY_SEC + HOUR,
+            ..input(ReadinessSignal::Illness, 2.0)
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    app.update(
+        Event::ResolveHold {
+            signal: ReadinessSignal::Illness,
+            observed_at: POS_MON * DAY_SEC + 2 * HOUR,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    let ns = app.view(&model).next_session.expect("today's session");
+    assert!(ns.items.iter().any(|i| i.return_check));
+    assert!(ns.adjustment.is_some());
+    assert!(ns.adjustment_on_item);
+
+    // An HRV downgrade adjusts the session without a return-check item.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReadiness(input(ReadinessSignal::HrvLnRmssd, -1.0)),
+        &mut model,
+    )
+    .expect_only_render();
+    let ns = app.view(&model).next_session.expect("today's session");
+    assert!(ns.adjustment.is_some());
+    assert!(!ns.adjustment_on_item);
 }
 
 #[test]
 fn rows_the_headline_or_the_sessions_adjustment_state_are_marked() {
-    let said = adjustment("Stop a rep earlier", "c1");
-    let other = adjustment("Stop a rep earlier", "c2");
-    let mut s = lift_day(DAY, SessionStatus::Adjusted);
-    s.adjustment = Some(said.clone());
-    let headline = |kind| TodayHeadlineView {
-        kind,
-        summary: said.summary.clone(),
-        evidence: said.evidence.clone(),
-        ..TodayHeadlineView::default()
-    };
-    let feedback = FeedbackView {
-        category: crate::feedback::FeedbackCategory::PositiveMastery,
-        category_label: String::new(),
-        message: said.summary.clone(),
-        glossary: Vec::new(),
-        subject: String::new(),
-        prose: false,
-        evidence: said.evidence.clone(),
-        why: WhyView::default(),
-        repeats_session: false,
-    };
-    let v = marked(
-        ViewModel {
-            today_headline: headline(HeadlineKind::Adjustment),
-            adjustments: vec![said.clone(), other.clone()],
-            review_adjustments: vec![said.clone()],
-            feedback: Some(feedback),
-            ..vm(Some(s.clone()), vec![s.clone()])
-        },
-        &Model::default(),
-    );
-    // Same summary, another citation: another statement.
-    assert_eq!(
-        v.adjustments
-            .iter()
+    // An HRV dip is the headline, the session's adjustment and the one row.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReadiness(input(ReadinessSignal::HrvLnRmssd, -1.0)),
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    assert_eq!(vm.today_headline.kind, HeadlineKind::Adjustment);
+    assert!(vm.today_headline.repeats_session);
+    let marks = |rows: &[AdjustmentView]| {
+        rows.iter()
             .map(|a| (a.repeats_headline, a.repeats_session))
-            .collect::<Vec<_>>(),
-        [(true, true), (false, false)]
-    );
-    assert!(v.review_adjustments[0].repeats_headline && v.review_adjustments[0].repeats_session);
-    assert!(v.today_headline.repeats_session);
-    assert!(v.feedback.unwrap().repeats_session);
-    // Only an adjustment headline states a row.
-    let v = marked(
-        ViewModel {
-            today_headline: headline(HeadlineKind::Feedback),
-            adjustments: vec![said],
-            ..vm(None, vec![])
-        },
-        &Model::default(),
-    );
-    assert!(!v.adjustments[0].repeats_headline && !v.adjustments[0].repeats_session);
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(marks(&vm.adjustments), [(true, true)]);
+
+    // A weekly deload then leads the headline; the HRV row still states the
+    // session's adjustment, the deload row only the headline.
+    app.update(
+        Event::SubmitReview(SessionReview {
+            rpe_load_gap_sessions: Some(2),
+            ..Default::default()
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    assert!(vm.today_headline.summary.starts_with("Lighter week"));
+    assert!(!vm.today_headline.repeats_session);
+    assert_eq!(marks(&vm.adjustments), [(false, true)]);
+    assert_eq!(marks(&vm.review_adjustments), [(true, false)]);
+
+    // Only an adjustment headline states a row: a pain hold's safety headline
+    // has the pain row's words but is not that row.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReadiness(pain_row(1.0, None, MON * DAY_SEC + HOUR)),
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
+    let pain = vm
+        .adjustments
+        .iter()
+        .find(|a| a.summary == vm.today_headline.summary)
+        .expect("the pain row the headline words");
+    assert!(!pain.repeats_headline && !pain.repeats_session);
 }

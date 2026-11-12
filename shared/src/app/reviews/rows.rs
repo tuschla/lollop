@@ -539,11 +539,8 @@ mod tests {
             derived_hrv_streak: None,
             derived_wellness_streak: None,
         };
-        let mut out = Rows(Vec::new());
-        push_monitoring_rows(&mut out, &r, &ctx);
-        push_hypertrophy_rows(&mut out, &r);
-        push_profile_rows(&mut out, &r, &p);
-        let got: Vec<&str> = out.0.iter().map(|v| v.view.summary.as_str()).collect();
+        let rows = review_views(&r, ctx);
+        let got: Vec<&str> = rows.iter().map(|v| v.view.summary.as_str()).collect();
         for want in [
             "2 of your last 3 HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform",
             "HRV has been below your normal on most of the last 3+ days. Take a recovery day or a few easy days.",

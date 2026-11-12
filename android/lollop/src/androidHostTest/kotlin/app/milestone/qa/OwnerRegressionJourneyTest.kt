@@ -15,7 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppClock
+import app.milestone.LoopRepeatGuardMs
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.PrescriptionView
@@ -57,11 +57,10 @@ class OwnerRegressionJourneyTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    private fun rest(sec: Long = 90) {
-        TestClock.offsetMillis += sec * 1000L
+    /** The next tap comes after the loop's double-tap guard, as a real one does. */
+    private fun nextTapLater() {
+        TestClock.offsetMillis += LoopRepeatGuardMs
     }
-
-    private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()
 
     private fun primaryReads(label: String) {
         rule.assertCountEventually(hasTestTag("editor-primary") and hasText(label), 1)
@@ -104,7 +103,7 @@ class OwnerRegressionJourneyTest {
         rule.onNode(hasText(str(R.string.run_delete_message))).assertExists()
         rule.onNode(hasText(str(R.string.main_delete)) and hasClickAction()).performClick()
         rule.waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
-        rule.assertTextCountEventually(str(R.string.history_run_deleted), 1)
+        rule.assertCountEventually(hasText(str(R.string.history_run_deleted)), 1)
 
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction()).performClick()
         rule.waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
@@ -155,12 +154,12 @@ class OwnerRegressionJourneyTest {
         rule.scrollToText(title)
         rule.onNodeWithText(title).performClick()
         // Undo is built from the route, so wait until it has loaded (Trim appears then).
-        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("run-trim")).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForNode(hasTestTag("run-trim"), 10_000)
         rule.onNodeWithTag("run-delete").performScrollTo().performClick()
         rule.waitForIdle()
         rule.onNode(hasText(str(R.string.main_delete)) and hasClickAction()).performClick()
         rule.waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
-        rule.assertTextCountEventually(str(R.string.history_run_deleted), 1)
+        rule.assertCountEventually(hasText(str(R.string.history_run_deleted)), 1)
 
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction()).performClick()
         rule.waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
@@ -182,21 +181,21 @@ class OwnerRegressionJourneyTest {
             val n = app.milestone.plannedSetCount(item)
             rule.typeWeight("60")
             for (k in 1..n) {
-                rule.assertTextCountEventually(setHeader(k, n), 1)
+                rule.assertCountEventually(hasText(setHeader(k, n)), 1)
                 primaryReads(str(R.string.log_primary_set_n_of_n, k, n))
-                logSet()
-                rest()
+                rule.tapEditorPrimary()
+                nextTapLater()
             }
-            rule.assertTextCountEventually(str(R.string.plan_item_complete), 1)
+            rule.assertCountEventually(hasText(str(R.string.plan_item_complete)), 1)
             val next = items.getOrNull(i + 1)
             primaryReads(
                 if (next != null) str(R.string.log_primary_next, next.exercise) else str(R.string.log_primary_finish_session),
             )
             assertEquals(n, todaysItems().first { it.exercise == item.exercise }.sets_done)
-            logSet()
+            rule.tapEditorPrimary()
             // The lifter walks to the next bar (a tap within the loop's repeat guard
             // would be dropped as a double tap).
-            rest()
+            nextTapLater()
         }
         rule.assertCountEventually(hasTestTag("editor-primary"), 0)
         rule.assertCountEventually(hasTestTag("session-done"), 1)
@@ -214,11 +213,11 @@ class OwnerRegressionJourneyTest {
         // Set 1 as prescribed, then set 2 short of the planned reps (a missed set):
         // the coach cues "end the exercise here" with an End exercise action in the loop.
         rule.typeWeight("60")
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, n), 1)
-        rest()
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, n)), 1)
+        nextTapLater()
         rule.onNode(hasText("1") and hasAnyAncestor(hasTestTag("reps-scale"))).performScrollTo().performClick()
-        logSet()
+        rule.tapEditorPrimary()
         rule.waitForState { todaysItems().first { it.exercise == squat }.logged_sets.size == 2 }
         val endLabel = str(R.string.log_cue_end_exercise)
         val inLoopEnd = hasText(endLabel) and hasClickAction() and noDescription
@@ -228,15 +227,15 @@ class OwnerRegressionJourneyTest {
 
         val epochDay = app.milestone.todayEpochDay()
         rule.waitForState { todaysItems().first { it.exercise == squat }.ended_early }
-        rule.assertTextCountEventually(str(R.string.plan_ended_msg, squat, done, n), 1)
-        rule.assertTextCountEventually(str(R.string.plan_item_complete), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_ended_msg, squat, done, n)), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_item_complete)), 1)
 
         // The snackbar's Undo (the loop's own "Logged … · Undo" row is spoken with
         // its set, so it carries a description).
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction() and noDescription).performClick()
         rule.waitForState { !todaysItems().first { it.exercise == squat }.ended_early }
-        rule.assertTextCountEventually(str(R.string.plan_item_complete), 0)
-        rule.assertTextCountEventually(setHeader(done + 1, n), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_item_complete)), 0)
+        rule.assertCountEventually(hasText(setHeader(done + 1, n)), 1)
         assertEquals(done, todaysItems().first { it.exercise == squat }.sets_done)
 
         val ends = journeyLog().filter { it.variant == "SetExerciseEnded" }.map { it.payload }

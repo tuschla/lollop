@@ -44,15 +44,6 @@ fn aged(age_years: Option<f64>, birth: Option<i64>, today: Option<i64>) -> Draft
     })
 }
 
-const BORN_1991_03_12: i64 = 7_740;
-const BORN_2008_02_29: i64 = 13_938;
-const BORN_2008_10_18: i64 = 14_170;
-const D_2026_02_28: i64 = 20_512;
-const D_2026_03_01: i64 = 20_513;
-const D_2026_03_11: i64 = 20_523;
-const D_2026_03_12: i64 = 20_524;
-const D_2026_10_17: i64 = 20_743;
-
 #[test]
 fn a_new_follow_up_yes_after_clearance_drops_the_clearance() {
     let cleared = clearance(
@@ -256,11 +247,25 @@ fn each_health_answer_defers_and_a_cleared_doctor_flag_does_not() {
 #[test]
 fn the_age_counts_completed_calendar_years() {
     let age = |birth, today| aged(None, Some(birth), Some(today)).age_years;
-    assert_eq!(age(BORN_1991_03_12, D_2026_03_11), Some(34.0));
-    assert_eq!(age(BORN_1991_03_12, D_2026_03_12), Some(35.0));
+    let born_1991_03_12 = days_from_civil(1991, 3, 12);
+    assert_eq!(
+        age(born_1991_03_12, days_from_civil(2026, 3, 11)),
+        Some(34.0)
+    );
+    assert_eq!(
+        age(born_1991_03_12, days_from_civil(2026, 3, 12)),
+        Some(35.0)
+    );
     // A 29 February birthday completes its year on 1 March in a common year.
-    assert_eq!(age(BORN_2008_02_29, D_2026_02_28), Some(17.0));
-    assert_eq!(age(BORN_2008_02_29, D_2026_03_01), Some(18.0));
+    let born_2008_02_29 = days_from_civil(2008, 2, 29);
+    assert_eq!(
+        age(born_2008_02_29, days_from_civil(2026, 2, 28)),
+        Some(17.0)
+    );
+    assert_eq!(
+        age(born_2008_02_29, days_from_civil(2026, 3, 1)),
+        Some(18.0)
+    );
     // A future birthday reads 0.
     assert_eq!(age(20_600, 20_500), Some(0.0));
 }
@@ -280,22 +285,18 @@ fn the_youth_gate_is_under_eighteen_and_about_age_alone() {
 
 #[test]
 fn the_birthday_wins_over_a_stated_age() {
-    let eve = aged(Some(30.0), Some(BORN_2008_10_18), Some(D_2026_10_17));
+    let born = Some(days_from_civil(2008, 10, 18));
+    let eve_day = days_from_civil(2026, 10, 17);
+    let eve = aged(Some(30.0), born, Some(eve_day));
     assert_eq!(eve.age_years, Some(17.0));
     assert!(eve.youth);
-    let birthday = aged(Some(30.0), Some(BORN_2008_10_18), Some(D_2026_10_17 + 1));
+    let birthday = aged(Some(30.0), born, Some(eve_day + 1));
     assert_eq!(birthday.age_years, Some(18.0));
     assert!(!birthday.youth);
     // A legacy stated age stands until a birthday is picked.
-    assert_eq!(
-        aged(Some(30.0), None, Some(D_2026_10_17)).age_years,
-        Some(30.0)
-    );
+    assert_eq!(aged(Some(30.0), None, Some(eve_day)).age_years, Some(30.0));
     // Without today the birthday can't be counted: the stated age stands.
-    assert_eq!(
-        aged(Some(30.0), Some(BORN_2008_10_18), None).age_years,
-        Some(30.0)
-    );
+    assert_eq!(aged(Some(30.0), born, None).age_years, Some(30.0));
 }
 
 #[test]
@@ -315,7 +316,7 @@ fn a_sent_youth_flag_never_outlives_its_age() {
             &mut model,
         )
         .expect_only_render();
-        model.profile().unwrap().health.youth
+        app.view(&model).profile.unwrap().health.youth
     };
     // The echo of a 17-year-old's profile, re-sent after the age changed.
     assert!(!sent(Some(18.0), true), "an adult age lifts the gate");

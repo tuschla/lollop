@@ -2,6 +2,12 @@ package app.milestone
 
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,64 +18,51 @@ import org.w3c.dom.Element
  *  or motivating. The rules are objective markers of that voice: exclamation marks,
  *  emojis, "we/us/our", a hype/AI word list, rhetorical question openers ("First time?
  *  Pick…"), stock phrases ("Let's", "Ready to", "It's important to note") and em dashes
- *  in sentences (a lone `—` no-value placeholder is fine). The core twin is
- *  `shared/src/app/tests/copy_tone.rs`; keep the two rule sets in step.
+ *  in sentences (a lone `—` no-value placeholder is fine).
  *
- *  A real exception goes in [ALLOW] with its reason; an entry nothing matches any more
- *  fails [allowlistIsReasonedAndLive]. */
+ *  The word lists (hype, stock phrases, terms) and the lint's own clean/flagged cases are
+ *  `shared/tests/fixtures/copy_tone.json`, which the core's twin
+ *  `shared/src/app/tests/copy_tone.rs` reads too. */
 class CopyToneTest {
-
-    /** A sanctioned exception: [rule] (a rule-name prefix) on resource [name]. */
-    private data class Allow(val name: String, val rule: String, val reason: String)
-
-    private val ALLOW: List<Allow> = listOf()
 
     /** One resource string: its file, `name` (`name[quantity]` / `name[index]` for
      *  plural and array items) and its text as the app shows it. */
     private data class Res(val file: String, val name: String, val text: String)
 
+    /** A label and the lowercase, straight-apostrophe forms that count as it. */
+    private class Phrase(val label: String, val forms: List<String>)
+
+    private val fixture: JsonObject =
+        Json.parseToJsonElement(File(REPO_ROOT, "shared/tests/fixtures/copy_tone.json").readText()).jsonObject
+
+    private fun strings(key: String): List<String> = fixture[key]!!.jsonArray.map { it.jsonPrimitive.content }
+
+    private fun phrases(key: String): List<Phrase> = fixture[key]!!.jsonArray.map { e ->
+        val o = e.jsonObject
+        Phrase(o["label"]!!.jsonPrimitive.content, (o["forms"] as JsonArray).map { it.jsonPrimitive.content })
+    }
+
+    /** Hype and AI-voice words. */
+    private val hype = phrases("hype")
+
+    /** Stock phrases matched case-insensitively ("Ready to" is case-sensitive, in [violations]). */
+    private val stockPhrases = phrases("stock_phrases")
+
+    /** writing.md Terms: the word not to use to the app's word. */
+    private val terms: List<Pair<String, String>> = fixture["terms"]!!.jsonArray.map {
+        it.jsonObject["term"]!!.jsonPrimitive.content to it.jsonObject["say"]!!.jsonPrimitive.content
+    }
+
     @Test
     fun theLintFlagsEachRuleAndPassesCleanCopy() {
-        for (clean in listOf(
-            "Squat 5×3 @ 85 kg · ~2 reps left",
-            "Held: resting heart rate 8 bpm above your usual. Easy run instead.",
-            "—",
-            "Feeling ill?",
-            "Pace 4:50–5:05 /km → 150–162 bpm",
-            "US spelling; elevated resting heart rate; Expert opinion",
-            "Lighter week: the plan keeps %1\$d sessions. Log them by hand if needed.",
-        )) {
-            assertEquals(clean, emptyList<String>(), violations(clean))
+        val clean = strings("clean")
+        assertTrue("the fixture lists clean copy", clean.isNotEmpty())
+        for (s in clean) {
+            assertEquals(s, emptyList<String>(), violations(s))
         }
-        for ((s, rule) in listOf(
-            "Nice run!" to "exclamation",
-            "Done \uD83D\uDCAA" to "emoji",
-            "Rest ☀" to "emoji",
-            "We hold this day" to "`we`",
-            "We’ll lower the weight" to "`we`",
-            "Tell us how it felt" to "`us`",
-            "Our plan adapts" to "`our`",
-            "This unlocks the next block" to "`unlock`",
-            "Level up your squat" to "`level up`",
-            "Personalised targets" to "`personalized`",
-            "A plan tailored to you" to "`tailored`",
-            "Welcome back, Sam" to "`Welcome back`",
-            "Well-paced run" to "`Well paced`",
-            "Don’t worry about a missed day" to "`Don't worry`",
-            "Simply log a set" to "`simply`",
-            "Research backs this" to "`research shows`",
-            "Studies show it works" to "`studies show`",
-            "Experts say rest" to "`experts say`",
-            "Start when you're ready" to "`when you're ready`",
-            "First time? Pick a plan" to "question opener",
-            "Is it sore? Then skip it" to "question opener",
-            "Done. Feeling ill? Hold today" to "question opener",
-            "Let's go" to "`Let's`",
-            "Ready to train" to "`Ready to`",
-            "It's important to note the cap" to "`It's important to note`",
-            "Easy run — keep it short" to "em dash",
-            "Training is on hold" to "`on hold`",
-        )) {
+        val flagged = fixture["flagged"]!!.jsonArray.map { it.jsonObject["text"]!!.jsonPrimitive.content to it.jsonObject["rule"]!!.jsonPrimitive.content }
+        assertTrue("the fixture lists flagged copy", flagged.isNotEmpty())
+        for ((s, rule) in flagged) {
             val v = violations(s)
             assertTrue("`$s` must flag $rule: $v", v.any { it.contains(rule) })
         }
@@ -79,25 +72,9 @@ class CopyToneTest {
     }
 
     @Test
-    fun allowlistIsReasonedAndLive() {
-        val all = resources()
-        for (a in ALLOW) {
-            assertTrue("$a needs a reason", a.reason.isNotBlank())
-            val r = all.firstOrNull { it.name == a.name }
-            assertTrue("$a names no string resource; remove it", r != null)
-            assertTrue(
-                "$a: `${r!!.text}` no longer breaks ${a.rule}; remove it",
-                violations(r.text).any { it.startsWith(a.rule) },
-            )
-        }
-    }
-
-    @Test
     fun everyStringReadsNeutral() {
         val bad = resources().flatMap { r ->
-            violations(r.text)
-                .filter { v -> ALLOW.none { it.name == r.name && v.startsWith(it.rule) } }
-                .map { v -> "${r.file} ${r.name}: $v · `${r.text}`" }
+            violations(r.text).map { v -> "${r.file} ${r.name}: $v · `${r.text}`" }
         }
         assertTrue("${bad.size} tone violations:\n" + bad.joinToString("\n"), bad.isEmpty())
     }
@@ -111,20 +88,14 @@ class CopyToneTest {
         for (w in listOf("we", "our")) if (phrase(w).containsMatchIn(n)) v += "first-person plural `$w`"
         // Lowercase or sentence-case only: `US` is the country.
         if (Regex("""\b[Uu]s\b""").containsMatchIn(s)) v += "first-person plural `us`"
-        for ((label, forms) in HYPE) if (forms.any { phrase(it).containsMatchIn(n) }) v += "hype `$label`"
+        for (p in hype) if (p.forms.any { phrase(it).containsMatchIn(n) }) v += "hype `${p.label}`"
         if (QUESTION_OPENER.containsMatchIn(s)) v += "rhetorical question opener"
-        if (phrase("let's").containsMatchIn(n)) v += "stock phrase `Let's`"
+        for (p in stockPhrases) if (p.forms.any { phrase(it).containsMatchIn(n) }) v += "stock phrase `${p.label}`"
         if (Regex("""\bReady to\b""").containsMatchIn(straight)) v += "stock phrase `Ready to`"
-        if (phrase("it's important to note").containsMatchIn(n) || phrase("it is important to note").containsMatchIn(n)) {
-            v += "stock phrase `It's important to note`"
-        }
         if ('—' in s && s.trim() != "—") v += "em dash in a sentence"
-        for ((term, say) in TERMS) if (phrase(term).containsMatchIn(n)) v += "term `$term` (say $say)"
+        for ((term, say) in terms) if (phrase(term).containsMatchIn(n)) v += "term `$term` (say $say)"
         return v
     }
-
-    /** writing.md Terms: the word not to use to the app's word. */
-    private val TERMS = listOf("on hold" to "paused")
 
     /** A whole-word phrase in lowercase, straight-apostrophe text. */
     private fun phrase(p: String) = Regex("""(?<![\p{L}\p{N}])""" + Regex.escape(p) + """(?![\p{L}\p{N}])""")
@@ -138,47 +109,8 @@ class CopyToneTest {
      *  and goes on. A lone question (a field label) is fine. */
     private val QUESTION_OPENER = Regex("""(?:^|\. |\n)[A-Z][^?]{0,40}\? \S""")
 
-    /** Hype and AI-voice words: label to the forms that count. "elevated" is not listed:
-     *  "elevated resting heart rate" is the clinical term. */
-    private val HYPE: List<Pair<String, List<String>>> = listOf(
-        "unlock" to listOf("unlock", "unlocks", "unlocked", "unlocking"),
-        "crush" to listOf("crush", "crushes", "crushed", "crushing"),
-        "journey" to listOf("journey", "journeys"),
-        "level up" to listOf("level up", "levels up", "leveled up", "leveling up", "level-up"),
-        "boost" to listOf("boost", "boosts", "boosted", "boosting"),
-        "supercharge" to listOf("supercharge", "supercharges", "supercharged", "supercharging"),
-        "seamless" to listOf("seamless", "seamlessly"),
-        "effortless" to listOf("effortless", "effortlessly"),
-        "empower" to listOf("empower", "empowers", "empowered", "empowering", "empowerment"),
-        "elevate" to listOf("elevate", "elevates", "elevating"),
-        "delve" to listOf("delve", "delves", "delved", "delving"),
-        "robust" to listOf("robust", "robustly"),
-        "vibrant" to listOf("vibrant"),
-        "tapestry" to listOf("tapestry"),
-        "testament" to listOf("testament"),
-        "game-changer" to listOf("game-changer", "game changer", "game-changing"),
-        "insights" to listOf("insight", "insights"),
-        "personalized" to listOf("personalized", "personalised", "personalize", "personalization"),
-        "tailored" to listOf("tailor", "tailors", "tailored", "tailoring"),
-        "Welcome back" to listOf("welcome back"),
-        "Great job" to listOf("great job"),
-        "Nice work" to listOf("nice work"),
-        "Well done" to listOf("well done"),
-        "Well paced" to listOf("well paced", "well-paced"),
-        "You've got this" to listOf("you've got this"),
-        "Keep it up" to listOf("keep it up"),
-        "Don't worry" to listOf("don't worry"),
-        "No pressure" to listOf("no pressure"),
-        "simply" to listOf("simply"),
-        "when you're ready" to listOf("when you're ready"),
-        "studies show" to listOf("studies show", "studies suggest", "studies have shown"),
-        "research shows" to listOf("research shows", "research backs", "research suggests", "research has shown"),
-        "experts say" to listOf("experts say", "experts agree", "experts recommend"),
-    )
-
-    /** The unit-test working directory is the lollop module. */
     private fun resources(): List<Res> {
-        val dir = File("src/androidMain/res/values")
+        val dir = File(REPO_ROOT, "android/lollop/src/androidMain/res/values")
         val files = dir.listFiles { f -> f.name.startsWith("strings") && f.name.endsWith(".xml") }
             .orEmpty().sortedBy { it.name }
         assertTrue("no strings*.xml under ${dir.absolutePath}", files.isNotEmpty())

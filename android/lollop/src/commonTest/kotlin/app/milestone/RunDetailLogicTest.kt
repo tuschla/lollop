@@ -1,11 +1,12 @@
 package app.milestone
 
-import java.time.ZoneId
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlinx.datetime.toInstant
 
 /** Rules of the run detail redesign (ui-sweep §0.2, §2.5, §2.7). */
 class RunDetailLogicTest {
@@ -63,8 +64,9 @@ class RunDetailLogicTest {
 
     @Test
     fun gpxFileName_usesTheRunsLocalStart() {
-        val start = java.time.ZonedDateTime.of(2026, 10, 14, 7, 42, 30, 0, ZoneId.of("Europe/Berlin")).toEpochSecond()
-        assertEquals("run-2026-10-14-0742.gpx", gpxFileName(start, TimeZone.of("Europe/Berlin")))
+        val berlin = TimeZone.of("Europe/Berlin")
+        val start = LocalDateTime(2026, 10, 14, 7, 42, 30).toInstant(berlin).epochSeconds
+        assertEquals("run-2026-10-14-0742.gpx", gpxFileName(start, berlin))
     }
 
     @Test

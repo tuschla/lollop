@@ -1,6 +1,7 @@
 package app.milestone.qa
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -9,17 +10,13 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.ComposeTestRule
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -140,6 +137,74 @@ internal fun ComposeTestRule.walkLiftSetup(birthdayDigits: String?, ill: Boolean
     setupNext()
 }
 
+/**
+ * Drives the guided setup along the Both path with real taps, screen by screen.
+ */
+internal object GuidedSetupWalk {
+    /** One wizard screen: its caption while Next is disabled (null = never gated)
+     *  and the taps that answer it. */
+    class Screen(val name: String, @StringRes val gateCaption: Int?, val answer: (ComposeTestRule) -> Unit)
+
+    /** The longest walk: Both + calisthenics (adds the placement screen) + a race
+     *  goal (adds race details), so every wizard screen is visited. */
+    val bothPath = listOf(
+        Screen("train", R.string.setup_need_train) { it.tapText(str(R.string.setup_modality_both_title)) },
+        Screen("lift-goal", R.string.setup_need_goal) {
+            it.tapText(str(R.string.setup_liftgoal_strength))
+            it.tapText(str(R.string.setup_modality_calis_title))
+        },
+        Screen("placement", null) {
+            it.tapText(str(R.string.setup_place_push_full))
+            it.tapText(str(R.string.setup_place_pull_many))
+            it.tapText(str(R.string.setup_equip_bar))
+        },
+        Screen("run-goal", R.string.setup_need_goal) { it.tapText(str(R.string.setup_goaldist_10k)) },
+        // A recent 5K in 26:15, typed on the pinned keypad.
+        Screen("race", null) { it.tapText(str(R.string.setup_goaldist_5k)); it.typeKeys("2615") },
+        Screen("lead", R.string.setup_need_lead) { it.tapText(str(R.string.setup_bothpriority_liftlean_title)) },
+        // Five days, then five ticked weekdays (fewer would block Next). The day
+        // count is a figure and the weekday short names come from java.time.
+        Screen("days", R.string.setup_days_pick_hint) {
+            it.tapText("5")
+            listOf("Mon", "Tue", "Thu", "Sat", "Sun").forEach { d -> it.tapText(d) }
+        },
+        // Lifting and running levels are separate groups with the same titles.
+        Screen("level", R.string.setup_need_level) {
+            for (group in 0..1) {
+                it.onAllNodes(hasText(str(R.string.setup_level_intermediate_title)) and hasClickAction())[group]
+                    .performScrollTo().performClick()
+                it.waitForIdle()
+            }
+        },
+        Screen("run-now", null) { it.typeKeys("25") },
+        // The birthday needs an answer ([adultBirthday]); bodyweight and sex stay unanswered.
+        Screen("about", R.string.setup_about_pick_hint) { it.pickBirthday(str(R.string.setup_birthday_pick), ADULT_BIRTHDAY_DIGITS) },
+        Screen("health", null) {},
+        Screen("review", null) {},
+    )
+
+    /** Walk from the first screen; [onArrive] runs on each screen before it is
+     *  answered. Stops on arrival at [stopAt] (or at the review, before Finish). */
+    fun walk(rule: ComposeTestRule, stopAt: String? = null, onArrive: (Screen) -> Unit = {}) {
+        for (screen in bothPath) {
+            rule.waitForIdle()
+            onArrive(screen)
+            if (screen.name == stopAt || screen === bothPath.last()) return
+            screen.answer(rule)
+            rule.waitForIdle()
+            rule.setupNext()
+        }
+    }
+
+    /** Tap each of [digits] on the pinned keypad. */
+    private fun ComposeTestRule.typeKeys(digits: String) {
+        for (k in digits) {
+            onNode(hasText(k.toString()) and hasClickAction()).performClick()
+            waitForIdle()
+        }
+    }
+}
+
 /** On the review: Finish, then wait for Today's scaffold with the profile applied. */
 internal fun ComposeTestRule.finishSetup() {
     onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performClick()
@@ -188,14 +253,12 @@ internal fun ComposeTestRule.pickBirthday(pillText: String, digits: String): Boo
 /** Log › Morning check-in, answer sleep, soreness and mood with 3 and "Feeling
  *  ill?" with [illnessAnswer], then Save. */
 internal fun ComposeTestRule.checkInIll(illnessAnswer: Int) {
-    onNodeWithContentDescription(str(R.string.main_log)).performClick()
-    onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-    waitUntil(5_000) { onAllNodes(hasTestTag("checkin-sleep")).fetchSemanticsNodes().isNotEmpty() }
+    openMorningCheckin()
     for (key in listOf("sleep", "soreness", "mood")) {
         pickRating("checkin-$key", 3)
     }
     onNodeWithText(str(illnessAnswer), substring = true).performScrollTo().performClick()
-    onNodeWithTag("editor-primary").performClick()
+    tapEditorPrimary()
     waitForState { journeyLog().any { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Illness") } }
 }
 

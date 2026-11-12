@@ -17,9 +17,19 @@ fn stretch(track: &[GpsPoint]) -> Vec<GpsPoint> {
         .collect()
 }
 
-/// The pacing-cue split of the latest tracked run, as the feedback path reads it.
-fn feedback_split(model: &Model) -> Option<f64> {
-    feedback_track_split(model, &RunFacts::new(&model.runs)).map(|t| t.pct)
+/// The feedback after `track` is logged (undated) and a plain review sent.
+fn reviewed_track(track: Vec<GpsPoint>) -> FeedbackView {
+    let (app, model) = replay(&[
+        log_run_track(track, 70.0, 12.0, 0, 0),
+        Event::SubmitReview(SessionReview::default()),
+    ]);
+    app.view(&model).feedback.expect("feedback present")
+}
+
+/// The card of `ev` (a logged run), as `view()` shows it.
+fn card_of(ev: Event) -> RunResultView {
+    let (app, model) = replay(&[ev]);
+    app.view(&model).runs.swap_remove(0)
 }
 
 #[test]
@@ -50,36 +60,23 @@ fn run_only_review_derives_positive_split_feedback_from_last_track() {
 
 #[test]
 fn a_fragment_too_short_for_a_verdict_gives_no_pacing_feedback() {
-    // A ~0.4 km GPS fragment (no full km split) is the latest
-    // tracked run; a manual 4 km run is logged after it. Its halves say
-    // nothing about pacing, so no "Even split: textbook pacing" cue.
-    let app = Engine;
-    let mut model = Model::default();
+    // A ~0.4 km GPS fragment (no full km split) is the latest tracked run;
+    // its halves say nothing about pacing, so no pacing cue either way.
     let points: Vec<GpsPoint> = (0..5)
         .map(|k| gps(0.001 * f64::from(k), 30 * i64::from(k)))
         .collect();
-    app.update(log_run_track(points.clone(), 70.0, 12.0, 0, 0), &mut model)
-        .expect_only_render();
-    app.update(log_run_at(4.0, 40.0, 70.0, 600), &mut model)
-        .expect_only_render();
-    assert!(run_split_pct(&model.runs[0]).is_some());
-    assert_eq!(feedback_split(&model), None);
-    let vm = app.view(&model);
+    let fb = reviewed_track(points.clone());
     assert!(
-        vm.feedback
-            .as_ref()
-            .is_none_or(|f| f.category != FeedbackCategory::IntensityDiscipline),
-        "{:?}",
-        vm.feedback
+        ![
+            FeedbackCategory::IntensityDiscipline,
+            FeedbackCategory::PositiveExecution
+        ]
+        .contains(&fb.category),
+        "{fb:?}"
     );
-    // The same even track at full length is judged.
-    let mut model = Model::default();
-    app.update(
-        log_run_track(stretch(&points), 70.0, 12.0, 0, 0),
-        &mut model,
-    )
-    .expect_only_render();
-    assert!(feedback_split(&model).is_some());
+    // The same even track at full length is judged: textbook pacing.
+    let fb = reviewed_track(stretch(&points));
+    assert_eq!(fb.category, FeedbackCategory::PositiveExecution, "{fb:?}");
 }
 
 #[test]
@@ -88,21 +85,17 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
     // split. The run summary must phrase it as a positive magnitude
     // ("N% negative split"), not a signed "-N%" that reads awkwardly next to
     // the word "negative".
-    let run = LoggedRun {
-        longest_recent_km: 12.0,
-        wire_longest_recent_km: 12.0,
-        track: stretch(&[
-            gps(0.000, 0),
-            gps(0.001, 50),
-            gps(0.002, 100),
-            gps(0.003, 120),
-            gps(0.004, 140),
-        ]),
-        ..logged_run(0.0, 0.0, 70.0, 0)
-    };
-    let view = run_card(&run);
-    assert!(
-        run_split_pct(&run).expect("split derived") < 0.0,
+    let track = stretch(&[
+        gps(0.000, 0),
+        gps(0.001, 50),
+        gps(0.002, 100),
+        gps(0.003, 120),
+        gps(0.004, 140),
+    ]);
+    let view = card_of(log_run_track(track, 70.0, 12.0, 0, 0));
+    assert_eq!(
+        view.split.expect("a verdict").verdict,
+        SplitVerdict::Negative,
         "back-half-faster track should read as a negative split"
     );
     assert!(view.summary.contains("second half"), "{}", view.summary);
@@ -118,9 +111,8 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
 fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
     // A single teleport fix (implausible >12 m/s jump) that CLEARS the
     // accuracy gate but FAILS a qc_track speed gate. The displayed run-row
-    // split (to_run_view → qc_track) drops it; the pacing-feedback split
-    // (feedback_track_split) must derive from the SAME qc_track output, not the
-    // accuracy-only usable_track, so the run chip and the coaching cue can't
+    // verdict drops it; the pacing cue must derive from the SAME QC'd track,
+    // not the accuracy-only one, so the run chip and the coaching cue can't
     // disagree near ±3%.
     // Clean track is evenly paced (split ≈ 0 %, "even"); the teleport in the
     // back half, if kept, flips it to a large negative split, opposite
@@ -139,31 +131,24 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
     // The teleport stays a 1 s jump of ~5.2 km off the stretched track.
     pts[4].lon = pts[3].lon + 0.047;
     pts[4].observed_at = pts[3].observed_at + 1;
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(log_run_track(pts.clone(), 70.0, 12.0, 0, 0), &mut model)
-        .expect_only_render();
 
-    let row_split = run_split_pct(&model.runs[0]).expect("run-row split");
-    let fb_split = feedback_split(&model).expect("feedback split");
+    let card = card_of(log_run_track(pts.clone(), 70.0, 12.0, 0, 0));
+    assert_eq!(card.split.expect("a verdict").verdict, SplitVerdict::Even);
+    let fb = reviewed_track(pts);
     assert_eq!(
-        row_split, fb_split,
-        "run chip and pacing feedback must derive the split from the same qc_track"
+        fb.category,
+        FeedbackCategory::PositiveExecution,
+        "run chip and pacing feedback must agree on the QC'd track: {fb:?}"
     );
 
-    // An accuracy-only filter keeps the teleport fix and yields a
-    // materially different split, proving the two filters actually diverge
-    // on this shape, so the assertion above is not vacuous (checked on the
-    // short track, where the capped teleport legs still sit in the halves).
-    let short_run = LoggedRun {
-        track: short.clone(),
-        ..model.runs[0].clone()
-    };
-    let qc_split = run_split_pct(&short_run).expect("qc split");
+    // An accuracy-only filter keeps the teleport fix and yields a split on
+    // the other side of the line, so the agreement above is not vacuous
+    // (checked on the short track, where the capped teleport legs still sit
+    // in the halves).
     let raw_split = crate::gps::track_positive_split_pct(&short, &[]).expect("raw split");
     assert!(
-        (raw_split - qc_split).abs() > 3.0,
-        "teleport must shift the accuracy-only split vs the qc split (raw {raw_split}, qc {qc_split})"
+        raw_split < -feedback::POSITIVE_SPLIT_FLAG_PCT,
+        "teleport must flip the accuracy-only split (raw {raw_split})"
     );
 }
 
@@ -172,41 +157,27 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
     // A track whose back half is slower than its front half is a positive
     // split. The run summary must call it out as a "+N% back-half slowdown"
     // so the note and the coaching cue (positive_split_discipline) agree.
-    let run = LoggedRun {
-        longest_recent_km: 12.0,
-        wire_longest_recent_km: 12.0,
-        // Front half (0 → 0.002° over 40 s) is fast; back half
-        // (0.002 → 0.004° over 100 s) is slow, a clear back-half slowdown.
-        track: vec![
-            gps(0.000, 0),
-            gps(0.001, 20),
-            gps(0.002, 40),
-            gps(0.003, 90),
-            gps(0.004, 140),
-        ],
-        ..logged_run(0.0, 0.0, 70.0, 0)
-    };
-    let view = run_card(&run);
-    assert!(
-        run_split_pct(&run).expect("split derived") > feedback::POSITIVE_SPLIT_FLAG_PCT,
-        "back-half-slower track should read as a positive split above the flag"
-    );
+    // Front half (0 → 0.002° over 40 s) is fast; back half (0.002 → 0.004°
+    // over 100 s) is slow, a clear back-half slowdown.
+    let track = vec![
+        gps(0.000, 0),
+        gps(0.001, 20),
+        gps(0.002, 40),
+        gps(0.003, 90),
+        gps(0.004, 140),
+    ];
     // A ~445 m track has no full km split, so it gets no pacing verdict or
-    // note (too short to judge pacing); the measured split is still reported.
+    // note (too short to judge pacing).
+    let view = card_of(log_run_track(track.clone(), 70.0, 12.0, 0, 0));
     assert!(view.split.is_none(), "no verdict under 2 full splits");
     assert!(
         !view.summary.contains("second half"),
         "got {}",
         view.summary
     );
-
     // The same shape stretched to ~4.4 km carries the note and the core-owned
     // verdict chip, in agreement.
-    let long = LoggedRun {
-        track: stretch(&run.track),
-        ..run.clone()
-    };
-    let view = run_card(&long);
+    let view = card_of(log_run_track(stretch(&track), 70.0, 12.0, 0, 0));
     assert!(
         view.summary.contains("second half") && view.summary.contains("% slower"),
         "got {}",
@@ -280,14 +251,9 @@ fn split_verdict_bands_match_the_single_core_threshold() {
 fn manual_run_has_no_split_verdict() {
     // No GPS track → no measurable split → no verdict chip (the core never
     // invents a pacing judgment from a hand-entered distance/duration).
-    let run = LoggedRun {
-        longest_recent_km: 10.0,
-        wire_longest_recent_km: 10.0,
-        ..logged_run(8.0, 45.0, 70.0, 0)
-    };
-    let view = run_card(&run);
-    assert!(run_split_pct(&run).is_none());
+    let view = card_of(log_run(8.0, 45.0, 70.0, 10.0, 0, 0));
     assert!(view.split.is_none());
+    assert!(!view.summary.contains("second half"), "{}", view.summary);
     // A hand-entered run has no track to walk → no per-unit splits either.
     assert!(view.splits.is_empty());
 }

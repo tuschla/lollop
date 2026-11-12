@@ -61,27 +61,13 @@ fn an_anchored_load_lifted_since_the_return_is_not_derated_again() {
     );
 }
 
-/// `n` + 1 fixes due north from (50°N, 8°E), 4 s apart, each leg `step_deg`
-/// of latitude (≈ 11.1 m per 1e-4°, ≈ 2.8 m/s: no QC gate trips).
-fn north_track(start: (f64, i64), legs: &[f64]) -> Vec<GpsPoint> {
-    let (mut lat, mut t) = start;
-    let mut v = vec![GpsPoint {
-        lat,
-        lon: 8.0,
-        observed_at: t,
-        accuracy_m: 3.0,
-    }];
-    for step in legs {
-        lat += step;
-        t += 4;
-        v.push(GpsPoint {
-            lat,
-            lon: 8.0,
-            observed_at: t,
-            accuracy_m: 3.0,
-        });
-    }
-    v
+/// One 4 s leg of the guards' north tracks (1e-4° of latitude, ≈ 2.8 m/s: no
+/// QC gate trips).
+const LEG_M: f64 = 1.0e-4 * M_PER_DEG;
+
+/// `legs_m` due north from (`lat0`°N, 8°E), 4 s apart, 3 m fixes.
+fn guard_track(lat0: f64, t0: i64, legs_m: impl IntoIterator<Item = f64>) -> Vec<GpsPoint> {
+    north_track(lat0, t0, 4, legs_m, 3.0)
 }
 
 /// M09b: a run whose second half is faster by a hair rounds its positive
@@ -90,10 +76,10 @@ fn north_track(start: (f64, i64), legs: &[f64]) -> Vec<GpsPoint> {
 /// through the `view_equivalence` hash pin.
 #[test]
 fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
-    let mut legs = vec![1.0e-4; 50];
-    legs.extend(std::iter::repeat_n(1.0e-4 * (1.0 + 1.0e-5), 50));
+    let legs =
+        std::iter::repeat_n(LEG_M, 50).chain(std::iter::repeat_n(LEG_M * (1.0 + 1.0e-5), 50));
     let start = 1_700_000_000;
-    let points = north_track((50.0, start), &legs);
+    let points = guard_track(50.0, start, legs);
     let raw = crate::gps::track_positive_split_pct(&points, &[]).expect("a 100-leg track splits");
     assert_eq!(raw, 0.0, "the split rounds to zero: {raw}");
     assert!(!raw.is_sign_negative(), "positive split is -0.0");
@@ -248,18 +234,9 @@ fn run_progress_at_extreme_days_never_overflows() {
             log_run(5.0, 30.0, 70.0, 0.0, 1_700_000_000, 7_330_001),
             &mut m,
         );
-        let _ = Engine.update(
-            Event::SetToday {
-                epoch_day: day,
-                utc_offset_sec: offset,
-            },
-            &mut m,
-        );
-        let vm = Engine.view(&m);
-        assert!(
-            serde_json::to_string(&vm).is_ok(),
-            "day {day} offset {offset}"
-        );
+        let _ = Engine.update(set_today_off_ev(day, offset), &mut m);
+        // A day-arithmetic overflow panics (tests build with overflow checks).
+        let _ = Engine.view(&m);
     }
 }
 
@@ -271,7 +248,7 @@ fn run_progress_at_extreme_days_never_overflows() {
 #[test]
 fn a_runs_gpx_export_names_its_logged_at_stamp() {
     let start = 1_700_100_000;
-    let points = north_track((50.0, start), &[1.0e-4; 20]);
+    let points = guard_track(50.0, start, [LEG_M; 20]);
     // Logged 10 minutes after the last fix (a standing-still finish).
     let logged_at = start + 80 + 600;
     let mut m = Model::default();
@@ -290,38 +267,9 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
 }
 
 // Storage-order ties (BUGS.md 2026-10-23: "storage-order sums and ties").
-// An Undo is `DeleteEntry` + the original `Log*` event again: the row comes
-// back with its stamp and `entry_id`, at the END of storage. Every view must
-// read the same afterwards.
-
-/// The view JSON before vs after an Undo of entry `id`; `None` when equal,
-/// else the first differing context.
-fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, ev: Event) -> Option<String> {
-    let json = |m: &Model| vm_json(&Engine.view(m));
-    let before = json(m);
-    let _ = Engine.update(
-        Event::DeleteEntry {
-            kind,
-            entry_id: id,
-            observed_at_fallback: at,
-        },
-        m,
-    );
-    let _ = Engine.update(ev, m);
-    let after = json(m);
-    (before != after).then(|| {
-        let i = before
-            .bytes()
-            .zip(after.bytes())
-            .position(|(a, b)| a != b)
-            .unwrap_or(0);
-        format!(
-            "Undo of {kind:?} {id}: …{}… vs …{}…",
-            excerpt(&before, i, 160, 240),
-            excerpt(&after, i, 160, 240)
-        )
-    })
-}
+// An Undo is `DeleteEntry` + the original `Log*` event again (`undo_diff`):
+// the row comes back with its stamp and `entry_id`, at the END of storage.
+// Every view must read the same afterwards.
 
 /// M09l: two sets of the same lift set the same new best on the latest day
 /// (equal gain). Mastery names the EARLIER one (`day_sets` sorted by time,
@@ -399,10 +347,9 @@ fn undo_of_a_same_stamp_run_keeps_the_spike_gate() {
 #[test]
 fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
     let t0 = (DAY0 + 10) * DAY_SEC + 3_600;
-    let even = north_track((50.0, t0), &[1.0e-4; 270]);
-    let mut fade_legs = vec![1.0e-4; 135];
-    fade_legs.extend(std::iter::repeat_n(0.8e-4, 169));
-    let fade = north_track((50.1, t0), &fade_legs);
+    let even = guard_track(50.0, t0, [LEG_M; 270]);
+    let fade_legs = std::iter::repeat_n(LEG_M, 135).chain(std::iter::repeat_n(0.8 * LEG_M, 169));
+    let fade = guard_track(50.1, t0, fade_legs);
     let at = t0 + 4 * 304 + 60;
     let mut m = Model::default();
     set_today(&Engine, &mut m, DAY0 + 10);
@@ -417,14 +364,7 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
         }),
         &mut m,
     );
-    let vm = Engine.view(&m);
-    assert!(
-        m.runs
-            .iter()
-            .any(|r| run_split_pct(r).is_some_and(|p| p > 10.0)),
-        "fixture: one run fades"
-    );
-    let fb = serde_json::to_string(&vm.feedback).unwrap();
+    let fb = serde_json::to_string(&Engine.view(&m).feedback).unwrap();
     assert!(
         fb.contains("Second half 25% slower"),
         "fixture: the pacing cue shows: {fb}"

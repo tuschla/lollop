@@ -145,7 +145,7 @@ fn utf16_len(s: &str) -> u32 {
 }
 
 /// Longest spoken subject, UTF-16 code units.
-const SUBJECT_MAX_UNITS: usize = 60;
+pub(crate) const SUBJECT_MAX_UNITS: usize = 60;
 
 /// What a card is about, spoken on its "?" ("Details: <subject>"): the
 /// summary up to its first ". ", cut to [`SUBJECT_MAX_UNITS`] UTF-16 code
@@ -163,7 +163,7 @@ pub(crate) fn spoken_subject(summary: &str) -> String {
 }
 
 /// Longest card summary that still reads as a short claim, UTF-16 code units.
-const CLAIM_MAX_UNITS: u32 = 90;
+pub(crate) const CLAIM_MAX_UNITS: u32 = 90;
 
 /// Whether a card summary reads as a paragraph rather than a short claim:
 /// longer than [`CLAIM_MAX_UNITS`]. A paragraph is set in the body weight so it

@@ -28,11 +28,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crux_core::App;
 use serde_json::Value;
+use shared::Event;
 use shared::event::RETIRED_TAGS;
 use shared::log::{LineFacts, compact_lines};
-use shared::{Engine, Event};
 
 mod common;
 
@@ -45,32 +44,16 @@ fn dir() -> PathBuf {
 
 /// The builds with a log in the corpus: each `<sha>.log.ndjson`, sorted.
 fn versions() -> Vec<String> {
-    let mut out: Vec<String> = fs::read_dir(dir())
-        .expect("upgrade fixtures dir")
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter_map(|name| name.strip_suffix(".log.ndjson").map(str::to_owned))
+    let out: Vec<String> = common::cases(&dir(), ".log.ndjson")
+        .into_iter()
         .filter(|stem| !stem.contains('-'))
         .collect();
-    out.sort();
     assert!(!out.is_empty(), "no upgrade logs in {}", dir().display());
     out
 }
 
 fn lines(name: &str) -> Vec<String> {
-    fs::read_to_string(dir().join(name))
-        .unwrap_or_else(|e| panic!("fixture {name}: {e}"))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
-fn tag(line: &str) -> String {
-    match serde_json::from_str::<Value>(line).expect("fixture line is JSON") {
-        Value::String(s) => s,
-        Value::Object(m) => m.keys().next().cloned().unwrap_or_default(),
-        _ => String::new(),
-    }
+    common::lines(&dir().join(name))
 }
 
 /// The view after replaying `lines` and the boot `SetToday`, plus the indices of
@@ -88,34 +71,132 @@ fn replay<'a>(lines: impl IntoIterator<Item = &'a String>) -> (Value, Vec<usize>
         epoch_day: TODAY,
         utc_offset_sec: OFF,
     };
-    let model = common::replay(events.into_iter().chain([today]));
-    (serde_json::to_value(Engine.view(&model)).unwrap(), rejected)
+    (
+        common::view_json(events.into_iter().chain([today])),
+        rejected,
+    )
 }
 
-/// The view minus its copy ([`is_copy`]).
-fn data_only(v: &Value) -> Value {
-    match v {
-        Value::Object(m) => Value::Object(
-            m.iter()
-                .filter(|(k, x)| !matches!(x, Value::String(s) if is_copy(&format!(".{k}"), s)))
-                .map(|(k, x)| (k.clone(), data_only(x)))
-                .collect(),
-        ),
-        Value::Array(a) => Value::Array(a.iter().map(data_only).collect()),
-        _ => v.clone(),
+/// View fields an old build showed that this core no longer sends, by path
+/// with list indices as `[]`: the 901d239 cleanup's removals (mile twins, the
+/// pre-computed plan targets, the retired Cooper, critical-speed and APRE
+/// calculators) and the later ones. Any other field an old build showed must
+/// still be there.
+const REMOVED: &[&str] = &[
+    ".adjustments[].neutral",
+    ".apre",
+    ".apre_input",
+    ".autoreg_source.neutral",
+    ".checkin_today",
+    ".consistency.notes[].summary_mi",
+    ".cooper",
+    ".cooper_input",
+    ".critical_speed",
+    ".critical_speed_input",
+    ".feedback.anchor_mastery",
+    ".feedback.max_metrics",
+    ".feedback.max_takeaways",
+    ".feedback.message_mi",
+    ".feedback.minimize_jargon",
+    ".feedback.rationale_mandatory",
+    ".feedback.suppresses_praise",
+    ".grade_definitions[].label",
+    ".guidance[].summary_mi",
+    ".hr_zone_input.weeks_since_pace_test",
+    ".hr_zone_input.weeks_since_recalc",
+    ".hr_zones[].summary_mi",
+    ".hypertrophy_figures.min_sets",
+    ".hypertrophy_plan[].summary_mi",
+    ".lifts[].e1rm_delta_kg",
+    ".lifts[].e1rm_direction",
+    ".next_session.adjustment.neutral",
+    ".next_session.items[].intensity",
+    ".next_session.items[].rep_count",
+    ".next_session.items[].run_target.hr_high_bpm",
+    ".next_session.items[].run_target.hr_low_bpm",
+    ".next_session.items[].run_target.hr_max_bpm",
+    ".next_session.items[].run_target.hr_max_measured",
+    ".next_session.items[].run_target.hr_rest_bpm",
+    ".next_session.items[].run_target.pace_label_km",
+    ".next_session.items[].run_target.pace_label_mi",
+    ".next_session.items[].run_target.rpe_high",
+    ".next_session.items[].run_target.rpe_low",
+    ".next_session.items[].run_target.vdot",
+    ".next_session.items[].safety_reason_mi",
+    ".profile.endurance_intensity_pct_vo2max",
+    ".race_prediction.agreed",
+    ".race_prediction.high_sec",
+    ".race_prediction.low_sec",
+    ".readiness_summary[].detail",
+    ".reference[].summary_mi",
+    ".review_present",
+    ".run_progress.best_efforts[].from_split",
+    ".run_progress.weekly[].longest_km",
+    ".run_progress.weekly[].moving_min",
+    ".run_progress.weekly[].rated_runs",
+    ".runs[].interval.variability_index",
+    ".runs[].qc_dropped",
+    ".runs[].split_pct",
+    ".runs[].splits_km",
+    ".runs[].splits_mi",
+    ".srpe_load.prev_week_au",
+    ".srpe_load.rated_runs",
+    ".srpe_load.unrated_runs",
+    ".srpe_load.week_au",
+    ".train_blocked",
+    ".training_load.atl",
+    ".training_load.ctl",
+    ".training_load.tsb",
+    ".trend.neutral",
+    ".weekly_report[].summary_mi",
+    ".week_plan[].adjustment.neutral",
+    ".week_plan[].items[].intensity",
+    ".week_plan[].items[].rep_count",
+    ".week_plan[].items[].run_target.hr_high_bpm",
+    ".week_plan[].items[].run_target.hr_low_bpm",
+    ".week_plan[].items[].run_target.hr_max_bpm",
+    ".week_plan[].items[].run_target.hr_max_measured",
+    ".week_plan[].items[].run_target.hr_rest_bpm",
+    ".week_plan[].items[].run_target.pace_label_km",
+    ".week_plan[].items[].run_target.pace_label_mi",
+    ".week_plan[].items[].run_target.rpe_high",
+    ".week_plan[].items[].run_target.rpe_low",
+    ".week_plan[].items[].run_target.vdot",
+    ".week_plan[].items[].safety_reason_mi",
+];
+
+/// `path` with every list index as `[]`.
+fn shape(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut in_index = false;
+    for c in path.chars() {
+        match c {
+            '[' => in_index = true,
+            ']' => {
+                in_index = false;
+                out.push_str("[]");
+            }
+            _ if in_index => {}
+            _ => out.push(c),
+        }
     }
+    out
 }
 
 /// Every difference between the old build's `expected` and this core's `got`:
-/// object keys present in both are compared (a view field the cleanup removed
-/// or a new one is not a difference), lists must hold the same number of
-/// entries, numbers agree to 1e-9 relative.
+/// every object key `expected` holds is compared, and one `got` lacks is a
+/// difference unless [`REMOVED`] names it (a field `got` adds is none), lists
+/// must hold the same number of entries, numbers agree to 1e-9 relative. The
+/// expected files hold no copy text but the best-effort labels.
 fn diffs(path: &str, expected: &Value, got: &Value, out: &mut Vec<String>) {
     match (expected, got) {
         (Value::Object(e), Value::Object(g)) => {
             for (k, v) in e {
-                if let Some(w) = g.get(k) {
-                    diffs(&format!("{path}.{k}"), v, w, out);
+                let at = format!("{path}.{k}");
+                match g.get(k) {
+                    Some(w) => diffs(&at, v, w, out),
+                    None if REMOVED.contains(&shape(&at).as_str()) => {}
+                    None => out.push(format!("{at}: {v:.80}, now missing")),
                 }
             }
         }
@@ -152,16 +233,11 @@ fn diffs(path: &str, expected: &Value, got: &Value, out: &mut Vec<String>) {
         // Copy, sent as its sentences now so the shell never splits the text.
         (Value::String(_), Value::Array(g))
             if path.ends_with(".why.basis") && g.iter().all(Value::is_string) => {}
-        // Text is copy: it was reworded between these builds.
-        (Value::String(a), Value::String(_)) if is_copy(path, a) => {}
+        // A best-effort label is copy: a rewording is not a difference.
+        (Value::String(_), Value::String(_)) if shape(path).ends_with(".best_effort_labels[]") => {}
         _ if expected == got => {}
         _ => out.push(format!("{path}: {expected}, now {got}")),
     }
-}
-
-/// A string leaf holding a space is copy text, but an exercise name.
-fn is_copy(path: &str, s: &str) -> bool {
-    s.contains(' ') && !path.ends_with(".exercise")
 }
 
 fn expected(v: &str) -> Value {
@@ -179,7 +255,7 @@ fn assert_shows(v: &str, file: &str, view: &Value) {
         rows.splice(0..0, profile);
     }
     let mut out = Vec::new();
-    diffs("", &expected(v), &data_only(&view), &mut out);
+    diffs("", &expected(v), &view, &mut out);
     assert!(
         out.is_empty(),
         "{file} shows other data than {v} did:\n{}",
@@ -195,7 +271,11 @@ fn old_logs_replay_every_line_but_the_retired_calculators() {
         let (_, rejected) = replay(&lines);
         let unexpected: Vec<String> = rejected
             .iter()
-            .filter(|&&i| !RETIRED_TAGS.contains(&tag(&lines[i]).as_str()))
+            .filter(|&&i| {
+                let tag =
+                    common::tag(&serde_json::from_str(&lines[i]).expect("fixture line is JSON"));
+                !RETIRED_TAGS.contains(&tag.as_str())
+            })
             .map(|&i| format!("#{i} {}", &lines[i][..lines[i].len().min(120)]))
             .collect();
         assert!(

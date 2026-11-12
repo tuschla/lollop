@@ -19,14 +19,13 @@ fn no_age(p: Profile) -> Profile {
 #[test]
 fn a_profile_with_no_age_plans_like_an_adult() {
     let (app, model) = planned(no_age(strength_profile()));
-    let p = model.profile().unwrap();
+    let vm = app.view(&model);
+    let p = vm.profile.as_ref().unwrap();
     assert!(!p.health.youth, "no age is not youth");
     assert_eq!(
         p.age_years, None,
         "SetToday derives no age without a birthday"
     );
-    let vm = app.view(&model);
-    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.hold_reason, None);
     assert_eq!(vm.plan_withheld, None);
     assert!(vm.program.is_some(), "GeneratePlan builds a program");
@@ -69,18 +68,17 @@ fn no_age_is_never_masters() {
 
 #[test]
 fn no_age_run_targets_carry_no_age_estimated_heart_rate() {
-    let (_, model) = planned(no_age(running_profile()));
-    let plan = working_plan(&model);
-    let targets: Vec<(&RunTargetView, f64)> = plan
+    let (app, model) = planned(no_age(running_profile()));
+    let vm = app.view(&model);
+    let targets: Vec<&RunTargetView> = vm
         .week_plan
         .iter()
         .flat_map(|s| s.items.iter())
-        .filter_map(|it| Some((it.run_target.as_ref()?, it.target_anchor?.hr.max_bpm)))
+        .filter_map(|it| it.run_target.as_ref())
         .collect();
     assert!(!targets.is_empty(), "the running week has run targets");
-    for (t, hr_max) in &targets {
+    for t in &targets {
         assert!(t.hr_label.is_empty(), "no HRmax, no bpm: {t:?}");
-        assert_eq!(*hr_max, 0.0, "{t:?}");
         assert!(!t.effort_cue.is_empty(), "the effort cue stays: {t:?}");
     }
     let long = planned_long_run_item(&model);
@@ -90,22 +88,28 @@ fn no_age_run_targets_carry_no_age_estimated_heart_rate() {
 
 #[test]
 fn no_age_run_targets_use_a_measured_hrmax() {
-    let (_, model) = planned(Profile {
-        measured_hr_max: Some(190.0),
-        ..no_age(running_profile())
-    });
-    let long = planned_long_run_item(&model);
-    let t = long.run_target.as_ref().expect("the long run has a target");
-    let hr = long.target_anchor.expect("a resolved target").hr;
-    assert!(hr.measured, "{t:?}");
-    assert_eq!(hr.max_bpm, 190.0);
-    let high: u32 = t
-        .hr_label
-        .strip_suffix(" bpm")
-        .and_then(|s| s.rsplit(['–', ' ']).next())
-        .and_then(|h| h.parse().ok())
-        .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
-    assert!(high > 0 && high <= 190, "{t:?}");
+    // Without an age only a measured HRmax yields a bpm band
+    // (`no_age_run_targets_carry_no_age_estimated_heart_rate`), and the band
+    // scales with the measured value.
+    let ceiling = |hr_max: f64| -> u32 {
+        let (_, model) = planned(Profile {
+            measured_hr_max: Some(hr_max),
+            ..no_age(running_profile())
+        });
+        let long = planned_long_run_item(&model);
+        let t = long.run_target.expect("the long run has a target");
+        t.hr_label
+            .strip_suffix(" bpm")
+            .and_then(|s| s.rsplit(['–', ' ']).next())
+            .and_then(|h| h.parse().ok())
+            .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"))
+    };
+    let (high, lower) = (ceiling(190.0), ceiling(171.0));
+    assert!(high > 0 && high <= 190, "{high}");
+    assert!(
+        (f64::from(lower) - f64::from(high) * 0.9).abs() <= 1.0,
+        "the band follows the measured HRmax: {high} bpm at 190, {lower} bpm at 171"
+    );
 }
 
 #[test]

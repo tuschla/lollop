@@ -67,22 +67,15 @@ fn predict_race_with_degenerate_input_surfaces_no_false_time() {
     )
     .expect_only_render();
 
-    assert!(
-        app.view(&model).race_prediction.is_some(),
-        "the section is present, just with no numeric estimate"
-    );
-    let pred = race_of(&model);
+    let pred = app
+        .view(&model)
+        .race_prediction
+        .expect("the section is present, just with no numeric estimate");
     assert_eq!(pred.predicted, "-");
-    assert_eq!(pred.low_sec, 0.0);
-    assert!(!pred.agreed);
     assert!(
         pred.summary.contains("enter a recent race"),
         "degenerate summary should explain the missing input, got {}",
         pred.summary
-    );
-    assert!(
-        !pred.predicted.contains(':'),
-        "must not render a clock time for undefined input"
     );
 }
 
@@ -379,12 +372,16 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
 
 #[test]
 fn coach_query_builders_never_panic_on_degenerate_inputs() {
-    // The four Coach tool builders take free-form numeric/string queries from
-    // the shell (a text field the user can leave empty, zero, or negative).
-    // Each guards its own degenerate domain; sweep the boundaries and assert
+    // The four Coach tools take free-form numeric/string queries from the
+    // shell (a text field the user can leave empty, zero, or negative). Each
+    // guards its own degenerate domain; sweep the boundaries and assert
     // (a) no panic (div-by-zero / NaN-format / underflow) and (b) HARD RULE 2:
     // every surfaced row is evidence-cited and none is graded MarketingMyth.
     let cited_non_myth = |rows: &[GuidanceView]| assert_cited_non_myth(rows, &"coach query");
+    let view_after = |events: &[Event]| {
+        let (app, model) = replay(events);
+        app.view(&model)
+    };
 
     // Race predictor: zero/negative distances and times must degrade to the
     // "need a valid recent race" summary, never a NaN clock or panic.
@@ -392,17 +389,15 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
         for &t in &[0.0, -1.0, 1200.0] {
             for &g in &[0.0, -1.0, 10_000.0] {
                 for &wk in &[0.0, -5.0, 60.0] {
-                    let v = to_race_view(
-                        &RaceQuery {
-                            recent_distance_m: d,
-                            recent_time_sec: t,
-                            goal_distance_m: g,
-                            weekly_km: wk,
-                            weeks_since_race: None,
-                        },
-                        None,
-                        DistanceUnit::Km,
-                    );
+                    let v = view_after(&[Event::PredictRace {
+                        recent_distance_m: d,
+                        recent_time_sec: t,
+                        goal_distance_m: g,
+                        weekly_km: wk,
+                        weeks_since_race: None,
+                    }])
+                    .race_prediction
+                    .expect("a prediction section");
                     assert!(
                         !v.predicted.contains("NaN"),
                         "NaN clock for d={d} t={t} g={g}"
@@ -416,39 +411,43 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
     for muscle in ["", "chest", "not-a-muscle"] {
         for &weeks in &[0u8, 1, 12, 255] {
             cited_non_myth(
-                &build_hypertrophy_plan(
-                    &HypertrophyInputView {
-                        muscle: muscle.to_string(),
-                        weeks,
-                        not_growing: false,
-                        recovering_easily: false,
-                    },
-                    None,
-                    None,
-                )
-                .0,
+                &view_after(&[Event::PlanHypertrophyMeso {
+                    muscle: muscle.to_string(),
+                    weeks,
+                    not_growing: false,
+                    recovering_easily: false,
+                }])
+                .hypertrophy_plan,
             );
         }
     }
 
     // Protein: non-positive bodyweight yields no rows; positive scales
-    // cleanly, with and without the RED-S refusal path (safety-022).
+    // cleanly, with and without the RED-S refusal path (safety-022), in kg
+    // and lb.
     for &bw in &[0.0, -70.0, 70.0, 1e6] {
-        for &m in &[false, true] {
-            for &d in &[false, true] {
-                for &reds in &[false, true] {
-                    for &lb in &[false, true] {
+        for &masters in &[false, true] {
+            for &deficit in &[false, true] {
+                for &reds_signal in &[false, true] {
+                    for &weight_lb in &[false, true] {
+                        let profile = Profile {
+                            weight_lb,
+                            health: HealthScreen {
+                                reds_signal,
+                                ..HealthScreen::default()
+                            },
+                            ..base_profile()
+                        };
                         cited_non_myth(
-                            &build_protein_targets(
-                                &ProteinInputView {
+                            &view_after(&[
+                                Event::SetProfile(profile),
+                                Event::ComputeProtein {
                                     bodyweight_kg: bw,
-                                    masters: m,
-                                    deficit: d,
+                                    masters,
+                                    deficit,
                                 },
-                                reds,
-                                lb,
-                            )
-                            .0,
+                            ])
+                            .protein_targets,
                         );
                     }
                 }
@@ -460,14 +459,11 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
     // HRmax; in-range ages produce cited bands.
     for &age in &[-1.0, 0.0, 4.9, 5.0, 30.0, 100.0, 100.1, 200.0] {
         cited_non_myth(
-            &build_hr_zones(
-                &HrZoneInputView {
-                    age_years: age,
-                    resting_hr_bpm: None,
-                },
-                None,
-            )
-            .0,
+            &view_after(&[Event::ComputeHrZones {
+                age_years: age,
+                resting_hr_bpm: None,
+            }])
+            .hr_zones,
         );
     }
 }
@@ -625,14 +621,16 @@ fn race_prediction_notes_flag_stale_input_and_marathon_optimism() {
         "optimism note carries the running-008 derate: {:#?}",
         pred.notes
     );
-    let query = RaceQuery {
-        recent_distance_m: 10_000.0,
-        recent_time_sec: 2_520.0,
-        goal_distance_m: 42_195.0,
-        weekly_km: 50.0,
-        weeks_since_race: Some(10),
-    };
-    let miles = to_race_view(&query, Some(20.0), DistanceUnit::Mi);
+    // A miles user reads the optimism note in miles.
+    app.update(
+        Event::SetProfile(Profile {
+            distance_unit: DistanceUnit::Mi,
+            ..base_profile()
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let miles = app.view(&model).race_prediction.expect("prediction");
     assert!(
         miles
             .notes
@@ -762,8 +760,8 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
 fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
     // An absurd goal distance overflows Riegel's power to f64::INFINITY. The
     // prediction must collapse to the degenerate "-"/"need a valid recent
-    // race" path, never leak Inf (→ serde null) into low_sec/high_sec (a
-    // `low_sec <= 0.0` guard alone does not catch Inf).
+    // race" path with no notes, never an Inf-derived clock (a `low_sec <= 0.0`
+    // guard alone does not catch Inf).
     let app = Engine;
     let mut model = Model::default();
     app.update(
@@ -777,16 +775,10 @@ fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
         &mut model,
     )
     .expect_only_render();
-    assert!(app.view(&model).race_prediction.is_some(), "prediction");
-    let pred = race_of(&model);
+    let pred = app.view(&model).race_prediction.expect("prediction");
     assert_eq!(pred.predicted, "-", "absurd goal → degenerate dash");
     assert!(pred.summary.contains("enter a recent race"));
-    assert!(
-        pred.low_sec.is_finite() && pred.high_sec.is_finite(),
-        "no Inf reaches the view: low {} high {}",
-        pred.low_sec,
-        pred.high_sec
-    );
+    assert!(pred.notes.is_empty(), "{:#?}", pred.notes);
 }
 
 #[test]
@@ -859,13 +851,29 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
     assert!(hy.not_growing && !hy.recovering_easily);
 }
 
+/// The HR-zone rows and structured HRmax after `profile` is set and the
+/// zones are computed for `age`.
+fn hr_zones_for_profile(profile: Profile, age: f64) -> (Vec<GuidanceView>, Option<HrMaxView>) {
+    let (app, model) = replay(&[
+        Event::SetProfile(profile),
+        Event::ComputeHrZones {
+            age_years: age,
+            resting_hr_bpm: None,
+        },
+    ]);
+    let vm = app.view(&model);
+    (vm.hr_zones, vm.hr_max)
+}
+
 #[test]
 fn an_implausible_measured_hr_max_falls_back_to_tanaka() {
-    let q = HrZoneInputView {
-        age_years: 30.0,
-        resting_hr_bpm: None,
-    };
-    let (rows, hr_max, _) = build_hr_zones(&q, Some(9999.0));
+    let (rows, hr_max) = hr_zones_for_profile(
+        Profile {
+            measured_hr_max: Some(9999.0),
+            ..base_profile()
+        },
+        30.0,
+    );
     let hrmax_row = rows.iter().find(|r| r.summary.contains("HRmax")).unwrap();
     assert!(
         hrmax_row.summary.contains("187"),
@@ -882,11 +890,13 @@ fn an_implausible_measured_hr_max_falls_back_to_tanaka() {
 #[test]
 fn maf_row_skipped_when_age_out_of_range_with_measured_max() {
     for age in [0.0, 130.0] {
-        let q = HrZoneInputView {
-            age_years: age,
-            resting_hr_bpm: None,
-        };
-        let (rows, hm, _) = build_hr_zones(&q, Some(190.0));
+        let (rows, hm) = hr_zones_for_profile(
+            Profile {
+                measured_hr_max: Some(190.0),
+                ..base_profile()
+            },
+            age,
+        );
         assert!(hm.is_some_and(|h| h.measured));
         let maf: Vec<_> = rows
             .iter()
@@ -901,45 +911,47 @@ fn maf_row_skipped_when_age_out_of_range_with_measured_max() {
 /// there is no prediction for them to qualify.
 #[test]
 fn degenerate_race_view_has_no_prediction_notes() {
-    let q = RaceQuery {
-        recent_distance_m: 5000.0,
-        recent_time_sec: 0.0,
-        goal_distance_m: 42_195.0,
-        weekly_km: 40.0,
-        weeks_since_race: Some(12),
-    };
-    let v = to_race_view(&q, Some(10.0), DistanceUnit::Km);
+    let (app, model) = replay(&[
+        log_run_at(10.0, 60.0, 70.0, 100 * WEEK),
+        Event::PredictRace {
+            recent_distance_m: 5000.0,
+            recent_time_sec: 0.0,
+            goal_distance_m: 42_195.0,
+            weekly_km: 40.0,
+            weeks_since_race: Some(12),
+        },
+    ]);
+    let v = app.view(&model).race_prediction.expect("prediction");
     assert_eq!(v.predicted, "-");
     let notes: Vec<_> = v.notes.iter().map(|n| n.summary.clone()).collect();
     assert!(notes.is_empty(), "{notes:#?}");
 }
 
-/// At ≥ 64 km a week the long-run row states only the 25% share cap: the
-/// twice-the-daily-average bound is the low-mileage rule (running-016).
+/// At ≥ 64 km a week the long-run row states only the 25% share cap, once:
+/// the twice-the-daily-average bound is the low-mileage rule (running-016).
 #[test]
 fn high_mileage_long_run_row_does_not_apply_the_low_mileage_rule() {
-    let hybrid = include_str!("../../../tests/fixtures/view_snapshot/hybrid.events.ndjson");
-    let mut profile: serde_json::Value =
-        serde_json::from_str(hybrid.lines().next().unwrap()).unwrap();
-    profile["SetProfile"]["running_days_per_week"] = 6.into();
-    let mut model = snapshot_fixture_model(&profile.to_string());
     let monday = 20_003_i64;
+    let mut events = vec![Event::SetProfile(Profile {
+        running_days_per_week: 6,
+        ..sample_profile()
+    })];
     for (i, km) in [30.0, 10.0, 10.0, 10.0, 10.0].into_iter().enumerate() {
         let at = (monday + i as i64) * DAY_SEC + 36_000;
-        let _ = Engine.update(log_run_at(km, km * 6.0, 70.0, at), &mut model);
+        events.push(log_run_at(km, km * 6.0, 70.0, at));
     }
-    let _ = Engine.update(set_today_ev(monday + 6), &mut model);
-    let report = Engine.view(&model).weekly_report;
+    events.push(set_today_ev(monday + 6));
+    let (app, model) = replay(&events);
+    let report = app.view(&model).weekly_report;
     let long: Vec<&str> = report
         .iter()
         .map(|r| r.summary.as_str())
         .filter(|s| s.starts_with("Long run ") && !s.starts_with("Long run and"))
         .collect();
-    assert!(long.iter().any(|s| s.contains("25% limit")), "{report:#?}");
     assert!(
-        !long
-            .iter()
-            .any(|s| s.contains("twice your average daily distance")),
-        "{long:#?}"
+        long.len() == 1
+            && long[0].starts_with("Long run 30.0 km is 43% of the week")
+            && long[0].contains("over the 25% limit"),
+        "{report:#?}"
     );
 }

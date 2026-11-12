@@ -43,4 +43,4 @@ with tempfile.NamedTemporaryFile(suffix=".png", dir=sys.argv[5] if len(sys.argv)
     im.save(f.name)
     out = subprocess.run(["tesseract", f.name, "-", "--psm", "6", "-l", lang],
                          capture_output=True, text=True).stdout
-print(f"{hit.get('text')}\t{' '.join(out.split())}")
+print(f"{' '.join(hit.get('text').split())}\t{' '.join(out.split())}")

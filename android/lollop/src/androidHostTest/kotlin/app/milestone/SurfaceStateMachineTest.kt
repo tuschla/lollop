@@ -24,8 +24,6 @@ import java.io.File
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
 import java.time.ZoneId
 import java.util.TimeZone
 import kotlin.random.Random
@@ -37,6 +35,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -46,8 +45,7 @@ import org.robolectric.Shadows.shadowOf
 /**
  * Seeded walks over the surfaces that read the widget snapshot (session reminder,
  * home screen widget, Quick Settings tile): clock, zone, plan, run and process
- * steps in [Walk.step], invariants in [Walk.check]. `SURFACE_SM_SEEDS` ×
- * `SURFACE_SM_STEPS` from `SURFACE_SM_SEED`; a failure prints its replay line.
+ * steps in [Walk.step], invariants in [Walk.check]. A failure names its seed.
  */
 @RunWith(RobolectricTestRunner::class)
 class SurfaceStateMachineTest {
@@ -55,7 +53,8 @@ class SurfaceStateMachineTest {
     private val res get() = app.resources
     private val nm get() = app.getSystemService(NotificationManager::class.java)
     private val am get() = app.getSystemService(AlarmManager::class.java)
-    private val savedZone: TimeZone = TimeZone.getDefault()
+
+    @get:Rule val jvmDefaults = JvmDefaultsRule()
 
     @Before
     fun setUp() {
@@ -66,7 +65,6 @@ class SurfaceStateMachineTest {
     @After
     fun tearDown() {
         clean()
-        TimeZone.setDefault(savedZone)
     }
 
     private fun clean() {
@@ -74,57 +72,23 @@ class SurfaceStateMachineTest {
         AppRuntime.resetForTest(clock = TestClock)
         // A fresh install per walk: the reminder's setting and the day it last reminded.
         app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().clear().commit()
-        RunSession.reset()
         File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         nm.cancelAll()
         shadowOf(am).scheduledAlarms.toList().forEach { it.operation?.let(am::cancel) }
-    }
-
-    /** Every tz rule set, instants around each 2025–2028 transition: the reminder's next
-     *  fire is the first valid local reminder time strictly after now (a skipped
-     *  time moves forward by the gap, a repeated one fires at its first pass) and
-     *  the midnight tick is the start of the next local day. */
-    @Test
-    fun nextFireAndMidnightMatchTheOracleInEveryZone() {
-        val rng = Random(SEED_BASE)
-        val minutes = listOf(0, 1, 30, 59, 60, 90, 119, 120, 150, 179, 180, 7 * 60 + 30, 23 * 60 + 59) + List(4) { rng.nextInt(MINUTES_PER_DAY) }
-        for (zone in ZoneId.getAvailableZoneIds().sorted().map(ZoneId::of).distinctBy { it.rules }) {
-            val id = zone.id
-            val instants = mutableListOf<Long>()
-            var t = Instant.parse("2025-01-01T00:00:00Z")
-            val end = Instant.parse("2028-12-31T00:00:00Z")
-            while (true) {
-                val tr = zone.rules.nextTransition(t) ?: break
-                if (tr.instant.isAfter(end)) break
-                val at = tr.instant.toEpochMilli()
-                for (d in longArrayOf(-26 * HOUR, -HOUR, -1, 0, 1, HOUR / 2, HOUR, 3 * HOUR)) instants += at + d
-                instants += at + rng.nextLong(-2 * DAY, 2 * DAY)
-                t = tr.instant
-            }
-            repeat(3) { instants += rng.nextLong(Instant.parse("2025-01-01T00:00:00Z").toEpochMilli(), end.toEpochMilli()) }
-            for (now in instants) {
-                for (m in minutes) {
-                    assertEquals("$id now=${Instant.ofEpochMilli(now)} minute=$m", oracleNextFire(now, m, zone), SessionReminder.nextFireMillis(now, m, zone.toKotlinTimeZone()))
-                }
-                assertEquals("$id midnight after ${Instant.ofEpochMilli(now)}", oracleNextMidnight(now, zone), nextLocalMidnightMillis(now, zone.toKotlinTimeZone()))
-            }
-        }
     }
 
     /**
      * Day by day through the real core's plans (lifter, hybrid 10K, under 18,
      * calisthenics), training, moving or skipping each day: every model's surfaces
      * agree with it, and each morning the reminder an older snapshot would post from
-     * its days ahead is today's own. `SURFACE_CORE_SEEDS` × `SURFACE_CORE_DAYS`.
+     * its days ahead is today's own.
      */
     @Test
     fun realCoreDaysKeepTheSurfacesInStep() {
-        val seeds = System.getenv("SURFACE_CORE_SEEDS")?.toIntOrNull() ?: 4
-        val days = System.getenv("SURFACE_CORE_DAYS")?.toIntOrNull() ?: 28
-        for (i in 0 until seeds) {
+        for (i in 0 until CORE_SEEDS) {
             val seed = SEED_BASE + i
             try {
-                seededWalk("core seed=$seed", "SURFACE_SM_SEED=$seed SURFACE_CORE_SEEDS=1", keep = 20) { note -> coreWalk(seed, days, note) }
+                seededWalk("core seed=$seed", keep = 20) { note -> coreWalk(seed, CORE_DAYS, note) }
             } finally {
                 JniCore.reset()
             }
@@ -233,12 +197,10 @@ class SurfaceStateMachineTest {
 
     @Test
     fun randomWalksKeepTheSurfacesConsistent() {
-        val seeds = System.getenv("SURFACE_SM_SEEDS")?.toIntOrNull() ?: DEFAULT_SEEDS
-        val steps = System.getenv("SURFACE_SM_STEPS")?.toIntOrNull() ?: DEFAULT_STEPS
-        for (i in 0 until seeds) {
+        for (i in 0 until SEEDS) {
             val seed = SEED_BASE + i
             clean()
-            Walk(seed).run(steps)
+            Walk(seed).run(STEPS)
         }
     }
 
@@ -387,7 +349,7 @@ class SurfaceStateMachineTest {
         private val today get() = todayEpochDay()
         private val zone get() = ZoneId.systemDefault()
 
-        fun run(steps: Int) = seededWalk("seed=$seed", "SURFACE_SM_SEED=$seed SURFACE_SM_SEEDS=1") { n ->
+        fun run(steps: Int) = seededWalk("seed=$seed") { n ->
             note = n
             start()
             check("start")
@@ -422,8 +384,8 @@ class SurfaceStateMachineTest {
             0 -> SessionReminder.DEFAULT_MINUTE_OF_DAY
             1 -> 2 * 60 + rng.nextInt(60) // inside the usual spring-forward gap
             2 -> listOf(0, 1, 23 * 60 + 59)[rng.nextInt(3)]
-            3 -> Math.floorMod(Instant.ofEpochMilli(now).atZone(zone).let { it.hour * 60 + it.minute } + rng.nextInt(-3, 4), MINUTES_PER_DAY)
-            else -> rng.nextInt(MINUTES_PER_DAY)
+            3 -> Math.floorMod(Instant.ofEpochMilli(now).atZone(zone).let { it.hour * 60 + it.minute } + rng.nextInt(-3, 4), SessionReminder.MINUTES_PER_DAY)
+            else -> rng.nextInt(SessionReminder.MINUTES_PER_DAY)
         }
 
         private fun step(): String {
@@ -477,13 +439,13 @@ class SurfaceStateMachineTest {
 
         private fun advanceToReminder(): String {
             val m = SessionReminder.setting(app).minuteOfDay
-            val next = oracleNextFire(now, m, zone)
+            val next = SessionReminder.nextFireMillis(now, m, zone.toKotlinTimeZone())
             advance(next - now + rng.nextLong(-5 * MINUTE, 10 * MINUTE).coerceAtLeast(-(next - now) + 1_000))
             return "advance to reminder time"
         }
 
         private fun advanceToMidnight(): String {
-            val next = oracleNextMidnight(now, zone)
+            val next = nextLocalMidnightMillis(now, zone.toKotlinTimeZone())
             advance(next - now + rng.nextLong(-10 * MINUTE, 30 * MINUTE).coerceAtLeast(-(next - now) + 1_000))
             return "advance to midnight"
         }
@@ -669,6 +631,10 @@ class SurfaceStateMachineTest {
             shown = n
         }
 
+        /** The reminder alarm and the midnight tick are rescheduled on every change
+         *  (setting, clock, zone, boot, a fire): each stands at the instant the
+         *  current clock, zone and setting give ([SessionReminder.nextFireMillis],
+         *  [nextLocalMidnightMillis], hand-checked across DST in ReminderClockTest). */
         private fun check(op: String) {
             observe(op)
             val setting = SessionReminder.setting(app)
@@ -681,7 +647,7 @@ class SurfaceStateMachineTest {
                 assertEquals(
                     "reminder alarm for minute ${setting.minuteOfDay} in ${zone.id} after ${Instant.ofEpochMilli(now).atZone(zone)} " +
                         "was ${Instant.ofEpochMilli(a.triggerAtTime).atZone(zone)}",
-                    oracleNextFire(now, setting.minuteOfDay, zone), a.triggerAtTime,
+                    SessionReminder.nextFireMillis(now, setting.minuteOfDay, zone.toKotlinTimeZone()), a.triggerAtTime,
                 )
             } else {
                 assertTrue("reminder off but ${reminderAlarms.size} alarms", reminderAlarms.isEmpty())
@@ -689,7 +655,7 @@ class SurfaceStateMachineTest {
             }
 
             val tick = withAction(TodayWidgetReceiver.ACTION_MIDNIGHT).singleOrNull() ?: throw AssertionError("no single midnight tick")
-            assertEquals("midnight tick in ${zone.id}", oracleNextMidnight(now, zone), tick.triggerAtTime)
+            assertEquals("midnight tick in ${zone.id}", nextLocalMidnightMillis(now, zone.toKotlinTimeZone()), tick.triggerAtTime)
 
             val stored = WidgetSnapshotStore.read(app)
             val fresh = stored != null && !stored.stale && stored.epochDay == today
@@ -762,10 +728,11 @@ class SurfaceStateMachineTest {
         private const val MINUTE = 60_000L
         private const val HOUR = 60 * MINUTE
         private const val DAY = 24 * HOUR
-        private const val MINUTES_PER_DAY = 24 * 60
-        private const val DEFAULT_SEEDS = 12
-        private const val DEFAULT_STEPS = 150
-        private val SEED_BASE = System.getenv("SURFACE_SM_SEED")?.toLongOrNull() ?: 20_261_030L
+        private const val SEEDS = 12
+        private const val STEPS = 150
+        private const val CORE_SEEDS = 4
+        private const val CORE_DAYS = 28
+        private const val SEED_BASE = 20_261_030L
         private val LIFTS = listOf("Back squat", "Bench press", "Row", "Deadlift")
 
         /** Share of days the app is not opened in the real-core walk. */
@@ -778,36 +745,5 @@ class SurfaceStateMachineTest {
             "Australia/Lord_Howe", "Pacific/Chatham", "Asia/Kolkata", "UTC", "Pacific/Kiritimati",
             "Pacific/Pago_Pago", "America/St_Johns", "Africa/Casablanca",
         )
-
-        /** The first instant strictly after [now] whose local time in [zone] is
-         *  [minute]: on a day the time is skipped, that time shifted by the gap; on
-         *  a day it repeats, its first pass. */
-        private fun oracleNextFire(now: Long, minute: Int, zone: ZoneId): Long {
-            var date = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            while (true) {
-                val ldt = LocalDateTime.of(date, LocalTime.of(minute / 60, minute % 60))
-                val offsets = zone.rules.getValidOffsets(ldt)
-                val at = if (offsets.isEmpty()) {
-                    val tr = zone.rules.getTransition(ldt)
-                    ldt.plus(tr.duration).toInstant(tr.offsetAfter)
-                } else {
-                    offsets.minOf { ldt.toInstant(it) }
-                }.toEpochMilli()
-                if (at > now) return at
-                date = date.plusDays(1)
-            }
-        }
-
-        /** The first instant of the local day after [now]'s (the end of the gap when
-         *  midnight is skipped). */
-        private fun oracleNextMidnight(now: Long, zone: ZoneId): Long {
-            val ldt = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(1).atStartOfDay()
-            val offsets = zone.rules.getValidOffsets(ldt)
-            return if (offsets.isEmpty()) {
-                zone.rules.getTransition(ldt).instant.toEpochMilli()
-            } else {
-                offsets.minOf { ldt.toInstant(it) }.toEpochMilli()
-            }
-        }
     }
 }

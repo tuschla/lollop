@@ -4,13 +4,13 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.core.CoreBridge
 import app.milestone.core.JniCore
-import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.widget.WidgetSnapshotStore
 import app.milestone.widget.widgetSnapshotOf
 import app.milestone.qa.QaHarness.daysAgoAtMidday as at
 import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -47,7 +47,6 @@ import org.robolectric.RobolectricTestRunner
  * the log exactly as the last write left it); every thread's view at a quiet point
  * equals a fresh thread's; the live view equals a cold reboot's
  * replay of the log; nothing waits past [STALL_SEC] (a deadlock fails, not hangs).
- * `CORE_STRESS_ROUNDS` scales the main stress.
  */
 @RunWith(RobolectricTestRunner::class)
 class CoreConcurrencyTest {
@@ -126,7 +125,7 @@ class CoreConcurrencyTest {
 
     @Test
     fun manyThreadsSendingExportingAndReadingLoseNothingAndReplayToTheLiveView() {
-        val rounds = System.getenv("CORE_STRESS_ROUNDS")?.toIntOrNull() ?: 3
+        val rounds = 3
         val threads = 8
         val perRound = 7
         boot(listOf(QaHarness.hybridTenKProfile(), Event.GeneratePlan(todayEpochDay() - 7)))
@@ -351,10 +350,7 @@ class CoreConcurrencyTest {
                 if (poisoning && POISON in String(event, Charsets.UTF_8)) {
                     JniCore.reset()
                     resets.incrementAndGet()
-                    return coreJson.encodeToString(
-                        ErrorEnvelope.serializer(),
-                        ErrorEnvelope(CoreError(ErrorKind.PanicReset, "update", "injected")),
-                    ).toByteArray()
+                    return coreErrorJson(ErrorKind.PanicReset, "update", "injected").encodeToByteArray()
                 }
                 return JniCore.update(event)
             }
@@ -398,19 +394,25 @@ class CoreConcurrencyTest {
     @Test
     fun sendsRacingBootCompactionAllLandInTheRewrittenLogOnce() {
         val profile = QaHarness.strengthProfile()
-        val zones = (0 until 60).map { Event.ComputeHrZones(30.0 + it) }
+        // Every zone request but the last is superseded: enough dropped lines to rewrite.
+        val zones = (0..EventLog.REWRITE_MIN_DROPPED_LINES).map { Event.ComputeHrZones(30.0 + it) }
         val old = (0 until 10).map { Event.LogSet("Back squat", 80.0 + it, 5, 8.0, observedAt = at(30 + it), entryId = at(30 + it) * 1000) }
         QaHarness.seedLog(ctx, listOf(profile) + zones + old)
-        ProcessDeath.kill(ctx)
-        val restoredFlag = DurableCore::class.java.getDeclaredField("restored").apply { isAccessible = true }
+        // The real core; boot's restore asks it for the compaction under the engine's lock.
+        val restoring = CountDownLatch(1)
+        val engine = DurableCore(
+            object : CoreBridge by JniCore {
+                override fun compactLog(lines: Array<String>): ByteArray? {
+                    restoring.countDown()
+                    return JniCore.compactLog(lines)
+                }
+            },
+        )
+        QaHarness.freshProcess(engine)
         val sent = ConcurrentHashMap.newKeySet<Long>()
-        val booter = thread(name = "boot") { Core.restore(ctx) }
+        val booter = thread(name = "boot") { engine.restore(ctx) }
         runWorkers(4) { t ->
-            val deadline = System.currentTimeMillis() + STALL_SEC * 1000
-            while (restoredFlag.get(Core) != true) {
-                check(System.currentTimeMillis() < deadline) { "restore never started" }
-                Thread.onSpinWait()
-            }
+            check(restoring.await(STALL_SEC, TimeUnit.SECONDS)) { "restore never started" }
             repeat(15) { i ->
                 val e = Event.LogSet("Lift $t", 60.0 + i, 5, 8.0, observedAt = at(i % 7, t * 100L + i))
                 sendOk(e, "t$t#$i")
@@ -419,7 +421,7 @@ class CoreConcurrencyTest {
         }
         booter.join(STALL_SEC * 1000)
         assertFalse("boot still running (deadlock?)", booter.isAlive)
-        val live = Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec())).view
+        val live = engine.send(Event.SetToday(todayEpochDay(), utcOffsetSec())).view
         val onDisk = QaHarness.logLines(ctx)
         assertTrue("the log was not compacted", onDisk.none { it.startsWith("{\"ComputeHrZones\"") && "\"age_years\":30.0" in it })
         for (id in sent) assertEquals("set $id on disk once", 1, onDisk.count { carriesId(it, id) })

@@ -1,7 +1,7 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.Test
 
 /**
  * The keypad editors submit exactly what the buffer displays (the
@@ -34,8 +34,10 @@ class NumericBufferTest {
 
     @Test
     fun lengthIsCapped() {
-        assertEquals("123456", editNumericBuffer("123456", '7', replaceAll = false))
-        assertEquals("123456", editNumericBuffer("123456", '.', replaceAll = false))
+        val full = "1".repeat(NumericBufferMaxLength)
+        assertEquals(full, editNumericBuffer(full.dropLast(1), '1', replaceAll = false))
+        assertEquals(full, editNumericBuffer(full, '7', replaceAll = false))
+        assertEquals(full, editNumericBuffer(full, '.', replaceAll = false))
     }
 
     @Test

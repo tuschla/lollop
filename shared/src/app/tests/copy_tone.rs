@@ -5,113 +5,50 @@
 //! marks, emojis, "we/us/our", a hype/AI word list, rhetorical question
 //! openers ("First time? Pick…"), stock phrases ("Let's", "Ready to", "It's
 //! important to note") and em dashes in sentences (a lone `—` no-value
-//! placeholder is fine). The Android twin is `CopyToneTest.kt`; keep the two
-//! rule sets in step.
-//!
-//! A real exception goes in `ALLOW` with its reason; an entry nothing matches
-//! any more fails `tone_allowlist_is_reasoned_and_live`.
+//! placeholder is fine). The word lists and the lint's own cases are
+//! `tests/fixtures/copy_tone.json`, which the Android twin `CopyToneTest.kt`
+//! reads too.
 
-use super::copy_invariants::{ALL_HITS, assert_family, has_word, is_word_at};
+use std::sync::LazyLock;
 
-/// A sanctioned exception: `rule` (a `tone:` rule prefix) on a string at
-/// `path` (`""`: any path) containing `text`.
-struct Allow {
-    rule: &'static str,
-    path: &'static str,
-    text: &'static str,
-    reason: &'static str,
+use serde::Deserialize;
+
+use super::copy_invariants::{assert_family, has_word, is_word_at};
+
+/// A phrase rule: its label and the lowercase forms that count.
+#[derive(Deserialize)]
+struct Phrase {
+    label: String,
+    forms: Vec<String>,
 }
 
-const ALLOW: &[Allow] = &[];
+/// writing.md Terms: the word not to use and the app's word.
+#[derive(Deserialize)]
+struct Term {
+    term: String,
+    say: String,
+}
 
-/// Hype and AI-voice words: (label, the forms that count). "elevated" is not
-/// listed: "elevated resting heart rate" is the clinical term.
-const HYPE: &[(&str, &[&str])] = &[
-    ("unlock", &["unlock", "unlocks", "unlocked", "unlocking"]),
-    ("crush", &["crush", "crushes", "crushed", "crushing"]),
-    ("journey", &["journey", "journeys"]),
-    (
-        "level up",
-        &[
-            "level up",
-            "levels up",
-            "leveled up",
-            "leveling up",
-            "level-up",
-        ],
-    ),
-    ("boost", &["boost", "boosts", "boosted", "boosting"]),
-    (
-        "supercharge",
-        &[
-            "supercharge",
-            "supercharges",
-            "supercharged",
-            "supercharging",
-        ],
-    ),
-    ("seamless", &["seamless", "seamlessly"]),
-    ("effortless", &["effortless", "effortlessly"]),
-    (
-        "empower",
-        &[
-            "empower",
-            "empowers",
-            "empowered",
-            "empowering",
-            "empowerment",
-        ],
-    ),
-    ("elevate", &["elevate", "elevates", "elevating"]),
-    ("delve", &["delve", "delves", "delved", "delving"]),
-    ("robust", &["robust", "robustly"]),
-    ("vibrant", &["vibrant"]),
-    ("tapestry", &["tapestry"]),
-    ("testament", &["testament"]),
-    (
-        "game-changer",
-        &["game-changer", "game changer", "game-changing"],
-    ),
-    ("insights", &["insight", "insights"]),
-    (
-        "personalized",
-        &[
-            "personalized",
-            "personalised",
-            "personalize",
-            "personalization",
-        ],
-    ),
-    ("tailored", &["tailor", "tailors", "tailored", "tailoring"]),
-    ("Welcome back", &["welcome back"]),
-    ("Great job", &["great job"]),
-    ("Nice work", &["nice work"]),
-    ("Well done", &["well done"]),
-    ("Well paced", &["well paced", "well-paced"]),
-    ("You've got this", &["you've got this"]),
-    ("Keep it up", &["keep it up"]),
-    ("Don't worry", &["don't worry"]),
-    ("No pressure", &["no pressure"]),
-    ("simply", &["simply"]),
-    ("when you're ready", &["when you're ready"]),
-    (
-        "studies show",
-        &["studies show", "studies suggest", "studies have shown"],
-    ),
-    (
-        "research shows",
-        &[
-            "research shows",
-            "research backs",
-            "research suggests",
-            "research has shown",
-        ],
-    ),
-    (
-        "experts say",
-        &["experts say", "experts agree", "experts recommend"],
-    ),
-];
+#[derive(Deserialize)]
+struct Flagged {
+    text: String,
+    rule: String,
+}
+
+/// `tests/fixtures/copy_tone.json`.
+#[derive(Deserialize)]
+struct ToneRules {
+    hype: Vec<Phrase>,
+    stock_phrases: Vec<Phrase>,
+    terms: Vec<Term>,
+    clean: Vec<String>,
+    flagged: Vec<Flagged>,
+}
+
+static RULES: LazyLock<ToneRules> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../../tests/fixtures/copy_tone.json"))
+        .expect("copy_tone.json parses")
+});
 
 /// Pictographic emoji blocks plus the emoji joiner and presentation selector.
 /// Arrows (`→`, `↔`) and math symbols are typography, not emoji.
@@ -174,36 +111,32 @@ fn tone_violations(s: &str) -> Vec<String> {
     if has_word(s, "us") || has_word(s, "Us") {
         v.push("tone: first-person plural `us`".into());
     }
-    for (label, forms) in HYPE {
-        if forms.iter().any(|f| has_phrase(&n, f)) {
-            v.push(format!("tone: hype `{label}`"));
+    for p in &RULES.hype {
+        if p.forms.iter().any(|f| has_phrase(&n, f)) {
+            v.push(format!("tone: hype `{}`", p.label));
         }
     }
     if question_opener(s) {
         v.push("tone: rhetorical question opener".into());
     }
-    if has_phrase(&n, "let's") {
-        v.push("tone: stock phrase `Let's`".into());
+    for p in &RULES.stock_phrases {
+        if p.forms.iter().any(|f| has_phrase(&n, f)) {
+            v.push(format!("tone: stock phrase `{}`", p.label));
+        }
     }
     if has_word(&straight, "Ready to") {
         v.push("tone: stock phrase `Ready to`".into());
     }
-    if has_phrase(&n, "it's important to note") || has_phrase(&n, "it is important to note") {
-        v.push("tone: stock phrase `It's important to note`".into());
-    }
     if s.contains('—') && s.trim() != "—" {
         v.push("tone: em dash in a sentence".into());
     }
-    for (term, say) in TERMS {
-        if has_phrase(&n, term) {
-            v.push(format!("tone: term `{term}` (say {say})"));
+    for t in &RULES.terms {
+        if has_phrase(&n, &t.term) {
+            v.push(format!("tone: term `{}` (say {})", t.term, t.say));
         }
     }
     v
 }
-
-/// writing.md Terms: (the word not to use, the app's word).
-const TERMS: &[(&str, &str)] = &[("on hold", "paused")];
 
 /// `s` with digit runs as `#`, so one template rendered with different
 /// numbers reports once.
@@ -221,96 +154,36 @@ fn template(s: &str) -> String {
     out
 }
 
-/// The sweep's tone hits for the string `s` at `path`: each broken rule with
-/// the string's template (so every distinct offending line is listed), or
-/// `tone-allowed: <ALLOW index>` when an allowlist entry covers it.
-pub(super) fn tone_hits(path: &str, s: &str) -> Vec<String> {
+/// The sweep's tone hits for the string `s`: each broken rule with the
+/// string's template (so every distinct offending line is listed).
+pub(super) fn tone_hits(s: &str) -> Vec<String> {
     tone_violations(s)
         .into_iter()
-        .map(|rule| {
-            let allowed = ALLOW.iter().position(|a| {
-                rule.starts_with(a.rule)
-                    && (a.path.is_empty() || a.path == path)
-                    && s.contains(a.text)
-            });
-            match allowed {
-                Some(i) => format!("tone-allowed: {i}"),
-                None => format!("{rule} · `{}`", template(s)),
-            }
-        })
+        .map(|rule| format!("{rule} · `{}`", template(s)))
         .collect()
 }
 
 #[test]
 fn the_tone_lint_flags_each_rule_and_passes_clean_copy() {
-    for clean in [
-        "Squat 5×3 @ 85 kg · ~2 reps left",
-        "Held: resting heart rate 8 bpm above your usual. Easy run instead.",
-        "—",
-        "Feeling ill?",
-        "Pace 4:50–5:05 /km → 150–162 bpm",
-        "US spelling; elevated resting heart rate; Expert opinion",
-        "Lighter week: the plan keeps 3 sessions. Log them by hand if needed.",
-    ] {
+    for clean in &RULES.clean {
         let v = tone_violations(clean);
         assert!(v.is_empty(), "`{clean}` must pass: {v:?}");
     }
-    for (s, rule) in [
-        ("Nice run!", "exclamation"),
-        ("Done 💪", "emoji"),
-        ("Rest ☀", "emoji"),
-        ("We hold this day", "`we`"),
-        ("We’ll lower the weight", "`we`"),
-        ("Tell us how it felt", "`us`"),
-        ("Our plan adapts", "`our`"),
-        ("This unlocks the next block", "`unlock`"),
-        ("Level up your squat", "`level up`"),
-        ("Personalised targets", "`personalized`"),
-        ("A plan tailored to you", "`tailored`"),
-        ("Welcome back, Sam", "`Welcome back`"),
-        ("Well-paced run", "`Well paced`"),
-        ("Don’t worry about a missed day", "`Don't worry`"),
-        ("Simply log a set", "`simply`"),
-        ("Research backs this", "`research shows`"),
-        ("Studies show it works", "`studies show`"),
-        ("Experts say rest", "`experts say`"),
-        ("Start when you're ready", "`when you're ready`"),
-        ("First time? Pick a plan", "question opener"),
-        ("Done. Feeling ill? Hold today", "question opener"),
-        ("Let's go", "`Let's`"),
-        ("Ready to train", "`Ready to`"),
-        ("It's important to note the cap", "`It's important to note`"),
-        ("Easy run — keep it short", "em dash"),
-        ("Training is on hold", "`on hold`"),
-    ] {
-        let v = tone_violations(s);
+    for Flagged { text, rule } in &RULES.flagged {
+        let v = tone_violations(text);
         assert!(
-            v.iter().any(|r| r.contains(rule)),
-            "`{s}` must flag {rule}: {v:?}"
+            v.iter().any(|r| r.contains(rule.as_str())),
+            "`{text}` must flag {rule}: {v:?}"
         );
     }
     // Every hit names its distinct line, numbers folded.
     assert_eq!(
-        tone_hits("x", "Ran 5 km — 25:10!"),
+        tone_hits("Ran 5 km — 25:10!"),
         [
             "tone: exclamation mark · `Ran # km — #:#!`",
             "tone: em dash in a sentence · `Ran # km — #:#!`",
         ]
     );
-}
-
-#[test]
-fn tone_allowlist_is_reasoned_and_live() {
-    for (i, a) in ALLOW.iter().enumerate() {
-        assert!(a.rule.starts_with("tone: ") && !a.reason.trim().is_empty() && !a.text.is_empty());
-        let key = format!("tone-allowed: {i}");
-        assert!(
-            ALL_HITS.keys().any(|(_, r)| *r == key),
-            "allowlist entry {i} ({} on `{}`) matches nothing any more; remove it",
-            a.rule,
-            a.text
-        );
-    }
 }
 
 #[test]

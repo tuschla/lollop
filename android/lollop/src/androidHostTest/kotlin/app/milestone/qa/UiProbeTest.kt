@@ -6,21 +6,19 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.lifecycle.Lifecycle
+import androidx.test.espresso.EspressoException
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.ConcurrentGoal
 import app.milestone.Core
+import app.milestone.DistanceUnit
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
 import app.milestone.HealthScreen
-import app.milestone.LiftGoal
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.ViewModel
@@ -33,9 +31,9 @@ import org.robolectric.RuntimeEnvironment
 /**
  * The app over the REAL core with the screen probes its UI test classes share:
  * seeded start states, settling the UI onto the core's model, node lookup, the
- * crash guard, a relaunch after Back left the app, cut-off and overlapping text,
- * small touch targets, the hold banner's chrome overlaps, and screen dumps. Each
- * test restores the qualifiers and the font scale it changed.
+ * crash guard, a relaunch after Back left the app, small touch targets, the hold
+ * banner's chrome overlaps, and screen dumps. Each test restores the qualifiers
+ * and the font scale it changed.
  */
 abstract class UiProbeTest {
 
@@ -71,18 +69,20 @@ abstract class UiProbeTest {
     protected open fun fail(msg: String): Nothing =
         throw ProbeFailure("$msg\nscreen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" })
 
-    /** Run [block]; false when the test framework threw (node gone, touch outside the
-     *  window), which only skips the action. An exception from app code anywhere in
-     *  the cause chain is a crash and fails the test. */
+    /** Run a crawled or random action on a node the probe saw a moment ago; false
+     *  when the test framework refused it, which only skips the action: the
+     *  Compose test API's [AssertionError] (the node left, moved or is no longer
+     *  unique) or an [EspressoException] (Back found no focused window). Anything
+     *  else thrown is the app's and fails the test as a crash. */
     protected fun guard(what: String, block: () -> Unit): Boolean = try {
         block()
         true
+    } catch (e: ProbeFailure) {
+        throw e
     } catch (e: Throwable) {
-        if (e is ProbeFailure) throw e
-        val crash = generateSequence(e) { it.cause }.any { t ->
-            t.stackTrace.any { f -> f.className.startsWith("app.milestone.") && !f.className.startsWith("app.milestone.qa.") }
+        if (e !is AssertionError && e !is EspressoException) {
+            fail("crash during $what: $e\n${e.stackTraceToString().lines().take(30).joinToString("\n")}")
         }
-        if (crash) fail("crash during $what: $e\n${e.stackTraceToString().lines().take(30).joinToString("\n")}")
         onSkipped(what, e)
         false
     }
@@ -92,39 +92,18 @@ abstract class UiProbeTest {
     /** Back on the root screen left the app: open it again (warm start). True when it did. */
     protected fun relaunchIfLeft(): Boolean {
         val sc = lastScenario ?: return false
-        var finishing = false
-        runCatching { sc.onActivity { finishing = it.isFinishing } }
-        if (sc.state != Lifecycle.State.DESTROYED && !finishing) return false
-        runCatching { sc.close() }
-        guard("relaunch") { lastScenario = launchMain() }
+        val left = sc.state == Lifecycle.State.DESTROYED || run {
+            var finishing = false
+            sc.onActivity { finishing = it.isFinishing }
+            finishing
+        }
+        if (!left) return false
+        sc.close()
+        lastScenario = launchMain()
         return true
     }
 
     protected val morning get() = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
-
-    protected fun profile(
-        weeklySets: Int = 12,
-        runDays: Int = 0,
-        runKm: Double = 0.0,
-        goal: GoalDistance = GoalDistance.General,
-        concurrent: ConcurrentGoal = ConcurrentGoal.Strength,
-        age: Double = 30.0,
-        lb: Boolean = false,
-        health: HealthScreen = HealthScreen(),
-    ): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = goal,
-        concurrentGoal = concurrent,
-        weeklySets = weeklySets,
-        runningDaysPerWeek = runDays,
-        runningKmPerWeek = runKm,
-        advanced = false,
-        bodyweightKg = 78.0,
-        ageYears = age,
-        weightLb = lb,
-        health = health,
-    )
 
     protected fun liftDays(vararg daysAgo: Int): List<Event> = daysAgo.flatMap { d ->
         val t = QaHarness.daysAgoAtMidday(d)
@@ -141,41 +120,59 @@ abstract class UiProbeTest {
         Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, observedAt = at, entryId = at * 1000)
     }
 
-    enum class Start { FreshInstall, Runner, Lifter, Hybrid, Calisthenics, Under18, PainHold, Illness, Pregnancy, LongHistory, MilesLb }
+    /** A seeded start state; [legacyDistanceUnit] is the unit an upgrading install
+     *  kept in its settings store (boot moves it into the profile). */
+    enum class Start(val legacyDistanceUnit: DistanceUnit? = null) {
+        FreshInstall, Runner, Lifter, Hybrid, Calisthenics, Under18, PainHold, Illness, Pregnancy, LongHistory, MilesLb(DistanceUnit.Mi),
+    }
 
-    protected fun seedEvents(start: Start): List<Event>? = when (start) {
-        Start.FreshInstall -> null
+    private fun seedEvents(start: Start): List<Event> = when (start) {
+        Start.FreshInstall -> emptyList()
         Start.Runner -> listOf(QaHarness.tenKRunnerProfile()) + runs(1, 3, 6, 9, 40)
         Start.Lifter -> listOf(QaHarness.strengthProfile()) + liftDays(1, 3, 5, 8, 35)
-        Start.Hybrid -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + liftDays(2, 4) + runs(1, 3, 5)
+        Start.Hybrid -> listOf(QaHarness.hybridFiveKProfile()) + liftDays(2, 4) + runs(1, 3, 5)
         Start.Calisthenics -> listOf(QaHarness.calisthenicsProfile(), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(1)), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(3)))
-        Start.Under18 -> listOf(profile(age = 15.0))
+        Start.Under18 -> listOf(QaHarness.youthProfile())
         Start.PainHold -> listOf(QaHarness.strengthProfile()) + liftDays(2) + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning)
-        Start.Illness -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + runs(2) + Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning)
-        Start.Pregnancy -> listOf(profile(age = 33.0, health = HealthScreen(pregnant = true)))
+        Start.Illness -> listOf(QaHarness.hybridFiveKProfile()) + runs(2) + Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning)
+        Start.Pregnancy -> listOf(QaHarness.strengthProfile().copy(ageYears = 33.0, health = HealthScreen(pregnant = true)))
         Start.LongHistory -> LongHistorySeed.build(days = 150, fixEverySec = 60L).events
         Start.MilesLb -> listOf(QaHarness.strengthProfileLb()) + liftDays(1, 4) + runs(2, 6)
+    }
+
+    /** Put [start] (plus [extra] events) on disk for the next launch. */
+    protected fun seedStart(start: Start, extra: List<Event> = emptyList()) {
+        start.legacyDistanceUnit?.let { QaHarness.legacyDistanceUnit(ctx, it) }
+        (seedEvents(start) + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
     }
 
     /** Idle the UI, then wait until the published model agrees with the core (a
      *  tap's event reaches the core on its JNI thread and the view comes back on a
      *  later main-looper turn). */
     protected fun settle() {
-        val t0 = System.currentTimeMillis()
-        while (true) {
-            idle()
-            val core = Core.currentView()
-            val ui = EventDispatcher.model.value
-            if (ui != null && entrySignature(ui) == entrySignature(core)) return
-            if (ui == null && System.currentTimeMillis() - t0 > 30_000) fail("stuck splash: no model published after 30 s")
-            if (ui != null && System.currentTimeMillis() - t0 > 15_000) {
-                fail("UI model diverged from the core:\n ui   ${entrySignature(ui)}\n core ${entrySignature(core)}")
+        try {
+            rule.waitUntil(30_000) {
+                idle()
+                EventDispatcher.model.value != null
             }
-            Thread.sleep(20)
+        } catch (e: ComposeTimeoutException) {
+            fail("stuck splash: no model published after 30 s")
+        }
+        var ui = ""
+        var core = ""
+        try {
+            rule.waitUntil(15_000) {
+                idle()
+                ui = EventDispatcher.model.value?.let(::entrySignature) ?: "<none>"
+                core = entrySignature(Core.currentView())
+                ui == core
+            }
+        } catch (e: ComposeTimeoutException) {
+            fail("UI model diverged from the core:\n ui   $ui\n core $core")
         }
     }
 
-    protected open fun idle() {
+    protected fun idle() {
         rule.waitForIdle()
         roots()
     }
@@ -187,18 +184,18 @@ abstract class UiProbeTest {
     /** Wait until the core holds [n] logged sets (an [EventDispatcher] send reaches
      *  it on its consumer), then [settle] the UI onto that view. */
     protected fun awaitCoreLifts(n: Int) {
-        val t0 = System.currentTimeMillis()
-        while (Core.currentView().lifts.size != n) {
-            if (System.currentTimeMillis() - t0 > 10_000) fail("the core holds ${Core.currentView().lifts.size} sets, expected $n")
-            rule.waitForIdle()
-            Thread.sleep(20)
+        try {
+            rule.waitUntil(10_000) {
+                rule.waitForIdle()
+                Core.currentView().lifts.size == n
+            }
+        } catch (e: ComposeTimeoutException) {
+            fail("the core holds ${Core.currentView().lifts.size} sets, expected $n")
         }
         settle()
     }
 
     protected fun roots(): List<SemanticsNode> = rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-
-    protected fun flatten(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap { flatten(it) }
 
     protected fun allUnmerged(root: SemanticsNode): List<SemanticsNode> {
         val unmerged = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
@@ -257,70 +254,6 @@ abstract class UiProbeTest {
         "window $i: " + flatten(r).filter { it.isVisible() }.map { labelOf(it) }.filter { it.isNotBlank() }.distinct().take(40).joinToString(" | ")
     }.joinToString("\n")
 
-    /** Visible text the layout cut off (ellipsis, lines past maxLines, an unwrapped
-     *  line wider than its box) or that overlaps another visible text in the same
-     *  window (same rules as LongHistoryUiTest). A text
-     *  containing one of [typed] (what a user typed) is not judged for cut-off. */
-    protected fun textProblems(typed: Collection<String> = emptyList()): List<String> {
-        val out = ArrayList<String>()
-        val d = rule.density.density
-        val slack = 2f * d
-        // Floating layers ride over the scrolling list by design: the "Log" button
-        // (the list's end clearance is RedesignFlowsTest's gate) and a snackbar
-        // (its host is the node with a dismiss action), so text under them is not
-        // an overlap.
-        val floating = roots().firstOrNull()?.let { r ->
-            flatten(r).filter { n ->
-                (
-                    n.config.getOrNull(SemanticsActions.OnClick) != null &&
-                        n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == str(R.string.main_log) }
-                    ) || n.config.getOrNull(SemanticsActions.Dismiss) != null
-            }.map { it.boundsInRoot }
-        }.orEmpty()
-        rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().forEachIndexed { ri, root ->
-            val boxes = ArrayList<Pair<String, Rect>>()
-            fun visit(n: SemanticsNode) {
-                // A composed-but-unplaced group (SetEditor's shownOnly) draws nothing.
-                if (!n.layoutInfo.isPlaced) return
-                val b = n.boundsInRoot
-                if (b.width > 0f && b.height > 0f) {
-                    n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { get ->
-                        val layouts = ArrayList<TextLayoutResult>()
-                        if (get(layouts)) {
-                            layouts.filter { it.cutsOffText }
-                                .filterNot { l -> typed.any { it.isNotBlank() && l.layoutInput.text.text.contains(it.take(20)) } }
-                                .forEach { l ->
-                                    val why = when {
-                                        l.didOverflowHeight -> "taller than its ${(l.size.height / d).toInt()}dp box"
-                                        (0 until l.lineCount).any { l.isLineEllipsized(it) } -> "ellipsized at ${l.lineCount} line(s)"
-                                        else -> "one line wider than its ${(l.size.width / d).toInt()}dp box"
-                                    }
-                                    out += "cut off: \"${l.layoutInput.text.text}\" ($why, font ${l.layoutInput.style.fontSize}, node at ${(b.left / d).toInt()},${(b.top / d).toInt()}dp)"
-                                }
-                        }
-                    }
-                    n.config.getOrNull(SemanticsProperties.Text)?.let { t -> boxes += t.joinToString(" ") { it.text } to b }
-                }
-                n.children.forEach(::visit)
-            }
-            visit(root)
-            for (i in boxes.indices) for (j in i + 1 until boxes.size) {
-                val a = boxes[i].second
-                val b = boxes[j].second
-                val w = minOf(a.right, b.right) - maxOf(a.left, b.left)
-                val hgt = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-                val under = ri == 0 && floating.any { f -> a.overlaps(f) || b.overlaps(f) }
-                // The M3 date picker keeps its year grid composed behind the day grid.
-                val yearGrid = listOf(boxes[i].first, boxes[j].first).any { it.startsWith("Navigate to year") }
-                if (w > slack && hgt > slack && !under && !yearGrid) {
-                    fun Rect.dp() = "(${(left / d).toInt()},${(top / d).toInt()})-(${(right / d).toInt()},${(bottom / d).toInt()})dp"
-                    out += "overlap: \"${boxes[i].first}\" ${a.dp()} × \"${boxes[j].first}\" ${b.dp()}"
-                }
-            }
-        }
-        return out.distinct()
-    }
-
     /** The activity window's chrome that could be laid over the banner: the
      *  bottom nav, the side rail and the Log button, where placed and visible. */
     private fun chromeNodes(): List<SemanticsNode> = allUnmerged(roots().first()).filter { n ->
@@ -353,21 +286,18 @@ abstract class UiProbeTest {
     }
 
     /** Fully visible actions whose touch target (own size or touch expansion) is
-     *  under 48dp; a partly scrolled-out action is judged once fully in view. */
+     *  under [UxInvariants.MIN_TOUCH]; a partly scrolled-out action is judged once
+     *  fully in view. */
     protected fun smallTargets(): List<String> {
         val d = rule.density.density
+        val min = UxInvariants.MIN_TOUCH.value
         return roots().flatMap { flatten(it) }.filter { n ->
             n.config.getOrNull(SemanticsActions.OnClick) != null && n.isVisible() &&
                 n.boundsInRoot.width + 1f >= n.size.width && n.boundsInRoot.height + 1f >= n.size.height
         }.mapNotNull { n ->
             val w = maxOf(n.size.width.toFloat(), n.touchBoundsInRoot.width) / d
             val h = maxOf(n.size.height.toFloat(), n.touchBoundsInRoot.height) / d
-            if (w + 0.5f < 48f || h + 0.5f < 48f) "\"${labelOf(n)}\" is ${w.toInt()}x${h.toInt()}dp (<48dp)" else null
+            if (w + 0.5f < min || h + 0.5f < min) "\"${labelOf(n)}\" is ${w.toInt()}x${h.toInt()}dp (<${min.toInt()}dp)" else null
         }
     }
-
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
 }

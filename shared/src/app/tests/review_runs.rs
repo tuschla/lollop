@@ -381,7 +381,7 @@ fn hdop_round_trips() -> impl Iterator<Item = (f32, f32)> {
 
 fn hdop_back(a: f32) -> f32 {
     let hdop: f64 = format!("{}", crate::gps::gpx_hdop(a)).parse().unwrap();
-    (hdop * 5.0) as f32
+    crate::gps::hdop_accuracy_m(hdop).expect("a positive hdop") as f32
 }
 
 #[test]

@@ -580,12 +580,12 @@ class AdaptiveLayoutTest {
         rotate(LANDSCAPE)
         rule.assertCountEventually(hasTestTag("editor-side-by-side"), 1)
         rule.assertCountEventually(typed, 1)
-        rule.assertTextCountEventually(setHeader(1, 4), 1)
+        rule.assertCountEventually(hasText(setHeader(1, 4)), 1)
 
         rotate(PORTRAIT)
         rule.assertCountEventually(hasTestTag("editor-side-by-side"), 0)
         rule.assertCountEventually(typed, 1)
-        rule.assertTextCountEventually(setHeader(1, 4), 1)
+        rule.assertCountEventually(hasText(setHeader(1, 4)), 1)
         assertEquals("a rotation logs nothing", 0, EventDispatcher.model.value!!.lifts.count { it.observed_at > QaHarness.daysAgoAtMidday(0) - 43_200L })
     }
 
@@ -635,8 +635,7 @@ class AdaptiveLayoutTest {
         window(PORTRAIT)
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         QaHarness.seedRecordingRun()
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
+        rule.launchOnTracker()
         val points = RunSession.points.value.size
         assertEquals(0, rule.countOf(hasTestTag("tracker-side-panel")))
 
@@ -687,10 +686,8 @@ class AdaptiveLayoutTest {
         window(qualifiers, font)
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         QaHarness.seedRecordingRun()
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
-        rule.onNode(hasText(str(R.string.track_btn_stop)) and hasClickAction()).performClick()
-        rule.waitForNode(hasText(str(R.string.track_finish_title)), 15_000)
+        rule.launchOnTracker()
+        rule.stopToFinishReview()
         rule.waitForIdle()
     }
 
@@ -738,11 +735,6 @@ class AdaptiveLayoutTest {
         n.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layout)
         return layout.single()
     }
-
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
 
     /** Bug (SmallLand 640×360dp at 200 % font): the review beside the route got
      *  half the width, "Save run" wrapped to two lines cut by its pill and the

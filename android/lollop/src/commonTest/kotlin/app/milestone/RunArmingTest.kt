@@ -1,10 +1,10 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class RunArmingTest {
 
@@ -29,7 +29,7 @@ class RunArmingTest {
             Triple(null, 1_000L, false),
         )
         for ((accuracy, age, lock) in rows) {
-            assertEquals("accuracy $accuracy m, age $age ms", lock, isFreshLock(accuracy, now - age, now))
+            assertEquals(lock, isFreshLock(accuracy, now - age, now), "accuracy $accuracy m, age $age ms")
         }
         // fixElapsedMs == 0: no fix yet, whatever the accuracy.
         assertFalse(isFreshLock(accuracyM = 10.0, fixElapsedMs = 0L, nowElapsedMs = 5_000L))
@@ -57,10 +57,10 @@ class RunArmingTest {
         val p0 = GpsPoint(0.0, 0.0, 0, 5.0)
         val p1 = GpsPoint(0.0, 3.0 * degPerM, 1, 5.0) // 3 m/s
         val p2 = GpsPoint(0.0, 6.0 * degPerM, 2, 5.0) // 3 m/s
-        assertNull("0 legs → wait", t.offer(p0, sec(0)))
-        assertNull("1 leg → wait", t.offer(p1, sec(1)))
+        assertNull(t.offer(p0, sec(0)), "0 legs → wait")
+        assertNull(t.offer(p1, sec(1)), "1 leg → wait")
         val seed = t.offer(p2, sec(2)) // 2 legs → fire
-        assertEquals("seed is the whole run-up window, oldest first", listOf(p0, p1, p2), seed?.map { it.first })
+        assertEquals(listOf(p0, p1, p2), seed?.map { it.first }, "seed is the whole run-up window, oldest first")
     }
 
     @Test
@@ -109,7 +109,7 @@ class RunArmingTest {
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         listOf(0.0, 2.0, -1.0, 1.0, -2.0, 1.0).forEachIndexed { i, m ->
             val p = GpsPoint(0.0, m * degPerM, i.toLong(), 5.0)
-            assertNull("wander fix $i must not auto-start", t.offer(p, sec(i.toLong())))
+            assertNull(t.offer(p, sec(i.toLong())), "wander fix $i must not auto-start")
         }
     }
 
@@ -141,7 +141,7 @@ class RunArmingTest {
         }
         assertNull(t.offer(pts[0], sec(0)))
         assertNull(t.offer(pts[1], sec(1)))
-        assertTrue("fires on the third moving fix", t.offer(pts[2], sec(2)) != null)
+        assertTrue(t.offer(pts[2], sec(2)) != null, "fires on the third moving fix")
     }
 
     @Test
@@ -214,8 +214,8 @@ class RunArmingTest {
         RunRecorder.armRequested()
         RunSession.markStopped()
         assertFalse(RunSession.tracking.value)
-        assertFalse("locating cleared: no stuck 'Acquiring GPS'", RunSession.locating.value)
-        assertFalse("armed cleared: no stuck armed engine", RunSession.armed.value)
+        assertFalse(RunSession.locating.value, "locating cleared: no stuck 'Acquiring GPS'")
+        assertFalse(RunSession.armed.value, "armed cleared: no stuck armed engine")
         RunSession.reset()
     }
 
@@ -226,7 +226,7 @@ class RunArmingTest {
         RunSession.add(GpsPoint(0.0, 0.0003, 10, 5.0), 10_000_000_000L)
         val captured = RunSession.points.value
         RunSession.markStopped()
-        assertEquals("markStopped preserves the captured track (unlike reset)", captured, RunSession.points.value)
+        assertEquals(captured, RunSession.points.value, "markStopped preserves the captured track (unlike reset)")
         RunSession.reset()
     }
 
@@ -257,7 +257,7 @@ class RunArmingTest {
             Fix(GpsPoint(0.0, 12.0 * degPerM, 4, 5.0), sec(4), nowMs - 4_000L),
             Fix(GpsPoint(0.0, 24.0 * degPerM, 8, 5.0), sec(8), nowMs - 8_000L),
         )
-        assertTrue("every fix is stale", batch.all { it.ageMs > ARMED_FIX_MAX_AGE_MS })
+        assertTrue(batch.all { it.ageMs > ARMED_FIX_MAX_AGE_MS }, "every fix is stale")
 
         // Delivered as ONE batch (batchSize = 3): all three clear the exempted gate and
         // reach the trigger, whose window fills and fires, seeding the whole run-up.
@@ -268,7 +268,7 @@ class RunArmingTest {
                 seed = trigger.offer(f.p, f.nanos)?.map { it.first }
             }
         }
-        assertEquals("batched stale delivery arms and seeds the run-up", batch.map { it.p }, seed)
+        assertEquals(batch.map { it.p }, seed, "batched stale delivery arms and seeds the run-up")
 
         // Counterfactual: the SAME fixes arriving one-per-callback (batchSize = 1) are
         // each rejected by the staleness gate, so the trigger never fills → never fires.
@@ -279,7 +279,7 @@ class RunArmingTest {
                 if (lone.offer(f.p, f.nanos) != null) loneFired = true
             }
         }
-        assertFalse("a lone stale cached fix stays rejected", loneFired)
+        assertFalse(loneFired, "a lone stale cached fix stays rejected")
     }
 
     @Test

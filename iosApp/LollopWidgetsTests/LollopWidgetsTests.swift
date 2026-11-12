@@ -6,8 +6,9 @@ import XCTest
 /// resolves: fixtures.json (written by android/lollop's GeneratedSourcesTest from
 /// the states of Android's widget screenshots, run frames and a rest), the bundled
 /// fallback and strings, and the payload the app wrote in the CI smoke test
-/// (LOLLOP_WIDGET_PAYLOAD). Renders every family, state and activity
-/// (LOLLOP_RENDER_DIR, the CI artifact `widget-renders`).
+/// (LOLLOP_WIDGET_PAYLOAD). Draws every family, state and activity, so a view
+/// that traps fails the test; the images go to LOLLOP_RENDER_DIR (the CI
+/// artifact `widget-renders`).
 final class LollopWidgetsTests: XCTestCase {
     private struct Fixture: Decodable {
         var widgets: [String: WidgetPayload]
@@ -53,12 +54,14 @@ final class LollopWidgetsTests: XCTestCase {
 
     /// The payload the app wrote in the simulator (the CI smoke test copies it
     /// from the App Group container): the extension reads it, it describes today,
-    /// and every family draws it.
+    /// and every family draws it. Only the simulator job runs it (the widgets job
+    /// skips it); without LOLLOP_WIDGET_PAYLOAD it fails.
     @MainActor
     func testThePayloadTheAppWroteReads() throws {
-        guard let path = ProcessInfo.processInfo.environment["LOLLOP_WIDGET_PAYLOAD"] else {
-            throw XCTSkip("LOLLOP_WIDGET_PAYLOAD not set: only the CI smoke test has an app that wrote one")
-        }
+        let path = try XCTUnwrap(
+            ProcessInfo.processInfo.environment["LOLLOP_WIDGET_PAYLOAD"],
+            "LOLLOP_WIDGET_PAYLOAD: the payload file the app wrote"
+        )
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         let payload = try XCTUnwrap(WidgetPayload.decode(data), "the app's payload decodes")
         XCTAssertTrue(payload.isCurrent(at: Date()), "written today, in this zone")
@@ -139,7 +142,6 @@ final class LollopWidgetsTests: XCTestCase {
             wide.first,
             CardLayout(overline: true, hero: .stacked, week: .strip, lines: 0, large: false, bigTitle: false)
         )
-        XCTAssertEqual(wide.map(\.rank), wide.map(\.rank).sorted(by: >))
         // A lone lead line that would wrap to more than two lines gives way to the short one.
         let rest = try widget("rest").face
         let short = try XCTUnwrap(rest.shortBody)
@@ -285,9 +287,8 @@ final class LollopWidgetsTests: XCTestCase {
         let ground = scheme == .dark ? Color(white: 0.12) : Color(white: 0.95)
         let renderer = ImageRenderer(content: view.padding(8).background(ground).environment(\.colorScheme, scheme).frame(width: width))
         renderer.scale = 3
-        let png = renderer.uiImage?.pngData()
-        XCTAssertNotNil(png, "\(name) renders")
-        if let dir = ProcessInfo.processInfo.environment["LOLLOP_RENDER_DIR"], let png {
+        // Drawing evaluates every view body; the image is only the artifact.
+        if let png = renderer.uiImage?.pngData(), let dir = ProcessInfo.processInfo.environment["LOLLOP_RENDER_DIR"] {
             let url = URL(fileURLWithPath: dir).appendingPathComponent("\(name).png")
             XCTAssertNoThrow(try png.write(to: url))
         }

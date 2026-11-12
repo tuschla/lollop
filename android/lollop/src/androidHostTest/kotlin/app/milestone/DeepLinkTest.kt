@@ -12,6 +12,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
 import app.milestone.qa.lastScenario
 import app.milestone.qa.launchMain
+import app.milestone.qa.launchWithSplashWatchdog
 import app.milestone.qa.str
 import app.milestone.qa.strPrefix
 import app.milestone.qa.waitForBoot
@@ -28,15 +29,17 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 /**
  * The open-intent contract (action `app.milestone.action.OPEN`, extra `dest`) the
  * widget, the Quick Settings tile and the Live Update notifications use: the intent
- * itself, the `log_set` target, and the real app landing on each destination from a
- * cold start and from onNewIntent, including setup and a training hold. The routing
- * from every navigation state is [DeepLinkPropertyTest].
+ * itself (its `dest` wire values are what pinned widgets, tiles and notifications
+ * already hold), and the real app landing on each destination from a cold start
+ * and from a new intent, including setup and a training hold. The `log_set` target
+ * and the routing from every navigation state are OpenRoutingTest (common).
  */
 @RunWith(RobolectricTestRunner::class)
 class DeepLinkTest {
@@ -94,29 +97,6 @@ class DeepLinkTest {
         assertNotEquals(all[0], all[1])
     }
 
-    private val day = 20_000L
-    private fun lift(vararg items: PrescriptionView, status: SessionStatus = SessionStatus.Next, epochDay: Long = day) =
-        SessionPlanView(epoch_day = epochDay, title = "Lower", session_type = SessionType.LiftMaxEffort, status = status, items = items.toList())
-
-    private val squat = PrescriptionView(exercise = "Back Squat", sets = 3)
-    private val bench = PrescriptionView(exercise = "Bench Press", sets = 3)
-    private val liftDay = ViewModel(today_epoch_day = day, next_session = lift(squat, bench), week_plan = listOf(lift(squat, bench)))
-
-    @Test
-    fun logSetTargetsTodaysOpenLiftItemOnly() {
-        assertEquals("Back Squat", logSetTarget(liftDay))
-        val squatDone = squat.copy(done = true, sets_done = 3)
-        assertEquals("Bench Press", logSetTarget(liftDay.copy(next_session = lift(squatDone, bench))))
-        // After Finish the core moves next_session off today: the started session resumes.
-        val finished = liftDay.copy(next_session = lift(squat, epochDay = day + 2), week_plan = listOf(lift(squatDone, bench)))
-        assertEquals("Bench Press", logSetTarget(finished))
-        assertNull(logSetTarget(liftDay.copy(next_session = lift(squat, epochDay = day + 1), week_plan = emptyList())))
-        val run = SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, status = SessionStatus.Next, items = listOf(PrescriptionView()))
-        assertNull(logSetTarget(ViewModel(today_epoch_day = day, next_session = run, week_plan = listOf(run))))
-        assertNull(logSetTarget(ViewModel(today_epoch_day = day)))
-        assertNull(logSetTarget(liftDay.copy(hold_reason = HoldReason.Pain)))
-    }
-
     private fun launchAt(dest: String?) {
         val intent = Intent(ACTION_OPEN).setClass(ctx, MainActivity::class.java)
         if (dest != null) intent.putExtra(EXTRA_DEST, dest)
@@ -170,40 +150,29 @@ class DeepLinkTest {
         assertEquals(0, rule.countOf(hasTestTag("exercise-search")))
         assertTrue(rule.countOf(hasText(str(R.string.setup_step_train_q))) > 0)
         // Held, not dropped: once the setup is skipped the request opens the (blank) set editor.
-        assertEquals(OpenDest.LogSet, readOpenRequest())
         rule.onNode(hasText(str(R.string.setup_skip)) and hasClickAction()).performClick()
         rule.waitForNode(hasTestTag("exercise-search"), 30_000)
-        assertNull(readOpenRequest())
     }
 
+    /** A widget, tile or notification tap while the app runs reaches the running
+     *  Activity as a new intent (Robolectric's [org.robolectric.android.controller.ActivityController.newIntent],
+     *  the system's pause, onNewIntent, resume). */
     @Test
     fun newIntentWhileRunningOpensTheLogChooser() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        lastScenario = launchMain()
-        rule.waitForNode(hasText(str(R.string.main_dest_history)), 30_000)
-        rule.waitForBoot()
-        assertEquals(0, rule.countOf(chooserPlanRow))
-        checkNotNull(lastScenario).onActivity { activity ->
-            MainActivity::class.java.getDeclaredMethod("onNewIntent", Intent::class.java)
-                .apply { isAccessible = true }
-                .invoke(activity, openIntent(activity, OpenDest.Log))
+        val activity = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup() }
+        try {
+            rule.waitForNode(hasText(str(R.string.main_dest_history)), 30_000)
+            rule.waitForBoot()
+            assertEquals(0, rule.countOf(chooserPlanRow))
+            activity.newIntent(openIntent(ctx, OpenDest.Log))
+            rule.waitForNode(chooserPlanRow, 30_000)
+        } finally {
+            activity.pause().stop().destroy()
         }
-        rule.waitForNode(chooserPlanRow, 30_000)
-        assertEquals(null, readOpenRequest())
     }
 
     private val chooserPlanRow get() = hasText(strPrefix(R.string.main_todays_plan), substring = true)
-
-    private fun readOpenRequest(): OpenDest? {
-        var value: OpenDest? = null
-        checkNotNull(lastScenario).onActivity { activity ->
-            @Suppress("UNCHECKED_CAST")
-            val flow = MainActivity::class.java.getDeclaredField("openRequest").apply { isAccessible = true }
-                .get(activity) as kotlinx.coroutines.flow.MutableStateFlow<OpenDest?>
-            value = flow.value
-        }
-        return value
-    }
 
     @Test
     fun duringAHoldLogSetAndTrackStillOpenUnderTheBanner() {

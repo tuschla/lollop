@@ -13,7 +13,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
-import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -33,12 +32,10 @@ class TrimRunSheetTest {
 
     @Before
     fun kmWithoutTiles() {
+        AppRuntime.resetForTest()
         AppSettings.setShowRouteMaps(ctx, false)
         EventDispatcher.model.value = ViewModel(profile = Profile(distance_unit = DistanceUnit.Km))
     }
-
-    @After
-    fun restore() = AppRuntime.resetForTest()
 
     // 21 fixes 10 s apart, ~37 m each: a 200 s, ~0.745 km raw GPS track.
     private val segments = listOf((0..20).map { GpsPoint(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, 5.0) })

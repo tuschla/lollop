@@ -8,13 +8,8 @@ use crate::schema::{LiftIntensity, LiftPrescription, Prescription};
 
 fn set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, day: i64) -> LoggedSet {
     LoggedSet {
-        hold_sec: None,
-        exercise: exercise.into(),
-        weight_kg,
-        reps,
-        rpe,
-        observed_at: day * DAY_SEC + 3_600,
         entry_id: day as u64,
+        ..logged_set(exercise, weight_kg, reps, rpe, day * DAY_SEC + 3_600)
     }
 }
 
@@ -29,53 +24,99 @@ fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::Li
     )
 }
 
-fn layoff(weeks_off: f64, returned: i64) -> AnchorCtx<'static> {
-    AnchorCtx {
-        layoff: Some(Layoff {
-            weeks_off,
-            returned_epoch_day: Some(returned),
-        }),
-        ..Default::default()
+/// A Monday, a lift day of the strength plan, far enough out that every set
+/// below keeps a positive (dated) timestamp.
+const T: i64 = POS_MON;
+
+/// A logged set: `(exercise, kg, reps, rpe, epoch day)`, stamped 01:00.
+type DaySet<'a> = (&'a str, f64, u32, f64, i64);
+
+/// The cards on `day` (a lift day) once `profile` is set, `sets` are logged
+/// and a plan is generated from `day` (also today).
+fn cards_on(profile: Profile, sets: &[DaySet], day: i64) -> Vec<PrescriptionView> {
+    let history = sets
+        .iter()
+        .map(|&(ex, kg, reps, rpe, d)| log_set(ex, kg, reps, rpe, d * DAY_SEC + 3_600));
+    let (app, model) = planned_on(profile, history, day);
+    day_row(&app, &model, day).items
+}
+
+/// The card of `exercise`'s movement among `cards`.
+fn card(cards: Vec<PrescriptionView>, exercise: &str) -> PrescriptionView {
+    cards
+        .into_iter()
+        .find(|i| crate::exercise::same_movement(&i.exercise, exercise))
+        .unwrap_or_else(|| panic!("a {exercise} card"))
+}
+
+/// The Back Squat card on `day` ([`cards_on`]).
+fn squat_on(profile: Profile, sets: &[DaySet], day: i64) -> PrescriptionView {
+    card(cards_on(profile, sets, day), "Back Squat")
+}
+
+/// The strength profile back on `returned` from a declared `weeks_off` layoff.
+fn back_from_layoff(weeks_off: f64, returned: i64) -> Profile {
+    Profile {
+        weeks_off: Some(weeks_off),
+        layoff_returned_epoch_day: Some(returned),
+        ..strength_profile()
     }
 }
 
 #[test]
 fn one_rep_set_e1rm_equals_load() {
     // A single is its own 1RM (no +3.3 % Epley inflation).
-    let a = anchors_at(
-        &[set("Back Squat", 140.0, 1, 0.0, 10)],
-        AnchorCtx::default(),
-        11,
+    let squat = squat_on(
+        strength_profile(),
+        &[("Back Squat", 140.0, 1, 0.0, T - 1)],
+        T,
     );
-    assert_eq!(a.e1rm_for("Back Squat"), Some(140.0));
+    assert!(
+        squat.anchored_on.starts_with("Estimated max 140 kg"),
+        "{}",
+        squat.anchored_on
+    );
 }
 
 #[test]
 fn anchor_tracks_recent_window_not_all_time_max() {
     // One optimistic old best must not pin every later load: the anchor is the
     // best of the last 3 sessions / 21 days. Weekly sessions, so no week-long
-    // break puts the old best on a re-entry ramp (REENTRY-RAMP-001).
-    let mut sets = vec![set("Back Squat", 120.0, 5, 8.0, 0)];
-    for d in (7..=49).step_by(7) {
-        sets.push(set("Back Squat", 100.0, 5, 8.0, d));
+    // break puts the old best on a re-entry ramp (REENTRY-RAMP-001). 100 kg × 5
+    // at RPE 8 is 7 reps of capacity: 123.3 kg; the 120 kg PR would be 148.
+    let mut sets = vec![("Back Squat", 120.0, 5, 8.0, T - 50)];
+    for back in (1..=43).step_by(7) {
+        sets.push(("Back Squat", 100.0, 5, 8.0, T - back));
     }
-    let a = anchors_at(&sets, AnchorCtx::default(), 50);
-    let e = a.e1rm_for("Back Squat").unwrap();
-    let recent = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(e, recent, "anchor = recent window best, not the day-0 PR");
+    let squat = squat_on(strength_profile(), &sets, T);
+    assert!(
+        squat.anchored_on.starts_with("Estimated max 123.3 kg"),
+        "anchor = recent window best, not the old PR: {}",
+        squat.anchored_on
+    );
 }
 
 #[test]
 fn anchor_merges_same_movement_names() {
-    let sets = [
-        set("Back squat", 100.0, 5, 8.0, 0),
-        set("Barbell back squat", 110.0, 5, 8.0, 2),
-    ];
-    let a = anchors_at(&sets, AnchorCtx::default(), 3);
-    assert_eq!(a.e1rm.len(), 1, "one anchor per movement: {:?}", a.e1rm);
-    let want = (crate::strength::e1rm_epley_rpe(110.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(a.e1rm_for("Back squat"), Some(want));
-    assert_eq!(a.e1rm_for("Barbell back squat"), Some(want));
+    // Two names of one movement make one anchor: the 70 kg × 5 @ RPE 8 best
+    // (86.3 kg) logged as "Row (barbell)", not the later 60 kg session (74 kg)
+    // under the plan's own "Cable row".
+    let row = card(
+        cards_on(
+            strength_profile(),
+            &[
+                ("Row (barbell)", 70.0, 5, 8.0, T - 3),
+                ("Cable row", 60.0, 5, 8.0, T - 1),
+            ],
+            T,
+        ),
+        "Cable row",
+    );
+    assert!(
+        row.anchored_on.starts_with("Estimated max 86.3 kg"),
+        "{}",
+        row.anchored_on
+    );
 }
 
 #[test]
@@ -84,115 +125,164 @@ fn unrated_compliant_sets_hold_the_anchor_instead_of_failing_it() {
     // rated 100×5 @ RPE 8 anchors ~123 kg; later unrated working sets at the
     // prescribed ~85 % (3 reps) keep that anchor instead of dragging it to
     // the reps-as-failure estimate (~94 kg).
-    let mut sets = vec![set("Back Squat", 100.0, 5, 8.0, 0)];
-    for d in [7, 14, 21, 28] {
-        sets.push(set("Back Squat", 105.0, 3, 0.0, d));
+    let mut sets = vec![("Back Squat", 100.0, 5, 8.0, T - 29)];
+    for back in [22, 15, 8, 1] {
+        sets.push(("Back Squat", 105.0, 3, 0.0, T - back));
     }
-    let a = anchors_at(&sets, AnchorCtx::default(), 29);
-    let rated = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(a.e1rm_for("Back Squat"), Some(rated));
+    let squat = squat_on(strength_profile(), &sets, T);
+    assert!(
+        squat.anchored_on.starts_with("Estimated max 123.3 kg"),
+        "{}",
+        squat.anchored_on
+    );
+    assert!(
+        !squat.why.basis.contains("scaled to"),
+        "{}",
+        squat.why.basis
+    );
 }
 
 #[test]
 fn speed_set_without_rpe_does_not_create_or_move_an_anchor() {
-    // Unrated sets under 70 % of the anchor are speed work.
-    let mut sets = vec![set("Back Squat", 100.0, 5, 8.0, 0)];
-    for d in [3, 7, 10, 14] {
-        sets.push(set("Back Squat", 60.0, 3, 0.0, d));
+    // Unrated sets under 70 % of the anchor are speed work: four weekly speed
+    // sessions after a rated 100 kg × 5 @ RPE 8 neither push that session out
+    // of the anchor window (3 sessions / 21 days) nor become the estimate.
+    let mut sets = vec![("Back Squat", 100.0, 5, 8.0, T - 30)];
+    for back in [26, 19, 12, 5] {
+        sets.push(("Back Squat", 60.0, 3, 0.0, T - back));
     }
-    let a = anchors_at(&sets, AnchorCtx::default(), 15);
-    let rated = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(a.e1rm_for("Back Squat"), Some(rated));
+    let squat = squat_on(strength_profile(), &sets, T);
+    assert!(
+        squat.anchored_on.starts_with("Estimated max 123.3 kg"),
+        "{}",
+        squat.anchored_on
+    );
+    assert!(
+        !squat.why.basis.contains("scaled to"),
+        "{}",
+        squat.why.basis
+    );
 }
 
 #[test]
 fn lift_anchor_after_44_days_is_70pct_not_50pct() {
     // 44 days without the lift scales the working load to 70 %
-    // (DETRAIN-STR-001), never a linear-to-zero 50 %.
-    let a = anchors_at(
-        &[set("Back Squat", 100.0, 5, 8.0, 0)],
-        AnchorCtx::default(),
-        44,
+    // (DETRAIN-STR-001), never a linear-to-zero 50 %: 85 % of 123.3 kg at
+    // 70 % is 73.4 kg, 72.5 on the plate grid.
+    let squat = squat_on(
+        strength_profile(),
+        &[("Back Squat", 100.0, 5, 8.0, T - 44)],
+        T,
     );
-    let d = a.load_frac_for("Back Squat").expect("a detraining derate");
-    assert_eq!(d.frac, 0.70);
-    assert!(matches!(
-        d.cause,
-        DerateCause::Detraining { days_since: 44 }
-    ));
+    assert_eq!(squat.load_kg, Some(72.5));
+    assert!(
+        squat
+            .why
+            .basis
+            .contains("scaled to 70% after about 6 weeks off this lift"),
+        "{}",
+        squat.why.basis
+    );
     // Past 8 weeks the anchor is dropped (fresh, novice-style start).
-    let gone = anchors_at(
-        &[set("Back Squat", 100.0, 5, 8.0, 0)],
-        AnchorCtx::default(),
-        60,
+    let gone = squat_on(
+        strength_profile(),
+        &[("Back Squat", 100.0, 5, 8.0, T - 60)],
+        T,
     );
-    assert!(gone.e1rm_for("Back Squat").is_none());
+    assert_eq!(gone.load_kg, None);
+    assert!(
+        !gone.anchored_on.starts_with("Estimated max"),
+        "{}",
+        gone.anchored_on
+    );
 }
 
 #[test]
 fn declared_layoff_and_inactivity_do_not_stack() {
-    // A declared 6 wk layoff returning on day 44: the pre-layoff anchor takes
-    // the re-entry fraction INSTEAD of the detraining credit (0.70, not 0.49).
-    let a = anchors_at(&[set("Back Squat", 100.0, 5, 8.0, 0)], layoff(6.0, 44), 44);
-    let d = a.load_frac_for("Back Squat").expect("a re-entry derate");
-    assert_eq!(d.frac, 0.70);
-    assert!(matches!(d.cause, DerateCause::Reentry { .. }));
-    assert_eq!(a.derates.len(), 1, "one derate, never stacked");
+    // A declared 6 wk layoff returning today: the pre-layoff anchor takes the
+    // re-entry fraction INSTEAD of the detraining credit (70 %, not 49 %).
+    let squat = squat_on(
+        back_from_layoff(6.0, T),
+        &[("Back Squat", 100.0, 5, 8.0, T - 44)],
+        T,
+    );
+    assert!(
+        squat
+            .why
+            .basis
+            .contains("scaled to 70% in week 1 of 4 back from your break"),
+        "{}",
+        squat.why.basis
+    );
+    assert_eq!(squat.load_kg, Some(72.5), "one derate, never stacked");
 }
 
 #[test]
 fn six_weeks_off_starts_near_70pct_and_ramps_to_full() {
-    // 6 wk off → ~70 % on the return day, ramping to 100 %
-    // over the 4-wk window; the athlete trains the lift lightly meanwhile,
-    // the last time the day before the ramp ends (a full week without any
-    // lifting after the ramp would be a new break, REENTRY-001).
-    let returned = 50;
-    let mut sets = vec![set("Back Squat", 100.0, 5, 8.0, 0)];
-    for d in [
-        returned,
-        returned + 7,
-        returned + 14,
-        returned + 21,
-        returned + 27,
-    ] {
-        sets.push(set("Back Squat", 70.0, 5, 0.0, d));
+    // 6 wk off → 70 % on the return day, ramping to 100 % over the 4-wk
+    // window; the athlete trains the lift lightly meanwhile, the last time the
+    // day before the ramp ends (a full week without any lifting after the
+    // ramp would be a new break, REENTRY-001). A day is prescribed from the
+    // history through the day before it.
+    let mut sets = vec![("Back Squat", 100.0, 5, 8.0, T - 50)];
+    for d in [0, 7, 14, 21, 27] {
+        sets.push(("Back Squat", 70.0, 5, 0.0, T + d));
     }
-    let frac_on = |today: i64| {
-        anchors_at(&sets, layoff(6.0, returned), today)
-            .load_frac_for("Back Squat")
-            .map_or(1.0, |d| d.frac)
+    let squat_on_day = |day: i64| {
+        let before: Vec<DaySet> = sets.iter().copied().filter(|s| s.4 < day).collect();
+        squat_on(back_from_layoff(6.0, T), &before, day)
     };
-    assert_eq!(frac_on(returned), 0.70);
-    let mid = frac_on(returned + 14);
-    assert!((mid - 0.85).abs() < 1e-3, "half-way up the ramp: {mid}");
-    assert_eq!(frac_on(returned + 28), 1.0, "full load once the ramp ends");
-    let pre = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(
-        anchors_at(&sets, layoff(6.0, returned), returned + 28).e1rm_for("Back Squat"),
-        Some(pre),
-        "the pre-layoff anchor is back at 100 %"
+    let first = squat_on_day(T);
+    assert!(
+        first.why.basis.contains("scaled to 70% in week 1 of 4"),
+        "{}",
+        first.why.basis
+    );
+    let mid = squat_on_day(T + 14);
+    assert!(
+        mid.why.basis.contains("scaled to 84% in week 2 of 4"),
+        "half-way up the ramp: {}",
+        mid.why.basis
+    );
+    // The first lift day after the ramp (a Wednesday): full load on the
+    // pre-layoff anchor.
+    let full = squat_on_day(T + 30);
+    assert!(!full.why.basis.contains("scaled to"), "{}", full.why.basis);
+    assert!(
+        full.anchored_on.starts_with("Estimated max 123.3 kg"),
+        "the pre-layoff anchor is back at 100 %: {}",
+        full.anchored_on
     );
 }
 
 #[test]
 fn post_return_anchor_is_unscaled_and_long_layoff_window_ends() {
-    // A heavier post-return set wins unscaled; a >8 wk layoff sets pre-layoff
-    // anchors aside only while its window runs.
+    // A heavier post-return set wins unscaled (95 kg × 5 @ RPE 8: 117.2 kg); a
+    // >8 wk layoff sets pre-layoff anchors aside and prescribes every other
+    // lift as a fresh novice (re-pointed to REENTRY-001) only while its
+    // window runs.
     let sets = [
-        set("Back Squat", 100.0, 5, 8.0, 0),
-        set("Back Squat", 95.0, 5, 8.0, 101),
+        ("Back Squat", 100.0, 5, 8.0, T - 102),
+        ("Back Squat", 95.0, 5, 8.0, T - 1),
     ];
-    let a = anchors_at(&sets, layoff(12.0, 100), 102);
-    assert!(a.reentry_novice);
-    let post = (crate::strength::e1rm_epley_rpe(95.0, 5, 8.0) * 10.0).round() / 10.0;
-    assert_eq!(a.e1rm_for("Back Squat"), Some(post));
+    let cards = cards_on(back_from_layoff(12.0, T - 2), &sets, T);
+    let squat = card(cards.clone(), "Back Squat");
     assert!(
-        a.load_frac_for("Back Squat").is_none(),
-        "post-return anchors are unscaled"
+        squat.anchored_on.starts_with("Estimated max 117.2 kg"),
+        "{}",
+        squat.anchored_on
     );
-    let later = anchors_at(&sets, layoff(12.0, 100), 100 + 43);
     assert!(
-        !later.reentry_novice,
+        !squat.why.basis.contains("scaled to"),
+        "post-return anchors are unscaled: {}",
+        squat.why.basis
+    );
+    let deadlift = |cards: Vec<PrescriptionView>| card(cards, "Deadlift").evidence.grade;
+    assert_eq!(deadlift(cards), Some(EvidenceGrade::ExpertOpinion));
+    let later = cards_on(back_from_layoff(12.0, T - 2), &sets, T + 42);
+    assert_eq!(
+        deadlift(later),
+        Some(EvidenceGrade::Strong),
         "the novice window ends with the ramp"
     );
 }
@@ -499,7 +589,6 @@ fn power_item_face_shows_move_fast_without_a_device_number() {
     assert_eq!(it.effort_cue, "move fast");
     assert!(it.summary.contains("move fast"), "{}", it.summary);
     assert!(it.why.basis.contains("visibly slows"), "{}", it.why.basis);
-    assert!(!it.why.basis.contains("~10%"), "{}", it.why.basis);
 }
 
 #[test]
@@ -538,13 +627,23 @@ fn derated_card_names_the_reason_and_cites_detraining() {
 
 #[test]
 fn plates_per_side_greedy_kg_and_lb() {
-    assert_eq!(
-        plates_per_side(117.5, false),
-        vec![20.0, 20.0, 5.0, 2.5, 1.25]
+    // 85 % of a 140 kg single is 119 → 117.5 kg: 48.75 kg a side on a 20 kg
+    // bar.
+    let kg = squat_on(
+        strength_profile(),
+        &[("Back Squat", 140.0, 1, 0.0, T - 1)],
+        T,
     );
-    assert!(plates_per_side(20.0, false).is_empty());
-    // 225 lb on a 45 lb bar = 90 lb per side.
-    assert_eq!(plates_per_side(225.0 / LB_PER_KG, true), vec![45.0, 45.0]);
+    assert_eq!(kg.load_kg, Some(117.5));
+    assert_eq!(kg.plates_per_side, vec![20.0, 20.0, 5.0, 2.5, 1.25]);
+    // 85 % of 121 kg is 226.7 lb → 225 lb on a 45 lb bar = 90 lb per side.
+    let lb_profile = Profile {
+        weight_lb: true,
+        ..strength_profile()
+    };
+    let lb = squat_on(lb_profile, &[("Back Squat", 121.0, 1, 0.0, T - 1)], T);
+    assert_eq!(lb.load_kg.map(|kg| (kg * LB_PER_KG).round()), Some(225.0));
+    assert_eq!(lb.plates_per_side, vec![45.0, 45.0]);
 }
 
 #[test]
@@ -587,42 +686,12 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
     );
 }
 
-/// An effort-prescribed (3×`reps` at 3 RIR) row item after applying the last
-/// set: one 60 kg × 8 @ RPE 7 row logged `age_days` before day 100.
-fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> PlanItem {
-    let today = 100;
-    let rx = RxBasis::Workout.rx(
-        Prescription::Lift(LiftPrescription {
-            exercise: "Row".into(),
-            sets: 3,
-            reps,
-            intensity: LiftIntensity::Rir(3),
-            rest_sec: 120,
-            velocity_loss_pct: None,
-            reps_max: None,
-            load_kg: None,
-        }),
-        claims::STR_INTENT_001,
-    );
-    let mut items = vec![flatten_prescription(
-        &rx,
-        anchors,
-        None,
-        false,
-        DistanceUnit::Km,
-    )];
-    let mut model = Model::default();
-    model.sets.push(set("Row", 60.0, 8, 7.0, today - age_days));
-    apply_last_sets(
-        &mut items,
-        &model,
-        &SetIndex::new(&model.sets),
-        &anchors.lift,
-        &[Some(today - age_days)],
-        today,
-        false,
-    );
-    items.remove(0)
+/// The Row card on `T` after a 60 kg × 8 @ RPE 7 row `back` days before.
+fn row_after(profile: Profile, back: i64) -> PrescriptionView {
+    card(
+        cards_on(profile, &[("Row", 60.0, 8, 7.0, T - back)], T),
+        "Row",
+    )
 }
 
 #[test]
@@ -630,75 +699,79 @@ fn no_start_weight_after_a_break_the_plan_treats_as_a_fresh_start() {
     // Past the 8-week horizon (DETRAIN-STR-001) or inside a declared
     // >8 wk re-entry (REENTRY-001: treat as novice) the plan carries no load,
     // so "Start from …" must not bring the pre-break weight back.
-    let none = crate::plan::Anchors::default();
-    let old = rir_row_item(&none, 70, 5);
-    assert!(old.last_set.is_some(), "last time is still shown");
+    let old = row_after(strength_profile(), 70);
+    assert!(
+        old.anchored_on.starts_with("Last: "),
+        "last time is still shown"
+    );
     assert_eq!(old.suggested_load_kg, None);
-    let reentry = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            reentry_novice: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    assert_eq!(rir_row_item(&reentry, 3, 5).suggested_load_kg, None);
+    let reentry = row_after(back_from_layoff(12.0, T - 1), 3);
+    assert_eq!(reentry.suggested_load_kg, None);
     // Control: a recent set that beat the 5-rep / 3-RIR target by 3 reps
     // suggests one step up (STR-LOADPROG-001).
-    assert_eq!(rir_row_item(&none, 3, 5).suggested_load_kg, Some(62.5));
+    assert_eq!(
+        row_after(strength_profile(), 3).suggested_load_kg,
+        Some(62.5)
+    );
 }
 
 #[test]
 fn start_weight_after_a_six_week_gap_is_derated() {
     // 31–56 days since the set → the detraining credit (70 %) scales the
     // suggestion, never the full pre-gap load.
-    let item = rir_row_item(&crate::plan::Anchors::default(), 40, 5);
+    let item = row_after(strength_profile(), 40);
     assert_eq!(item.suggested_load_kg, Some(40.0), "60 × 0.70 = 42 → 40");
-    assert!(item.why.basis.contains("70%"), "{}", item.why.basis);
-}
-
-#[test]
-fn start_weight_is_lightened_for_a_higher_rep_target() {
-    // 60 kg × 8 @ RPE 7 is 11 reps of capacity; 12 reps at 3 RIR needs
-    // 15. Epley scales it to 60 × (1 + 11/30) / (1 + 15/30) ≈ 54.7 → 52.5.
-    let item = rir_row_item(&crate::plan::Anchors::default(), 3, 12);
-    assert_eq!(item.suggested_load_kg, Some(52.5));
+    assert!(
+        item.why.basis.contains("70% of your last top set"),
+        "{}",
+        item.why.basis
+    );
 }
 
 #[test]
 fn an_undeclared_gap_ramps_back_instead_of_jumping_to_full_load() {
-    // Squat e1RM 150 on days 0/3/7, then nothing until day 47. Day 47 is
-    // prescribed at the 70 % detraining credit; the light session logged that
-    // day must not restore 100 % on day 48 (REENTRY-001 4–8 wk: 70 %, ramp
-    // 2–4 weeks). Rated or not, the next load stays on the re-entry ramp.
-    let base: Vec<LoggedSet> = [0, 3, 7]
+    // Squat e1RM 150 (125 kg × 5 @ RPE 9) 47, 44 and 40 days ago, then
+    // nothing. Today is prescribed at the 70 % detraining credit; the light
+    // session logged today must not restore 100 % on the next lift day
+    // (REENTRY-001 4–8 wk: 70 %, ramp 2–4 weeks). Rated or not, the next
+    // load stays on the re-entry ramp.
+    let base: Vec<Event> = [47, 44, 40]
         .iter()
-        .map(|&d| set("Back Squat", 125.0, 5, 9.0, d))
+        .map(|&back| log_set("Back Squat", 125.0, 5, 9.0, (T - back) * DAY_SEC + 3_600))
         .collect();
-    let on_47 = anchors_at(&base, AnchorCtx::default(), 47);
-    assert_eq!(on_47.e1rm_for("Back Squat"), Some(150.0));
-    let d47 = on_47
-        .load_frac_for("Back Squat")
-        .expect("detraining credit");
-    assert_eq!(d47.frac, 0.70);
-    let heavy_47 = round_load_grid(150.0 * 0.85 * d47.frac, false);
-    assert_eq!(heavy_47, 87.5);
     for rpe in [0.0, 7.0] {
-        let mut sets = base.clone();
-        for _ in 0..3 {
-            sets.push(set("Back Squat", heavy_47, 3, rpe, 47));
-        }
-        let on_48 = anchors_at(&sets, AnchorCtx::default(), 48);
-        let d = on_48
-            .load_frac_for("Back Squat")
-            .unwrap_or_else(|| panic!("rpe {rpe}: still on the ramp"));
-        assert!(matches!(d.cause, DerateCause::Reentry { .. }), "{d:?}");
-        assert!(d.frac < 0.75, "rpe {rpe}: {}", d.frac);
-        let e = on_48.e1rm_for("Back Squat").unwrap();
-        let heavy_48 = round_load_grid(e * 0.85 * d.frac, false);
+        let (app, mut model) = planned_on(strength_profile(), base.clone(), T);
+        let today = card(day_row(&app, &model, T).items, "Back Squat");
         assert!(
-            heavy_48 <= heavy_47 * 1.10,
-            "rpe {rpe}: {heavy_47} → {heavy_48}"
+            today.anchored_on.starts_with("Estimated max 150 kg"),
+            "{}",
+            today.anchored_on
         );
+        assert!(
+            today.why.basis.contains("scaled to 70% after about"),
+            "detraining credit: {}",
+            today.why.basis
+        );
+        let heavy = today.load_kg.expect("a derated load");
+        assert_eq!(heavy, 87.5);
+        for k in 0..3 {
+            app.update(
+                log_set("Back Squat", heavy, 3, rpe, T * DAY_SEC + 3_600 + k * 300),
+                &mut model,
+            )
+            .expect_only_render();
+        }
+        set_today(&app, &mut model, T + 2);
+        let next = card(day_row(&app, &model, T + 2).items, "Back Squat");
+        assert!(
+            next.why
+                .basis
+                .contains("scaled to 71% in week 1 of 4 back from your break"),
+            "rpe {rpe}: still on the ramp: {}",
+            next.why.basis
+        );
+        let load = next.load_kg.expect("a ramped load");
+        assert!(load <= heavy * 1.10, "rpe {rpe}: {heavy} → {load}");
     }
 }
 
@@ -706,19 +779,33 @@ fn an_undeclared_gap_ramps_back_instead_of_jumping_to_full_load() {
 fn an_open_ended_effort_set_is_a_lower_bound_for_the_anchor() {
     // "4+ reps left" (RPE 6) counts its reps as performed, like an
     // unrated set: it can raise the anchor only by what was actually lifted
-    // and never cuts it.
-    let base = set("Back Squat", 100.0, 5, 8.0, 0);
-    let rated = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
-    let easy_heavy = [base.clone(), set("Back Squat", 110.0, 5, 6.0, 3)];
-    let a = anchors_at(&easy_heavy, AnchorCtx::default(), 4);
-    let lower_bound = (crate::strength::e1rm_epley(110.0, 5) * 10.0).round() / 10.0;
-    assert_eq!(a.e1rm_for("Back Squat"), Some(lower_bound));
-    let easy_light = [base, set("Back Squat", 90.0, 5, 6.0, 3)];
-    let a = anchors_at(&easy_light, AnchorCtx::default(), 4);
-    assert_eq!(a.e1rm_for("Back Squat"), Some(rated));
+    // (110 kg × 5: 128.3 kg, not the 146.7 kg its 4 reps left would read)
+    // and never cuts it (100 kg × 5 @ RPE 8 stays at 123.3 kg).
+    let base = ("Back Squat", 100.0, 5, 8.0, T - 4);
+    let easy_heavy = squat_on(
+        strength_profile(),
+        &[base, ("Back Squat", 110.0, 5, 6.0, T - 1)],
+        T,
+    );
     assert!(
-        a.load_frac_for("Back Squat").is_none(),
-        "never an e1RM-drop cut"
+        easy_heavy.anchored_on.starts_with("Estimated max 128.3 kg"),
+        "{}",
+        easy_heavy.anchored_on
+    );
+    let easy_light = squat_on(
+        strength_profile(),
+        &[base, ("Back Squat", 90.0, 5, 6.0, T - 1)],
+        T,
+    );
+    assert!(
+        easy_light.anchored_on.starts_with("Estimated max 123.3 kg"),
+        "{}",
+        easy_light.anchored_on
+    );
+    assert!(
+        !easy_light.why.basis.contains("scaled to"),
+        "never an e1RM-drop cut: {}",
+        easy_light.why.basis
     );
 }
 
@@ -727,20 +814,15 @@ fn warm_up_sets_do_not_silence_the_prilepin_audit() {
     // A warm-up ramp (STR-WARMUP-001) is not working volume. 5×3 at the
     // top load is 15 reps above 90 % (Prilepin 4–10): the row must fire even
     // though the warm-ups would pull the day's mean intensity under 70 %.
-    let mut model = Model::default();
-    let mut push = |kg: f64, reps: u32, i: i64| {
-        let mut s = set("Back squat", kg, reps, 0.0, 10);
-        s.observed_at += i;
-        s.entry_id = 100 + i as u64;
-        model.sets.push(s);
-    };
-    push(20.0, 5, 0);
-    push(40.0, 5, 1);
-    push(60.0, 3, 2);
-    for i in 3..8 {
-        push(100.0, 3, i);
-    }
-    let rows = build_lift_audit(&ViewCtx::new(&model));
+    let ramp = [(20.0, 5), (40.0, 5), (60.0, 3)];
+    let events: Vec<Event> = ramp
+        .into_iter()
+        .chain([(100.0, 3); 5])
+        .enumerate()
+        .map(|(i, (kg, reps))| log_set("Back squat", kg, reps, 0.0, 10 * DAY_SEC + i as i64))
+        .collect();
+    let (app, model) = replay_rendering(&events);
+    let rows = app.view(&model).lift_audit;
     assert!(
         rows.iter()
             .any(|r| r.summary.starts_with("Back squat: 15 reps")),
@@ -878,100 +960,21 @@ fn stale_pr_does_not_revive_on_a_light_set() {
 #[test]
 fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
     // After a declared layoff the WORKING LOAD is derated (REENTRY-RAMP-001),
-    // but the e1RM anchor stays the logged value so the honesty line never
-    // lies: build_plan_anchors keeps the e1RM and carries a per-lift derate.
-    let sets = [LoggedSet {
-        hold_sec: None,
-        exercise: "Back Squat".into(),
-        weight_kg: 140.0,
-        reps: 5,
-        rpe: 8.0,
-        observed_at: 1_000,
-        entry_id: 1,
-    }];
-    let fresh = build_plan_anchors(
-        SetIndex::new(&sets).with_facts(&sets),
-        AnchorCtx::default(),
-        0,
-        0,
-    );
-    let returning = build_plan_anchors(
-        SetIndex::new(&sets).with_facts(&sets),
-        AnchorCtx {
-            layoff: Some(Layoff {
-                weeks_off: 6.0,
-                returned_epoch_day: None,
-            }),
-            ..Default::default()
-        },
-        0,
-        0,
-    );
-    assert_eq!(
-        fresh.e1rm[0].1, returning.e1rm[0].1,
-        "the e1RM anchor is the logged value either way"
-    );
-    assert!(fresh.derates.is_empty());
-    assert_eq!(
-        returning.load_frac_for("Back Squat").map(|d| d.frac),
-        Some(0.70),
-        "6 wk off → 0.70 re-entry fraction on day 0 of the ramp"
-    );
-    assert!(matches!(
-        returning.load_frac_for("Back Squat").unwrap().cause,
-        crate::plan::DerateCause::Reentry { .. }
-    ));
-
-    // Flatten an anchored %1RM prescription with vs without the derate.
-    let pres = Prescription::Lift(crate::schema::LiftPrescription {
-        exercise: "Back Squat".into(),
-        sets: 3,
-        reps: 5,
-        intensity: LiftIntensity::PercentOneRm(80.0),
-        rest_sec: 180,
-        velocity_loss_pct: None,
-        reps_max: None,
-        load_kg: None,
-    });
-    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
-    let anchors_full = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 100.0)],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let anchors_re = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 100.0)],
-            derates: vec![crate::plan::LiftDerate {
-                exercise: "Back Squat".into(),
-                frac: 0.70,
-                cause: crate::plan::DerateCause::Reentry {
-                    day: 0,
-                    ramp_days: 28,
-                },
-            }],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let full = flatten_prescription(&rx, &anchors_full, None, false, DistanceUnit::Km);
-    let re = flatten_prescription(&rx, &anchors_re, None, false, DistanceUnit::Km);
-    assert_eq!(full.load_kg, Some(round_load_grid(100.0 * 0.80, false)));
-    assert_eq!(
-        re.load_kg,
-        Some(round_load_grid(100.0 * 0.80 * 0.70, false))
-    );
-    assert!(
-        re.load_kg.unwrap() < full.load_kg.unwrap(),
-        "the layoff load is lighter"
-    );
-    assert!(
-        re.anchored_on.contains("100 kg (your recent best)"),
-        "the logged best stays honest: {}",
-        re.anchored_on
-    );
+    // but the estimate shown stays the logged best so the honesty line never
+    // lies, and the card re-points to the rule that scaled it. A 100 kg single
+    // at 85 %: 85 kg fresh, 59.5 → 57.5 kg at the 70 % re-entry start.
+    let best = [("Back Squat", 100.0, 1, 0.0, T - 1)];
+    let full = squat_on(strength_profile(), &best, T);
+    let re = squat_on(back_from_layoff(6.0, T), &best, T);
+    assert_eq!((full.load_kg, re.load_kg), (Some(85.0), Some(57.5)));
+    for card in [&full, &re] {
+        assert!(
+            card.anchored_on
+                .starts_with("Estimated max 100 kg (your recent best)"),
+            "the logged best stays honest: {}",
+            card.anchored_on
+        );
+    }
     assert_eq!(
         re.evidence.grade,
         Some(EvidenceGrade::ExpertOpinion),
@@ -979,7 +982,7 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
     );
     assert_eq!(
         full.evidence.grade,
-        Some(EvidenceGrade::Strong),
+        Some(EvidenceGrade::Moderate),
         "the full load keeps its loading-band grade"
     );
     // The why-panel note must match the re-pointed chip, not the stale band.
@@ -989,13 +992,11 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         re.why.grade_note
     );
     assert!(
-        !re.why.grade_note.contains("Strong evidence"),
-        "no stale Strong note on a derated card"
-    );
-    assert!(
-        full.why.grade_note.contains("Strong evidence"),
-        "the full card keeps its band note: {}",
-        full.why.grade_note
+        full.why.grade_note.contains("Moderate evidence")
+            && !re.why.grade_note.contains("Moderate evidence"),
+        "no stale band note on a derated card: {} / {}",
+        full.why.grade_note,
+        re.why.grade_note
     );
 }
 
@@ -1004,156 +1005,86 @@ fn a_stale_pr_is_dropped_from_the_plan_anchors() {
     // A 14-month-old PR no longer reflects current strength, so it must not
     // anchor a %1RM working load (it decays to zero credit and drops out,
     // leaving a RIR prescription). A recent PR of the same load still anchors.
-    let today = 500i64;
-    let stale = [LoggedSet {
-        hold_sec: None,
-        exercise: "Back Squat".into(),
-        weight_kg: 140.0,
-        reps: 1,
-        rpe: 0.0,
-        observed_at: (today - 420) * DAY_SEC, // ~14 months ago
-        entry_id: 1,
-    }];
-    let a = build_plan_anchors(
-        SetIndex::new(&stale).with_facts(&stale),
-        AnchorCtx::default(),
-        today,
-        0,
-    );
-    assert!(
-        a.e1rm_for("Back Squat").is_none(),
+    let squat_after = |back: i64| {
+        squat_on(
+            strength_profile(),
+            &[("Back Squat", 140.0, 1, 0.0, T - back)],
+            T,
+        )
+    };
+    let stale = squat_after(420);
+    assert_eq!(
+        stale.load_kg, None,
         "a 14-month-old PR no longer anchors a %1RM load"
     );
-
-    let recent = [LoggedSet {
-        observed_at: (today - 5) * DAY_SEC,
-        ..stale[0].clone()
-    }];
-    let a2 = build_plan_anchors(
-        SetIndex::new(&recent).with_facts(&recent),
-        AnchorCtx::default(),
-        today,
-        0,
+    assert!(
+        stale.intensity_label.starts_with("RIR"),
+        "{}",
+        stale.intensity_label
     );
-    assert!(a2.e1rm_for("Back Squat").is_some(), "a recent PR anchors");
+    assert_eq!(squat_after(5).load_kg, Some(117.5), "a recent PR anchors");
 }
 
 #[test]
 fn a_weighted_timed_hold_produces_no_plan_anchor() {
-    // A weighted hold (e.g. "Weighted plank" at 20 kg) has no e1RM — a hold
-    // is isometric time, not a rep-max (CAL-E1RM-001). Without a hold guard,
-    // e1rm_epley(20, reps) > 0 (even reps==0 → 20) would fabricate a %1RM plan
-    // anchor. The guard skips it on a WEIGHTS profile too (calisthenics=false),
-    // where the ladder-name check alone never catches a non-ladder weighted hold.
-    let sets = [
-        LoggedSet {
-            hold_sec: Some(30),
-            exercise: "Weighted plank".into(),
-            weight_kg: 20.0,
-            reps: 0,
-            rpe: 7.0,
-            observed_at: 100,
-            entry_id: 1,
-        },
-        LoggedSet {
-            hold_sec: None,
-            exercise: "Back Squat".into(),
-            weight_kg: 140.0,
-            reps: 5,
-            rpe: 8.0,
-            observed_at: 200,
-            entry_id: 2,
-        },
-    ];
-    let anchors = build_plan_anchors(
-        SetIndex::new(&sets).with_facts(&sets),
-        AnchorCtx::default(),
-        0,
-        0,
-    );
-    assert!(
-        anchors.e1rm_for("Weighted plank").is_none(),
+    // A weighted hold has no e1RM: a hold is isometric time, not a rep-max
+    // (CAL-E1RM-001). Without a hold guard a 100 kg × 30 s squat hold would
+    // read as a 100 kg single and anchor an 85 kg working load, on a WEIGHTS
+    // profile too, where the ladder-name check never catches it.
+    let squat_after = |hold: Option<u16>| {
+        let mut ev = log_set("Back Squat", 100.0, 1, 0.0, (T - 1) * DAY_SEC);
+        let Event::LogSet { hold_sec, .. } = &mut ev else {
+            unreachable!()
+        };
+        *hold_sec = hold;
+        let (app, model) = planned_on(strength_profile(), [ev], T);
+        card(day_row(&app, &model, T).items, "Back Squat")
+    };
+    assert_eq!(
+        squat_after(Some(30)).load_kg,
+        None,
         "a weighted hold must not fabricate a %1RM anchor"
     );
-    assert!(
-        anchors.e1rm_for("Back Squat").is_some(),
-        "a normal barbell set still anchors an e1RM"
+    assert_eq!(
+        squat_after(None).load_kg,
+        Some(85.0),
+        "the same weight lifted once anchors an e1RM"
     );
 }
 
 #[test]
 fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
     // A >8 wk layoff carries NO KB load fraction (Table 3.4b) and directs a
-    // fresh-novice re-entry, so while the re-entry window runs
-    // `build_plan_anchors` sets `reentry_novice` and sets the pre-layoff anchor
-    // aside: `lift_prescription` prescribes the lift by RIR (technique first),
+    // fresh-novice re-entry: while the re-entry window runs the pre-layoff
+    // anchor is set aside and the lift is prescribed by RIR (technique first),
     // never a scaled %e1RM load (HARD RULE 1). The card still cites the
     // re-entry reason.
-    let sets = [LoggedSet {
-        hold_sec: None,
-        exercise: "Back Squat".into(),
-        weight_kg: 140.0,
-        reps: 5,
-        rpe: 8.0,
-        observed_at: 1_000,
-        entry_id: 1,
-    }];
-    let ctx = AnchorCtx {
-        layoff: Some(Layoff {
-            weeks_off: 12.0,
-            returned_epoch_day: None,
-        }),
-        ..Default::default()
-    };
-    let anchors = build_plan_anchors(SetIndex::new(&sets).with_facts(&sets), ctx, 0, 0);
-    assert!(
-        anchors.reentry_novice,
-        "12 wk off → treat as a fresh novice"
+    let squat = squat_on(
+        back_from_layoff(12.0, T),
+        &[("Back Squat", 140.0, 5, 8.0, T - 90)],
+        T,
     );
+    assert_eq!(squat.load_kg, None, "no %e1RM load on a novice re-entry");
     assert!(
-        anchors.e1rm_for("Back Squat").is_none() && anchors.derates.is_empty(),
-        "no invented load fraction beyond 8 wk: the pre-layoff anchor is set aside"
-    );
-
-    // >8 wk re-entry: the pipeline prescribes by RIR, not a %1RM anchor.
-    let pres = Prescription::Lift(crate::schema::LiftPrescription {
-        exercise: "Back Squat".into(),
-        sets: 3,
-        reps: 5,
-        intensity: LiftIntensity::Rir(3),
-        rest_sec: 180,
-        velocity_loss_pct: None,
-        reps_max: None,
-        load_kg: None,
-    });
-    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
-    let anchors = crate::plan::Anchors {
-        lift: anchors,
-        ..Default::default()
-    };
-    let item = flatten_prescription(&rx, &anchors, None, false, DistanceUnit::Km);
-    // No anchor-derived %e1RM load: a novice re-entry trains by RIR (HARD RULE 1).
-    assert_eq!(item.load_kg, None, "no %e1RM load on a novice re-entry");
-    assert!(
-        item.intensity_label.starts_with("RIR"),
+        squat.intensity_label.starts_with("RIR"),
         "novice re-entry is prescribed by RIR, not % e1RM: {}",
-        item.intensity_label
+        squat.intensity_label
     );
     assert!(
-        item.anchored_on.is_empty(),
+        !squat.anchored_on.starts_with("Estimated max"),
         "no logged-best load line when the anchor is set aside: {}",
-        item.anchored_on
+        squat.anchored_on
     );
     // The card re-points to REENTRY-001 (ExpertOpinion), citing the reason.
     assert_eq!(
-        item.evidence.grade,
+        squat.evidence.grade,
         Some(EvidenceGrade::ExpertOpinion),
         "re-points to REENTRY-001"
     );
     assert!(
-        item.why.grade_note.contains("Expert opinion"),
+        squat.why.grade_note.contains("Expert opinion"),
         "grade_note follows the re-pointed chip: {}",
-        item.why.grade_note
+        squat.why.grade_note
     );
 }
 

@@ -4,13 +4,6 @@
 
 use super::*;
 
-fn env_or(key: &str, default: u64) -> u64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-
 /// Names that collide on movement key, case, whitespace, equipment words,
 /// retired catalog labels, isolation keywords and calisthenics rungs.
 const POOL: &[&str] = &[
@@ -177,10 +170,7 @@ impl Gen {
 
     fn init(&mut self) -> Vec<Event> {
         vec![
-            Event::SetToday {
-                epoch_day: self.today,
-                utc_offset_sec: self.offset,
-            },
+            set_today_off_ev(self.today, self.offset),
             Event::SetProfile(self.profile.clone()),
             Event::GeneratePlan {
                 start_epoch_day: self.today - 14,
@@ -238,11 +228,7 @@ impl Gen {
             53..=60 if !self.sets.is_empty() => {
                 let i = self.rng.below(self.sets.len() as u64) as usize;
                 let row = self.sets.remove(i);
-                let ev = Event::DeleteEntry {
-                    kind: EntryKind::Set,
-                    entry_id: row.id,
-                    observed_at_fallback: row.at,
-                };
+                let ev = delete_of(EntryKind::Set, row.id, row.at);
                 self.deleted_sets.push(row);
                 ev
             }
@@ -256,10 +242,7 @@ impl Gen {
                 if self.rng.chance(0.2) {
                     self.offset = self.rng.pick(&[0, 3600, 7200, -18_000]);
                 }
-                Event::SetToday {
-                    epoch_day: self.today,
-                    utc_offset_sec: self.offset,
-                }
+                set_today_off_ev(self.today, self.offset)
             }
             75..=79 => {
                 match self.rng.below(4) {
@@ -299,11 +282,7 @@ impl Gen {
             91..=93 if !self.runs.is_empty() => {
                 let i = self.rng.below(self.runs.len() as u64) as usize;
                 let row = self.runs.remove(i);
-                let ev = Event::DeleteEntry {
-                    kind: EntryKind::Run,
-                    entry_id: row.id,
-                    observed_at_fallback: row.at,
-                };
+                let ev = delete_of(EntryKind::Run, row.id, row.at);
                 self.deleted_runs.push(row);
                 ev
             }
@@ -412,14 +391,7 @@ fn review_undo_and_identical_amend_never_change_the_view() {
                     g.sets.push(row.clone());
                     (
                         format!("delete+undo set {} {:?} @{}", row.id, row.exercise, row.at),
-                        vec![
-                            Event::DeleteEntry {
-                                kind: EntryKind::Set,
-                                entry_id: row.id,
-                                observed_at_fallback: row.at,
-                            },
-                            row.log(),
-                        ],
+                        vec![delete_of(EntryKind::Set, row.id, row.at), row.log()],
                     )
                 }
                 1 if !g.sets.is_empty() => {
@@ -440,14 +412,7 @@ fn review_undo_and_identical_amend_never_change_the_view() {
                     g.runs.push(row.clone());
                     (
                         format!("delete+undo run {} {} km @{}", row.id, row.km, row.at),
-                        vec![
-                            Event::DeleteEntry {
-                                kind: EntryKind::Run,
-                                entry_id: row.id,
-                                observed_at_fallback: row.at,
-                            },
-                            row.log(),
-                        ],
+                        vec![delete_of(EntryKind::Run, row.id, row.at), row.log()],
                     )
                 }
                 _ => continue,
@@ -585,13 +550,8 @@ fn review_set_index_matches_per_call_classifiers() {
         .iter()
         .enumerate()
         .map(|(i, n)| LoggedSet {
-            exercise: n.clone(),
-            weight_kg: 50.0,
-            reps: 5,
-            rpe: 8.0,
-            observed_at: 1_700_000_000 + i as i64,
             entry_id: i as u64 + 1,
-            hold_sec: None,
+            ..logged_set(n, 50.0, 5, 8.0, 1_700_000_000 + i as i64)
         })
         .collect();
     let idx = SetIndex::new(&sets);
@@ -664,14 +624,7 @@ fn review_last_set_full_tie_survives_delete_undo() {
         before.iter().any(|(_, l)| l.is_some()),
         "fixture: a squat item carries a Last: set, got {before:?}"
     );
-    let _ = app.update(
-        Event::DeleteEntry {
-            kind: EntryKind::Set,
-            entry_id: 11,
-            observed_at_fallback: at,
-        },
-        &mut model,
-    );
+    let _ = app.update(delete_of(EntryKind::Set, 11, at), &mut model);
     let _ = app.update(first, &mut model);
     assert_eq!(
         before,
@@ -892,10 +845,7 @@ fn review_extreme_days_never_panic_the_view() {
                         Event::GeneratePlan {
                             start_epoch_day: start,
                         },
-                        Event::SetToday {
-                            epoch_day: today,
-                            utc_offset_sec: 3600,
-                        },
+                        set_today_off_ev(today, 3600),
                         log_run(8.0, 45.0, 80.0, 0.0, at, 1),
                         log_run(5.0, 30.0, 65.0, 0.0, 1_700_000_000, 2),
                         with_entry_id(log_set("Back squat", 100.0, 5, 8.0, at), 3),
@@ -921,42 +871,24 @@ fn review_extreme_days_never_panic_the_view() {
 }
 
 /// Log `entries` (kind, entry id, stamp, its log event) after `setup`, then
-/// delete each entry and log it again (the shell's Undo, which re-pushes the
-/// row at the tail): every Undo must render the view byte for byte as
-/// before. Returns each Undo's first differing path.
+/// delete each entry and log it again (`undo_diff`: the shell's Undo, which
+/// re-pushes the row at the tail): every Undo must render the view byte for
+/// byte as before. Returns each Undo's first differing path.
 fn undo_each_entry_diffs(
     setup: Vec<Event>,
     entries: Vec<(EntryKind, u64, i64, Event)>,
 ) -> Vec<String> {
-    let app = Engine;
     let mut model = Model::default();
     for e in setup
         .into_iter()
         .chain(entries.iter().map(|(.., e)| e.clone()))
     {
-        let _ = app.update(e, &mut model);
+        let _ = Engine.update(e, &mut model);
     }
-    let mut diffs = Vec::new();
-    for (kind, entry_id, at, e) in entries {
-        let before = vm_json(&app.view(&model));
-        let _ = app.update(
-            Event::DeleteEntry {
-                kind,
-                entry_id,
-                observed_at_fallback: at,
-            },
-            &mut model,
-        );
-        let _ = app.update(e, &mut model);
-        let after = vm_json(&app.view(&model));
-        if before != after {
-            diffs.push(format!(
-                "Undo of {kind:?} {entry_id}: {}",
-                json_diff(&before, &after)
-            ));
-        }
-    }
-    diffs
+    entries
+        .into_iter()
+        .filter_map(|(kind, id, at, e)| undo_diff(&mut model, kind, id, at, e))
+        .collect()
 }
 
 /// The weekly report's easy share sums run minutes chronologically

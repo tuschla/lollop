@@ -1,29 +1,39 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toInstant
 
-@RunWith(RobolectricTestRunner::class)
-class SetLoggingLogicTest {
+class SetLoggingLogicTest : PlatformTest() {
+
+    // Exercise matching and the warm-up ramp ask the real core: start from a
+    // fresh process, not an engine another test class left installed.
+    @BeforeTest
+    fun setUp() = AppRuntime.resetForTest()
 
     @Test
     fun aRepeatTapInsideTheGuardIsNotANewSet() {
         assertTrue(loopSaveAccepted(null, 1_000))
-        assertFalse("a double tap", loopSaveAccepted(1_000, 1_120))
-        assertTrue("the next real set", loopSaveAccepted(1_000, 1_000 + LoopRepeatGuardMs))
-        assertTrue("a clock that stepped back never blocks saving", loopSaveAccepted(5_000, 1_000))
+        assertFalse(loopSaveAccepted(1_000, 1_120), "a double tap")
+        assertTrue(loopSaveAccepted(1_000, 1_000 + LoopRepeatGuardMs), "the next real set")
+        assertTrue(loopSaveAccepted(5_000, 1_000), "a clock that stepped back never blocks saving")
     }
 
     @Test
     fun recentLiftsSurviveABusyPlanWeek() {
         val week = (1..10).map { "Plan lift $it" }
         val picks = quickPickCandidates("", todayOpen = listOf("Back Squat"), recents = listOf("Curl", "Lateral raise"), weekPlanned = week)
-        assertEquals(listOf("Back Squat", "Curl", "Lateral raise", "Plan lift 1", "Plan lift 2", "Plan lift 3"), picks)
+        // Today's item and every recent lift first; the week's plan fills the rest of the row.
+        val first = listOf("Back Squat", "Curl", "Lateral raise")
+        assertEquals(first + week.take(QuickPickBase - first.size), picks)
     }
 
     @Test
@@ -57,12 +67,12 @@ class SetLoggingLogicTest {
     @Test
     fun theSetFieldsWaitForAChosenExercise() {
         val known = listOf("Back Squat", "Curl")
-        assertFalse("nothing typed", exerciseChosen("", known, added = null, preset = null, editing = false))
-        assertFalse("a half-typed search", exerciseChosen("Back Sq", known, added = null, preset = null, editing = false))
-        assertTrue("a known name, any case", exerciseChosen("back squat", known, added = null, preset = null, editing = false))
-        assertTrue("a confirmed new name", exerciseChosen("Dumbbell fly", known, added = "Dumbbell fly", preset = null, editing = false))
-        assertTrue("the rung the editor opened on", exerciseChosen("Ring row", known, added = null, preset = "Ring row", editing = false))
-        assertTrue("an edited set", exerciseChosen("Old lift", known, added = null, preset = null, editing = true))
+        assertFalse(exerciseChosen("", known, added = null, preset = null, editing = false), "nothing typed")
+        assertFalse(exerciseChosen("Back Sq", known, added = null, preset = null, editing = false), "a half-typed search")
+        assertTrue(exerciseChosen("back squat", known, added = null, preset = null, editing = false), "a known name, any case")
+        assertTrue(exerciseChosen("Dumbbell fly", known, added = "Dumbbell fly", preset = null, editing = false), "a confirmed new name")
+        assertTrue(exerciseChosen("Ring row", known, added = null, preset = "Ring row", editing = false), "the rung the editor opened on")
+        assertTrue(exerciseChosen("Old lift", known, added = null, preset = null, editing = true), "an edited set")
     }
 
     @Test
@@ -173,11 +183,11 @@ class SetLoggingLogicTest {
 
     @Test
     fun theLatestLoggableDayIsTodaysLocalDate() {
-        val zone = java.time.ZoneId.of("America/New_York")
+        val zone = TimeZone.of("America/New_York")
         // 23:30 local on Oct 16 is already Oct 17 in UTC; tomorrow must stay unselectable.
-        val now = java.time.ZonedDateTime.of(2026, 10, 16, 23, 30, 0, 0, zone).toInstant().toEpochMilli()
-        val oct16 = java.time.LocalDate.of(2026, 10, 16).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
-        assertEquals(oct16, latestSelectableDayUtcMillis(now, kotlinx.datetime.TimeZone.of("America/New_York")))
+        val now = LocalDateTime(2026, 10, 16, 23, 30).toInstant(zone).toEpochMilliseconds()
+        val oct16 = LocalDate(2026, 10, 16).atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+        assertEquals(oct16, latestSelectableDayUtcMillis(now, zone))
     }
 
     @Test

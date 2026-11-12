@@ -1,9 +1,6 @@
 package app.milestone.qa
 
 import android.content.Context
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
-import app.milestone.AppClock
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsOff
@@ -24,17 +21,14 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppSettings
-import app.milestone.ConcurrentGoal
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
 import app.milestone.HealthScreen
 import app.milestone.HoldReason
-import app.milestone.LiftGoal
 import app.milestone.PlanWithheld
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
+import app.milestone.actionMessageMillis
 import androidx.compose.ui.unit.dp
 import app.milestone.TestClock
 import app.milestone.todayEpochDay
@@ -98,11 +92,12 @@ class OwnerJourneysTest {
     }
 
     /** Profile tab: the "I'm ill right now" toggle is off. A while later, as a
-     *  user gets there: Today's messages ("Saved", …) have timed out and no
+     *  user gets there: Today's messages ("Saved", an Undo) have timed out and no
      *  longer sit over the bottom of the list. */
     private fun assertProfileIllnessOff() {
-        rule.mainClock.advanceTimeBy(10_000L)
-        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(10))
+        val shownFor = actionMessageMillis(long = false, a11y = null)
+        rule.mainClock.advanceTimeBy(shownFor)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(shownFor))
         rule.openProfileAnswersAt(illToggle())
         rule.onNode(illToggle()).assertIsOff()
     }
@@ -110,10 +105,10 @@ class OwnerJourneysTest {
     @Test
     fun freshSetupIllNow_bannerResolveEndsTheHold_withoutAProfileTrip() {
         rule.launchAppExpectingSetup()
-        rule.walkLiftSetup(birthdayDigits = "03121991", ill = true)
+        rule.walkLiftSetup(birthdayDigits = ADULT_BIRTHDAY_DIGITS, ill = true)
         rule.finishSetup()
 
-        rule.assertTextCountEventually(doNotTrain, 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
         assertEquals(HoldReason.AcuteIllnessProfile, EventDispatcher.model.value!!.hold_reason)
         val labels = resolveLabels()
         assertEquals("one illness action on the banner: $labels", 1, labels.size)
@@ -123,7 +118,7 @@ class OwnerJourneysTest {
         rule.tapResolveAndConfirm(labels.single())
 
         // Without visiting Profile: the hold is gone and a session is planned.
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         rule.waitForState { EventDispatcher.model.value?.let { !it.train_blocked && it.next_session != null } == true }
         rule.assertCountEventually(sessionShown(), 1)
         rule.onAllNodesWithText(str(R.string.main_plan_prompt_cta)).fetchSemanticsNodes()
@@ -139,7 +134,7 @@ class OwnerJourneysTest {
         rule.launchApp()
         rule.checkInIll(R.string.log_illness_below_neck)
         rule.waitForState { EventDispatcher.model.value?.train_blocked == true }
-        rule.assertTextCountEventually(doNotTrain, 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
         // Flu / fever / body aches is the below-neck-or-fever tier.
         val illness = journeyLog().last { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Illness") }
         assertEquals(2.0, illness.payload["value"]!!.jsonPrimitive.double, 0.0)
@@ -150,7 +145,7 @@ class OwnerJourneysTest {
         TestClock.offsetMillis += 3 * 3_600_000L
         rule.tapResolveAndConfirm(labels.single())
 
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         rule.waitForState { EventDispatcher.model.value?.next_session?.items?.any { it.return_check } == true }
         assertEquals(1, countOf("ResolveHold"))
         // The easy return session replaces today's plan, and its advice is stated once.
@@ -165,7 +160,7 @@ class OwnerJourneysTest {
         rule.launchApp()
         rule.checkInIll(R.string.log_illness_below_neck)
         rule.waitForState { EventDispatcher.model.value?.readiness_summary?.any { it.signal == ReadinessSignal.Illness } == true }
-        rule.assertTextCountEventually(doNotTrain, 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
         val labels = resolveLabels()
         assertEquals("both illnesses share one action: $labels", 1, labels.size)
         // Exactly one resolve action on screen: no second "I've recovered" beside "I'm better".
@@ -175,7 +170,7 @@ class OwnerJourneysTest {
         TestClock.offsetMillis += 3 * 3_600_000L
         rule.tapResolveAndConfirm(labels.single())
 
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         rule.waitForState { EventDispatcher.model.value?.let { !it.train_blocked && it.next_session != null } == true }
         val m = EventDispatcher.model.value!!
         assertTrue("no hold left anywhere", m.hold_resolutions.isEmpty() && m.hold_reason == null)
@@ -205,13 +200,13 @@ class OwnerJourneysTest {
         rule.waitForState { EventDispatcher.model.value?.program == null }
         val cta = str(R.string.main_plan_prompt_cta)
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(cta))
-        rule.assertTextCountEventually(cta, 1)
+        rule.assertCountEventually(hasText(cta), 1)
         assertEquals(0, rule.onAllNodes(sessionShown()).fetchSemanticsNodes().size)
 
         rule.onNode(hasText(cta) and hasClickAction()).performClick()
 
         rule.waitForState { EventDispatcher.model.value?.next_session != null }
-        rule.assertTextCountEventually(cta, 0)
+        rule.assertCountEventually(hasText(cta), 0)
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(sessionShown())
         rule.assertCountEventually(sessionShown(), 1)
         val log = journeyLog().map { it.variant }
@@ -222,7 +217,7 @@ class OwnerJourneysTest {
     fun illnessHold_planCardIsNeverADeadButton() {
         QaHarness.seedLog(ctx, listOf(illProfile()))
         rule.launchApp()
-        rule.assertTextCountEventually(doNotTrain, 1)
+        rule.assertCountEventually(hasText(doNotTrain), 1)
         assertEquals(PlanWithheld.HealthHold, EventDispatcher.model.value!!.plan_withheld)
         rule.onAllNodesWithText(str(R.string.main_plan_prompt_cta)).fetchSemanticsNodes()
             .let { assertTrue("no Plan my training while it can't build anything", it.isEmpty()) }
@@ -248,27 +243,16 @@ class OwnerJourneysTest {
         QaHarness.seedLog(
             ctx,
             listOf(
-                Event.SetProfile(
-                    progressionCadence = ProgressionCadence.WeekToWeek,
-                    liftGoal = LiftGoal.MaxStrength,
-                    goalDistance = GoalDistance.General,
-                    concurrentGoal = ConcurrentGoal.Strength,
-                    weeklySets = 0,
-                    runningDaysPerWeek = 0,
-                    runningKmPerWeek = 0.0,
-                    advanced = false,
-                    bodyweightKg = 80.0,
-                    ageYears = 30.0,
-                ),
+                QaHarness.strengthProfile().copy(weeklySets = 0, bodyweightKg = 80.0),
             ),
         )
         rule.launchApp()
         assertEquals(PlanWithheld.NothingToPlan, EventDispatcher.model.value!!.plan_withheld)
         val cta = str(R.string.main_plan_withheld_empty_cta)
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(cta))
-        rule.assertTextCountEventually(str(R.string.main_plan_withheld_empty_title), 1)
-        rule.assertTextCountEventually(str(R.string.main_plan_withheld_empty_body), 1)
-        rule.assertTextCountEventually(str(R.string.main_plan_prompt_cta), 0)
+        rule.assertCountEventually(hasText(str(R.string.main_plan_withheld_empty_title)), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_plan_withheld_empty_body)), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_plan_prompt_cta)), 0)
 
         rule.onNode(hasText(cta) and hasClickAction()).performClick()
 
@@ -283,7 +267,7 @@ class OwnerJourneysTest {
 
         rule.waitForState { EventDispatcher.model.value?.let { it.plan_withheld == null && it.next_session != null } == true }
         rule.assertCountEventually(sessionShown(), 1)
-        rule.assertTextCountEventually(str(R.string.main_plan_withheld_empty_title), 0)
+        rule.assertCountEventually(hasText(str(R.string.main_plan_withheld_empty_title)), 0)
         val log = journeyLog().map { it.variant }
         assertTrue("setup logged the plan request after the new profile: $log", log.lastIndexOf("GeneratePlan") > log.lastIndexOf("SetProfile"))
     }
@@ -323,7 +307,7 @@ class OwnerJourneysTest {
         val label = resolveLabels().single()
         rule.tapResolveAndConfirm(label)
         rule.waitForState { resolveLabels().isEmpty() }
-        rule.assertTextCountEventually(label, 0)
+        rule.assertCountEventually(hasText(label), 0)
         assertEquals(1, countOf("ResolveHold"))
     }
 

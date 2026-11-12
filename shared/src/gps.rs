@@ -925,7 +925,7 @@ fn xml_escape_into(out: &mut String, text: &str) {
 /// the importer (`import::time::parse_import_time_sec`) reads: an explicit sign
 /// and at least four digits (`+10000-01-01T00:00:00Z`, `-0001-…`), never a bare
 /// five-digit year it would read as no timestamp.
-fn unix_to_rfc3339_utc(secs: i64) -> String {
+pub(crate) fn unix_to_rfc3339_utc(secs: i64) -> String {
     let days = secs.div_euclid(crate::day::DAY_SEC);
     let tod = secs.rem_euclid(crate::day::DAY_SEC);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);

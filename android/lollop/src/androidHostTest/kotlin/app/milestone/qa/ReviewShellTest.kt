@@ -137,7 +137,7 @@ class ReviewShellTest {
         // end-positioned "+ Log" FAB sits on the left half.
         var dir = -1
         lastScenario!!.onActivity { dir = it.resources.configuration.layoutDirection }
-        val fab = rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).fetchSemanticsNode().boundsInRoot
+        val fab = rule.onNode(logFab).fetchSemanticsNode().boundsInRoot
         val window = rule.onAllNodes(isRoot()).fetchSemanticsNodes()[0].boundsInRoot
         assertTrue(
             "RTL is active (activity dir $dir, app dir ${ctx.resources.configuration.layoutDirection}, qualifiers ${RuntimeEnvironment.getQualifiers()}, FAB $fab in $window)",
@@ -299,7 +299,7 @@ class ReviewShellTest {
         val title = EventDispatcher.model.value!!.next_session!!.title
         problems += wordSplits(all().filter { it.text() == title })
         val isDay = androidx.compose.ui.test.SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
-        runCatching { rule.onAllNodes(androidx.compose.ui.test.hasScrollToIndexAction())[0].performScrollToNode(isDay) }
+        rule.onAllNodes(androidx.compose.ui.test.hasScrollToIndexAction())[0].performScrollToNode(isDay)
         rule.waitForIdle()
         val days = all().filter { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab && it.boundsInRoot.height > 0f }
         assertTrue("found the 7 week-strip days (${days.size})", days.size >= 7)
@@ -329,7 +329,7 @@ class ReviewShellTest {
         RuntimeEnvironment.setFontScale(scale)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).performClick()
+        rule.onNode(logFab).performClick()
         val title = str(R.string.main_weekly_checkin_title)
         rule.waitUntil(10_000) { rule.onAllNodes(hasText(title) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasText(title) and hasClickAction()).performScrollTo().performClick()
@@ -338,8 +338,10 @@ class ReviewShellTest {
         rule.waitForIdle()
         val problems = mutableListOf<String>()
         problems += screenWordSplits()
+        // Page through the sheet when it scrolls (at a small scale it may fit whole).
         repeat(6) {
-            runCatching { rule.onAllNodes(hasScrollToNodeAction()).onLast().performTouchInput { swipeUp() } }
+            val scrollers = rule.onAllNodes(hasScrollToNodeAction())
+            if (scrollers.fetchSemanticsNodes().isNotEmpty()) scrollers.onLast().performTouchInput { swipeUp() }
             rule.waitForIdle()
             problems += screenWordSplits()
         }
@@ -417,35 +419,6 @@ class ReviewShellComponentTest {
         assertTrue("its hint ${shortHint.boundsInRoot} beside it ${long.boundsInRoot}", shortHint.boundsInRoot.top < long.boundsInRoot.bottom - 1f)
     }
 
-    /**
-     * Claim check (passes = VERIFIED): SmallScreenLargeFontTest's text walker CAN
-     * see the run-stat value and label nodes in the unmerged tree despite the
-     * column's clearAndSetSemantics, so `runDetail_font200`
-     * is a real gate for cut numbers.
-     */
-    @Test
-    fun runStatColumns_valueAndLabelVisibleToTheTextCutWalker() {
-        val stats = listOf(
-            app.milestone.RunStat("Distance", "3.72", "mi", "Distance 3.72 miles"),
-            app.milestone.RunStat("Moving time", "29:57", "", "Moving time 29:57"),
-            app.milestone.RunStat("Avg pace", "8:03", "/mi", "Average pace 8:03 per mile"),
-        )
-        rule.setContent {
-            MilestoneTheme {
-                Box(Modifier.width(288.dp)) { app.milestone.RunStatColumns(stats, compact = false) }
-            }
-        }
-        assertTrue(rule.onAllNodes(hasContentDescription("Moving time 29:57")).fetchSemanticsNodes().isNotEmpty())
-        val withLayout = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
-            .flatMap { listOf(it) + it.allDescendants() }
-            .filter { it.textLayout() != null }
-            .map { it.text() }
-        for (s in stats) {
-            assertTrue("value \"${s.value}\" has a text-layout node the walker can check (have: $withLayout)", s.value in withLayout)
-            assertTrue("label \"${s.label.uppercase(Locale.US)}\" has a text-layout node (have: $withLayout)", s.label.uppercase(Locale.US) in withLayout)
-        }
-    }
-
     private fun runStatsWhole(scale: Float, widthDp: Int) {
         val stats = listOf(
             app.milestone.RunStat("Distance", "13.72", "km", "Distance 13.72 kilometres"),
@@ -462,6 +435,13 @@ class ReviewShellComponentTest {
         }
         val nodes = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
             .flatMap { listOf(it) + it.allDescendants() }.filter { it.textLayout() != null }
+        // The values and labels are laid-out text this check (and the screen walkers) can
+        // read, though the column's own node clears its semantics for one spoken line.
+        val texts = nodes.map { it.text() }
+        for (s in stats) {
+            assertTrue("value \"${s.value}\" has a text-layout node (have: $texts)", s.value in texts)
+            assertTrue("label \"${s.label.uppercase(Locale.US)}\" has a text-layout node (have: $texts)", s.label.uppercase(Locale.US) in texts)
+        }
         val problems = mutableListOf<String>()
         for (s in stats) {
             nodes.filter { it.text() == s.value }.forEach { if (it.linesNeeded() > 1) problems += "value \"${s.value}\" needs ${it.linesNeeded()} lines" }

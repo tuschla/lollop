@@ -131,11 +131,10 @@ fn taper_holds_intensity() {
 #[test]
 fn plyo_caps_rise_with_level() {
     use crate::individualization::TrainingAge;
-    assert_eq!(plyo_foot_contact_cap(TrainingAge::Novice).value, (80, 100));
-    assert_eq!(
-        plyo_foot_contact_cap(TrainingAge::Advanced).value,
-        (120, 140)
-    );
+    let cap = |age| plyo_foot_contact_cap(age).value;
+    assert_eq!(cap(TrainingAge::Novice), (80, 100));
+    assert_eq!(cap(TrainingAge::Intermediate), (100, 120));
+    assert_eq!(cap(TrainingAge::Advanced), (120, 140));
 }
 
 #[test]
@@ -202,7 +201,6 @@ fn prilepin_volume_pass_and_fail() {
 
 #[test]
 fn prilepin_table_nonempty_and_sorted() {
-    assert!(!PRILEPIN.is_empty());
     assert_eq!(PRILEPIN.len(), 4);
     for w in PRILEPIN.windows(2) {
         assert!(w[0].pct_max < w[1].pct_min);

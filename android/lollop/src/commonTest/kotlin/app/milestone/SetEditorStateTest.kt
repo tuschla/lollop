@@ -1,14 +1,17 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
-@RunWith(RobolectricTestRunner::class)
-class SetEditorStateTest {
+class SetEditorStateTest : PlatformTest() {
+
+    // Exercise matching asks the real core: start from a fresh process, not an
+    // engine another test class left installed.
+    @BeforeTest
+    fun setUp() = AppRuntime.resetForTest()
 
     private val noCue: (PrescriptionView) -> AppliedCue? = { null }
 

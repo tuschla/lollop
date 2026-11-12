@@ -192,79 +192,93 @@ fn a_finished_exercise_carries_no_remaining_sets_cue() {
 
 #[test]
 fn stacked_holds_apply_once_and_read_as_one_call() {
-    // Two lift-holding signals add one rep in reserve, not two, and their
-    // rows merge into one call naming both.
-    let recs = vec![
-        AdjustmentKind::HrvHold.call(
-            Adjustment::CapTopEnd {
-                trigger: ReadinessSignal::HrvLnRmssd,
-            },
-            claims::AUTOREG_HRV_LIFT_001,
-        ),
-        AdjustmentKind::WellnessHold.call(
-            Adjustment::CapTopEnd {
-                trigger: ReadinessSignal::WellnessZ,
-            },
-            claims::AUTOREG_HRV_LIFT_001,
-        ),
-    ];
-    let mut ns = session(vec![lift_item("Back squat", 100.0)]);
-    apply_adjustments_to_session(&mut ns, &recs, false);
-    assert_eq!(ns.items[0].intensity, PlanIntensity::Rir { rir: 3 });
+    // Two lift-holding signals (a low-HRV week and a low check-in today) add
+    // one rep in reserve, not two, and their rows merge into one call naming
+    // both.
+    let (app, mut model) = planned_strength_model(true);
+    report_low_hrv(&app, &mut model);
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: MON * DAY_SEC + 60,
+            ..input(
+                ReadinessSignal::WellnessZ,
+                crate::autoreg::WELLNESS_SINGLE_DAY_Z,
+            )
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    let bench = hero_item(&vm, "Bench press");
     assert_eq!(
-        ns.items[0].adjusted_note,
-        "no weight added, stop 1 rep earlier"
+        bench.intensity_label, "RIR 4",
+        "RIR 3 one rep earlier, not two"
     );
+    assert_eq!(bench.adjusted_note, "no weight added, stop 1 rep earlier");
+    let holds: Vec<&str> = vm
+        .adjustments
+        .iter()
+        .map(|a| a.summary.as_str())
+        .filter(|s| s.contains("lifts add no weight"))
+        .collect();
+    assert_eq!(holds.len(), 1, "the second hold merges into the first row");
+    assert!(
+        holds[0].starts_with("HRV has been below your normal range this week and your check-in"),
+        "{}",
+        holds[0]
+    );
+    assert!(
+        holds[0].contains("lifts add no weight and stop 1 rep earlier"),
+        "{}",
+        holds[0]
+    );
+}
 
-    let rows = crate::app::evidence_views::call_rows(
-        &recs,
-        &crate::app::evidence_views::CallCtx::default(),
-    );
-    assert_eq!(rows.len(), 1, "the second hold merges into the first row");
-    assert!(std::ptr::eq(rows[0].0, &recs[0]));
-    let s = &rows[0].1.summary;
-    assert!(
-        s.starts_with("HRV has been below your normal range this week and your check-in"),
-        "{s}"
-    );
-    assert!(
-        s.contains("lifts add no weight and stop 1 rep earlier"),
-        "{s}"
-    );
+/// A sharp left-knee pain report on `MON` at `at`: stops the lifts that load
+/// the knee (SAFE-PAIN-STRUCT-001).
+fn knee_pain(at: i64) -> Event {
+    Event::SubmitReadiness(ReadinessInput {
+        observed_at: at,
+        pain: Some(PainDetail {
+            kind: PainKind::SharpJoint,
+            severity: Some(6),
+            trend: PainTrend::Stable,
+            persists: false,
+            location: Some("Left knee".into()),
+        }),
+        ..input(ReadinessSignal::Pain, 1.0)
+    })
+}
+
+/// Today's item for `exercise`.
+fn hero_item<'a>(vm: &'a ViewModel, exercise: &str) -> &'a PrescriptionView {
+    vm.next_session
+        .as_ref()
+        .and_then(|ns| ns.items.iter().find(|i| i.exercise == exercise))
+        .unwrap_or_else(|| panic!("{exercise} today"))
 }
 
 #[test]
 fn a_held_lift_goes_no_heavier_than_already_lifted_for_its_reps() {
-    // ready-upd-001 ("no load added"): the hold keeps the load at or under
-    // the heaviest weight already lifted for the prescribed reps.
-    let mut it = lift_item("Back squat", 100.0);
-    it.hold_load_cap_kg = Some(95.0);
-    let mut ns = session(vec![it]);
-    let hold = AdjustmentKind::HrvHold.call(
-        Adjustment::CapTopEnd {
-            trigger: ReadinessSignal::HrvLnRmssd,
-        },
-        claims::AUTOREG_HRV_LIFT_001,
+    // ready-upd-001 ("no load added"): a pain stop holds the lifts it spares
+    // at or under the heaviest weight already lifted for the prescribed
+    // reps: the bench planned at 82.5 kg stays at the 80 kg already benched.
+    let (app, mut model) = planned_on(
+        strength_profile(),
+        [
+            log_set("Back Squat", 120.0, 3, 8.0, (MON - 1) * DAY_SEC),
+            log_set("Bench press", 80.0, 5, 8.0, (MON - 1) * DAY_SEC),
+        ],
+        MON,
     );
-    apply_adjustments_to_session(&mut ns, std::slice::from_ref(&hold), false);
-    assert_eq!(ns.items[0].load_kg, Some(95.0));
-    // A pain stop holds the spared lifts the same way.
-    let mut bench = lift_item("Bench press", 80.0);
-    bench.hold_load_cap_kg = Some(77.5);
-    let mut ns = session(vec![bench]);
-    let knee = AdjustmentKind::PainScoped(PainRegion::LowerLimb).call(
-        Adjustment::StopItems {
-            location: "Left knee".into(),
-        },
-        claims::SAFE_PAIN_STRUCT_001,
-    );
-    apply_adjustments_to_session(&mut ns, &[knee], false);
-    assert_eq!(ns.items[0].load_kg, Some(77.5));
-    assert_eq!(ns.items[0].adjusted_note, "no weight added");
-    // Nothing lifted for these reps yet: the planned load stands.
-    let mut ns = session(vec![lift_item("Back squat", 100.0)]);
-    apply_adjustments_to_session(&mut ns, &[hold], false);
-    assert_eq!(ns.items[0].load_kg, Some(100.0));
+    let planned = hero_item(&app.view(&model), "Bench press").load_kg;
+    assert_eq!(planned, Some(82.5), "the plan adds load");
+    app.update(knee_pain(MON * DAY_SEC + 60), &mut model)
+        .expect_only_render();
+    let vm = app.view(&model);
+    let bench = hero_item(&vm, "Bench press");
+    assert_eq!(bench.load_kg, Some(80.0));
+    assert_eq!(bench.adjusted_note, "no weight added");
 }
 
 #[test]
@@ -299,38 +313,29 @@ fn a_hold_caps_today_from_the_recent_sets_of_matching_reps() {
 }
 
 #[test]
-fn short_reps_read_short_and_a_pain_stop_reads_stopped() {
-    // Missed reps at the planned load are "short", not "lighter"; a pain
-    // report that ends an item after some work reads stopped.
-    let full = |reps: u32, at: i64| ItemSetView {
-        weight_kg: 100.0,
-        reps,
-        observed_at: at,
-        qualifies: true,
-        short: reps < 5,
-        ..ItemSetView::default()
-    };
-    let mut it = lift_item("Back squat", 100.0);
-    it.logged_sets = vec![full(5, 1), full(4, 2), full(5, 3)];
-    it.sets_done = 3;
-    it.done = true;
-    let mut items = vec![it];
-    refresh_item_statuses(&mut items, &[]);
-    assert_eq!(items[0].status, ItemStatus::DoneShort);
-
-    let mut it = lift_item("Back squat", 100.0);
-    it.logged_sets = vec![full(5, 1)];
-    it.sets_done = 1;
-    let knee = AdjustmentKind::PainScoped(PainRegion::LowerLimb).call(
-        Adjustment::StopItems {
-            location: "Left knee".into(),
-        },
-        claims::SAFE_PAIN_STRUCT_001,
-    );
-    let mut items = vec![it];
-    refresh_item_statuses(&mut items, &[knee]);
-    assert_eq!(items[0].status, ItemStatus::StoppedPain);
-    assert!(items[0].done);
+fn short_reps_at_the_planned_load_read_done_short() {
+    // Missed reps at the planned load are "short", not "lighter".
+    let (app, mut model) = planned_strength_model(true);
+    let it = loaded_item(&app, &model);
+    let load = it.load_kg.unwrap();
+    let reps = u32::from(it.reps_low);
+    let rpe = it.target_rpe.unwrap_or(7.0);
+    for k in 0..i64::from(it.sets) {
+        let r = if k + 1 == i64::from(it.sets) {
+            reps - 1
+        } else {
+            reps
+        };
+        log(
+            &app,
+            &mut model,
+            &it.exercise,
+            set(load, r, rpe, MON * DAY_SEC + 3_600 + 300 * k),
+        );
+    }
+    let vm = app.view(&model);
+    let done = hero_item(&vm, &it.exercise);
+    assert_eq!(done.status, ItemStatus::DoneShort, "{:?}", done.logged_sets);
 }
 
 #[test]
@@ -363,27 +368,10 @@ fn a_pain_report_after_work_reads_stopped_on_the_hero() {
         &it.exercise,
         set(load, reps, 0.0, MON * DAY_SEC + 3_600),
     );
-    app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: MON * DAY_SEC + 3_700,
-            pain: Some(PainDetail {
-                kind: PainKind::SharpJoint,
-                severity: Some(6),
-                trend: PainTrend::Stable,
-                persists: false,
-                location: Some("Left knee".into()),
-            }),
-            ..input(ReadinessSignal::Pain, 1.0)
-        }),
-        &mut model,
-    )
-    .expect_only_render();
-    let ns = app.view(&model).next_session.expect("today's session");
-    let squat = ns
-        .items
-        .iter()
-        .find(|i| i.exercise == it.exercise)
-        .expect("the squat");
+    app.update(knee_pain(MON * DAY_SEC + 3_700), &mut model)
+        .expect_only_render();
+    let vm = app.view(&model);
+    let squat = hero_item(&vm, &it.exercise);
     assert_eq!(squat.status, ItemStatus::StoppedPain, "{squat:?}");
 }
 
@@ -405,16 +393,22 @@ fn the_two_heavy_days_of_a_week_read_apart() {
 #[test]
 fn a_hybrid_plan_is_named_for_its_lifting_goal() {
     // A muscle-goal hybrid reads "Muscle building + running".
-    let p = Profile {
-        lift_goal: LiftGoal::Hypertrophy,
-        ..sample_profile()
+    let name = |p: Profile| {
+        let (app, model) = planned_on(p, [], MON);
+        app.view(&model).program.expect("a program").name
     };
     assert_eq!(
-        program_name(crate::plan::ProgramFocus::of(&PlanProfile::new(&p))),
+        name(Profile {
+            lift_goal: LiftGoal::Hypertrophy,
+            ..sample_profile()
+        }),
         "Muscle building + running"
     );
     assert_eq!(
-        program_name(crate::plan::ProgramFocus::Calisthenics(LiftGoal::Power)),
+        name(Profile {
+            lift_goal: LiftGoal::Power,
+            ..calisthenics_profile()
+        }),
         "Calisthenics power"
     );
 }
@@ -423,49 +417,49 @@ fn a_hybrid_plan_is_named_for_its_lifting_goal() {
 fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
     // CAL-EQUIP-001: "table/inverted rows for pulling".
     let p = Profile {
-        resistance_modality: ResistanceModality::Calisthenics,
         calis_equipment: Some(CalisEquipment {
             pull_up_bar: false,
             dip_bars: false,
             rings: false,
         }),
-        ..strength_profile()
+        ..calisthenics_profile()
     };
-    let prog = crate::plan::synthesize(&PlanProfile::new(&p), &crate::plan::Anchors::default(), 0)
-        .unwrap();
-    let row = prog
-        .mesocycle
-        .sessions
-        .iter()
-        .flat_map(|s| s.prescriptions.iter())
-        .find(|rx| {
-            matches!(&rx.value, Prescription::Calisthenics(c)
-                if c.ladder == crate::schema::LadderId::HorizontalPull)
-        })
-        .expect("a row");
-    let view = flatten_prescription(
-        row,
-        &crate::plan::Anchors::default(),
-        None,
-        false,
-        DistanceUnit::Km,
-    );
+    let (app, mut model) = planned_on(p, [], MON);
+    let row = |model: &Model| {
+        app.view(model)
+            .next_session
+            .expect("today's session")
+            .items
+            .into_iter()
+            .find(|it| {
+                crate::calisthenics::tier_by_name(&it.exercise).map(|(l, _)| l)
+                    == Some(Lad::HorizontalPull)
+            })
+            .expect("a row today")
+    };
+    let view = row(&model);
     assert_eq!(view.effort_cue, "use a sturdy table edge");
     assert!(view.summary.contains("sturdy table"), "{}", view.summary);
+    assert_eq!(
+        view.evidence,
+        EvidenceTagView::of(&Recommended::new((), claims::CAL_EQUIP_001))
+    );
     // The compact row shows only the lead, so the setup rides it, also after
-    // an adjustment re-renders the face.
+    // an adjustment (the e1RM gate's RPE cap) re-renders the face.
     assert!(
         view.face_lead.ends_with("· use a sturdy table edge"),
         "{}",
         view.face_lead
     );
-    let mut ns = session(vec![view.clone()]);
-    apply_adjustments_to_session(
-        &mut ns,
-        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
-        false,
-    );
-    let eased = &ns.items[0];
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: MON * DAY_SEC + 60,
+            ..input(ReadinessSignal::EstimatedOneRm, 0.93)
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let eased = row(&model);
     assert_ne!(
         eased.face_detail, view.face_detail,
         "the cap re-rendered the face"
@@ -481,7 +475,6 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
         "{}",
         eased.face_detail
     );
-    assert_eq!(row.claim_id(), claims::CAL_EQUIP_001);
 }
 
 #[test]
@@ -851,89 +844,60 @@ fn an_adjusted_today_reads_the_same_in_the_hero_and_its_strip_row() {
 
 #[test]
 fn a_held_lift_restates_its_load_in_the_why_basis() {
-    // The session `?` panel reads the held load, not the
-    // planned one.
-    let mut it = lift_item("Back squat", 100.0);
-    it.hold_load_cap_kg = Some(95.0);
-    it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Aim for 2 reps left.".into();
-    it.basis_rx = Some(BasisRx {
-        load_kg: Some(100.0),
-        lead: "3×5".into(),
-        rir: Some(2),
-        pieces: vec![
-            BasisPiece::Lead("3×5".into()),
-            BasisPiece::Text(" at 83% of your estimated max (120 kg): ".into()),
-            BasisPiece::Load(100.0),
-            BasisPiece::Text(". Aim for 2 reps left.".into()),
-        ],
-    });
-    let mut ns = session(vec![it]);
-    let hold = AdjustmentKind::HrvHold.call(
-        Adjustment::CapTopEnd {
-            trigger: ReadinessSignal::HrvLnRmssd,
-        },
-        claims::AUTOREG_HRV_LIFT_001,
+    // The session `?` panel reads the held load, not the planned one. A
+    // heavier single lifts the plan above the 120 kg × 3 baseline, which stays
+    // the most lifted for the squat's triples, so a low-HRV hold keeps 120 kg.
+    let (app, mut model) = planned_strength_model(true);
+    let squat = loaded_item(&app, &model).exercise;
+    log(
+        &app,
+        &mut model,
+        &squat,
+        set(170.0, 1, 10.0, (MON - 2) * DAY_SEC),
     );
-    apply_adjustments_to_session(&mut ns, &[hold], false);
-    let basis = &ns.items[0].why.basis;
+    let planned = loaded_item(&app, &model).load_kg.unwrap();
+    assert!(planned > 120.0, "{planned}");
+    report_low_hrv(&app, &mut model);
+    let held = loaded_item(&app, &model);
+    assert_eq!(held.load_kg, Some(120.0));
+    let basis = &held.why.basis;
     assert!(
-        basis.contains(": 100 kg planned, held at 95 kg today"),
+        basis.contains(&format!(": {planned} kg planned, held at 120 kg today")),
         "{basis}"
     );
-    assert!(!basis.contains(": 100 kg."), "{basis}");
+    assert!(!basis.contains(&format!(": {planned} kg.")), "{basis}");
 }
 
 #[test]
 fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
     // The `?` basis restates the sets and the reps left with the weight, so
-    // it reads the prescription the face shows.
-    let mut it = lift_item("Bench press", 100.0);
-    it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.".into();
-    it.basis_rx = Some(BasisRx {
-        load_kg: Some(100.0),
-        lead: "3×5".into(),
-        rir: Some(2),
-        pieces: vec![
-            BasisPiece::Lead("3×5".into()),
-            BasisPiece::Text(" at 83% of your estimated max (120 kg): ".into()),
-            BasisPiece::Load(100.0),
-            BasisPiece::Text(". Stop each set ".into()),
-            BasisPiece::RepsLeft(2),
-            BasisPiece::Text(". If a set feels much harder, you're below your estimate today: end the exercise there.".into()),
-        ],
-    });
-    let mut ns = session(vec![it]);
-    let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
-        Adjustment::Deload {
-            volume_reduction_pct: 50.0,
-            load_reduction_pct: 10.0,
-            weeks: 1,
-        },
-        claims::RUN_DELOAD_001,
-    );
-    let hold = AdjustmentKind::HrvHold.call(
-        Adjustment::CapTopEnd {
-            trigger: ReadinessSignal::HrvLnRmssd,
-        },
-        claims::AUTOREG_HRV_LIFT_001,
-    );
-    apply_adjustments_to_session(&mut ns, &[deload, hold], false);
-    let it = &ns.items[0];
-    let PlanIntensity::Rir { rir } = it.intensity else {
-        panic!("{:?}", it.intensity)
-    };
+    // it reads the prescription the face shows: a lighter week halves the
+    // squat's 5×3 and takes 10 % off its 117.5 kg, a low-HRV hold leaves one
+    // more rep in reserve than its ~3.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReview(SessionReview {
+            rpe_load_gap_sessions: Some(2),
+            observed_at: MON * DAY_SEC,
+            ..SessionReview::default()
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    report_low_hrv(&app, &mut model);
+    let it = loaded_item(&app, &model);
+    assert_eq!(it.face_lead, "3×3 @ 105 kg");
     assert!(
-        it.sets < 3 && rir > 2,
-        "both moved: {} sets, {rir} left",
-        it.sets
+        it.face_detail.ends_with("~4 reps left"),
+        "{}",
+        it.face_detail
     );
-    assert_eq!(
-        it.why.basis,
-        format!(
-            "{}×5 at 83% of your estimated max (120 kg): 100 kg planned, {} today. Stop each set with ~{rir} reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
-            it.sets,
-            fmt_weight(it.load_kg.unwrap(), false)
-        )
+    assert!(
+        it.why.basis.starts_with(
+            "3×3 at 85% of your estimated max (140 kg): 117.5 kg planned, 105 kg today. Stop each set with ~4 reps left."
+        ),
+        "{}",
+        it.why.basis
     );
 }
 
@@ -952,8 +916,7 @@ fn panel_load(basis: &str) -> &str {
 /// Every loaded lift of today's hero: the panel states the hero's load and
 /// its last-time set.
 fn assert_panel_states_hero_loads(model: &Model) {
-    let plan = working_plan(model);
-    let ns = plan.hero_day.and_then(|d| plan.row(d)).expect("hero");
+    let ns = Engine.view(model).next_session.expect("hero");
     let mut checked = 0;
     for it in ns.items.iter().filter(|i| !i.is_run()) {
         let Some(kg) = it.load_kg else { continue };
@@ -964,7 +927,10 @@ fn assert_panel_states_hero_loads(model: &Model) {
             "{}: {basis}",
             it.exercise
         );
-        if let Some(last) = it.last_set.as_ref().filter(|_| !it.anchored_on_single_set) {
+        // A face whose "Last: 60 kg × 8" line names a single set already shows
+        // it, so the basis never repeats it.
+        let last_on_face = it.anchored_on.starts_with("Last: ") && !it.anchored_on.contains(',');
+        if let Some(last) = it.last_set.as_ref().filter(|_| !last_on_face) {
             let last_time = format!("Last time: {} ×", fmt_weight(last.weight_kg, false));
             assert!(basis.contains(&last_time), "{}: {basis}", it.exercise);
         }

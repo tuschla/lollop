@@ -2,7 +2,6 @@ package app.milestone
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * [frameLongitudes] frames a route's longitude span for auto-zoom. The naive
@@ -28,11 +27,6 @@ class FrameLongitudesTest {
         val b = frameLongitudes(listOf(179.9, 179.95, -179.95, -179.9))
         assertEquals(179.9, b.west, 1e-9)
         assertEquals(-179.9, b.east, 1e-9)
-        assertTrue(b.west > b.east, "crossing box has west > east")
-        // Dateline-aware span (osmdroid: east − west, +360 if negative) is the true
-        // 0.2°, not the bogus 359.8°.
-        val span = (b.east - b.west).let { if (it < 0) it + 360.0 else it }
-        assertEquals(0.2, span, 1e-9)
     }
 
     @Test

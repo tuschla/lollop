@@ -35,22 +35,17 @@ fn rpe_extends_effective_reps_for_e1rm() {
             .expect_only_render();
         app.view(&m).lifts[0].clone()
     };
+    // Epley on effective reps: 100 × (1 + reps/30).
     let hard = log_at(9.0);
     let easy = log_at(7.0);
-    assert!(
-        easy.e1rm_kg > hard.e1rm_kg,
-        "RPE 7 (3 RIR) out-scores RPE 9 (1 RIR): {} vs {}",
-        easy.e1rm_kg,
-        hard.e1rm_kg
-    );
+    assert_eq!(hard.e1rm_kg, 120.0, "RPE 9: 5 + 1 RIR = 6 reps");
+    assert_eq!(easy.e1rm_kg, 126.7, "RPE 7: 5 + 3 RIR = 8 reps");
     assert!(hard.rpe_recorded && easy.rpe_recorded);
 
     let unrecorded = log_at(0.0);
-    let plain = (strength::e1rm_epley(100.0, 5) * 10.0).round() / 10.0;
-    assert!(
-        (unrecorded.e1rm_kg - plain).abs() < f64::EPSILON,
-        "RPE 0 scores as plain reps-to-failure Epley: {} vs {plain}",
-        unrecorded.e1rm_kg
+    assert_eq!(
+        unrecorded.e1rm_kg, 116.7,
+        "RPE 0 scores as plain reps-to-failure Epley (5 reps)"
     );
     assert!(!unrecorded.rpe_recorded, "RPE 0 is not a recorded RPE");
 }

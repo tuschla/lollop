@@ -34,24 +34,6 @@ class ImportParserTest {
     }
 
     @Test
-    fun everyCoreRefusalMapsToTheShellsReason() {
-        val reasons = ImportRefusal.entries.associateWith { refusal(ImportVerdict(refusal = it)).first }
-        assertEquals(
-            mapOf(
-                ImportRefusal.TooLarge to ImportFailure.TooLarge,
-                ImportRefusal.WrongType to ImportFailure.WrongType,
-                ImportRefusal.NoTrack to ImportFailure.NoTrack,
-                ImportRefusal.TooShort to ImportFailure.TooShort,
-                ImportRefusal.NoTimestamps to ImportFailure.NoTimestamps,
-                ImportRefusal.Damaged to ImportFailure.Damaged,
-                ImportRefusal.NotARun to ImportFailure.NotARun,
-                ImportRefusal.ImplausiblePace to ImportFailure.ImplausiblePace,
-            ),
-            reasons,
-        )
-    }
-
-    @Test
     fun aRideKeepsItsSportAndACoreWithoutAnAnswerReadsAsDamaged() {
         assertEquals(ImportFailure.NotARun to "cycling", refusal(ImportVerdict(refusal = ImportRefusal.NotARun, sport = "cycling")))
         assertEquals(ImportFailure.NotARun to null, refusal(ImportVerdict(refusal = ImportRefusal.NotARun, sport = " ")))

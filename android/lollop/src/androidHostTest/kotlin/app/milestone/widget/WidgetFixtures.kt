@@ -15,7 +15,8 @@ internal data class WidgetState(val snapshot: WidgetSnapshot, val recording: Boo
 internal object WidgetFixtures {
     const val DAY = 20_389L
 
-    private val week = listOf(
+    /** Mon trained, today (Tue) next, Wed rest, Thu and Fri planned, a rest weekend. */
+    val week = listOf(
         DayMark.Done, DayMark.Next, DayMark.Rest, DayMark.Planned,
         DayMark.Planned, DayMark.Rest, DayMark.Rest,
     ).mapIndexed { i, m -> WidgetWeekDay(DAY - 1 + i, m) }

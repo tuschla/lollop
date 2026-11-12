@@ -104,17 +104,20 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
     assert_eq!(it.sets_done, 1, "a working set at the load qualifies");
 }
 
-/// The set loop's one-tap warm-up row logs the STR-WARMUP-001 ramp (40 % × 5,
-/// 60 % × 3, 80 % × 2 of the working load, `strength::warm_up_ramp`)
-/// unrated BEFORE the first work set: "warm-up sets do not count as work
-/// sets", so the 80 % × 2 step is a warm-up while it is still the day's heaviest.
+/// The set loop's one-tap warm-up row logs the STR-WARMUP-001 ramp
+/// (`strength::warm_up_ramp`: the bar, then about 40 % × 5, 60 % × 3 and
+/// 80 % × 2 of the working load on the plate grid) unrated BEFORE the first
+/// work set: "warm-up sets do not count as work sets", so the 80 % × 2 step is
+/// a warm-up while it is still the day's heaviest.
 #[test]
 fn the_warm_up_ramp_top_step_does_not_count_before_the_first_work_set() {
     let (app, mut model) = planned_strength_model(true);
     let (ex, _, reps, load) = mon_anchored_item(&app, &model);
-    for (i, (share, r)) in [(0.4, 5), (0.6, 3), (0.8, 2)].into_iter().enumerate() {
+    let ramp = strength::warm_up_ramp(&ex, load, false).value;
+    assert!(ramp.len() > 1, "a ramp up to {load} kg: {ramp:?}");
+    for (i, step) in ramp.iter().enumerate() {
         app.update(
-            log_set(&ex, load * share, r, 0.0, MON * DAY_SEC + i as i64 * 120),
+            log_set(&ex, step.kg, step.reps, 0.0, MON * DAY_SEC + i as i64 * 120),
             &mut model,
         )
         .expect_only_render();
@@ -235,7 +238,12 @@ fn the_first_warm_up_step_of_a_suggested_load_item_is_not_work() {
             && !it.exercise.to_lowercase().contains("deadlift")
     });
     let work = item.suggested_load_kg.unwrap();
-    let first_step = (work * 0.4 / 2.5).round() * 2.5;
+    let first_step = strength::warm_up_ramp(&item.exercise, work, false)
+        .value
+        .into_iter()
+        .find(|s| !s.bar)
+        .expect("a ramp step above the bar")
+        .kg;
     let at = day * DAY_SEC + 17 * HOUR + (id as i64 + 1) * 60;
     app.update(
         with_entry_id(log_set(&item.exercise, first_step, 5, 0.0, at), id + 1),
@@ -255,6 +263,45 @@ fn the_first_warm_up_step_of_a_suggested_load_item_is_not_work() {
         "{}: {first_step} kg × 5 before {work} kg: {:?}",
         item.exercise, it.logged_sets
     );
+}
+
+/// A floor pull's ramp starts at 60 kg (the bar with full-size plates), so
+/// 60 kg × 5 before a deadlift's suggested start a few kg above it is a
+/// warm-up, not lighter work; logged under a Turkish keyboard's caps-lock
+/// spelling ("DEADLİFT") it is still the deadlift's set (the folded name).
+#[test]
+fn a_floor_pulls_first_warm_up_step_is_not_work() {
+    let lifts = [
+        "Back Squat",
+        "Bench Press",
+        "Deadlift",
+        "Overhead Press",
+        "Barbell Row",
+        "Romanian Deadlift",
+        "Incline Bench Press",
+        "Front Squat",
+    ];
+    let (app, mut model, day, item, id) = strength_day_with(&lifts, 55.0, 20, POS_MON, |it| {
+        it.exercise == "Deadlift" && it.load_kg.is_none() && it.suggested_load_kg.is_some()
+    });
+    let work = item.suggested_load_kg.unwrap();
+    assert!(
+        (0.8 * work..work).contains(&60.0),
+        "60 kg would be lighter work before {work} kg"
+    );
+    let at = day * DAY_SEC + 17 * HOUR + (id as i64 + 1) * 60;
+    app.update(
+        with_entry_id(log_set("DEADLİFT", 60.0, 5, 0.0, at), id + 1),
+        &mut model,
+    )
+    .expect_only_render();
+    let it = day_row(&app, &model, day)
+        .items
+        .into_iter()
+        .find(|it| it.exercise == "Deadlift")
+        .unwrap();
+    assert_eq!(it.logged_sets.len(), 1, "the folded name is the deadlift");
+    assert_eq!(it.sets_done, 0, "{:?}", it.logged_sets);
 }
 
 #[test]
@@ -326,30 +373,106 @@ fn sets_crossing_midnight_complete_the_day_they_started() {
 }
 
 #[test]
+fn a_morning_set_more_than_three_hours_later_starts_its_own_day() {
+    // 00:06 with the previous set at 20:00 (~4 h earlier) does NOT chain back
+    // to the evening's session, unlike the 16 min gap above.
+    let (app, mut model) = planned_strength_model(false);
+    set_today(&app, &mut model, MON + 1);
+    let (ex, _sets, reps, _load) = mon_first_item(&app, &model);
+    for at in [MON * DAY_SEC + 20 * HOUR, (MON + 1) * DAY_SEC + 6 * 60] {
+        app.update(log_set(&ex, 100.0, reps, 8.0, at), &mut model)
+            .expect_only_render();
+    }
+    assert_eq!(
+        mon_item(&app, &model, &ex).sets_done,
+        1,
+        "a 4 h gap breaks the chain"
+    );
+}
+
+#[test]
+fn no_load_item_qualifies_a_working_set_but_not_a_warmup() {
+    // A RIR-prescribed bench (no load anchor) counts a working set at 90 %+
+    // of the day's heaviest same-movement weight, but a 20 kg warm-up against
+    // an 80 kg top set does not.
+    let (app, mut model) = planned_strength_model(true);
+    assert_eq!(mon_item(&app, &model, "Bench press").load_kg, None);
+    for (kg, at) in [(20.0, 3_600), (80.0, 3_700)] {
+        app.update(
+            log_set("Bench press", kg, 5, 8.0, MON * DAY_SEC + at),
+            &mut model,
+        )
+        .expect_only_render();
+    }
+    let it = mon_item(&app, &model, "Bench press");
+    assert_eq!(it.sets_done, 1);
+    assert_eq!(
+        it.logged_sets
+            .iter()
+            .map(|s| (s.weight_kg, s.qualifies))
+            .collect::<Vec<_>>(),
+        [(20.0, false), (80.0, true)]
+    );
+}
+
+#[test]
+fn an_lb_step_up_from_225_lb_suggests_230_lb() {
+    // 225 lb × 9 at RPE 8 beats the bench's 5-rep / 3-RIR target by 3 reps:
+    // the suggested start is one 5 lb plate step up, never floored back to
+    // the logged 225 lb.
+    let (app, model) = planned_on(
+        Profile {
+            weight_lb: true,
+            ..strength_profile()
+        },
+        [log_set(
+            "Bench press",
+            225.0 / LB_PER_KG,
+            9,
+            8.0,
+            (MON - 3) * DAY_SEC,
+        )],
+        MON,
+    );
+    let bench = mon_item(&app, &model, "Bench press");
+    assert_eq!(bench.intensity_label, "RIR 3");
+    assert_eq!(bench.suggested_load_kg, Some(230.0 / LB_PER_KG));
+}
+
+#[test]
 fn a_short_jog_does_not_complete_a_long_run_but_a_near_full_run_does() {
     let (app, mut model) = planned_on(running_profile(), [], MON);
-    let long_day = app
+    let (long_day, km) = app
         .view(&model)
         .week_plan
         .iter()
-        .find(|s| s.title == "Long run")
-        .expect("a long run day")
-        .epoch_day;
+        .find(|s| s.session_type == SessionType::Run(RunSessionType::LongRun))
+        .map(|s| {
+            (
+                s.epoch_day,
+                s.items[0].run_head_km.expect("a long run by distance"),
+            )
+        })
+        .expect("a long run day");
     // Make the long-run day today so its completion is computed.
     set_today(&app, &mut model, long_day);
     let at = long_day * DAY_SEC + 9 * 3_600;
 
-    // A 1 km jog: below 80 % of the prescribed distance.
-    app.update(log_run_at(1.0, 6.0, 70.0, at), &mut model)
+    // A jog of a fifth of it: below 80 % of the prescribed distance.
+    let jog = 0.2 * km;
+    app.update(log_run_at(jog, jog * 6.0, 70.0, at), &mut model)
         .expect_only_render();
     let done_after_jog = day_row(&app, &model, long_day).items[0].done;
-    assert!(!done_after_jog, "a 1 km jog does not complete a long run");
+    assert!(
+        !done_after_jog,
+        "a {jog} km jog does not complete a {km} km long run"
+    );
 
-    // Replace it with a 4 km run (>= 80 % of the 4.8 km long run: the 30 %
-    // share under 64 km/wk, RUN-LONGRUN-TARGET-001).
+    // Replace it with 85 % of the long run (>= 80 %, RUN-LONGRUN-TARGET-001).
     app.update(Event::ClearRuns, &mut model)
         .expect_only_render();
-    app.update(log_run_at(4.0, 24.0, 70.0, at), &mut model)
+    let near = 0.85 * km;
+    app.update(log_run_at(near, near * 6.0, 70.0, at), &mut model)
         .expect_only_render();
     let row = day_row(&app, &model, long_day);
     assert!(
@@ -463,18 +586,14 @@ fn a_profile_edit_dated_today_leaves_last_mondays_prescription_and_done_unchange
 #[test]
 fn a_deload_reduced_set_count_completes_the_day_and_stays_done() {
     let (app, mut model) = planned_strength_model(false);
-
-    // Monday's prescribed exercises + full set counts, BEFORE any deload.
-    let full: Vec<(String, u8, u32)> = day_row(&app, &model, MON)
-        .items
-        .iter()
-        .filter(|i| !i.exercise.is_empty())
-        .map(|i| (i.exercise.clone(), i.sets, i.reps_low.max(1) as u32))
-        .collect();
-    assert!(
-        full.iter().any(|(_, sets, _)| *sets >= 2),
-        "at least one multi-set exercise so the deload actually reduces it"
-    );
+    let sets = |model: &Model| -> Vec<u8> {
+        day_row(&app, model, MON)
+            .items
+            .iter()
+            .map(|i| i.sets)
+            .collect()
+    };
+    let full = sets(&model);
 
     // A review with an rpe-load gap over 2 sessions triggers a standard deload
     // (volume −50 %). Dated today so it is active now and tomorrow.
@@ -487,15 +606,14 @@ fn a_deload_reduced_set_count_completes_the_day_and_stays_done() {
         &mut model,
     )
     .expect_only_render();
+    let shown = sets(&model);
+    assert!(
+        shown.iter().zip(&full).any(|(s, f)| s < f),
+        "the deload reduces the shown sets: {full:?} → {shown:?}"
+    );
 
-    // Log only the REDUCED count of each exercise (round(sets·0.5), min 1).
-    for (ex, sets, reps) in &full {
-        let reduced = ((*sets as f64 * 0.5).round() as u8).max(1);
-        for _ in 0..reduced {
-            app.update(log_set(ex, 100.0, *reps, 8.0, MON * DAY_SEC), &mut model)
-                .expect_only_render();
-        }
-    }
+    // Do what is shown: only the reduced count of each exercise.
+    log_shown(&app, &mut model, MON, shown_or(100.0), MON * DAY_SEC);
     let mon = day_row(&app, &model, MON);
     assert_eq!(
         mon.status,
@@ -716,10 +834,15 @@ fn the_hero_keeps_a_done_item_flagged_rather_than_dropping_it() {
     );
 }
 
-/// Log every lift item of `epoch_day` exactly as SHOWN — its displayed set count
-/// at its displayed load (a qualifying weight when unanchored) — timestamped at
-/// `at`.
-fn log_shown_session(app: &Engine, model: &mut Model, epoch_day: i64, at: i64) {
+/// Log every lift item shown on `epoch_day`: its shown set count × reps at
+/// `load(item)` kg, timestamped at `at`.
+fn log_shown(
+    app: &Engine,
+    model: &mut Model,
+    epoch_day: i64,
+    load: impl Fn(&PrescriptionView) -> f64,
+    at: i64,
+) {
     let items: Vec<(String, u8, u32, f64)> = day_row(app, model, epoch_day)
         .items
         .iter()
@@ -728,17 +851,22 @@ fn log_shown_session(app: &Engine, model: &mut Model, epoch_day: i64, at: i64) {
             (
                 i.exercise.clone(),
                 i.sets,
-                i.reps_low.max(1) as u32,
-                i.load_kg.unwrap_or(100.0),
+                u32::from(i.reps_low.max(1)),
+                load(i),
             )
         })
         .collect();
-    for (ex, sets, reps, w) in items {
+    for (ex, sets, reps, kg) in items {
         for _ in 0..sets {
-            app.update(log_set(&ex, w, reps, 8.0, at), model)
+            app.update(log_set(&ex, kg, reps, 8.0, at), model)
                 .expect_only_render();
         }
     }
+}
+
+/// The item's shown load, or `kg` for an effort-prescribed item.
+fn shown_or(kg: f64) -> impl Fn(&PrescriptionView) -> f64 {
+    move |i| i.load_kg.unwrap_or(kg)
 }
 
 #[test]
@@ -801,7 +929,13 @@ fn a_deload_expiring_midweek_keeps_an_already_done_day_done() {
         &mut model,
     )
     .expect_only_render();
-    log_shown_session(&app, &mut model, POS_MON, POS_MON * DAY_SEC + 3_600);
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        shown_or(100.0),
+        POS_MON * DAY_SEC + 3_600,
+    );
     assert_eq!(
         day_row(&app, &model, POS_MON).status,
         SessionStatus::Done,
@@ -819,53 +953,6 @@ fn a_deload_expiring_midweek_keeps_an_already_done_day_done() {
         SessionStatus::Done,
         "a deload expiring midweek must not flip an already-done day to missed"
     );
-}
-
-/// Log every lift item shown on `epoch_day` light: its shown set count × reps
-/// at `kg`, timestamped at `at`.
-fn log_shown_sets_at(app: &Engine, model: &mut Model, epoch_day: i64, kg: f64, at: i64) {
-    let items: Vec<(String, u8, u32)> = day_row(app, model, epoch_day)
-        .items
-        .iter()
-        .filter(|i| !i.exercise.is_empty())
-        .map(|i| (i.exercise.clone(), i.sets, i.reps_low.max(1) as u32))
-        .collect();
-    for (ex, sets, reps) in items {
-        for _ in 0..sets {
-            app.update(log_set(&ex, kg, reps, 8.0, at), model)
-                .expect_only_render();
-        }
-    }
-}
-
-/// Log every lift item shown on `epoch_day` at its SHOWN load (or `fallback`
-/// kg for an effort-prescribed item): its shown set count × reps at `at`.
-fn log_shown_sets_at_shown_load(
-    app: &Engine,
-    model: &mut Model,
-    epoch_day: i64,
-    fallback: f64,
-    at: i64,
-) {
-    let items: Vec<(String, u8, u32, f64)> = day_row(app, model, epoch_day)
-        .items
-        .iter()
-        .filter(|i| !i.exercise.is_empty())
-        .map(|i| {
-            (
-                i.exercise.clone(),
-                i.sets,
-                i.reps_low.max(1) as u32,
-                i.load_kg.unwrap_or(fallback),
-            )
-        })
-        .collect();
-    for (ex, sets, reps, kg) in items {
-        for _ in 0..sets {
-            app.update(log_set(&ex, kg, reps, 8.0, at), model)
-                .expect_only_render();
-        }
-    }
 }
 
 #[test]
@@ -886,7 +973,13 @@ fn removing_a_readiness_input_the_next_day_keeps_the_day_it_shaped_done() {
     };
     app.update(illness(1.0, POS_MON * DAY_SEC + 3_600), &mut model)
         .expect_only_render();
-    log_shown_sets_at(&app, &mut model, POS_MON, 60.0, POS_MON * DAY_SEC + 7_200);
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        |_| 60.0,
+        POS_MON * DAY_SEC + 7_200,
+    );
     assert_eq!(
         day_row(&app, &model, POS_MON).status,
         SessionStatus::Done,
@@ -944,7 +1037,13 @@ fn a_review_hrv_downgrade_keeps_its_day_done_the_next_day() {
     // A readiness downgrade is "one level": the shown load is
     // ~5 % under the plan, below the full bar's plate step, so logging it
     // completes Monday only through the downgrade fold.
-    log_shown_sets_at_shown_load(&app, &mut model, POS_MON, 60.0, POS_MON * DAY_SEC + 7_200);
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        shown_or(60.0),
+        POS_MON * DAY_SEC + 7_200,
+    );
     assert_eq!(day_row(&app, &model, POS_MON).status, SessionStatus::Done);
     set_today(&app, &mut model, POS_MON + 1);
     let mon = day_row(&app, &model, POS_MON);
@@ -973,7 +1072,13 @@ fn a_later_review_or_clear_keeps_an_earlier_deload_day_done() {
         &mut model,
     )
     .expect_only_render();
-    log_shown_session(&app, &mut model, POS_MON, POS_MON * DAY_SEC + 3_600);
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        shown_or(100.0),
+        POS_MON * DAY_SEC + 3_600,
+    );
     assert_eq!(day_row(&app, &model, POS_MON).status, SessionStatus::Done);
     // Tuesday's per-session review carries every weekly field at its default.
     set_today(&app, &mut model, POS_MON + 1);
@@ -1051,7 +1156,13 @@ fn a_done_deload_row_shows_the_folded_sets_and_load() {
         squat_shown.1 < squat_full.sets && squat_shown.2 < squat_full.load_kg,
         "the deload reduces the squat's sets and load: {squat_full:?} → {squat_shown:?}"
     );
-    log_shown_session(&app, &mut model, POS_MON, POS_MON * DAY_SEC + 3_600);
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        shown_or(100.0),
+        POS_MON * DAY_SEC + 3_600,
+    );
     for today in [POS_MON, POS_MON + 1] {
         set_today(&app, &mut model, today);
         let mon = day_row(&app, &model, POS_MON);
@@ -1078,47 +1189,64 @@ fn a_done_deload_row_shows_the_folded_sets_and_load() {
 
 #[test]
 fn stacked_deloads_take_the_single_deepest_cut_not_compounded() {
-    // Two simultaneous 50 % deloads reduce a 5-set item to 3 (the single deepest
-    // cut), never 2 (sequential compounding) — otherwise the hero would show the
-    // item done at 2 sets while the next day's judgement needs 3 (a done→missed
-    // flip). Both the display fold and the completion judgement share one
-    // composition.
-    let mut ns = PlanRow {
-        items: vec![
-            PrescriptionView {
-                exercise: "Back Squat".into(),
-                sets: 5,
-                reps_low: 3,
-                reps_high: 3,
-                load_kg: Some(120.0),
-                sets_done: 3,
-                ..Default::default()
-            }
-            .into(),
-        ],
-        ..Default::default()
+    // Two simultaneous 50 % deloads (an RPE-load gap and the MRV sign cluster
+    // in one check-in) reduce the 5-set squat to 3 (the single deepest cut),
+    // never 2 (sequential compounding) — otherwise the hero would show the
+    // item done at 2 sets while the next day's judgement needs 3 (a
+    // done→missed flip). Both the display fold and the completion judgement
+    // share one composition.
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
+    let squat_sets = |model: &Model| {
+        day_row(&app, model, POS_MON)
+            .items
+            .into_iter()
+            .find(|i| i.exercise == "Back Squat")
+            .expect("the squat")
+            .sets
     };
-    let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
-        Adjustment::Deload {
-            volume_reduction_pct: 50.0,
-            load_reduction_pct: 10.0,
-            weeks: 1,
-        },
-        claims::RUN_DELOAD_001,
-    );
-    apply_adjustments_to_session(&mut ns, &[deload.clone(), deload], false);
+    assert_eq!(squat_sets(&model), 5);
+    app.update(
+        Event::SubmitReview(SessionReview {
+            rpe_load_gap_sessions: Some(2),
+            mrv_sign_cluster: true,
+            observed_at: POS_MON * DAY_SEC,
+            ..SessionReview::default()
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
     assert_eq!(
-        ns.items[0].sets, 3,
+        vm.review_adjustments
+            .iter()
+            .filter(|a| a.summary.starts_with("Lighter week"))
+            .count(),
+        2,
+        "both deloads are in force: {:#?}",
+        vm.review_adjustments
+    );
+    assert_eq!(
+        squat_sets(&model),
+        3,
         "the single deepest cut, not compounded to 2"
     );
-    assert!(
-        ns.items[0].done,
-        "3 qualifying sets complete the reduced 3-set item"
+    log_shown(
+        &app,
+        &mut model,
+        POS_MON,
+        shown_or(100.0),
+        POS_MON * DAY_SEC + 3_600,
+    );
+    set_today(&app, &mut model, POS_MON + 1);
+    assert_eq!(
+        day_row(&app, &model, POS_MON).status,
+        SessionStatus::Done,
+        "the shown 3 sets complete the day, also the next day"
     );
 }
 
 /// A runner's plan from `MON`, and the first run day's row with a run
-/// planned by distance, with that planned km.
+/// planned by distance, with the km its face shows.
 fn first_distance_run(app: &Engine, model: &mut Model) -> (i64, f64) {
     app.update(Event::SetProfile(running_profile()), model)
         .expect_only_render();
@@ -1130,13 +1258,12 @@ fn first_distance_run(app: &Engine, model: &mut Model) -> (i64, f64) {
     )
     .expect_only_render();
     set_today(app, model, MON);
-    working_plan(model)
+    app.view(model)
         .week_plan
         .iter()
         .find_map(|s| {
             let it = s.items.iter().find(|i| i.is_run())?;
-            let (km, _) = crate::app::plan_views::run_planned(it);
-            km.map(|k| (s.epoch_day, k))
+            it.run_head_km.map(|k| (s.epoch_day, k))
         })
         .expect("a run planned by distance")
 }
@@ -1202,7 +1329,12 @@ fn session_done_carries_run_numbers_and_says_of_plan_when_short() {
         fb.message,
         format!("Run done: {km:.1} km of {planned:.1} km in 60 min."),
     );
-    // A miles profile reads the same line in miles.
+    // A miles profile reads the same line in miles (1 mi = 1.609344 km, one
+    // decimal, a trailing ".0" dropped).
+    let mi = |km: f64| {
+        let tenths = format!("{:.1}", km / 1.609_344);
+        format!("{} mi", tenths.trim_end_matches(".0"))
+    };
     let miles = Profile {
         distance_unit: DistanceUnit::Mi,
         ..model.profile().cloned().expect("a profile")
@@ -1211,11 +1343,7 @@ fn session_done_carries_run_numbers_and_says_of_plan_when_short() {
         .expect_only_render();
     assert_eq!(
         app.view(&model).feedback.expect("feedback").message,
-        format!(
-            "Run done: {} of {} in 60 min.",
-            fmt_mi_of_km(km),
-            fmt_mi_of_km(planned)
-        ),
+        format!("Run done: {} of {} in 60 min.", mi(km), mi(planned)),
     );
 
     // The full distance reads "as planned".
@@ -1550,23 +1678,11 @@ fn partial_past_lift_day_is_judged_on_its_logged_share_with_per_item_done_flags(
     // Advance to Wednesday: Monday is now a partially-logged past day.
     set_today(&app, &mut model, MON + 2);
     let mon = day_row(&app, &model, MON);
-    let (planned, logged) =
-        mon.items
-            .iter()
-            .filter(|i| !i.exercise.is_empty())
-            .fold((0u32, 0u32), |(p, l), i| {
-                let required = u32::from(i.sets.max(1));
-                (p + required, l + u32::from(i.sets_done).min(required))
-            });
     // Under the lighter credit, logged work reads partly done, never missed.
-    let expected = if 2 * logged >= planned {
-        SessionStatus::DoneLighter
-    } else {
-        SessionStatus::Partial
-    };
-    assert_eq!(
-        mon.status, expected,
-        "{logged} of {planned} work sets on a partly logged past day"
+    assert!(
+        !matches!(mon.status, SessionStatus::Missed | SessionStatus::Done),
+        "a partly logged past day: {:?}",
+        mon.status
     );
     let done_item = mon
         .items
@@ -1664,14 +1780,8 @@ fn past_day_completeness_buckets_by_local_day() {
     )
     .expect_only_render();
     // Today = Wed local; +2h offset → the boundary set is LOCAL Monday.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: off,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    app.update(set_today_off_ev(MON + 2, off), &mut model)
+        .expect_only_render();
     let mut guard = 0;
     loop {
         let remaining: Vec<(String, u32)> = {

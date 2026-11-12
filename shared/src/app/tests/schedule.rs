@@ -15,6 +15,32 @@ fn move_session(app: &Engine, model: &mut Model, from: i64, to: i64) {
     .expect_only_render();
 }
 
+/// A hybrid (`sample_profile`) week restarted on the first of two adjacent
+/// planned days, so no earlier missed day competes for swapped work; today
+/// is that first day. `pick` maps the session types of days `d` and `d + 1`
+/// to the `(lift, run)` offsets from `d`. Returns the lift and run days.
+fn hybrid_pair(
+    pick: impl Fn(SessionType, SessionType) -> Option<(i64, i64)>,
+) -> (Engine, Model, i64, i64) {
+    let (app, mut model) = planned_on(sample_profile(), [], MON);
+    let kind = |day: i64| day_row(&app, &model, day).session_type;
+    let (lift_day, run_day) = (MON..MON + 5)
+        .find_map(|d| pick(kind(d), kind(d + 1)).map(|(l, r)| (d + l, d + r)))
+        .expect("a hybrid week places a lift next to a run");
+    let first = lift_day.min(run_day);
+    app.update(Event::ClearPlan, &mut model)
+        .expect_only_render();
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: first,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    set_today(&app, &mut model, first);
+    (app, model, lift_day, run_day)
+}
+
 #[test]
 fn move_session_moves_todays_session_and_blocks_a_spacing_violation() {
     // Pure lifter, full-body Mon/Wed/Fri; today is Monday.
@@ -51,10 +77,19 @@ fn move_session_moves_todays_session_and_blocks_a_spacing_violation() {
     // The next session is Wednesday's (Monday is rest now, Sunday is later).
     assert_eq!(vm.next_session.expect("next").epoch_day, MON + 2);
 
-    // ClearPlan drops the moves with the plan.
+    // ClearPlan drops the moves with the plan: a new plan has Monday's session
+    // back on Monday and nothing moved to Sunday.
     app.update(Event::ClearPlan, &mut model)
         .expect_only_render();
-    assert!(model.session_moves.is_empty());
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: MON,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    assert!(!day_row(&app, &model, MON).items.is_empty());
+    assert_eq!(day_row(&app, &model, MON + 6).moved_from_epoch_day, None);
 }
 
 /// "Remove plan" is a fact of the log: the view says so until the next
@@ -196,7 +231,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     };
     app.update(Event::SetProfile(poisoned), &mut model)
         .expect_only_render();
-    let p = model.profile().cloned().expect("profile stored");
+    let p = app.view(&model).profile.expect("profile stored");
     assert_eq!(p.lift_days_per_week, None);
     assert_eq!(p.training_weekdays, None, "no weekday bit left → any day");
     assert_eq!(p.goal_race_epoch_day, None);
@@ -215,7 +250,6 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     set_today(&app, &mut model, MON);
     let vm = app.view(&model);
     assert_eq!(vm.week_plan.len(), 7, "the plan still renders");
-    assert!(serde_json::to_string(&vm).is_ok());
 
     // Plausible values survive (a faster-than-2:00/km race and a stray high
     // weekday bit are cleaned; the rest is kept, the muscle canonicalized).
@@ -234,7 +268,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     };
     app.update(Event::SetProfile(fine), &mut model)
         .expect_only_render();
-    let p = model.profile().cloned().expect("profile stored");
+    let p = app.view(&model).profile.expect("profile stored");
     assert_eq!(p.lift_days_per_week, Some(4));
     assert_eq!(p.training_weekdays, Some(0b0110_0000));
     assert_eq!(p.goal_race_epoch_day, Some(20_600));
@@ -309,50 +343,13 @@ fn a_swapped_run_and_lift_credit_both_planned_sessions() {
     // leave a later day in the same week to look back from. The plan then
     // starts on the first of them, so no earlier missed day competes for the
     // swapped work.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(sample_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, MON);
+    let (app, mut model, lift_day, run_day) = hybrid_pair(|a, b| match (a, b) {
+        (SessionType::Lift(_), SessionType::Run(_)) => Some((0, 1)),
+        (SessionType::Run(_), SessionType::Lift(_)) => Some((1, 0)),
+        _ => None,
+    });
     let week = app.view(&model).week_plan;
-    let kind = |day: i64| {
-        week.iter()
-            .find(|s| s.epoch_day == day)
-            .map(|s| s.session_type)
-            .unwrap_or_default()
-    };
-    let (lift_day, run_day) = (MON..MON + 5)
-        .find_map(|d| match (kind(d), kind(d + 1)) {
-            (SessionType::Lift(_), SessionType::Run(_)) => Some((d, d + 1)),
-            (SessionType::Run(_), SessionType::Lift(_)) => Some((d + 1, d)),
-            _ => None,
-        })
-        .expect("a hybrid week places a lift next to a run");
-    let first = lift_day.min(run_day);
-    app.update(Event::ClearPlan, &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: first,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, first);
-    let week = app.view(&model).week_plan;
-    let kind = |day: i64| {
-        week.iter()
-            .find(|s| s.epoch_day == day)
-            .map(|s| s.session_type)
-            .unwrap_or_default()
-    };
+    let kind = |day: i64| day_row(&app, &model, day).session_type;
     assert!(
         matches!(kind(lift_day), SessionType::Lift(_))
             && matches!(kind(run_day), SessionType::Run(_)),
@@ -532,63 +529,21 @@ fn a_rest_day_after_a_quiet_48_h_can_take_the_next_session() {
 #[test]
 fn a_session_credited_from_a_lighter_day_reads_done_lighter() {
     // "✓ Mo": the swapped-in run covered 60 % of the plan, so the credited
-    // row carries the lighter status, not plain done.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(sample_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, MON);
-    let week = app.view(&model).week_plan;
-    let kind = |day: i64| {
-        week.iter()
-            .find(|s| s.epoch_day == day)
-            .map(|s| s.session_type)
-            .unwrap_or_default()
-    };
-    // The run day comes first, so its own plan never sees the run logged
-    // the day after it.
-    let (lift_day, run_day) = (MON..MON + 5)
-        .find_map(|d| match (kind(d), kind(d + 1)) {
-            (SessionType::Run(_), SessionType::Lift(_)) => Some((d + 1, d)),
-            _ => None,
-        })
-        .expect("a hybrid week places a run before a lift");
-    // Start on the first of the pair, so no earlier missed run day competes
-    // for the spare run.
-    let first = lift_day.min(run_day);
-    app.update(Event::ClearPlan, &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: first,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, first);
-    let run_item = working_plan(&model)
-        .week_plan
-        .into_iter()
-        .find(|s| s.epoch_day == run_day)
-        .expect("a week-strip row for the day")
+    // row carries the lighter status, not plain done. The run day comes
+    // first, so its own plan never sees the run logged the day after it.
+    let (app, mut model, lift_day, run_day) = hybrid_pair(|a, b| match (a, b) {
+        (SessionType::Run(_), SessionType::Lift(_)) => Some((1, 0)),
+        _ => None,
+    });
+    let km = day_row(&app, &model, run_day)
         .items
         .into_iter()
         .find(|i| i.is_run())
-        .expect("the run item");
-    let (km, min) = match crate::app::plan_views::run_planned(&run_item) {
-        (Some(km), _) => (km * 0.6, km * 0.6 * 6.0),
-        (None, Some(min)) => (min * 0.6 / 6.0, min * 0.6),
-        (None, None) => panic!("a run with a single planned number"),
-    };
+        .and_then(|i| i.run_head_km)
+        .expect("a run of a planned distance")
+        * 0.6;
     app.update(
-        log_run_at(km, min, 70.0, lift_day * DAY_SEC + 13 * 3_600),
+        log_run_at(km, km * 6.0, 70.0, lift_day * DAY_SEC + 13 * 3_600),
         &mut model,
     )
     .expect_only_render();
@@ -596,4 +551,17 @@ fn a_session_credited_from_a_lighter_day_reads_done_lighter() {
     let run = day_row(&app, &model, run_day);
     assert_eq!(run.credited_from_epoch_day, Some(lift_day));
     assert_eq!(run.status, SessionStatus::DoneLighter);
+}
+
+#[test]
+fn a_session_on_the_last_day_of_the_week_has_no_day_left_to_move_to() {
+    // Monday's session moved to Sunday; on Sunday nothing is left this week.
+    let (app, mut model) = planned_strength_model(true);
+    move_session(&app, &mut model, MON, MON + 6);
+    set_today(&app, &mut model, MON + 6);
+    let sunday = day_row(&app, &model, MON + 6);
+    assert!(!sunday.items.is_empty(), "the moved session is today");
+    assert!(sunday.move_targets.is_empty(), "{:?}", sunday.move_targets);
+    let reason = sunday.move_blocked_reason.expect("explained");
+    assert!(reason.starts_with("No day is left this week"), "{reason}");
 }

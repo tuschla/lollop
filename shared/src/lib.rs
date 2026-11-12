@@ -52,6 +52,8 @@ pub mod running;
 pub(crate) mod sanitize;
 pub mod schema;
 pub mod strength;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod wire;
 
 pub use app::{Engine, Model};

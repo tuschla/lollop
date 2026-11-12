@@ -34,7 +34,7 @@ import kotlin.test.assertTrue
  */
 class IosRunTrackerTest {
     private val dir = newTempDir()
-    private val sidecar = AppFiles.sibling(dir, "/active-run.ndjson")
+    private val sidecar = fileIn(dir, AppFileNames.ACTIVE_RUN)
     private val stream = FakeStream()
     private val clock = ShiftedClock()
     private lateinit var tracker: IosRunRecording
@@ -73,7 +73,14 @@ class IosRunTrackerTest {
         timestamp = at,
     )
 
-    private fun spin(seconds: Double) = NSRunLoop.mainRunLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(seconds))
+    /** Run the main run loop (the surface's flow collectors) until [done]. */
+    private fun runLoopUntil(what: String, done: () -> Boolean) {
+        val deadline = NSDate().timeIntervalSince1970 + 10.0
+        while (!done()) {
+            assertTrue(NSDate().timeIntervalSince1970 < deadline, "no $what within 10 s")
+            NSRunLoop.mainRunLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(0.01))
+        }
+    }
 
     private fun deliver(vararg fixes: CLLocation) =
         tracker.delegate.locationManager(manager, didUpdateLocations = fixes.toList())
@@ -191,11 +198,11 @@ class IosRunTrackerTest {
             }
         }
         tracker.recorder.start(record = false, arming = true)
-        spin(0.1)
+        runLoopUntil("armed frame") { RunSurfacePhase.Armed in frames }
         deliver(location(0, ageSec = 2.0), location(1, ageSec = 1.0))
         RunSession.setPaused(true)
         // The pause reaches the surface through the main-thread flow collector.
-        spin(0.2)
+        runLoopUntil("paused frame") { frames.lastOrNull() == RunSurfacePhase.Paused }
         deliver(location(2, ageSec = 0.0))
         tracker.recorder.stop()
         assertEquals(listOf(RunSurfacePhase.Armed, RunSurfacePhase.Recording, RunSurfacePhase.Paused), frames.distinct())

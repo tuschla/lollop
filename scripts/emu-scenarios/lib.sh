@@ -37,11 +37,11 @@ PHASE_TAG="EMUSCN"
 out_init() {
   OUT="$1"
   mkdir -p "$OUT"/{shots,ui,logs}
-  : >"$OUT/checks.tsv"
+  : >"$OUT/checks.tsv"; : >"$OUT/observations.tsv"
 }
 log() { printf '[%s] ==> %s\n' "$(date +%T)" "$*" | tee -a "$OUT/run.log" >&2; }
 die() { log "ERROR: $*"; exit 1; }
-# check PASS|FAIL|INFO SCENARIO NAME DETAIL: one checks.tsv row, echoed to the log.
+# check PASS|FAIL SCENARIO NAME DETAIL: one checks.tsv row, echoed to the log.
 check() {
   local d="${4//$'\t'/ }"; d="${d//$'\n'/ ⏎ }"
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$d" >>"$OUT/checks.tsv"
@@ -52,7 +52,13 @@ expect() {
   local sc="$1" nm="$2" de="$3"; shift 3
   if "$@"; then check PASS "$sc" "$nm" "$de"; else check FAIL "$sc" "$nm" "$de"; fi
 }
-measure() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$OUT/measurements.tsv"; log "measure $1 · $2 = $3"; }
+# observe SCENARIO WHAT VALUE: one observations.tsv row (a measurement or a device
+# state the report records), never a check.
+observe() {
+  local v="${3//$'\t'/ }"; v="${v//$'\n'/ ⏎ }"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$v" >>"$OUT/observations.tsv"
+  log "observe $1 · $2 = $v"
+}
 # config KEY VALUE: one "key: value" line of config.txt (the report's header).
 config() { printf '%-10s %s\n' "$1:" "$2" >>"$OUT/config.txt"; }
 config_run() {
@@ -200,6 +206,20 @@ open_dest() { _am_start -a "$ACTION_OPEN" -n "${COMP[MainActivity]}" --es "$EXTR
 app_pid() { sh_ pidof "$APP_ID"; return 0; }
 app_up() { [[ -n "$(app_pid)" && "$(focus)" == "$APP_ID"* ]]; }
 app_gone() { [[ -z "$(app_pid)" ]]; }
+# pid_released PID: the system no longer hosts process PID. `pidof` loses a killed
+# process at once, but ActivityManager keeps its record until it hears of the death;
+# a launch before then goes to the dead process's activity and is finished with it.
+pid_released() { [[ "$(app_pid)" != "$1" ]] && ! sh_ dumpsys activity processes "$APP_ID" | grep " $1:$APP_ID/" >/dev/null; }
+# launch_up: launch, then wait (15 s) until the app is up. A force-stop or `pm clear`
+# removes the app's task, and the system kills the package's processes once that
+# task's 1 s destroy timeout runs out (ActivityTaskSupervisor
+# KILL_TASK_PROCESSES_TIMEOUT_MS, "Killing …: remove task" in logcat): a launch
+# inside that second loses its new process. Then it launches once more.
+launch_up() {
+  launch && wait_for 15 app_up && return 0
+  log "launch_up: app not up ($(focus)), launching again"
+  launch && wait_for 15 app_up
+}
 grant_perms() {
   local p
   for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
@@ -241,16 +261,16 @@ snapshot_for() { [[ "$(snap_field epochDay)" == "$(epoch_day "$1")" && "$(snap_f
 EV() { python3 "$HELP/events.py" "$@"; }
 # install_apk APK [pm install flags, e.g. -r]: `adb install`, else a pushed
 # `pm install` (on some API 37 images `adb install` fails with "Broken pipe").
-# Echoes the last status line; succeeds on "Success".
+# Echoes the status line; succeeds on a "Success" line (adb 37 prints "Install
+# command complete in N ms" after it).
 install_apk() {
-  local apk="$1" r; shift
-  r="$(adb_ install "$@" "$apk" 2>&1 | tail -1)"
-  if [[ "$r" != Success ]]; then
+  local apk="$1" out; shift
+  out="$(adb_ install "$@" "$apk" 2>&1)"
+  if ! grep -qx Success <<<"$out"; then
     adb_ push "$apk" /data/local/tmp/emu-install.apk >/dev/null &&
-      r="$(sh_ pm install "$@" /data/local/tmp/emu-install.apk | tail -1)"
+      out="$(sh_ pm install "$@" /data/local/tmp/emu-install.apk 2>&1)"
   fi
-  echo "$r"
-  [[ "$r" == Success ]]
+  grep -x Success <<<"$out" || { tail -1 <<<"$out"; return 1; }
 }
 # Launch time (ms) of the last "Displayed <app>/..." line in the logcat buffer.
 displayed_ms() { sh_ logcat -d -s ActivityTaskManager:I | grep "Displayed $APP_ID/" | python3 "$HELP/parse.py" displayed; }
@@ -684,7 +704,7 @@ monkey_checks() {
   expect "$1" "$2: no crash or ANR reported by monkey" "$crashes crash(es), $anrs ANR(s) in $injected events; $3" \
     test "$crashes" -eq 0 -a "$anrs" -eq 0
   expect "$1" "$2: every chunk ran to the end" "$fin of $chunks chunks finished; $3" test "$fin" -eq "$chunks"
-  [[ $escapes -eq 0 ]] || check INFO "$1" "$2: left the app" "$escapes chunk(s); relaunched ($3/escapes.txt)"
+  [[ $escapes -eq 0 ]] || observe "$1" "$2: left the app" "$escapes chunk(s); relaunched ($3/escapes.txt)"
 }
 
 EMU_PID=""
@@ -781,8 +801,6 @@ out = open(sys.argv[2], "a")
 for k, label in (("fatal", "Java FATAL EXCEPTION (not induced)"), ("native", "native crash"), ("anr", "ANR"),
                  ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure"), ("strictmode", "StrictMode")):
     out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
-if s["induced"]:
-    out.write(f"INFO\tlogcat\tinduced crashes (am crash)\t{s['induced']}\n")
 PY
 }
 # session_end TITLE: logcat_checks, REPORT.md titled TITLE; succeeds when no

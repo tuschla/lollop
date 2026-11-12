@@ -60,14 +60,7 @@ class EventLogTest {
         // The core-unavailable boot still exports the raw log.
         val file = tempLog()
         file.writeText(listOf(set("a"), line(Event.ClearSets), torn, run(5.0)).joinToString("\n", postfix = "\n"))
-        val dead = DurableCore(
-            FaultBridge(
-                object : CoreFault {
-                    override fun update(event: ByteArray): ByteArray? = null
-                    override fun view(): ByteArray? = null
-                },
-            ),
-        )
+        val dead = DurableCore(FakeCore().apply { dead = true })
         assertEquals(listOf(set("a"), line(Event.ClearSets), run(5.0)), EventLog.read(file, dead).lines)
         assertEquals(listOf(set("a"), line(Event.ClearSets)), EventLog.compact(listOf(set("a"), line(Event.ClearSets)), dead))
     }
@@ -376,15 +369,12 @@ class EventLogTest {
     @Test
     fun streamValidateRejectsAnOversizedStreamWithoutDrainingIt() {
         // A content provider may report an unknown size, so the bound has to hold on
-        // the stream itself: a stream past the cap is rejected...
-        val src = CountingSource(MAX_IMPORT_BYTES + 1)
-        assertEquals(ImportCheck.Invalid, streamValidateImport(src, MAX_IMPORT_BYTES))
-        // ...and the reader stops there instead of buffering the whole file: at most
-        // one chunk past the cap is ever pulled (bounded memory).
-        assertTrue(
-            "read ${src.bytesRead} bytes past the cap",
-            src.bytesRead <= MAX_IMPORT_BYTES + 64 * 1024,
-        )
+        // the stream itself: a stream past the cap is rejected (whatever its lines)...
+        val cap = 1L shl 20
+        val src = CountingSource(8 * cap)
+        assertEquals(ImportCheck.Invalid, streamValidateImport(src, max = cap, maxLine = Long.MAX_VALUE))
+        // ...and the reader stops there instead of buffering the whole file.
+        assertTrue("read all ${src.bytesRead} bytes of an oversized stream", src.bytesRead < 8 * cap)
     }
 
     @Test

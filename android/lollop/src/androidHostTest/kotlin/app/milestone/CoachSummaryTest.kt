@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,6 +20,8 @@ import org.robolectric.RobolectricTestRunner
 class CoachSummaryTest {
 
     private val res get() = ApplicationProvider.getApplicationContext<Context>().resources
+
+    @get:Rule val jvmDefaults = JvmDefaultsRule()
 
     @Before
     fun setUp() = Locale.setDefault(Locale.US)

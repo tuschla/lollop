@@ -10,14 +10,12 @@ use serde_json::Value;
 use shared::Event;
 use shared::wire::{Body, Registry, Wire};
 
+mod common;
+
 fn corpus() -> Vec<String> {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events/shell_encoder.ndjson");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("unreadable {}: {e}", path.display()))
-        .lines()
-        .map(str::to_owned)
-        .collect()
+    common::lines(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events/shell_encoder.ndjson"),
+    )
 }
 
 /// Every key path in `value` (`a.b` for nested objects; list items share
@@ -37,14 +35,6 @@ fn key_paths(value: &Value, prefix: &str, out: &mut BTreeSet<String>) {
         }
         Value::Array(items) => items.iter().for_each(|v| key_paths(v, prefix, out)),
         _ => {}
-    }
-}
-
-fn tag(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Object(map) => map.keys().next().expect("a tagged event").clone(),
-        other => panic!("not an event: {other}"),
     }
 }
 
@@ -75,7 +65,7 @@ fn the_corpus_covers_every_event_variant() {
     let all: BTreeSet<String> = variants.iter().map(|v| v.name.to_owned()).collect();
     let seen: BTreeSet<String> = corpus()
         .iter()
-        .map(|l| tag(&serde_json::from_str(l).unwrap()))
+        .map(|l| common::tag(&serde_json::from_str(l).unwrap()))
         .collect();
     let missing: Vec<_> = all.difference(&seen).collect();
     assert!(missing.is_empty(), "no shell line for {missing:?}");

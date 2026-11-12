@@ -31,14 +31,6 @@ pub(super) use plan_item::{PlanItem, PlanRow};
 pub(super) use plan_week::{PlanViews, build_plan_views};
 
 #[cfg(test)]
-pub(super) use adjust_fold::{fold_completion_adjustments, fold_item_numbers};
-#[cfg(test)]
-pub(super) use adjustments::annotate_and_rejudge;
-#[cfg(test)]
-pub(super) use completion::{apply_last_sets, refresh_item_statuses};
-#[cfg(test)]
 pub(super) use flatten::{flatten_prescription, plan_session_title};
 #[cfg(test)]
-pub(super) use plan_item::{BasisPiece, BasisRx, RunAmount};
-#[cfg(test)]
-pub(super) use program_summary::program_name;
+pub(super) use item_render::EASY_RUN_LABEL;

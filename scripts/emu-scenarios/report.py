@@ -1,8 +1,9 @@
 """Assemble OUT/REPORT.md from a device-script run. argv: title out_dir
 
-Reads config.txt, checks.tsv (status, scenario, check, evidence), measurements.tsv
-(scenario, metric, value), the script's own sections (sections/*.md, in name
-order) and logcat-scan.json; lists every file under out_dir.
+Reads config.txt, checks.tsv (PASS/FAIL, scenario, check, evidence),
+observations.tsv (scenario, what, value: measurements and device states, not
+checks), the script's own sections (sections/*.md, in name order) and
+logcat-scan.json; lists every file under out_dir.
 """
 import json
 import os
@@ -15,8 +16,8 @@ w(f"# {title}\n")
 if os.path.exists(f"{out}/config.txt"):
     w("```\n" + open(f"{out}/config.txt").read().rstrip() + "\n```\n")
 rows = [l.rstrip("\n").split("\t") for l in open(f"{out}/checks.tsv") if l.strip()]
-tally = {k: sum(r[0] == k for r in rows) for k in ("PASS", "FAIL", "INFO")}
-w(f"**{'FAIL' if tally['FAIL'] else 'PASS'}: {tally['PASS']} PASS · {tally['FAIL']} FAIL · {tally['INFO']} INFO**\n")
+tally = {k: sum(r[0] == k for r in rows) for k in ("PASS", "FAIL")}
+w(f"**{'FAIL' if tally['FAIL'] else 'PASS'}: {tally['PASS']} PASS · {tally['FAIL']} FAIL**\n")
 fails = [r for r in rows if r[0] == "FAIL"]
 if fails:
     w("## Failures\n")
@@ -34,12 +35,12 @@ for sc in order:
         if r[1] == sc:
             w(f"| {r[0]} | {r[2]} | {r[3].replace('|', '/')} |")
     w("")
-mp = f"{out}/measurements.tsv"
-if os.path.exists(mp) and os.path.getsize(mp):
-    w("## Measurements\n\n| scenario | metric | value |\n|---|---|---|")
-    for l in open(mp):
+op = f"{out}/observations.tsv"
+if os.path.exists(op) and os.path.getsize(op):
+    w("## Observations\n\n| scenario | what | value |\n|---|---|---|")
+    for l in open(op):
         p = l.rstrip("\n").split("\t")
-        w(f"| {p[0]} | {p[1]} | {p[2]} |")
+        w(f"| {p[0]} | {p[1]} | {p[2].replace('|', '/')} |")
     w("")
 sd = f"{out}/sections"
 if os.path.isdir(sd):

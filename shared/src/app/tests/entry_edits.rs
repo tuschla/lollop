@@ -106,22 +106,8 @@ fn amend_after_delete_is_a_no_op_never_resurrects() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::AmendRun {
-            entry_id: 42,
-            distance_km: 9.0,
-            duration_min: 45.0,
-            hr_pct_max: 0.0,
-            longest_recent_km: 0.0,
-            observed_at: 0,
-            observed_at_fallback: 0,
-            workout_type: None,
-            session_rpe: None,
-            avg_hr_bpm: None,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    app.update(amend_run(42, 9.0, 45.0, 0.0, 0, 0), &mut model)
+        .expect_only_render();
     assert!(
         app.view(&model).runs.is_empty(),
         "a strict run amend on a deleted row is a no-op"
@@ -287,7 +273,7 @@ fn a_zero_rep_set_with_no_hold_is_rejected() {
     )
     .expect_only_render();
     assert!(
-        model.sets.is_empty(),
+        app.view(&model).lifts.is_empty(),
         "a zero-rep no-hold set is not persisted"
     );
     // A timed hold with zero reps is still valid data (no e1RM, real hold time).
@@ -304,12 +290,13 @@ fn a_zero_rep_set_with_no_hold_is_rejected() {
         &mut model,
     )
     .expect_only_render();
+    let lifts = app.view(&model).lifts;
     assert_eq!(
-        model.sets.len(),
+        lifts.len(),
         1,
         "a timed hold with zero reps is still recorded"
     );
-    let _ = app.view(&model); // must not panic
+    assert_eq!(lifts[0].hold_sec, Some(60));
 }
 
 #[test]
@@ -365,7 +352,7 @@ fn amend_legacy_date_change_replaces_not_duplicates() {
     // Legacy log (entry_id 0).
     app.update(log_set("Bench", 100.0, 5, 8.0, old_ts), &mut model)
         .expect_only_render();
-    assert_eq!(model.sets.len(), 1);
+    assert_eq!(app.view(&model).lifts.len(), 1);
     // Amend it, CHANGING the date: must match the OLD row via fallback.
     app.update(
         Event::AmendSet {
@@ -381,11 +368,12 @@ fn amend_legacy_date_change_replaces_not_duplicates() {
         &mut model,
     )
     .expect_only_render();
+    let lifts = app.view(&model).lifts;
     assert_eq!(
-        model.sets.len(),
+        lifts.len(),
         1,
         "a re-dated legacy amend must replace, not duplicate"
     );
-    assert_eq!(model.sets[0].weight_kg, 110.0);
-    assert_eq!(model.sets[0].observed_at, new_ts);
+    assert_eq!(lifts[0].weight_kg, 110.0);
+    assert_eq!(lifts[0].observed_at, new_ts);
 }

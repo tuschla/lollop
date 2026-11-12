@@ -1,8 +1,11 @@
 package app.milestone
 
+import android.Manifest
+import android.app.Application
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Looper
 import android.service.quicksettings.Tile
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.widget.tileFace
@@ -21,8 +24,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ServiceController
+import org.robolectric.annotation.Config
 
 /** The Quick Settings tile: its face per day snapshot and run state, and what a tap opens. */
 @RunWith(RobolectricTestRunner::class)
@@ -32,14 +36,35 @@ class QuickTileTest {
 
     @Before
     fun setUp() {
-        RunSession.reset()
+        AppRuntime.resetForTest(clock = TestClock)
         File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     @After
     fun tearDown() {
-        RunSession.reset()
+        run?.destroy()
+        run = null
+        AppRuntime.resetForTest(clock = TestClock)
         File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
+    }
+
+    private var run: ServiceController<RunTrackingService>? = null
+
+    private fun runIntent(action: String) = Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.$action")
+
+    /** The tracker's Start: [RunTrackingService] starts recording a run. */
+    private fun startRecording() {
+        shadowOf(ctx as Application).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        run = Robolectric.buildService(RunTrackingService::class.java, runIntent("START")).create().startCommand(0, 1)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("the run records", RunSession.tracking.value)
+    }
+
+    /** The tracker's Stop. */
+    private fun stopRecording() {
+        checkNotNull(run).withIntent(runIntent("STOP")).startCommand(0, 2)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse("the run stopped", RunSession.tracking.value)
     }
 
     @Test
@@ -54,16 +79,11 @@ class QuickTileTest {
             assertEquals(kind.name, TileFace.Log, tileFace(daySnapshot(kind, trackable = true)))
         }
         // A recording run wins over any day.
-        RunSession.recordingStarted()
+        startRecording()
         for (s in listOf(null, daySnapshot(WidgetDayKind.Lift), daySnapshot(WidgetDayKind.Paused))) {
             if (s == null) File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete() else WidgetSnapshotStore.write(ctx, s)
             assertEquals(TileFace.Recording, QuickTileService.currentFace(ctx))
         }
-        assertEquals(OpenDest.Track, TileFace.Recording.dest)
-        assertEquals(OpenDest.Track, TileFace.StartRun.dest)
-        assertEquals(OpenDest.LogSet, TileFace.LogSet.dest)
-        assertEquals(OpenDest.Log, TileFace.Log.dest)
-        assertEquals(listOf(TileFace.Recording), TileFace.entries.filter { it.active })
     }
 
     private fun listen(): Tile {
@@ -100,11 +120,11 @@ class QuickTileTest {
     @Test
     fun recordingRunLightsTheTile() {
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
-        RunSession.recordingStarted()
+        startRecording()
         val recording = listen()
         assertTile(recording, R.string.tile_run_recording, R.drawable.ic_content_track_run, Tile.STATE_ACTIVE)
         assertNull(recording.activityLaunchForClick)
-        RunSession.markStopped()
+        stopRecording()
         val lift = listen()
         assertTile(lift, R.string.tile_log_set, R.drawable.ic_content_set_dumbbell, Tile.STATE_INACTIVE)
         assertNull(lift.activityLaunchForClick)
@@ -119,7 +139,7 @@ class QuickTileTest {
         // The day moves on (the stored snapshot is now yesterday's); the tile is not redrawn.
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, trackable = true, day = todayEpochDay() - 1))
         assertOpens(clickTile(), OpenDest.Log)
-        RunSession.recordingStarted()
+        startRecording()
         assertOpens(clickTile(), OpenDest.Track)
     }
 
@@ -147,7 +167,7 @@ class QuickTileTest {
         assertOpensIntent(clickAndTake(), OpenDest.Log)
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
         assertOpensIntent(clickAndTake(), OpenDest.LogSet)
-        RunSession.recordingStarted()
+        startRecording()
         assertOpensIntent(clickAndTake(), OpenDest.Track)
         assertOpensIntent(clickAndTake(locked = true), OpenDest.Track)
         assertEquals(null, shadowOf(app).nextStartedService)
@@ -170,7 +190,7 @@ class QuickTileTest {
         assertOpens(clickTile(), OpenDest.LogSet)
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, trackable = true))
         assertOpens(clickTile(), OpenDest.Track)
-        RunSession.recordingStarted()
+        startRecording()
         assertOpens(clickTile(), OpenDest.Track)
         // Start run opens the tracker screen; the tile itself starts no service.
         assertEquals(null, shadowOf(ctx as android.app.Application).nextStartedService)

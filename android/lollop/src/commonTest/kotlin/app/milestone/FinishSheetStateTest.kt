@@ -1,10 +1,10 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 /**
  * The tracker's Finish review ([finishTransition]): Stop never saves in one tap,
@@ -63,9 +63,9 @@ class FinishSheetStateTest {
         // never discards.
         for (step in listOf(FinishStep.Closed, FinishStep.Review)) {
             assertNotEquals(
-                "ConfirmDiscard from $step must not discard",
                 FinishEffect.DiscardRun,
                 finishTransition(step, FinishAction.ConfirmDiscard).effect,
+                "ConfirmDiscard from $step must not discard",
             )
         }
     }

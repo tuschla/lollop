@@ -1,6 +1,6 @@
 package app.milestone
 
-private const val NumericBufferMaxLength = 6
+internal const val NumericBufferMaxLength = 6
 
 /**
  * Apply one keypad key to a numeric text buffer. `replaceAll` implements

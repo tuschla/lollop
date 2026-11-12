@@ -8,4 +8,6 @@ pub(super) use card::split_verdict_view;
 pub(super) use card::{run_card, run_views};
 #[cfg(any(ffi_surface, test))]
 pub(crate) use gpx::{export_run_gpx, run_track_segments};
+#[cfg(test)]
+pub(super) use progress::PROGRESS_WEEKS;
 pub(super) use progress::{RunProgress, annotate_run_views, build_run_progress};

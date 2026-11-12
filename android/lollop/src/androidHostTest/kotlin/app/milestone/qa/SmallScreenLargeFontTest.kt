@@ -18,12 +18,9 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.isSelected
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -70,8 +67,6 @@ class SmallScreenLargeFontTest {
 
     @After
     fun tearDown() = QaHarness.teardown()
-
-    private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
     private fun dp(px: Float) = with(rule.density) { px.toDp().value }
 
@@ -144,11 +139,6 @@ class SmallScreenLargeFontTest {
             ?: n.config.getOrNull(SemanticsProperties.TestTag)
             ?: "node#${n.id}").let { "\"${it.take(40)}\"" }
 
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 1f)
-
     /** Lines this text needs at [widthPx] (the width its node really has: the
      *  semantics layout is re-run at the parent's max width, so it can't show a
      *  line cap that only bites at the real width). */
@@ -207,7 +197,9 @@ class SmallScreenLargeFontTest {
         assertTrue("[$where] has actions", n > 0)
         for (i in 0 until n) {
             val node = rule.onAllNodes(actions)[i]
-            runCatching { node.performScrollTo() }
+            // An action outside any scroller (the pinned primary, a tab) is where it is.
+            val inScroller = generateSequence(node.fetchSemanticsNode().parent) { it.parent }.any { SemanticsActions.ScrollBy in it.config }
+            if (inScroller) node.performScrollTo()
             rule.waitForIdle()
             if (underFab(node.fetchSemanticsNode())) {
                 // performScrollTo stops at the edge the FAB floats over: scroll on by the FAB.
@@ -243,12 +235,12 @@ class SmallScreenLargeFontTest {
     private fun assertTabsWholeAndWorking(where: String) {
         val tabs = listOf(R.string.main_dest_today, R.string.main_dest_history, R.string.main_dest_profile)
         val window = rule.onAllNodes(isRoot()).fetchSemanticsNodes()[0].boundsInRoot
-        val minPx = with(rule.density) { 48.dp.toPx() } - 0.5f
+        val minPx = with(rule.density) { UxInvariants.MIN_TOUCH.toPx() } - 0.5f
         for (t in tabs) {
             val node = rule.onNode(hasText(str(t)) and hasClickAction()).fetchSemanticsNode()
             val b = node.boundsInRoot
             assertTrue("[$where] tab ${str(t)} inside the window: $b of $window", b.left >= window.left - 1f && b.right <= window.right + 1f && b.bottom <= window.bottom + 1f)
-            assertTrue("[$where] tab ${str(t)} ≥48dp: ${dp(b.width)}x${dp(b.height)}", b.height >= minPx && b.width >= minPx)
+            assertTrue("[$where] tab ${str(t)} ≥${UxInvariants.MIN_TOUCH}: ${dp(b.width)}x${dp(b.height)}", b.height >= minPx && b.width >= minPx)
         }
         val navCut = layoutProblems().filter { p -> tabs.any { p.contains("\"${str(it)}\"") } }
         assertTrue("[$where] tab labels: $navCut", navCut.isEmpty())
@@ -258,14 +250,6 @@ class SmallScreenLargeFontTest {
         rule.onNode(hasText(str(tab)) and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.waitUntil(10_000) { rule.onAllNodes(hasText(str(tab)) and isSelected()).fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    private fun scrollTodayToEnd() {
-        val list = rule.onAllNodes(hasScrollToIndexAction())[0]
-        val info = list.fetchSemanticsNode().config.getOrNull(SemanticsProperties.CollectionInfo)
-        if (info != null && info.rowCount > 0) list.performScrollToIndex(info.rowCount - 1)
-        repeat(3) { list.performTouchInput { swipeUp() } }
-        rule.waitForIdle()
     }
 
     private fun fabWidthDp() = dp(rule.onNode(logFab).fetchSemanticsNode().boundsInRoot.width)
@@ -285,7 +269,7 @@ class SmallScreenLargeFontTest {
             "today",
             hasClickAction() and hasAnyAncestor(hasScrollToIndexAction()),
         )
-        scrollTodayToEnd()
+        rule.scrollTodayToEnd()
         assertClean("today end")
         val iconOnly = fabWidthDp()
         assertEquals("icon-only once scrolled (${iconOnly}dp)", 56f, iconOnly, 1.5f)
@@ -293,8 +277,7 @@ class SmallScreenLargeFontTest {
         val lastBottom = listNode.children.map { it.boundsInRoot }.filter { it.height > 0f }.maxOf { it.bottom }
         val fab = rule.onNode(logFab).fetchSemanticsNode().boundsInRoot
         assertTrue("the last row (${dp(lastBottom)}dp) clears the Log FAB (${dp(fab.top)}dp)", lastBottom <= fab.top + 1f)
-        rule.onNode(logFab).performClick()
-        rule.waitUntil(10_000) { rule.onAllNodes(hasText(str(R.string.main_report_pain)) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.openLogChooser()
         assertClean("chooser")
         assertEveryActionReachable("chooser", hasClickAction() and hasAnyAncestor(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollBy)) and !hasAnyAncestor(hasScrollToIndexAction()))
         assertClean("chooser scrolled")
@@ -464,8 +447,7 @@ class SmallScreenLargeFontTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         for (title in listOf(R.string.main_morning_checkin_title, R.string.main_weekly_checkin_title)) {
-            rule.onNode(logFab).performClick()
-            rule.waitUntil(10_000) { rule.onAllNodes(hasText(str(title)) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+            rule.openLogChooser()
             rule.onNode(hasText(str(title)) and hasClickAction()).performScrollTo().performClick()
             rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("editor-primary")).fetchSemanticsNodes().isNotEmpty() }
             assertClean(str(title))

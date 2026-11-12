@@ -15,18 +15,18 @@ import kotlin.test.assertTrue
  * failure and stale-session unwinds and the signal-loss watchdog. A scripted host
  * stands in for the location stream, the surface and the timers; [RunSession] and
  * [ActiveRunStore] are the real ones (the sidecar in a temporary directory). The
- * engine is a scripted one (the JVM runs these without Robolectric, where the native
- * core must not load), so a save or recovery keeps every fix (no core thinning).
+ * engine is a stand-in ([FakeCore]), so a save or recovery keeps every fix (no core
+ * thinning).
  */
 class RunRecorderTest {
     private val dir = newTempDir()
-    private val sidecar = AppFiles.sibling(dir, "/active-run.ndjson")
+    private val sidecar = fileIn(dir, AppFileNames.ACTIVE_RUN)
     private val host = ScriptedHost()
     private val recorder = RunRecorder(host)
 
     @BeforeTest
     fun setUp() {
-        AppRuntime.resetForTest(engine = DurableCore(ScriptedCore()))
+        AppRuntime.resetForTest(engine = DurableCore(FakeCore()))
         RunSession.reset()
         ActiveRunStore.open(sidecar)
     }

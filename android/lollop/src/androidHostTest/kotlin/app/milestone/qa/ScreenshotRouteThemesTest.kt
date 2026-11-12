@@ -1,7 +1,6 @@
 package app.milestone.qa
 
 import android.content.Context
-import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -52,11 +51,6 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
         QaHarness.freshProcess()
     }
 
-    private fun waitFor(matcher: SemanticsMatcher) {
-        rule.waitForNode(matcher, 10_000)
-        rule.waitForIdle()
-    }
-
     @Test
     fun capture() {
         AppSettings.setTheme(ctx, theme)
@@ -70,17 +64,17 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
         val title = str(R.string.history_run_weekday, "Sunday")
         rule.scrollToText(title)
         rule.onNodeWithText(title).performClick()
-        waitFor(hasTestTag("run-trim"))
+        rule.waitForNodeSettled(hasTestTag("run-trim"))
         val name = "route-${theme.name.lowercase()}"
         val s = mode.suffix
         rule.shot("$name-detail-$s")
         rule.onNode(hasContentDescription(str(R.string.runmap_open_full)) and hasClickAction()).performClick()
-        waitFor(hasContentDescription(str(R.string.runmap_fit_route)))
+        rule.waitForNodeSettled(hasContentDescription(str(R.string.runmap_fit_route)))
         rule.shot("$name-full-$s")
         rule.onNode(hasContentDescription(str(R.string.runmap_close)) and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("run-trim").performScrollTo().performClick()
-        waitFor(hasText(str(R.string.trim_hint)))
+        rule.waitForNodeSettled(hasText(str(R.string.trim_hint)))
         rule.shot("$name-trim-$s")
     }
 

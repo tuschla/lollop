@@ -15,24 +15,21 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.ActiveRunStore
-import app.milestone.AppClock
 import app.milestone.AppSettings
 import app.milestone.DistanceUnit
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
-import app.milestone.OpenDest
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.TestClock
-import app.milestone.openIntent
+import app.milestone.finishSummarySpoken
 import app.milestone.spokenDuration
 import app.milestone.spokenRunDistance
 import kotlinx.serialization.json.jsonArray
@@ -46,6 +43,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Run tracking and recovery guards: the tracker's Finish review shows the CORE's
@@ -80,7 +78,6 @@ class RunFixGuardsTest {
     @After
     fun tearDown() {
         QaHarness.teardown()
-        ProcessDeath.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
         QaHarness.freshProcess()
@@ -96,18 +93,12 @@ class RunFixGuardsTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         // 21 fixes, 30 m every 10 s: the core saves 600 m in 200 s moving.
         QaHarness.seedRecordingRun()
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
+        rule.launchOnTracker()
         // The live counters disagree with the saved figures (a live leg the QC
         // drops, a stop the live floor missed): the review must not show them.
         RunSession.overrideLiveFiguresForTest(distanceKm = 9.99, elapsedSec = 4_321L)
-        rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        rule.waitForNode(hasText(str(R.string.track_finish_title)))
-        val core = "${spokenRunDistance(ctx.resources, 0.6, DistanceUnit.Km)} · ${spokenDuration(ctx.resources, 200)} moving"
-        runCatching { rule.waitForNode(hasContentDescription(core, substring = true)) }
-        val spoken = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription))
-            .fetchSemanticsNodes().flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription] }
-        assertTrue("the review speaks the core's \"$core\": $spoken", spoken.any { core in it })
+        rule.stopToFinishReview()
+        rule.waitForNode(hasContentDescription(finishSummarySpoken(ctx.resources, 0.6, 200, DistanceUnit.Km), substring = true))
         assertEquals(0, rule.onAllNodes(hasContentDescription(spokenRunDistance(ctx.resources, 9.99, DistanceUnit.Km), substring = true)).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodes(hasContentDescription(spokenDuration(ctx.resources, 4_321L), substring = true)).fetchSemanticsNodes().size)
     }
@@ -146,9 +137,9 @@ class RunFixGuardsTest {
         assertEquals(listOf(100), RunSession.decimatedSegmentStarts(Int.MAX_VALUE))
         val liveKm = RunSession.distanceKm.value
 
-        ProcessDeath.kill(ctx)
+        QaHarness.killProcess()
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_resume_run_title)), 1)
         rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals("the pause is still a boundary", listOf(100), RunSession.decimatedSegmentStarts(Int.MAX_VALUE))
@@ -200,12 +191,19 @@ class RunFixGuardsTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), run))
         rule.launchApp()
         assertTrue(model.runs.single().gps_unmeasurable)
-        HistoryFocus.request(run.entryId, run.observedAt)
-        rule.waitForNode(hasTestTag("run-delete"))
-        // The fixes load off the main thread; give that fetch time to land.
-        repeat(20) {
-            Thread.sleep(50)
+        // The recorded fixes load off the main thread ([app.milestone.runTrackFetch]),
+        // and Delete offers Undo only once they have: wait for that fetch and the
+        // recomposition it lands in.
+        val fetched = AtomicBoolean(false)
+        val fetch = app.milestone.runTrackFetch
+        app.milestone.runTrackFetch = { id, at -> fetch(id, at).also { fetched.set(true) } }
+        try {
+            HistoryFocus.request(run.entryId, run.observedAt)
+            rule.waitForNode(hasTestTag("run-delete"))
+            rule.waitUntil(15_000) { fetched.get() }
             rule.waitForIdle()
+        } finally {
+            app.milestone.runTrackFetch = fetch
         }
         rule.onNodeWithTag("run-delete").performScrollTo().performClick()
         val confirm = hasText(str(R.string.main_delete)) and hasClickAction() and hasAnyAncestor(isDialog())

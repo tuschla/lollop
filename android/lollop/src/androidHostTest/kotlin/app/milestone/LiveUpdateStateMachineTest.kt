@@ -35,8 +35,9 @@ import org.robolectric.shadows.ShadowSystemClock
 /**
  * Seeded walks over the rest countdown and the run notification as Android 16
  * Live Updates (steps in `restWalk`/`runWalk`); after every step the posted
- * notifications must match the walk's model. `LIVE_SM_SEEDS` / `LIVE_SM_STEPS` /
- * `LIVE_SM_SEED` lengthen or pin a run; a failure prints its replay line.
+ * notifications must match the walk's model. A failure names its seed. Runs on
+ * API 36: promotable Live Updates (the chip, `requestPromotedOngoing`) exist from
+ * Android 16 on.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -58,16 +59,16 @@ class LiveUpdateStateMachineTest {
     @After
     fun tearDown() = clean()
 
+    /** A fresh process ([resetRest]) with no exact-alarm denial or notification left over. */
     private fun clean() {
         TestClock.offsetMillis = 0L
         resetRest(app)
-        RunSession.reset()
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         nm.cancelAll()
     }
 
     private fun walk(name: String, seed: Long, steps: Int, body: (Random, (String) -> Unit) -> Unit) =
-        seededWalk("$name seed=$seed", "LIVE_SM_SEED=$seed LIVE_SM_SEEDS=1 LIVE_SM_STEPS=$steps") { note -> body(Random(seed), note) }
+        seededWalk("$name seed=$seed steps=$steps") { note -> body(Random(seed), note) }
 
     private fun canNotify() =
         ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -76,8 +77,8 @@ class LiveUpdateStateMachineTest {
 
     @Test
     fun restWalksNeverShowAStaleCountdown() {
-        val seeds = System.getenv("LIVE_SM_SEEDS")?.toIntOrNull() ?: 30
-        val steps = System.getenv("LIVE_SM_STEPS")?.toIntOrNull() ?: 80
+        val seeds = REST_SEEDS
+        val steps = STEPS
         for (i in 0 until seeds) {
             clean()
             walk("rest", SEED_BASE + i, steps) { rng, note -> restWalk(rng, steps, note) }
@@ -281,8 +282,8 @@ class LiveUpdateStateMachineTest {
 
     @Test
     fun runWalksKeepTheLiveUpdateInStepWithTheService() {
-        val seeds = System.getenv("LIVE_SM_SEEDS")?.toIntOrNull() ?: 12
-        val steps = System.getenv("LIVE_SM_STEPS")?.toIntOrNull() ?: 80
+        val seeds = RUN_SEEDS
+        val steps = STEPS
         for (i in 0 until seeds) {
             clean()
             walk("run", SEED_BASE + i, steps) { rng, note -> runWalk(rng, steps, note) }
@@ -440,7 +441,7 @@ class LiveUpdateStateMachineTest {
                     send("STOP"); destroyIfStopped(); RunSession.reset(); stopModel(); paused = false; "save"
                 }
                 w < 94 -> { svc?.destroy(); svc = null; idle(); stopModel(); "system stops the service" }
-                w < 100 -> { svc?.destroy(); svc = null; RunSession.reset(); idle(); stopModel(); paused = false; "process death" }
+                w < 100 -> { svc?.destroy(); svc = null; AppRuntime.resetForTest(clock = TestClock); idle(); stopModel(); paused = false; "process death" }
                 w < 118 -> {
                     val dt = rng.nextLong(1_000, 5_000)
                     shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(dt))
@@ -475,6 +476,9 @@ class LiveUpdateStateMachineTest {
 
     companion object {
         private const val DAY = 24 * 60 * 60_000L
-        private val SEED_BASE = System.getenv("LIVE_SM_SEED")?.toLongOrNull() ?: 20_261_030L
+        private const val REST_SEEDS = 30
+        private const val RUN_SEEDS = 12
+        private const val STEPS = 80
+        private const val SEED_BASE = 20_261_030L
     }
 }

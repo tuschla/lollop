@@ -5,14 +5,14 @@
 use super::*;
 
 fn log(minutes: f64, observed_at: i64, entry_id: u64) -> Event {
-    Event::LogActivity {
-        kind: ActivityKind::Sport,
+    log_activity(
+        ActivityKind::Sport,
         minutes,
-        vigorous: true,
-        strengthening: false,
+        true,
+        false,
         observed_at,
         entry_id,
-    }
+    )
 }
 
 fn delete(entry_id: u64, observed_at_fallback: i64) -> Event {
@@ -35,6 +35,15 @@ fn ids(model: &Model) -> Vec<u64> {
         .activities
         .iter()
         .map(|a| a.entry_id)
+        .collect()
+}
+
+fn minutes(model: &Model) -> Vec<f64> {
+    Engine
+        .view(model)
+        .activities
+        .iter()
+        .map(|a| a.minutes)
         .collect()
 }
 
@@ -120,18 +129,26 @@ fn activities_list_chronologically() {
 
 #[test]
 fn minutes_outside_the_gate_are_ignored() {
+    use crate::event::entry::ACTIVITY_MAX_MINUTES as MAX;
     let app = Engine;
     let mut model = Model::default();
-    for minutes in [0.0, -5.0, 600.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+    for minutes in [
+        0.0,
+        -5.0,
+        MAX + 0.5,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
         apply(&app, &mut model, vec![log(minutes, 1_000, 1)]);
     }
-    assert!(model.activities.is_empty(), "no row for an invalid line");
+    assert!(ids(&model).is_empty(), "no row for an invalid line");
     apply(
         &app,
         &mut model,
-        vec![log(600.0, 1_000, 2), log(0.5, 1_000, 3)],
+        vec![log(MAX, 1_000, 2), log(0.5, 1_000, 3)],
     );
-    assert_eq!(ids(&model), vec![2, 3], "(0, 600] is accepted");
+    assert_eq!(ids(&model), vec![2, 3], "(0, max] is accepted");
 }
 
 #[test]
@@ -151,26 +168,18 @@ fn delete_entry_removes_the_newest_matching_activity() {
     );
     apply(&app, &mut model, vec![delete(7, 0)]);
     assert_eq!(
-        model
-            .activities
-            .iter()
-            .map(|a| a.minutes)
-            .collect::<Vec<_>>(),
+        minutes(&model),
         vec![30.0, 50.0, 60.0, 70.0],
         "an id delete removes the newest row with that id"
     );
     apply(&app, &mut model, vec![delete(0, 4_000)]);
     assert_eq!(
-        model
-            .activities
-            .iter()
-            .map(|a| a.minutes)
-            .collect::<Vec<_>>(),
+        minutes(&model),
         vec![30.0, 50.0, 70.0],
         "a legacy delete matches on observed_at"
     );
     apply(&app, &mut model, vec![delete(99, 0)]);
-    assert_eq!(model.activities.len(), 3, "an unmatched delete is a no-op");
+    assert_eq!(minutes(&model).len(), 3, "an unmatched delete is a no-op");
     apply(
         &app,
         &mut model,
@@ -181,7 +190,7 @@ fn delete_entry_removes_the_newest_matching_activity() {
         }],
     );
     assert_eq!(
-        model.activities.len(),
+        minutes(&model).len(),
         3,
         "a run delete never touches activities"
     );

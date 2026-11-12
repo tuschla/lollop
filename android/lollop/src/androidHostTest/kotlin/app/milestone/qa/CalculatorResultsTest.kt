@@ -24,7 +24,6 @@ import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.GoalDistance
 import app.milestone.LiftGoal
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -57,17 +56,13 @@ class CalculatorResultsTest {
     fun tearDown() = QaHarness.teardown()
 
     /** Lifts and runs, so all four calculators are offered. */
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
+    private fun hybridProfile(): Event = QaHarness.strengthProfile().copy(
         liftGoal = LiftGoal.Hypertrophy,
         goalDistance = GoalDistance.TenK,
         concurrentGoal = ConcurrentGoal.Hypertrophy,
-        weeklySets = 12,
         runningDaysPerWeek = 3,
         runningKmPerWeek = 30.0,
-        advanced = false,
         bodyweightKg = 81.7,
-        ageYears = 30.0,
     )
 
     private val queries = listOf(
@@ -249,8 +244,8 @@ class CalculatorResultsTest {
      *  heart rate as sessions_counted = 1 (shared/src/app/calculators/training_load.rs). */
     @Test
     fun trainingLoadDetailUsesTheSingular() {
-        val one = ctx.resources.getQuantityString(R.plurals.main_training_load_detail, 1, "TRIMP", 1, 1)
-        val two = ctx.resources.getQuantityString(R.plurals.main_training_load_detail, 2, "TRIMP", 2, 1)
+        val one = plural(R.plurals.main_training_load_detail, 1, "TRIMP", 1, 1)
+        val two = plural(R.plurals.main_training_load_detail, 2, "TRIMP", 2, 1)
         assertTrue(one, one.contains("Counted 1 session.") && !one.contains("1 sessions"))
         assertTrue(two, two.contains("Counted 2 sessions."))
     }

@@ -1,14 +1,13 @@
 //! A mis-imported future-dated run (e.g. a phantom ~2030 import) never poses as
-//! "the most recent session": the weekly report, training load and the two
-//! feedback fallbacks (`latest_run_spike`, `feedback_track_split`) all stop at
-//! the end of local today (`Model::up_to_today`), so it neither injects a bogus
-//! figure nor, with no real neighbours in its window, silently disarms a
-//! genuine spike/split cue.
+//! "the most recent session": the weekly report, training load and the
+//! spike/split feedback cues all stop at the end of local today
+//! (`Model::up_to_today`), so it neither injects a bogus figure nor, with no
+//! real neighbours in its window, silently disarms a genuine spike/split cue.
 
 use super::*;
 
 #[test]
-fn a_future_dated_run_is_excluded_from_the_spike_fallback() {
+fn a_future_dated_run_does_not_disarm_the_spike_cue() {
     let app = Engine;
     let mut model = Model::default();
     let today = 1000i64;
@@ -29,57 +28,68 @@ fn a_future_dated_run_is_excluded_from_the_spike_fallback() {
         &mut model,
     )
     .expect_only_render();
-    let frac = latest_run_spike(&model, &RunFacts::new(&model.runs))
-        .expect("the real today run, not the phantom future run, drives the spike")
-        .frac;
-    assert!(
-        (frac - 0.2).abs() < 1e-9,
-        "12 km vs the 10 km baseline is a +20% spike, got {frac}"
+    app.update(Event::SubmitReview(SessionReview::default()), &mut model)
+        .expect_only_render();
+    let fb = app.view(&model).feedback.expect("feedback present");
+    assert_eq!(
+        fb.category,
+        FeedbackCategory::DangerousProgression,
+        "the real today run, not the phantom future run, drives the spike: {fb:?}"
     );
 }
 
 #[test]
-fn a_future_dated_tracked_run_is_excluded_from_the_split_fallback() {
+fn a_future_dated_tracked_run_does_not_hijack_the_split_cue() {
     // A fast front half then a back half ~2x slower → a measurable positive
-    // split over ~4.4 km, long enough for a pacing verdict.
-    let split_track = || {
-        vec![
-            gps(0.00, 0),
-            gps(0.01, 300),
-            gps(0.02, 600),
-            gps(0.03, 1350),
-            gps(0.04, 2100),
-        ]
-    };
+    // split over ~4.4 km, long enough for a pacing verdict, run from 08:00 of
+    // `day` as entry `id`.
     let today = 1000i64;
+    let split_run = |day: i64, id: u64| {
+        let t0 = day * DAY_SEC + 8 * HOUR;
+        let track = [
+            (0.00, 0),
+            (0.01, 300),
+            (0.02, 600),
+            (0.03, 1350),
+            (0.04, 2100),
+        ]
+        .map(|(lon, t)| gps(lon, t0 + t))
+        .to_vec();
+        log_run_track(track, 78.0, 12.0, t0 + 2100, id)
+    };
+    // The feedback after `runs` and a review at 10:00 today.
+    let reviewed = |runs: &[Event]| {
+        let mut events = vec![set_today_ev(today)];
+        events.extend_from_slice(runs);
+        events.push(Event::SubmitReview(SessionReview {
+            observed_at: today * DAY_SEC + 10 * HOUR,
+            ..Default::default()
+        }));
+        let (app, model) = replay(&events);
+        app.view(&model).feedback.expect("feedback present")
+    };
 
-    // Dated today: the real tracked run feeds the split fallback.
-    let app = Engine;
-    let mut today_model = Model::default();
-    set_today(&app, &mut today_model, today);
-    app.update(
-        log_run_track(split_track(), 78.0, 12.0, today * DAY_SEC, 1),
-        &mut today_model,
-    )
-    .expect_only_render();
-    assert!(
-        feedback_track_split(&today_model, &RunFacts::new(&today_model.runs)).is_some(),
-        "a real tracked run feeds the positive-split fallback"
-    );
+    // Dated today: the real tracked run feeds the split cue, and a phantom
+    // future import does not pose as the latest tracked run in its place.
+    for runs in [
+        vec![split_run(today, 1)],
+        vec![split_run(today, 1), split_run(today + 100, 2)],
+    ] {
+        let fb = reviewed(&runs);
+        assert_eq!(
+            fb.category,
+            FeedbackCategory::IntensityDiscipline,
+            "the real tracked run feeds the positive-split cue: {fb:?}"
+        );
+    }
 
-    // The SAME run mis-dated to the future must not: no real run backs it, so
-    // the fallback goes quiet instead of surfacing the phantom's split.
-    let mut future_model = Model::default();
-    set_today(&app, &mut future_model, today);
-    app.update(
-        log_run_track(split_track(), 78.0, 12.0, (today + 100) * DAY_SEC, 1),
-        &mut future_model,
-    )
-    .expect_only_render();
-    assert_eq!(
-        feedback_track_split(&future_model, &RunFacts::new(&future_model.runs)),
-        None,
-        "a future-dated tracked run is excluded from the split fallback"
+    // The SAME run mis-dated to the future alone gives no cue: no real run
+    // backs it.
+    let fb = reviewed(&[split_run(today + 100, 2)]);
+    assert_ne!(
+        fb.category,
+        FeedbackCategory::IntensityDiscipline,
+        "a future-dated tracked run is excluded from the split cue: {fb:?}"
     );
 }
 
@@ -104,7 +114,6 @@ fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load() {
         .training_load
         .clone()
         .expect("training load present");
-    let fig = load_figures_of(&model).expect("load figures present");
     assert_eq!(
         tl.sessions_counted, 1,
         "the future run must be excluded from CTL/ATL"
@@ -129,7 +138,6 @@ fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load() {
     // CTL/ATL/TSB + counted are identical whether or not the future run is
     // present: it only ever contributes to the `skipped` tally.
     let tl2 = without.training_load.expect("training load present");
-    let fig2 = load_figures_of(&model).expect("load figures present");
-    assert_eq!((fig.ctl, fig.atl, fig.tsb), (fig2.ctl, fig2.atl, fig2.tsb));
+    assert_eq!(tl.summary, tl2.summary);
     assert_eq!(tl.sessions_counted, tl2.sessions_counted);
 }

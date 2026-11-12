@@ -11,11 +11,11 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import app.milestone.Event
+import app.milestone.JvmDefaultsRule
 import app.milestone.EventDispatcher
 import app.milestone.LocalEditorPinnedActions
 import app.milestone.LogRunEditor
@@ -42,6 +42,10 @@ class RunEditorHrEffortTest {
 
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
+
+    // show() pins Locale.US (the editor's distance unit follows the locale).
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
 
     @After
     fun tearDown() {
@@ -83,7 +87,7 @@ class RunEditorHrEffortTest {
         listOf("1", "5", "2").forEach { key(it) }
         rule.pickRating("effort-scale", 6)
         // The pinned primary sits below the scrolling form, always on screen.
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForIdle()
 
         val run = sent as Event.LogRun
@@ -117,7 +121,7 @@ class RunEditorHrEffortTest {
         key("5")
         rule.onNode(hasContentDescription(str(R.string.log_field_duration))).performScrollTo().performClick()
         listOf("3", "0", "0", "0").forEach { key(it) }
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForIdle()
 
         val run = sent as Event.LogRun
@@ -140,7 +144,7 @@ class RunEditorHrEffortTest {
         ).performScrollTo()
         rule.onNode(hasContentDescription("${str(R.string.log_field_distance)}, ", substring = true)).performScrollTo().performClick()
         key("6")
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForIdle()
 
         val run = sent as Event.AmendRun
@@ -164,7 +168,7 @@ class RunEditorHrEffortTest {
         ).performScrollTo()
         rule.onNode(hasContentDescription("${str(R.string.log_field_distance)}, ", substring = true)).performScrollTo().performClick()
         key("6")
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForIdle()
 
         val run = sent as Event.AmendRun

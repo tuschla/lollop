@@ -202,24 +202,6 @@ mod oracle {
     }
 }
 
-/// Deterministic SplitMix64 for the seeded sweeps.
-struct Rng(u64);
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-    fn unit(&mut self) -> f64 {
-        (self.next() >> 11) as f64 / (1u64 << 53) as f64
-    }
-    fn range(&mut self, lo: f64, hi: f64) -> f64 {
-        lo + (hi - lo) * self.unit()
-    }
-}
-
 /// `app == oracle.round()`, except an exact .5 tie in the oracle may land on
 /// either neighbour (float noise decides which side the engine computed).
 fn rounds_to(app: f64, exact: f64) -> bool {
@@ -390,7 +372,7 @@ fn hr_zones_rise_with_hr_max_and_are_ordered_easy_to_interval() {
 #[test]
 fn hr_zones_reach_the_view_and_maf_matches_180_minus_age() {
     let app = Engine;
-    for age in [13.0, 18.0, 30.0, 47.0, 64.0, 80.0, 100.0] {
+    for age in [13.0, 18.0, 30.0, 40.0, 47.0, 64.0, 80.0, 100.0] {
         let mut model = Model::default();
         let _ = app.update(
             Event::ComputeHrZones {
@@ -400,10 +382,25 @@ fn hr_zones_reach_the_view_and_maf_matches_180_minus_age() {
             &mut model,
         );
         let vm = app.view(&model);
-        let (rows, hm, bands) = build_hr_zones(&hr_query(age, Some(50.0)), None);
-        assert_eq!(vm.hr_max, hm);
-        assert_eq!(vm.hr_zone_bands, bands);
-        assert_eq!(vm.hr_zones.len(), rows.len());
+        // Tanaka (07:158): 208 − 0.7 × age, to the whole beat.
+        let hr_max = vm.hr_max.as_ref().expect("HRmax for ages 5–100");
+        assert!(
+            rounds_to(hr_max.bpm, oracle::tanaka(age)),
+            "age {age}: {}",
+            hr_max.bpm
+        );
+        assert_eq!(vm.hr_zone_bands.len(), 5, "age {age}");
+        if age == 40.0 {
+            // Worked by hand: HRmax 180; Easy 65–79 % → 117–142 bpm; with
+            // RHR 50, Karvonen at Easy's 59–74 % reserve → 127–146 bpm.
+            let easy = &vm.hr_zone_bands[0];
+            assert_eq!(hr_max.bpm, 180.0);
+            assert_eq!((easy.bpm_low, easy.bpm_high), (117.0, 142.0));
+            assert_eq!(
+                (easy.karvonen_low_bpm, easy.karvonen_high_bpm),
+                (127.0, 146.0)
+            );
+        }
         let maf = vm
             .hr_zones
             .iter()
@@ -601,9 +598,23 @@ fn race_prediction_identity_and_monotonicity() {
     }
 }
 
+/// The (low, high) seconds a shown prediction states: one clock, or a
+/// "low–high" span (`h:mm:ss` or `m:ss`).
+fn shown_race_sec(predicted: &str) -> (f64, f64) {
+    let clock = |s: &str| {
+        s.split(':')
+            .map(|p| p.parse::<f64>().unwrap_or_else(|_| panic!("{predicted:?}")))
+            .fold(0.0, |acc, p| acc * 60.0 + p)
+    };
+    match predicted.split_once('–') {
+        Some((lo, hi)) => (clock(lo), clock(hi)),
+        None => (clock(predicted), clock(predicted)),
+    }
+}
+
 #[test]
 fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
-    // End to end through PredictRace: no logged runs → the bare band; a
+    // End to end through PredictRace: no logged runs → the oracle band; a
     // logged 12 km longest run (< 30 km, 04:437-439) → marathon band shifted
     // slower, never faster; a 32 km longest run → no derate.
     let app = Engine;
@@ -618,17 +629,21 @@ fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
             },
             model,
         );
-        assert!(app.view(model).race_prediction.is_some(), "prediction");
-        race_of(model)
+        app.view(model)
+            .race_prediction
+            .expect("prediction")
+            .predicted
     };
     for t in [1080.0, 1320.0, 1500.0, 1800.0, 2400.0] {
-        let base = race(&race_q(5000.0, t, 42_195.0, 40.0), None, DistanceUnit::Km);
-        let mut bare = Model::default();
-        let p = predict(&mut bare, t);
-        assert_eq!(
-            (p.low_sec, p.high_sec, p.agreed),
-            (base.low_sec, base.high_sec, base.agreed)
-        );
+        let bare = predict(&mut Model::default(), t);
+        let (lo, hi, agreed) = oracle_race(5000.0, t, 42_195.0, 40.0).expect("in bracket");
+        let want = if agreed {
+            oracle::clock(lo)
+        } else {
+            format!("{}–{}", oracle::clock(lo), oracle::clock(hi))
+        };
+        assert_eq!(bare, want, "{t}: bare prediction");
+        let base = shown_race_sec(&bare);
 
         for (longest, derated) in [(12.0, true), (32.0, false)] {
             let mut m = Model::default();
@@ -644,29 +659,22 @@ fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
                 ),
                 &mut m,
             );
-            let p = predict(&mut m, t);
+            let shown = predict(&mut m, t);
             if derated {
-                assert!(
-                    p.low_sec > base.low_sec && p.high_sec > base.high_sec,
-                    "{t}: {p:?}"
-                );
+                let p = shown_race_sec(&shown);
+                assert!(p.0 > base.0 && p.1 > base.1, "{t}: {shown} vs {bare}");
                 // The derate is 2–3 VDOT points (04:87): never more than the
-                // Daniels time at VDOT − 3 relative to VDOT.
+                // Daniels time at VDOT − 3 relative to VDOT (half a second of
+                // display rounding on each side).
                 let v = oracle::vdot(5000.0, t);
                 let worst =
                     oracle::daniels_time(v - 3.0, 42_195.0) / oracle::daniels_time(v, 42_195.0);
                 assert!(
-                    p.high_sec <= base.high_sec * worst * (1.0 + 1e-6),
-                    "{t}: {} vs {}",
-                    p.high_sec,
-                    base.high_sec * worst
+                    p.1 <= (base.1 + 0.5) * worst + 0.5,
+                    "{t}: {shown} vs {bare} × {worst}"
                 );
             } else {
-                assert_eq!(
-                    (p.low_sec, p.high_sec),
-                    (base.low_sec, base.high_sec),
-                    "{t}"
-                );
+                assert_eq!(shown, bare, "{t}");
             }
         }
     }
@@ -809,7 +817,7 @@ fn run_target_labels_match_the_clock_oracle_in_km_and_miles() {
     // The displayed pace strings are the unrounded band paces rendered once
     // (round half away) per km and per mile (1 mi = 1609.344 m exactly), and
     // the integer fields equal the rounded paces.
-    let mut rng = Rng(0x5eed_0001);
+    let mut rng = SplitMix(0x5eed_0001);
     for _ in 0..4000 {
         let vdot = rng.range(18.0, 88.0);
         for band in [
@@ -892,16 +900,9 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
     }
 }
 
+/// A stored back squat (`w` kg × `reps` @ `rpe`).
 fn set(w: f64, reps: u32, rpe: f64) -> LoggedSet {
-    LoggedSet {
-        exercise: "Back squat".into(),
-        weight_kg: w,
-        reps,
-        rpe,
-        observed_at: 1,
-        entry_id: 0,
-        hold_sec: None,
-    }
+    logged_set("Back squat", w, reps, rpe, 1)
 }
 
 /// Effective reps the oracle credits: reps + RIR when the RPE is an exact
@@ -1039,7 +1040,7 @@ fn logged_set_reaches_the_view_with_the_same_metrics_and_lb_display() {
     // Event path for a seeded sample, in kg and lb profiles; the lb summary
     // shows the e1RM in pounds rounded to the 0.5 lb display grid.
     let app = Engine;
-    let mut rng = Rng(0x5eed_0002);
+    let mut rng = SplitMix(0x5eed_0002);
     for i in 0..300 {
         let w = (rng.range(20.0, 300.0) * 4.0).round() / 4.0;
         let reps = 1 + (rng.next() % 12) as u32;
@@ -1058,11 +1059,22 @@ fn logged_set_reaches_the_view_with_the_same_metrics_and_lb_display() {
         let _ = app.update(log_set("Back squat", w, reps, rpe, 1_000_000), &mut model);
         let vm = app.view(&model);
         let got = vm.lifts.first().expect("one lift");
-        let want = to_lift_view(&set(w, reps, rpe), false, lb);
-        assert_eq!(
-            (got.e1rm_kg, got.pct_1rm, got.rir),
-            (want.e1rm_kg, want.pct_1rm, want.rir)
+        // The view's figures against the Epley oracle (02:54) at 0.1 kg.
+        let e1 = e1rm_exact(w, reps, rpe);
+        assert!(
+            (got.e1rm_kg - e1).abs() <= 0.05 + 1e-9,
+            "{w}×{reps}@{rpe}: e1RM {} vs {e1}",
+            got.e1rm_kg
         );
+        assert!(
+            rounds_to(got.pct_1rm, 100.0 * w / e1),
+            "{w}×{reps}@{rpe}: %1RM {} vs {}",
+            got.pct_1rm,
+            100.0 * w / e1
+        );
+        if (6.0..=10.0).contains(&rpe) {
+            assert_eq!(got.rir, oracle::rir_of_rpe(rpe), "RPE {rpe}");
+        }
         if lb {
             let exact_lb = e1rm_exact(w, reps, rpe) / oracle::KG_PER_LB;
             let shown: f64 = got
@@ -1114,7 +1126,6 @@ fn prescribed_pct_1rm_for_reps_in_reserve_inverts_epley() {
             if eff >= 2.0 {
                 assert!((got - want).abs() < 1e-4, "{reps}@{rir}: {got} vs {want}");
                 let floor = got.floor() as u8;
-                assert_eq!(f64::from(floor), want.floor(), "{reps}@{rir}");
                 // A load at the floored % really leaves ≥ rir in reserve on Epley.
                 let reps_possible = 30.0 * (100.0 / f64::from(floor) - 1.0);
                 assert!(
@@ -1124,13 +1135,16 @@ fn prescribed_pct_1rm_for_reps_in_reserve_inverts_epley() {
             }
         }
     }
+    // The documented whole-percent loads: 5 @ 1 RIR → 83 %, 3 @ 1 → 88 %.
+    assert_eq!(strength::pct_1rm_leaving_rir(5, 1).floor(), 83.0);
+    assert_eq!(strength::pct_1rm_leaving_rir(3, 1).floor(), 88.0);
 }
 
 #[test]
 fn load_grid_floors_onto_the_display_unit_and_is_idempotent() {
     // 03:361 smallest increment ~2.5 kg / 5 lb; the app floors (never rounds
     // up past the prescribed %1RM) on the DISPLAY unit grid.
-    let mut rng = Rng(0x5eed_0003);
+    let mut rng = SplitMix(0x5eed_0003);
     for _ in 0..200_000 {
         let kg = rng.range(0.0, 400.0);
         let g = round_load_grid(kg, false);
@@ -1156,12 +1170,14 @@ fn load_grid_floors_onto_the_display_unit_and_is_idempotent() {
 
 #[test]
 fn pound_display_of_shell_entered_loads_round_trips() {
-    // The shell stores a pound entry as `lb / LB_PER_KG` (Units.kt `lbToKg`); the
-    // core shows it back on the 0.5 lb display grid as the same pounds.
+    // The shell stores a pound entry as kg kept to 0.01 (Units.kt
+    // `lbToKgWire`, `round2(lb / LB_PER_KG)`); the core shows it back on the
+    // 0.5 lb display grid as the same pounds.
     for half in 1..=2000 {
         let lb = 0.5 * f64::from(half);
+        let wire_kg = (lb / LB_PER_KG * 100.0).round() / 100.0;
         assert_eq!(
-            fmt_weight_num(lb / LB_PER_KG, true),
+            fmt_weight_num(wire_kg, true),
             oracle_fmt_half(lb),
             "{lb} lb"
         );
@@ -1177,10 +1193,11 @@ fn pound_display_of_shell_entered_loads_round_trips() {
 fn pound_loads_already_on_the_plate_grid_stay_put() {
     // plates.rs `round_load_grid`: round DOWN onto the display-unit plate grid
     // so the load never exceeds the prescribed %1RM. A load that IS on the grid
-    // (a shell-entered 215 lb, or an e1RM × %1RM product that is exactly a
-    // plate load) must stay; floor() of `lb/step` computed as 42.99999… would
-    // drop it a whole 5 lb plate step. Callers pass their raw load
-    // (flatten_lift.rs, first_set.rs, adjustments.rs, completion.rs).
+    // (a pound load as its exact quotient `lb / LB_PER_KG`, or an e1RM × %1RM
+    // product that is exactly a plate load) must stay; floor() of `lb/step`
+    // computed as 42.99999… would drop it a whole 5 lb plate step. Callers
+    // pass their raw load (flatten_lift.rs, first_set.rs, adjustments.rs,
+    // completion.rs).
     let mut bad = Vec::new();
     for half in 1..=2000 {
         let lb = 0.5 * f64::from(half);
@@ -1196,52 +1213,46 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
             }
         }
     }
-    // flatten_lift.rs's expression, `round_load_grid(e * p / 100 * frac)`,
-    // for a pound e1RM (a logged single) and a whole %1RM whose exact product
-    // is a 5 lb plate load.
+    // Through the plan-item flattener: a pound Back Squat e1RM (a logged
+    // single) and a whole %1RM prescription whose exact product is a 5 lb
+    // plate load (300 lb × 80 % is 240 lb).
+    let flat = |e1rm_kg: f64, pct: u32| {
+        let rx = RxBasis::Workout.rx(
+            Prescription::Lift(crate::schema::LiftPrescription {
+                exercise: "Back Squat".into(),
+                sets: 3,
+                reps: 5,
+                intensity: LiftIntensity::PercentOneRm(pct as f32),
+                rest_sec: 180,
+                velocity_loss_pct: None,
+                reps_max: None,
+                load_kg: None,
+            }),
+            claims::STR_INTENT_001,
+        );
+        let anchors = crate::plan::Anchors {
+            lift: crate::plan::LiftAnchors {
+                e1rm: vec![("Back Squat".into(), e1rm_kg)],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        flatten_prescription(&rx, &anchors, None, true, DistanceUnit::Km)
+    };
     for e_lb in (100..=600).step_by(5) {
         for p in 50..=100u32 {
             let exact = f64::from(e_lb) * f64::from(p) / 100.0;
             if exact >= 50.0 && (exact / 5.0).fract() == 0.0 {
-                let e = f64::from(e_lb) / LB_PER_KG;
-                let shown = round_load_grid(e * f64::from(p) / 100.0 * 1.0, true) * LB_PER_KG;
+                let item = flat(f64::from(e_lb) / LB_PER_KG, p);
+                let shown = item.load_kg.expect("anchored load") * LB_PER_KG;
                 if (shown - exact).abs() > 1e-6 {
                     bad.push(format!(
-                        "e1RM {e_lb} lb × {p}% = {exact} lb → {shown:.1} lb"
+                        "e1RM {e_lb} lb × {p}% = {exact} lb → {shown:.1} lb ({:?})",
+                        item.summary
                     ));
                 }
             }
         }
-    }
-    // End to end through the plan-item flattener: a 300 lb Back Squat e1RM
-    // and an 80 %1RM prescription is a 240 lb load.
-    let rx = RxBasis::Workout.rx(
-        Prescription::Lift(crate::schema::LiftPrescription {
-            exercise: "Back Squat".into(),
-            sets: 3,
-            reps: 5,
-            intensity: LiftIntensity::PercentOneRm(80.0),
-            rest_sec: 180,
-            velocity_loss_pct: None,
-            reps_max: None,
-            load_kg: None,
-        }),
-        claims::STR_INTENT_001,
-    );
-    let anchors = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Back Squat".into(), 300.0 / LB_PER_KG)],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let item = flatten_prescription(&rx, &anchors, None, true, DistanceUnit::Km);
-    let shown = item.load_kg.expect("anchored load") * LB_PER_KG;
-    if (shown - 240.0).abs() > 1e-6 {
-        bad.push(format!(
-            "plan item: 300 lb e1RM × 80% → {shown:.1} lb ({:?})",
-            item.summary
-        ));
     }
     assert!(
         bad.is_empty(),
@@ -1262,7 +1273,7 @@ fn oracle_fmt_half(lb: f64) -> String {
 
 #[test]
 fn kg_display_rounds_once_to_a_tenth() {
-    let mut rng = Rng(0x5eed_0004);
+    let mut rng = SplitMix(0x5eed_0004);
     for _ in 0..100_000 {
         let kg = rng.range(0.0, 500.0);
         let s = fmt_weight_num(kg, false);
@@ -1318,7 +1329,7 @@ fn clock_and_pace_formatting_match_the_oracle_including_half_second_carries() {
         assert_eq!(fmt_clock(s), oracle::clock(s), "{s}");
         assert_eq!(fmt_mss(s), oracle::mss(s), "{s}");
     }
-    let mut rng = Rng(0x5eed_0005);
+    let mut rng = SplitMix(0x5eed_0005);
     for _ in 0..200_000 {
         let s = rng.range(0.0, 3.0 * 3600.0 + 10.0);
         assert_eq!(fmt_clock(s), oracle::clock(s), "{s}");
@@ -1352,7 +1363,6 @@ fn protein_figures_match_kb_g_per_kg_over_bodyweight_grid() {
             .iter()
             .zip([oracle::MASTERS_G_PER_KG, oracle::DEFICIT_G_PER_KG])
         {
-            assert_eq!((f.low_g_per_kg, f.high_g_per_kg), (lo, hi));
             assert!(
                 rounds_to(f.low_g_per_day, bw * lo) && rounds_to(f.high_g_per_day, bw * hi),
                 "{bw}: {f:?}"
@@ -1416,7 +1426,8 @@ fn protein_reaches_the_view_with_the_pound_bodyweight_echo() {
         let vm = app.view(&model);
         let f = &vm.protein_figures[0];
         let bw = lb * oracle::KG_PER_LB;
-        assert!(rounds_to(f.low_g_per_day, bw * 1.2) && rounds_to(f.high_g_per_day, bw * 1.6));
+        let (lo, hi) = oracle::MASTERS_G_PER_KG;
+        assert!(rounds_to(f.low_g_per_day, bw * lo) && rounds_to(f.high_g_per_day, bw * hi));
         let row = &vm.protein_targets[f.row as usize].summary;
         // `{:.0}` echo of the pound bodyweight: within half a pound.
         let shown: f64 = row
@@ -1431,21 +1442,6 @@ fn protein_reaches_the_view_with_the_pound_bodyweight_echo() {
         assert!((shown - lb).abs() <= 0.5 + 1e-9, "{row}");
     }
 }
-
-/// 03-hypertrophy.md:520-530 Table 1 (MV, MEV, MAV lo–hi, MRV "N+").
-const TABLE1: [(&str, u8, u8, u8, u8, u8); 11] = [
-    ("chest", 8, 10, 12, 20, 22),
-    ("back", 8, 10, 14, 22, 25),
-    ("quads", 6, 8, 12, 18, 20),
-    ("hamstrings", 4, 6, 10, 16, 20),
-    ("glutes", 0, 0, 4, 12, 16),
-    ("side delts", 6, 8, 16, 22, 26),
-    ("rear delts", 0, 6, 12, 18, 22),
-    ("biceps", 4, 6, 14, 20, 26),
-    ("triceps", 4, 6, 10, 14, 18),
-    ("calves", 4, 6, 8, 16, 20),
-    ("abs", 0, 0, 10, 16, 20),
-];
 
 /// The planner's figures and ramp for one muscle, optionally under a
 /// hypertrophy profile stating `stated` weekly sets.
@@ -1490,7 +1486,7 @@ const STATED: [Option<u8>; 8] = [
 
 #[test]
 fn hypertrophy_figures_match_table1_and_ramps_obey_the_kb_rules() {
-    for (muscle, mv, mev, mav_lo, mav_hi, mrv) in TABLE1 {
+    for (muscle, mv, mev, mav_lo, mav_hi, mrv) in KB_TABLE1 {
         let lm = hypertrophy::landmarks_for(muscle).expect(muscle);
         assert_eq!(
             (lm.mv, lm.mev, lm.mav, lm.mrv),
@@ -1549,7 +1545,7 @@ fn hypertrophy_profile_ramp_never_drops_within_the_accumulation_block() {
     // (03:504-505) may lower the LEVEL, but refitting each week separately
     // makes the shown weekly sets go down while the block is still building.
     let mut bad = Vec::new();
-    for (muscle, ..) in TABLE1 {
+    for (muscle, ..) in KB_TABLE1 {
         for stated in STATED.into_iter().flatten() {
             for weeks in 2..=8u8 {
                 let (_, ramp) = hyp_plan(muscle, Some(stated), weeks);
@@ -1569,7 +1565,7 @@ fn hypertrophy_profile_ramp_never_drops_within_the_accumulation_block() {
 
 /// A seeded history: `days` days ending on `last_day`, a run on ~60% of days.
 fn seeded_runs(seed: u64, last_day: i64, days: i64) -> Vec<(i64, f64, f64)> {
-    let mut rng = Rng(seed);
+    let mut rng = SplitMix(seed);
     let mut out = Vec::new();
     for d in (last_day - days + 1)..=last_day {
         if rng.unit() < 0.6 || d == last_day {
@@ -1617,37 +1613,48 @@ fn load_model(runs: &[(i64, f64, f64)], today: i64) -> (Engine, Model) {
     (app, m)
 }
 
+/// The CTL, ATL and TSB the training-load card shows: "Fitness (CTL) x.x ·
+/// Fatigue (ATL) x.x · Form (TSB) ±x.x".
+fn shown_load(vm: &ViewModel) -> (f64, f64, f64) {
+    let summary = &vm.training_load.as_ref().expect("HR-carrying runs").summary;
+    let figure = |label: &str| -> f64 {
+        summary
+            .split(label)
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("no {label} figure in {summary:?}"))
+    };
+    (
+        figure("Fitness (CTL) "),
+        figure("Fatigue (ATL) "),
+        figure("Form (TSB) "),
+    )
+}
+
+/// Within half the card's 0.1 display step of `want`.
+fn shows(shown: f64, want: f64) -> bool {
+    (shown - want).abs() <= 0.05 + 1e-6
+}
+
 #[test]
 fn training_load_matches_lucia_trimp_and_ewma_oracle() {
     for seed in 0..12u64 {
         let last = 20_000 + seed as i64;
         let runs = seeded_runs(0x10ad + seed, last, 20 + 15 * seed as i64);
         let (app, m) = load_model(&runs, last);
-        let tl = load_figures_of(&m).expect("HR-carrying runs");
-        let (ctl, atl) = oracle_load(&runs, last);
+        let vm = app.view(&m);
+        let (ctl, atl, tsb) = shown_load(&vm);
+        let (want_ctl, want_atl) = oracle_load(&runs, last);
+        assert!(shows(ctl, want_ctl), "seed {seed}: CTL {ctl} vs {want_ctl}");
+        assert!(shows(atl, want_atl), "seed {seed}: ATL {atl} vs {want_atl}");
         assert!(
-            (tl.ctl - ctl).abs() <= 0.05 + 1e-9,
-            "seed {seed}: CTL {} vs {ctl}",
-            tl.ctl
+            shows(tsb, want_ctl - want_atl),
+            "seed {seed}: TSB {tsb} vs {}",
+            want_ctl - want_atl
         );
-        assert!(
-            (tl.atl - atl).abs() <= 0.05 + 1e-9,
-            "seed {seed}: ATL {} vs {atl}",
-            tl.atl
-        );
-        assert!(
-            (tl.tsb - (ctl - atl)).abs() <= 0.05 + 1e-9,
-            "seed {seed}: TSB {} vs {}",
-            tl.tsb,
-            ctl - atl
-        );
-        let view = app.view(&m).training_load.expect("HR-carrying runs");
-        assert_eq!(view.sessions_counted as usize, runs.len());
-        let want = format!(
-            "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1}",
-            tl.ctl, tl.atl, tl.tsb
-        );
-        assert!(view.summary.starts_with(&want), "{}", view.summary);
+        let card = vm.training_load.expect("HR-carrying runs");
+        assert_eq!(card.sessions_counted as usize, runs.len());
     }
 }
 
@@ -1659,18 +1666,13 @@ fn training_load_decays_through_rest_days_up_to_today() {
     let last = 20_100;
     let runs = seeded_runs(0x10ad_0bad, last, 42);
     let today = last + 21;
-    let (_, m) = load_model(&runs, today);
-    let tl = load_figures_of(&m).expect("HR-carrying runs");
-    let (ctl, atl) = oracle_load(&runs, today);
+    let (app, m) = load_model(&runs, today);
+    let (ctl, atl, tsb) = shown_load(&app.view(&m));
+    let (want_ctl, want_atl) = oracle_load(&runs, today);
     assert!(
-        (tl.atl - atl).abs() <= 0.05
-            && (tl.ctl - ctl).abs() <= 0.05
-            && (tl.tsb - (ctl - atl)).abs() <= 0.05,
-        "today (+21 d rest): app CTL {} ATL {} TSB {} vs oracle CTL {ctl:.1} ATL {atl:.1} TSB {:.1}",
-        tl.ctl,
-        tl.atl,
-        tl.tsb,
-        ctl - atl
+        shows(atl, want_atl) && shows(ctl, want_ctl) && shows(tsb, want_ctl - want_atl),
+        "today (+21 d rest): app CTL {ctl} ATL {atl} TSB {tsb} vs oracle CTL {want_ctl:.1} ATL {want_atl:.1} TSB {:.1}",
+        want_ctl - want_atl
     );
 }
 

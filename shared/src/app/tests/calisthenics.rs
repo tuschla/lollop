@@ -11,11 +11,6 @@ use super::*;
 /// glob-imported `MON`.
 const MON: i64 = super::MON + 70;
 
-/// [`super::planned_calisthenics`] on this file's later `MON`.
-fn planned_calisthenics() -> (Engine, Model) {
-    planned_on(calisthenics_profile(), [], MON)
-}
-
 fn place(ladder: Lad, rung: u8, at: i64) -> Event {
     Event::SetCalisthenicsRung {
         ladder,
@@ -45,7 +40,7 @@ fn push_item(app: &Engine, model: &Model) -> PrescriptionView {
 
 #[test]
 fn calisthenics_regress_then_requalify_advances_again() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // Full push-up below its 5-rep floor on 2 sessions → step down, bridged.
     log_sets(&app, &mut model, "Full push-up", 3, 3, 10.0, MON - 6);
     log_sets(&app, &mut model, "Full push-up", 3, 3, 10.0, MON - 5);
@@ -73,7 +68,7 @@ fn calisthenics_regress_then_requalify_advances_again() {
 
 #[test]
 fn one_exploratory_harder_set_does_not_anchor() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Bodyweight squat", 3, 10, 8.0, MON - 5);
     // One curious pistol attempt, well below its 5-rep floor.
     log_sets(&app, &mut model, "Pistol squat", 1, 2, 10.0, MON - 3);
@@ -98,7 +93,7 @@ fn one_exploratory_harder_set_does_not_anchor() {
 
 #[test]
 fn calisthenics_far_over_band_top_skips_ahead_in_one_session() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Wall push-up", 3, 25, 9.0, MON - 1);
     let it = push_item(&app, &model);
     let rung = it.calis.as_ref().unwrap().rung;
@@ -111,7 +106,7 @@ fn calisthenics_far_over_band_top_skips_ahead_in_one_session() {
 
 #[test]
 fn straight_arm_rung_never_multi_skips() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // Very long tuck holds on 1 session: no skip on a straight-arm rung.
     for _ in 0..4 {
         app.update(
@@ -126,7 +121,7 @@ fn straight_arm_rung_never_multi_skips() {
 
 #[test]
 fn calisthenics_placement_seeds_starting_rung() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // Setup placement on day 0 (today): today's item starts there.
     app.update(
         place(Lad::HorizontalPush, 4, MON * DAY_SEC + 60),
@@ -188,7 +183,7 @@ fn placement_event_round_trips_and_compacts_with_the_sets_family() {
 
 #[test]
 fn pull_up_alias_counts_for_the_vertical_pull_ladder() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Pull-ups", 3, 5, 8.0, MON - 1);
     let vm = app.view(&model);
     let pull = cal_item(&vm, Lad::VerticalPull).unwrap();
@@ -206,7 +201,7 @@ fn pull_up_alias_counts_for_the_vertical_pull_ladder() {
 
 #[test]
 fn floor_rung_rpe10_at_top_still_advances() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // Wall push-up (8–12) is a near-failure rung: RPE 10 at the top is compliance.
     log_sets(&app, &mut model, "Wall push-up", 3, 12, 10.0, MON - 2);
     log_sets(&app, &mut model, "Wall push-up", 3, 12, 10.0, MON - 1);
@@ -215,7 +210,7 @@ fn floor_rung_rpe10_at_top_still_advances() {
 
 #[test]
 fn unrecorded_rpe_at_band_top_does_not_advance_dynamic_rung() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Full push-up", 3, 8, 0.0, MON - 2);
     log_sets(&app, &mut model, "Full push-up", 3, 8, 0.0, MON - 1);
     let it = push_item(&app, &model);
@@ -230,7 +225,7 @@ fn unrecorded_rpe_at_band_top_does_not_advance_dynamic_rung() {
 
 #[test]
 fn unrecorded_rpe_two_over_top_advances() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Full push-up", 3, 10, 0.0, MON - 2);
     log_sets(&app, &mut model, "Full push-up", 3, 10, 0.0, MON - 1);
     assert_eq!(push_item(&app, &model).exercise, "Decline push-up");
@@ -238,7 +233,7 @@ fn unrecorded_rpe_two_over_top_advances() {
 
 #[test]
 fn calisthenics_layoff_steps_rung_down_and_cites_reentry() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Full push-up", 3, 6, 8.0, MON - 40);
     log_sets(&app, &mut model, "Full push-up", 3, 6, 8.0, MON - 38);
     let it = push_item(&app, &model);
@@ -260,7 +255,7 @@ fn calisthenics_layoff_steps_rung_down_and_cites_reentry() {
 
 #[test]
 fn straight_arm_layoff_resets_acclimation_window() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // 3 weekly sessions, a 3-week break, then 4 weekly sessions: the newest
     // session is 56 days after the first, but only 21 days after the return.
     for back in [60, 53, 46, 25, 18, 11, 4] {
@@ -279,7 +274,7 @@ fn straight_arm_layoff_resets_acclimation_window() {
 
 #[test]
 fn weighted_rung_view_is_load_capable_and_shows_system_e1rm() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     app.update(
         Event::SetProfile(Profile {
             bodyweight_kg: Some(80.0),
@@ -352,7 +347,7 @@ fn ladder_picker_view_lists_every_ladder_and_greys_out_missing_equipment() {
 
 #[test]
 fn any_set_under_the_floor_on_two_sessions_regresses() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // 6/4/3 never completes 3×5 (KB §2.2), on 2 sessions → step down.
     for day in [MON - 6, MON - 5] {
         for reps in [6, 4, 3] {
@@ -368,7 +363,7 @@ fn any_set_under_the_floor_on_two_sessions_regresses() {
 
 #[test]
 fn one_bad_session_after_an_advance_does_not_regress() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Full push-up", 3, 8, 8.0, MON - 6);
     log_sets(&app, &mut model, "Full push-up", 3, 8, 8.0, MON - 5);
     let decline = "Decline push-up";
@@ -383,7 +378,7 @@ fn one_bad_session_after_an_advance_does_not_regress() {
 
 #[test]
 fn straight_arm_rung_advances_on_two_weekly_test_days_between_working_days() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     // Weekly 15 s test holds (T) between 8 s working-hold days (W), over 28+
     // days: the newest session is a working day, the last two tests passed.
     for (back, sec) in [
@@ -409,7 +404,7 @@ fn straight_arm_rung_advances_on_two_weekly_test_days_between_working_days() {
 
 #[test]
 fn harder_mid_session_keeps_the_sets_logged_after_it() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     let d = (MON - 2) * DAY_SEC;
     for _ in 0..3 {
         app.update(log_set("Knee push-up", 0.0, 8, 8.0, d + 100), &mut model)
@@ -432,7 +427,7 @@ fn harder_mid_session_keeps_the_sets_logged_after_it() {
 
 #[test]
 fn undated_placement_does_not_start_the_tendon_clock_at_epoch() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     app.update(place(Lad::FrontLever, 0, 0), &mut model)
         .expect_only_render();
     for back in [9, 2] {
@@ -451,7 +446,7 @@ fn undated_placement_does_not_start_the_tendon_clock_at_epoch() {
 
 #[test]
 fn load_capable_pull_up_coaching_promises_load_not_the_next_rung() {
-    let (app, mut model) = planned_calisthenics();
+    let (app, mut model) = planned_on(calisthenics_profile(), [], MON);
     log_sets(&app, &mut model, "Full pull-up", 3, 5, 8.0, MON - 1);
     let pull = cal_item(&app.view(&model), Lad::VerticalPull).unwrap();
     assert!(pull.calis.as_ref().unwrap().load_capable);

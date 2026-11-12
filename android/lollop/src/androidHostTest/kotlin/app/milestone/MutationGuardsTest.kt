@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
@@ -46,8 +45,7 @@ class MutationGuardsTest {
         RunSession.reset()
     }
 
-    private fun logLines(): List<String> =
-        File(ctx.filesDir, AppFileNames.EVENT_LOG).readLines().filter { it.isNotBlank() }
+    private fun logLines(): List<String> = QaHarness.logLines(ctx)
 
     private fun legacyMarker() = ctx.setupPrefs().contains(KEY_PLAN_CLEARED)
 
@@ -57,7 +55,7 @@ class MutationGuardsTest {
 
     private fun restoreAndRestart(lines: List<String>) {
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
-        ProcessDeath.kill(ctx)
+        QaHarness.killProcess()
         rule.launchApp()
     }
 

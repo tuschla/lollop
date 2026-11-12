@@ -7,16 +7,26 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -27,14 +37,10 @@ import app.milestone.EventDispatcher
 import app.milestone.MainActivity
 import app.milestone.R
 import app.milestone.ViewModel
-import app.milestone.getQuantityString
-import app.milestone.getString
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Timer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.schedule
-import org.jetbrains.compose.resources.PluralStringResource
-import org.jetbrains.compose.resources.StringResource
 
 /** The app's own copy for [id], so an assertion follows the string resource
  *  rather than pinning its English wording. Without [args] the resource is
@@ -56,15 +62,6 @@ fun strPrefix(@StringRes id: Int, vararg args: Any): String {
 
 fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
     ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(id, count, *args)
-
-/** [str] for the common handle the app's code names a string by (`Res.string.x`):
- *  the same Android resource, read as the app reads it outside composition. */
-fun str(resource: StringResource, vararg args: Any): String =
-    ApplicationProvider.getApplicationContext<Context>().resources.getString(resource, *args)
-
-fun plural(resource: PluralStringResource, count: Int, vararg args: Any): String =
-    ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(resource, count, *args)
-
 
 // The most recently launched Activity, closed by [QaHarness.teardown] so boot
 // effects + the process-scoped event consumer from a prior test don't accumulate
@@ -144,9 +141,6 @@ fun ComposeTestRule.assertCountEventually(matcher: SemanticsMatcher, count: Int,
     onAllNodes(matcher).assertCountEquals(count)
 }
 
-fun ComposeTestRule.assertTextCountEventually(text: String, count: Int) =
-    assertCountEventually(hasText(text), count)
-
 fun ComposeTestRule.selectTab(label: String) {
     onNodeWithText(label).performClick()
     waitForIdle()
@@ -203,10 +197,54 @@ fun ComposeTestRule.openLoopFor(exercise: String, set: Int = 1) {
 
 fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
 
-fun ComposeTestRule.selectHistoryFilter(label: String) {
-    onNodeWithText(label).performClick()
+/** The bottom bar's Log button, which opens the log chooser. */
+val logFab: SemanticsMatcher get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
+
+/** Wait until a node shows [text] and the UI is idle. */
+fun ComposeTestRule.waitForText(text: String, substring: Boolean = false) {
+    waitForNode(hasText(text, substring = substring))
     waitForIdle()
 }
+
+/** Tap [logFab] and wait for the chooser (its morning check-in row is always offered). */
+fun ComposeTestRule.openLogChooser() {
+    onNode(logFab).performClick()
+    waitForText(str(R.string.main_morning_checkin_title))
+}
+
+/** From Today: open the morning check-in from the log chooser and wait for its first scale. */
+fun ComposeTestRule.openMorningCheckin() {
+    openLogChooser()
+    onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
+    waitForNode(hasTestTag("checkin-sleep"))
+}
+
+/** Tap the open editor's primary action (Log set, Save, Next). */
+fun ComposeTestRule.tapEditorPrimary() = onNodeWithTag("editor-primary").performClick()
+
+/** Scroll Today's list to its last row. */
+fun ComposeTestRule.scrollTodayToEnd() {
+    val list = onAllNodes(hasScrollToIndexAction())[0]
+    val info = list.fetchSemanticsNode().config.getOrNull(SemanticsProperties.CollectionInfo)
+    if (info != null && info.rowCount > 0) list.performScrollToIndex(info.rowCount - 1)
+    waitForIdle()
+}
+
+/** Scroll Today's list until a node matching [matcher] is composed. */
+fun ComposeTestRule.scrollTodayTo(matcher: SemanticsMatcher) {
+    onNode(hasScrollToNodeAction()).performScrollToNode(matcher)
+    waitForIdle()
+}
+
+/** Every text and content description on screen, across all windows. */
+fun ComposeTestRule.screenTexts(): List<String> =
+    onAllNodes(isRoot()).fetchSemanticsNodes().flatMap { flatten(it) }.flatMap { n ->
+        n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
+            n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+    }.filter { it.isNotBlank() }
+
+/** [node] and every node under it, depth first. */
+fun flatten(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::flatten)
 
 /** Pick [value] on the [app.milestone.RatingScale] tagged [tag] (`effort-scale`,
  *  `pain-severity`, `checkin-sleep` …). The track is ONE adjustable node, so the

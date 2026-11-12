@@ -105,28 +105,33 @@ class RestAlarmDeliveryTest {
     @Test
     fun aFreshProcessPostsTheDoneAlertInPlaceOfTheCountdown() {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        val restAlert = AppSettings.restAlert.value
         AppSettings.setRestAlert(app, false)
-        RestAlarm.schedule(app, 90, "Back squat")
-        RestAlarm.setNextSet(app, RestNextSet("Bench press", "Set 1 of 3"))
-        assertEquals(resting, title(posted()))
-        val fired = restEndBroadcast(app)
+        try {
+            RestAlarm.schedule(app, 90, "Back squat")
+            RestAlarm.setNextSet(app, RestNextSet("Bench press", "Set 1 of 3"))
+            assertEquals(resting, title(posted()))
+            val fired = restEndBroadcast(app)
 
-        AppRuntime.resetForTest(clock = TestClock)
-        deliver(fired)
+            AppRuntime.resetForTest(clock = TestClock)
+            deliver(fired)
 
-        val n = posted()!!
-        assertEquals(restDone, title(n))
-        assertEquals(app.getString(R.string.log_rest_notif_done_body, "Bench press"), n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
-        assertEquals("not ongoing", 0, n.flags and Notification.FLAG_ONGOING_EVENT)
-        assertFalse("no chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
-        assertEquals("the countdown is gone", 1, shadowOf(nm).allNotifications.size)
-        assertEquals("rest_done", n.channelId)
-        // The saved "Rest timer alert" off is read in the fresh process.
-        assertFalse(AppSettings.restAlert.value)
+            val n = posted()!!
+            assertEquals(restDone, title(n))
+            assertEquals(app.getString(R.string.log_rest_notif_done_body, "Bench press"), n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+            assertEquals("not ongoing", 0, n.flags and Notification.FLAG_ONGOING_EVENT)
+            assertFalse("no chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
+            assertEquals("the countdown is gone", 1, shadowOf(nm).allNotifications.size)
+            assertEquals(RestAlarmPlatform.CHANNEL_DONE, n.channelId)
+            // The saved "Rest timer alert" off is read in the fresh process.
+            assertFalse(AppSettings.restAlert.value)
 
-        nm.cancelAll()
-        deliver(fired)
-        assertNull(posted())
+            nm.cancelAll()
+            deliver(fired)
+            assertNull(posted())
+        } finally {
+            AppSettings.setRestAlert(app, restAlert)
+        }
     }
 
     /** After the session's last set the loop's primary is FinishSession, so it

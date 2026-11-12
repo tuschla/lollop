@@ -451,7 +451,7 @@ class RunTrackingService : Service() {
         internal const val CHANNEL = "run_live"
 
         /** The run's channel before it moved to [ensureLiveChannel] (IMPORTANCE_LOW). */
-        private const val RETIRED_CHANNEL = "run_tracking"
+        internal const val RETIRED_CHANNEL = "run_tracking"
 
         /** The actions that may create the service ([stopIfStray]). */
         private val STARTING_ACTIONS = setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)

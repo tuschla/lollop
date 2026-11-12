@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config
 
 /** The status chip shows its text whole up to this many characters
  *  (developer.android.com, "Live Updates", "Status chip appearance"). */
-private const val LIVE_CHIP_MAX_CHARS = 7
+internal const val LIVE_CHIP_MAX_CHARS = 7
 
 /** The criteria developer.android.com lists for a Live Update, checked on a built
  *  notification. (`Notification.hasPromotableCharacteristics()` is not used: the
@@ -106,20 +106,37 @@ class LiveRunNotificationTest {
         assertEquals(150, guided.extras.getInt(Notification.EXTRA_PROGRESS))
     }
 
+    /** The chip the run notification shows as the tracker looks for GPS, waits
+     *  armed, records and pauses (driven through [RunTrackingService]); each fits
+     *  the chip, as does a moving time near ten hours. */
     @Test
+    @Config(sdk = [36])
     fun chipTextFollowsTheStateAndFitsTheChip() {
-        fun trackingChipRes(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean) =
-            runSurfacePhase(recording, armed, paused, signalLost).chipRes?.let { androidStringId(it.key) }
-        assertEquals(R.string.live_chip_paused, trackingChipRes(recording = true, armed = false, paused = true, signalLost = true))
-        assertEquals(R.string.live_chip_no_gps, trackingChipRes(recording = true, armed = false, paused = false, signalLost = true))
-        assertNull("recording shows the moving time", trackingChipRes(recording = true, armed = false, paused = false, signalLost = false))
-        assertEquals(R.string.live_chip_waiting, trackingChipRes(recording = false, armed = true, paused = false, signalLost = false))
-        assertEquals(R.string.live_chip_locating, trackingChipRes(recording = false, armed = false, paused = false, signalLost = false))
-        val chips = listOf(R.string.live_chip_paused, R.string.live_chip_no_gps, R.string.live_chip_waiting, R.string.live_chip_locating)
-            .map { ctx.getString(it) } + formatElapsed(9 * 3600L + 59 * 60 + 59)
-        for (c in chips) {
-            assertTrue("chip '$c' is not empty", c.isNotBlank())
-            assertTrue("chip '$c' fits $LIVE_CHIP_MAX_CHARS characters", c.length <= LIVE_CHIP_MAX_CHARS)
+        shadowOf(ctx as Application).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        fun intent(action: String) = Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.$action")
+        val nm = shadowOf(ctx.getSystemService(NotificationManager::class.java))
+        fun chip(): String? {
+            shadowOf(Looper.getMainLooper()).idle()
+            return nm.getNotification(AndroidIds.RUN_NOTIFICATION)?.shortCriticalText?.toString()
+        }
+        val controller = Robolectric.buildService(RunTrackingService::class.java, intent("LOCATE")).create().startCommand(0, 1)
+        try {
+            val locating = chip()
+            assertEquals("the tracker looks for GPS", ctx.getString(R.string.live_chip_locating), locating)
+            controller.withIntent(intent("ARM")).startCommand(0, 2)
+            val waiting = chip()
+            assertEquals("armed, waiting for the start", ctx.getString(R.string.live_chip_waiting), waiting)
+            controller.withIntent(intent("START_NOW")).startCommand(0, 3)
+            assertEquals("recording shows the moving time", "0:00", chip())
+            RunSession.setPaused(true)
+            val paused = chip()
+            assertEquals(ctx.getString(R.string.live_chip_paused), paused)
+            for (c in listOf(locating!!, waiting!!, paused!!, formatElapsed(9 * 3600L + 59 * 60 + 59))) {
+                assertTrue("chip '$c' is not empty", c.isNotBlank())
+                assertTrue("chip '$c' fits $LIVE_CHIP_MAX_CHARS characters", c.length <= LIVE_CHIP_MAX_CHARS)
+            }
+        } finally {
+            controller.destroy()
         }
     }
 

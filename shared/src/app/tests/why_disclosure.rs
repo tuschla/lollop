@@ -66,10 +66,9 @@ fn contested_guidance_grade_note_names_the_contested_question() {
     // A contested claim (HYP-VOL-001 → CQ-01) must append the contested
     // question to the grade note, not just restate the badge.
     let app = Engine;
-    let model = Model {
-        profile_history: vec![sample_profile()],
-        ..Default::default()
-    };
+    let mut model = Model::default();
+    app.update(Event::SetProfile(sample_profile()), &mut model)
+        .expect_only_render();
     let vm = app.view(&model);
     let g = vm
         .guidance

@@ -115,10 +115,7 @@ fn a_bpm_runs_hr_percentage_keeps_the_offset_it_was_logged_under() {
             off,
         )
     };
-    let clock = |off: i64| Event::SetToday {
-        epoch_day: d + 2,
-        utc_offset_sec: off,
-    };
+    let clock = |off: i64| set_today_off_ev(d + 2, off);
     let app = Engine;
     let hr_after = |events: Vec<Event>| {
         let mut m = Model::default();
@@ -188,7 +185,7 @@ fn a_three_week_running_break_rebuilds_the_long_run() {
         .collect();
     let total: f64 = week.iter().sum();
     let long = week.iter().copied().fold(0.0, f64::max);
-    let share_floor = (0.3 * total).max(total / week.len() as f64);
+    let share_floor = (running::LONG_RUN_SHARE_MAX * total).max(total / week.len() as f64);
     assert!(
         long <= share_floor + 0.5,
         "after 3 weeks off the long run is {long} km of a {total:.1} km week {week:?}: the 14 km \
@@ -200,9 +197,9 @@ fn a_three_week_running_break_rebuilds_the_long_run() {
 /// at the tail of its list, so every tie in this history (same stamp, same
 /// weight × reps, same km, two spellings of one lift) must be broken by time
 /// and `entry_id` (the fix's own rule), never by storage slot: deleting any
-/// one entry and logging it again (the shell's Undo) must render the view
-/// byte for byte as before. `same_stamp_sets` puts the two tied sets of a
-/// pair on the same second (else one second apart). Returns every diff.
+/// one entry and logging it again (`undo_diff`) must render the view byte for
+/// byte as before. `same_stamp_sets` puts the two tied sets of a pair on the
+/// same second (else one second apart). Returns every diff.
 fn tie_history_undo_diffs(same_stamp_sets: bool) -> Vec<String> {
     let s = i64::from(!same_stamp_sets);
     let app = Engine;
@@ -243,7 +240,7 @@ fn tie_history_undo_diffs(same_stamp_sets: bool) -> Vec<String> {
         let pts: Vec<GpsPoint> = (0..=n).map(|s| fix(3.0 * s as f64, end - n + s)).collect();
         log_run_track(pts, 0.0, 0.0, end, id)
     };
-    let mut entries: Vec<(EntryKind, u64, i64, Event)> = vec![
+    let entries: Vec<(EntryKind, u64, i64, Event)> = vec![
         (
             EntryKind::Set,
             1,
@@ -292,34 +289,10 @@ fn tie_history_undo_diffs(same_stamp_sets: bool) -> Vec<String> {
     for (.., e) in &entries {
         let _ = app.update(e.clone(), &mut m);
     }
-    let json = |m: &Model| vm_json(&app.view(m));
-    let mut diffs = Vec::new();
-    for (kind, id, at, e) in entries.drain(..) {
-        let before = json(&m);
-        let _ = app.update(
-            Event::DeleteEntry {
-                kind,
-                entry_id: id,
-                observed_at_fallback: at,
-            },
-            &mut m,
-        );
-        let _ = app.update(e, &mut m);
-        let after = json(&m);
-        if before != after {
-            let i = before
-                .bytes()
-                .zip(after.bytes())
-                .position(|(a, b)| a != b)
-                .unwrap_or(0);
-            diffs.push(format!(
-                "Undo of {kind:?} {id}: …{}… vs …{}…",
-                excerpt(&before, i, 120, 180),
-                excerpt(&after, i, 120, 180)
-            ));
-        }
-    }
-    diffs
+    entries
+        .into_iter()
+        .filter_map(|(kind, id, at, e)| undo_diff(&mut m, kind, id, at, e))
+        .collect()
 }
 
 /// Killer of M09k/M09l/M09m/M09q/M09r/M09s: the tied sets one second apart

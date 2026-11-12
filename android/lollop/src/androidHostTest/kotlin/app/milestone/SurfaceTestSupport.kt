@@ -16,10 +16,10 @@ import org.robolectric.Shadows.shadowOf
 
 /**
  * Run a seeded walk. [body] gets a `note` that keeps the last [keep] steps; a
- * failure rethrows with [label], [repro] (the env line that replays it) and those
- * steps.
+ * failure rethrows with [label] (which names the seed: the walk is deterministic,
+ * so the seed replays it) and those steps.
  */
-internal fun seededWalk(label: String, repro: String, keep: Int = 25, body: (note: (String) -> Unit) -> Unit) {
+internal fun seededWalk(label: String, keep: Int = 25, body: (note: (String) -> Unit) -> Unit) {
     val trace = ArrayDeque<String>()
     try {
         body { s ->
@@ -27,7 +27,7 @@ internal fun seededWalk(label: String, repro: String, keep: Int = 25, body: (not
             if (trace.size > keep) trace.removeFirst()
         }
     } catch (e: Throwable) {
-        val msg = "$label ($repro)\n  ${trace.joinToString("\n  ")}\n${e.message}"
+        val msg = "$label\n  ${trace.joinToString("\n  ")}\n${e.message}"
         println("FAILED $msg")
         throw AssertionError(msg, e)
     }

@@ -799,7 +799,8 @@ const RUN_DETRAIN_TAPER_DAYS: i64 = 28;
 /// Age at which a demonstrated long run carries no credit: 30 + 28 = 58 days,
 /// about 8 weeks, the edge of the KB's re-entry bracket (Table 3.4b: 4–8 wk off
 /// → "treat near-novice for spike caps").
-const RUN_DECAY_END_DAYS: i64 = crate::running::SPIKE_WINDOW_DAYS + RUN_DETRAIN_TAPER_DAYS;
+pub(super) const RUN_DECAY_END_DAYS: i64 =
+    crate::running::SPIKE_WINDOW_DAYS + RUN_DETRAIN_TAPER_DAYS;
 /// Trailing window of the measured weekly running volume, days (4 weeks).
 const WEEKLY_VOLUME_WINDOW_DAYS: i64 = 28;
 

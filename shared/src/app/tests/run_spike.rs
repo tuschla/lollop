@@ -116,9 +116,11 @@ fn run_view_carries_structured_spike_baseline_flag() {
     // The spike-baseline provenance is a structured bool, not prose for a
     // shell to scrape out of `spike_note` ("no prior run"). A first run (no
     // baseline) flags has_baseline=false; a run with a prior baseline is true.
-    let mut no_baseline = probe_run(1);
-    no_baseline.longest_recent_km = 0.0;
-    let v = run_card(&no_baseline);
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(log_run(5.0, 30.0, 70.0, 0.0, DAY_SEC, 1), &mut model)
+        .expect_only_render();
+    let v = app.view(&model).runs[0].clone();
     assert!(
         v.spike_flag && !v.spike_has_baseline,
         "first run: no baseline"
@@ -128,10 +130,12 @@ fn run_view_carries_structured_spike_baseline_flag() {
         "prose kept for compat"
     );
 
-    let mut with_baseline = probe_run(2);
-    with_baseline.longest_recent_km = 3.0; // a short run vs a 3 km baseline
-    let v2 = run_card(&with_baseline);
+    // A shorter run the next day: the first one is its baseline.
+    app.update(log_run(3.0, 18.0, 70.0, 0.0, 2 * DAY_SEC, 2), &mut model)
+        .expect_only_render();
+    let v2 = &app.view(&model).runs[1];
     assert!(v2.spike_has_baseline, "a prior baseline exists");
+    assert!(!v2.spike_flag);
 }
 
 #[test]
@@ -249,12 +253,6 @@ fn old_long_run_does_not_suppress_a_current_spike() {
     // A 10 km run today (day 160): its baseline must NOT include the old 40 km.
     app.update(log_run(10.0, 60.0, 75.0, 0.0, 160 * DAY_SEC, 0), &mut model)
         .expect_only_render();
-    let today = model.runs.last().unwrap();
-    assert!(
-        today.longest_recent_km < 40.0,
-        "an all-time baseline leaked in: {}",
-        today.longest_recent_km
-    );
     let current = app
         .view(&model)
         .runs

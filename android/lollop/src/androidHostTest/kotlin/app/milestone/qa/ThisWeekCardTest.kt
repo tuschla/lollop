@@ -28,7 +28,9 @@ import app.milestone.PainDetail
 import app.milestone.ItemStatus
 import app.milestone.MesoPhase
 import app.milestone.MilestoneTheme
+import app.milestone.JvmDefaultsRule
 import app.milestone.R
+import app.milestone.Space
 import app.milestone.ConsistencyView
 import app.milestone.GuidanceView
 import app.milestone.MuscleVolumeView
@@ -59,6 +61,9 @@ class ThisWeekCardTest {
 
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
 
     @Test
     fun aPartlyDoneDaySaysSoInItsPreview() {
@@ -113,8 +118,8 @@ class ThisWeekCardTest {
         assertEquals(7, days.size)
         val widths = days.map { it.width }
         assertTrue("equal columns: $widths", widths.max() - widths.min() <= 1f)
-        // The last column ends at the card's content edge, not short of it.
-        val inset = with(rule.density) { 14.dp.toPx() }
+        // The last column ends at the card's content edge (its padding), not short of it.
+        val inset = with(rule.density) { Space.Card.dp.toPx() }
         assertEquals(card.right - inset, days.maxOf { it.right }, 2f)
         assertEquals(card.left + inset, days.minOf { it.left }, 2f)
     }

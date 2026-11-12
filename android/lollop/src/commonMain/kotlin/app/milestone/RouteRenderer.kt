@@ -44,7 +44,7 @@ internal const val CutWidthDp = 6f
 internal const val CutDashDp = 7f
 internal const val CutGapDp = 6f
 /** Two marker centres closer than this drop the later one (spec §2.3 thinning). */
-private const val MarkerSpacingDp = 28f
+internal const val MarkerSpacingDp = 28f
 /** Gap between a marker's halo and its label pill. */
 private const val LabelGapDp = 4f
 internal const val PillPadXDp = 8f

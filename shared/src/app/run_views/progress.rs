@@ -115,7 +115,7 @@ fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
 }
 
 /// Weeks in the progress series (a half-marathon block is 12–20 weeks).
-const PROGRESS_WEEKS: i64 = 16;
+pub(in crate::app) const PROGRESS_WEEKS: i64 = 16;
 
 /// Two best-effort times within this many seconds are a tie (float noise from
 /// the window interpolation), so the earlier run keeps the record.

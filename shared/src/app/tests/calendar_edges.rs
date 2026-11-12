@@ -11,17 +11,6 @@
 use super::*;
 use crate::day::civil_from_days;
 
-/// The Monday on or before local day `d` (1970-01-05 was a Monday), computed
-/// without the core's `mon0_weekday`.
-fn monday_of(d: i64) -> i64 {
-    d - (d - 4).rem_euclid(7)
-}
-
-/// `hour:min` local on local day `d` at `offset`, as a UTC stamp.
-fn local(d: i64, hour: i64, min: i64, offset: i64) -> i64 {
-    d * DAY_SEC + hour * HOUR + min * 60 - offset
-}
-
 fn send(app: &Engine, model: &mut Model, e: Event) {
     app.update(e, model).expect_only_render();
 }
@@ -54,7 +43,7 @@ fn log_row(
     offset: i64,
     id: &mut u64,
 ) {
-    let mut t = local(row.epoch_day, hour, 0, offset);
+    let mut t = local_at(row.epoch_day, hour, 0, offset);
     for it in &row.items {
         *id += 1;
         if it.is_run() {
@@ -257,20 +246,17 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
                 if d == plan_start {
                     send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
                 }
-                let wd = (d - 4).rem_euclid(7);
+                let wd = wd(d);
                 if d % 3 != 0 {
                     send(
                         &app,
                         &mut model,
-                        Event::SubmitCheckin(crate::schema::CheckinInput {
-                            observed_at: local(d, 6, 45, offset),
-                            sleep_quality: Some(4),
-                            soreness: Some(2),
-                            mood: Some(4),
+                        Event::SubmitCheckin(CheckinInput {
                             fatigue: Some(2),
                             stress: Some(2),
                             resting_hr_bpm: Some(52.0 + (d % 4) as f64),
                             hrv_rmssd_ms: Some(60.0 + (d % 7) as f64),
+                            ..checkin(local_at(d, 6, 45, offset), 4, 2, 4)
                         }),
                     );
                 }
@@ -287,7 +273,7 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
                     log_row(&app, &mut model, ns, hour, offset, &mut id);
                 } else if d < plan_start && wd % 2 == 1 {
                     id += 1;
-                    let t = local(d, 23, 40, offset);
+                    let t = local_at(d, 23, 40, offset);
                     send(&app, &mut model, log_run(7.0, 42.0, 72.0, 50.0, t, id));
                 }
                 let vm = app.view(&model);
@@ -312,7 +298,7 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
         send(
             &app,
             &mut model,
-            log_run(km, km * 6.0, 70.0, 50.0, local(d, 7, 0, 0), id),
+            log_run(km, km * 6.0, 70.0, 50.0, local_at(d, 7, 0, 0), id),
         );
     }
     set_today(&app, &mut model, sat);
@@ -393,53 +379,6 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
     assert_eq!(vm.next_session.as_ref().map(|s| s.epoch_day), Some(d));
 }
 
-/// A GPS run starting 23:40 local on Sunday and finishing after midnight
-/// belongs to Sunday's week (its start), at any offset.
-#[test]
-fn a_run_across_local_midnight_counts_in_the_week_it_started() {
-    let sunday = days_from_civil(2027, 3, 7);
-    assert_eq!((sunday - 4).rem_euclid(7), 6);
-    for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
-        let app = Engine;
-        let mut model = Model::default();
-        send(&app, &mut model, Event::SetProfile(running_profile()));
-        let begin = local(sunday, 23, 40, offset);
-        // 6 km north at 5:00/km: 30 minutes, ending 00:10 Monday local.
-        let pts: Vec<GpsPoint> = (0..=360)
-            .map(|i| GpsPoint {
-                lat: 48.0 + 6.0 / 111.0 * f64::from(i) / 360.0,
-                lon: 11.0,
-                observed_at: begin + 5 * i64::from(i),
-                accuracy_m: 4.0,
-            })
-            .collect();
-        send(&app, &mut model, log_run_track(pts, 72.0, 50.0, begin, 1));
-        send(&app, &mut model, set_today_off_ev(sunday, offset));
-        let vm = app.view(&model);
-        let w = vm
-            .run_progress
-            .as_ref()
-            .expect("a dated run")
-            .weekly
-            .last()
-            .unwrap()
-            .clone();
-        assert_eq!(
-            (w.week_start_epoch_day, w.runs),
-            (sunday - 6, 1),
-            "offset {offset}: {w:?}"
-        );
-        send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
-        let vm = app.view(&model);
-        let weekly = &vm.run_progress.as_ref().unwrap().weekly;
-        assert_eq!(
-            weekly[15].runs, 0,
-            "offset {offset}: Monday's week is empty"
-        );
-        assert_eq!(weekly[14].runs, 1, "offset {offset}");
-    }
-}
-
 /// A run logged as the shell logs it, stamped at its END (a tracked run's last
 /// fix; a hand-entered run's finish), from Sunday 23:40 to Monday local: the
 /// progress week counts it in the week it STARTED, the day its card's
@@ -447,24 +386,24 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
 #[test]
 fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
     let sunday = days_from_civil(2027, 3, 7);
-    assert_eq!((sunday - 4).rem_euclid(7), 6);
+    assert_eq!(wd(sunday), 6);
     for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
-        let begin = local(sunday, 23, 40, offset);
+        let begin = local_at(sunday, 23, 40, offset);
         // GPS: 6 km at 5:00/km, last fix 00:10 Monday; manual: 40 min, logged 00:20.
-        let pts: Vec<GpsPoint> = (0..=360)
-            .map(|i| GpsPoint {
-                lat: 48.0 + 6.0 / 111.0 * f64::from(i) / 360.0,
-                lon: 11.0,
-                observed_at: begin + 5 * i64::from(i),
-                accuracy_m: 4.0,
-            })
-            .collect();
+        let pts = north_track(48.0, begin, 5, [6000.0 / 360.0; 360], 4.0);
         let end = pts.last().unwrap().observed_at;
         let cases = [
             ("gps", log_run_track(pts, 72.0, 50.0, end, 1)),
             (
                 "manual",
-                log_run(8.0, 40.0, 72.0, 50.0, local(sunday + 1, 0, 20, offset), 1),
+                log_run(
+                    8.0,
+                    40.0,
+                    72.0,
+                    50.0,
+                    local_at(sunday + 1, 0, 20, offset),
+                    1,
+                ),
             ),
         ];
         for (kind, ev) in cases {
@@ -506,7 +445,7 @@ fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
 #[test]
 fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
     let sunday = days_from_civil(2027, 3, 7);
-    assert_eq!((sunday - 4).rem_euclid(7), 6);
+    assert_eq!(wd(sunday), 6);
     let offset = 0;
     let app = Engine;
     let mut model = Model::default();
@@ -516,11 +455,11 @@ fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
         send(
             &app,
             &mut model,
-            log_run(10.0, 60.0, 70.0, 50.0, local(d, 12, 0, offset), id),
+            log_run(10.0, 60.0, 70.0, 50.0, local_at(d, 12, 0, offset), id),
         );
     }
     // Sunday 23:30 → Monday 00:30, logged at its end like every shell run.
-    let end = local(sunday + 1, 0, 30, offset);
+    let end = local_at(sunday + 1, 0, 30, offset);
     send(&app, &mut model, log_run(10.0, 60.0, 70.0, 50.0, end, 3));
     send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
     let vm = app.view(&model);
@@ -546,56 +485,62 @@ fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
     );
 }
 
-/// The runs of a model holding one hand-entered `km` run at 6:00/km logged at
-/// local `00:30` on `start_day + 1` (offset 0): it started the evening before,
-/// on `start_day`, and is stamped at its end like every shell run.
-fn runs_ending_after_midnight(km: f64, start_day: i64) -> Vec<LoggedRun> {
-    let app = Engine;
-    let mut model = Model::default();
-    let end = local(start_day + 1, 0, 30, 0);
-    send(&app, &mut model, log_run(km, km * 6.0, 70.0, 0.0, end, 1));
-    assert_eq!(
-        crate::day::local_day(end - (km * 360.0) as i64, 0),
-        start_day
-    );
-    model.runs
-}
-
-/// The run anchors date a run by the day it STARTED (`RunFacts::started`),
-/// the day plan completion credits: the plan's weekly-km carry, the
-/// longest-recent-run anchor (its 30-day full-credit edge), the 28-day weekly
-/// volume window and the last run day of a running break. Each would move a
-/// day later on the end stamp.
+/// The plan dates a run by the day it STARTED (`RunFacts::started`), the day
+/// plan completion credits, in every run anchor: the weekly-km carry, the
+/// longest-recent-run credit, the 28-day weekly volume window and a running
+/// break. A 20 km run from Sunday 23:00 to Monday 01:00 (stamped at its end,
+/// like every shell run) plans each of the next 45 days exactly like the same
+/// run ending 23:40 on Sunday, and unlike one started on Monday: on a plan
+/// made that day, and four weeks into a plan with a 5 km run every other day
+/// (whose next cycle carries the heaviest week up, RUN-VOLUME-001).
 #[test]
 fn run_anchors_date_a_midnight_crossing_run_by_its_start() {
-    // Weekly carry before Monday: Sunday's run is last week's km.
     let sunday = days_from_civil(2027, 3, 7);
-    let runs = runs_ending_after_midnight(10.0, sunday);
-    assert_eq!(
-        build_run_week_km(&runs, &RunFacts::new(&runs), sunday + 1, 0),
-        vec![10.0],
-        "the run started in the week before Monday"
-    );
-
-    let today = 500;
-    // Started 31 days ago (ended 30 days ago): past the full-credit window.
-    let (longest, _, detrained) =
-        run_anchors(&runs_ending_after_midnight(10.0, today - 31), today, 0);
-    assert!(
-        detrained && longest.is_some_and(|l| (l - 10.0 * 27.0 / 28.0).abs() < 1e-9),
-        "a run started 31 days ago is one taper day in: {longest:?} {detrained}"
-    );
-    // Started 28 days ago (ended 27 days ago): outside the 28-day volume window.
-    let (_, weekly, _) = run_anchors(&runs_ending_after_midnight(10.0, today - 28), today, 0);
-    assert_eq!(
-        weekly, None,
-        "a run started 28 days ago is out of the window"
-    );
-
-    // A break: the last run day is the day the run started.
-    let runs = runs_ending_after_midnight(10.0, today - 20);
-    let b = build_run_break(&runs, &RunFacts::new(&runs), today, 0).expect("a 20-day break");
-    assert_eq!(b.last_run_epoch_day, today - 20);
+    let habit: Vec<Event> = (sunday - 27..sunday - 1)
+        .step_by(2)
+        .zip(10..)
+        .map(|(d, id)| log_run(5.0, 30.0, 70.0, 0.0, local_at(d, 12, 0, 0), id))
+        .collect();
+    for (name, plan_start, history) in [
+        ("fresh plan", None, Vec::new()),
+        ("a cycle in", Some(sunday - 27), habit),
+    ] {
+        let plan = |end: i64, today: i64| {
+            let start = plan_start.unwrap_or(today);
+            let app = Engine;
+            let mut model = Model::default();
+            send(&app, &mut model, Event::SetProfile(running_profile()));
+            set_today(&app, &mut model, start);
+            send(
+                &app,
+                &mut model,
+                Event::GeneratePlan {
+                    start_epoch_day: start,
+                },
+            );
+            for e in history.iter().cloned() {
+                send(&app, &mut model, e);
+            }
+            send(&app, &mut model, log_run(20.0, 120.0, 70.0, 0.0, end, 1));
+            set_today(&app, &mut model, today);
+            let vm = app.view(&model);
+            (vm.week_plan, vm.next_week_plan)
+        };
+        let mut dated_apart = 0;
+        for today in sunday + 1..=sunday + 45 {
+            let crossing = plan(local_at(sunday + 1, 1, 0, 0), today);
+            assert!(
+                crossing == plan(local_at(sunday, 23, 40, 0), today),
+                "{name}, day {}: the run started on Sunday plans like one ended on Sunday",
+                today - sunday
+            );
+            dated_apart += usize::from(crossing != plan(local_at(sunday + 2, 1, 0, 0), today));
+        }
+        assert!(
+            dated_apart > 0,
+            "{name}: a run started a day later changes some day's plan"
+        );
+    }
 }
 
 /// The training-load chain puts a run's TRIMP on the day it STARTED: a run
@@ -607,7 +552,7 @@ fn training_load_lands_a_midnight_crossing_run_on_its_start_day() {
     for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
         let app = Engine;
         let mut model = Model::default();
-        let end = local(sunday + 1, 0, 30, offset);
+        let end = local_at(sunday + 1, 0, 30, offset);
         send(&app, &mut model, log_run(10.0, 60.0, 75.0, 0.0, end, 1));
         send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
         let tl = app
@@ -630,17 +575,13 @@ fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
     let app = Engine;
     let mut model = Model::default();
     // 4 km north: 20 × 100 m at 5:00/km, then 20 × 100 m at 6:00/km.
-    let mut t = local(sunday, 23, 40, 0);
-    let mut pts = Vec::new();
-    for k in 0..=40 {
-        pts.push(GpsPoint {
-            lat: 48.0 + 0.0009 * f64::from(k),
-            lon: 11.0,
-            observed_at: t,
-            accuracy_m: 5.0,
-        });
-        t += if k < 20 { 30 } else { 36 };
-    }
+    let mut pts = north_track(48.0, local_at(sunday, 23, 40, 0), 30, [100.0; 20], 5.0);
+    let turn = *pts.last().unwrap();
+    pts.extend(
+        north_track(turn.lat, turn.observed_at, 36, [100.0; 20], 5.0)
+            .into_iter()
+            .skip(1),
+    );
     let end = pts.last().unwrap().observed_at;
     assert_eq!(crate::day::local_day(end, 0), sunday + 1);
     send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
@@ -648,7 +589,7 @@ fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
         &app,
         &mut model,
         Event::SubmitReview(SessionReview {
-            observed_at: local(sunday, 12, 0, 0),
+            observed_at: local_at(sunday, 12, 0, 0),
             ..Default::default()
         }),
     );
@@ -668,13 +609,13 @@ fn the_spike_warning_ages_from_the_run_start_day() {
     send(
         &app,
         &mut model,
-        log_run(5.0, 30.0, 70.0, 0.0, local(sunday - 3, 12, 0, 0), 1),
+        log_run(5.0, 30.0, 70.0, 0.0, local_at(sunday - 3, 12, 0, 0), 1),
     );
     // 8 km (+60 %) at 6:00/km, 23:32 Sunday → 00:20 Monday.
     send(
         &app,
         &mut model,
-        log_run(8.0, 48.0, 70.0, 0.0, local(sunday + 1, 0, 20, 0), 2),
+        log_run(8.0, 48.0, 70.0, 0.0, local_at(sunday + 1, 0, 20, 0), 2),
     );
     let category = |model: &mut Model, d: i64| {
         set_today(&app, model, d);
@@ -702,13 +643,13 @@ fn the_longest_run_praise_ages_from_the_run_start_day() {
     send(
         &app,
         &mut model,
-        log_run(8.0, 48.0, 70.0, 0.0, local(sunday - 5, 12, 0, 0), 1),
+        log_run(8.0, 48.0, 70.0, 0.0, local_at(sunday - 5, 12, 0, 0), 1),
     );
     // 8.5 km (+6 %, inside the spike rule) at 6:00/km, 23:19 Sunday → 00:10 Monday.
     send(
         &app,
         &mut model,
-        log_run(8.5, 51.0, 70.0, 0.0, local(sunday + 1, 0, 10, 0), 2),
+        log_run(8.5, 51.0, 70.0, 0.0, local_at(sunday + 1, 0, 10, 0), 2),
     );
     let category = |model: &mut Model, d: i64| {
         set_today(&app, model, d);
@@ -736,19 +677,16 @@ fn the_provisional_day_count_counts_a_midnight_crossing_run_on_its_start_day() {
     send(
         &app,
         &mut model,
-        log_set("Back Squat", 100.0, 5, 8.0, local(sunday, 15, 0, 0)),
+        log_set("Back Squat", 100.0, 5, 8.0, local_at(sunday, 15, 0, 0)),
     );
     send(
         &app,
         &mut model,
-        log_run(10.0, 60.0, 70.0, 0.0, local(sunday + 1, 0, 30, 0), 1),
+        log_run(10.0, 60.0, 70.0, 0.0, local_at(sunday + 1, 0, 30, 0), 1),
     );
     set_today(&app, &mut model, sunday + 1);
-    let prov = format!(
-        "{:?}",
-        app.view(&model).provisional.expect("provisional framing")
-    );
-    assert!(prov.contains("(day 1 of about"), "{prov}");
+    let prov = app.view(&model).provisional.expect("provisional framing");
+    assert!(prov.summary.contains("(day 1 of about"), "{}", prov.summary);
 }
 
 /// Safety first (HARD RULE 3): a run begun before the day an illness hold was
@@ -764,7 +702,7 @@ fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
         &app,
         &mut model,
         Event::SubmitReadiness(ReadinessInput {
-            observed_at: local(d - 1, 8, 0, 0),
+            observed_at: local_at(d - 1, 8, 0, 0),
             ..crate::autoreg::tests::input(ReadinessSignal::Illness, 2.0)
         }),
     );
@@ -772,29 +710,36 @@ fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
     send(
         &app,
         &mut model,
-        log_run(10.0, 60.0, 70.0, 0.0, local(d, 0, 30, 0), 1),
+        log_run(10.0, 60.0, 70.0, 0.0, local_at(d, 0, 30, 0), 1),
     );
     send(
         &app,
         &mut model,
         Event::ResolveHold {
             signal: ReadinessSignal::Illness,
-            observed_at: local(d, 0, 15, 0),
+            observed_at: local_at(d, 0, 15, 0),
         },
     );
-    let cx = ViewCtx::new(&model);
+    // The first session after the hold, as Today shows it.
+    let return_check = |model: &mut Model| {
+        set_today(&app, model, d + 1);
+        let rtt = claims::ILLNESS_RTT_001.entry().reference();
+        app.view(model)
+            .adjustments
+            .iter()
+            .any(|a| a.evidence.citation == rtt)
+    };
     assert!(
-        return_step_on(&model, &cx.days, d + 1, 0).is_some(),
-        "the run started before the hold lifted: the next session is still the return step"
+        return_check(&mut model),
+        "the run started before the hold lifted: the next session is still the return check"
     );
     // A run started on the day the hold was lifted is a session back.
     send(
         &app,
         &mut model,
-        log_run(5.0, 30.0, 70.0, 0.0, local(d, 18, 0, 0), 2),
+        log_run(5.0, 30.0, 70.0, 0.0, local_at(d, 18, 0, 0), 2),
     );
-    let cx = ViewCtx::new(&model);
-    assert!(return_step_on(&model, &cx.days, d + 1, 0).is_none());
+    assert!(!return_check(&mut model));
 }
 
 /// Plan completion credits a run to the day it STARTED by the same start the
@@ -804,24 +749,21 @@ fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
 #[test]
 fn plan_completion_dates_a_run_by_its_first_kept_fix() {
     let sunday = days_from_civil(2027, 3, 7);
-    let app = Engine;
-    let mut model = Model::default();
-    let first = local(sunday, 23, 59, 0) + 50;
+    let first = local_at(sunday, 23, 59, 0) + 50;
     let mut pts = vec![GpsPoint {
         lat: 48.0,
-        lon: 11.0,
+        lon: 8.0,
         observed_at: first,
         accuracy_m: 500.0,
     }];
-    pts.extend((1..=40).map(|k| GpsPoint {
-        lat: 48.0 + 0.0009 * f64::from(k),
-        lon: 11.0,
-        observed_at: first + 20 + 30 * i64::from(k - 1),
-        accuracy_m: 5.0,
-    }));
+    // 40 kept fixes 100 m apart, every 30 s from Monday 00:00:10.
+    pts.extend(north_track(48.0009, first + 20, 30, [100.0; 39], 5.0));
     let end = pts.last().unwrap().observed_at;
-    send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
-    set_today(&app, &mut model, sunday + 1);
+    let (app, model) = planned_on(
+        running_profile(),
+        [log_run_track(pts, 70.0, 0.0, end, 1)],
+        sunday + 1,
+    );
     let vm = app.view(&model);
     let card_day = crate::day::local_day(vm.runs[0].started_at, 0);
     assert_eq!(
@@ -830,11 +772,15 @@ fn plan_completion_dates_a_run_by_its_first_kept_fix() {
         "QC dropped the Sunday fix: {}",
         vm.runs[0].started_at
     );
-    let cx = ViewCtx::new(&model);
-    assert_eq!(
-        cx.days.run_days(),
-        &[Some(card_day)],
-        "plan completion credits the card's day"
+    // Plan completion credits the card's day: Monday's planned run holds it.
+    let monday_run = row(&vm, sunday + 1)
+        .items
+        .into_iter()
+        .find(|i| i.is_run())
+        .expect("Monday is a run day");
+    assert!(
+        monday_run.run_logged_km > 0.0,
+        "plan completion credits the card's day: {monday_run:?}"
     );
 }
 
@@ -890,7 +836,7 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
         let total_sets: u32 = ns.items.iter().map(|i| u32::from(i.sets)).sum();
         // Every set as prescribed, 4 minutes apart, from 23:20 local: about
         // half of them land after midnight.
-        let mut t = local(mon, 23, 20, offset);
+        let mut t = local_at(mon, 23, 20, offset);
         for it in &ns.items {
             let kg = it.load_kg.or(it.suggested_load_kg).unwrap_or(40.0);
             for _ in 0..it.sets {
@@ -1035,7 +981,7 @@ fn a_short_lift_says_today_only_on_its_local_day() {
             .clone();
         // Half the sets of one lift (late evening, ended early), every other
         // item in full: the day completes "done lighter" today.
-        let mut t = local(mon, 21, 0, offset);
+        let mut t = local_at(mon, 21, 0, offset);
         for _ in 0..(it.sets / 2) {
             send(
                 &app,
@@ -1213,8 +1159,17 @@ fn a_clock_moving_backwards_never_judges_future_days() {
     );
     assert_eq!(back.consistency.as_ref().unwrap().this_week_done, 1);
     if let Some(f) = &back.feedback {
+        let wed_name = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ][wd(wed) as usize];
         assert!(
-            !f.message.contains(&format!("on {}", weekday_name(wed))),
+            !f.message.contains(&format!("on {wed_name}")),
             "{}",
             f.message
         );
@@ -1242,14 +1197,10 @@ fn entries_dated_in_the_future_do_not_count_as_today() {
     send(
         &app,
         &mut model,
-        Event::SubmitCheckin(crate::schema::CheckinInput {
-            observed_at: local(mon + 1, 7, 0, 0),
-            sleep_quality: Some(4),
-            soreness: Some(2),
-            mood: Some(4),
+        Event::SubmitCheckin(CheckinInput {
             fatigue: Some(2),
             stress: Some(2),
-            ..Default::default()
+            ..checkin(local_at(mon + 1, 7, 0, 0), 4, 2, 4)
         }),
     );
     let mut tomorrow = today_row.clone();

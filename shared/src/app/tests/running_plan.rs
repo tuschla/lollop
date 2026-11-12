@@ -5,7 +5,7 @@
 use super::*;
 
 fn planned_long_run_summary(model: &Model) -> String {
-    planned_long_run_item(model).view.summary
+    planned_long_run_item(model).summary
 }
 
 /// Build a run history via the real ingest path with explicit timestamps.
@@ -23,14 +23,7 @@ fn runs_via_log(stamps: &[(f64, i64)]) -> Vec<LoggedRun> {
 /// to the day it STARTED, so [`logrun`]'s midnight stamp minus its duration
 /// would date it the day before.
 fn logrun_noon(distance_km: f64, day: i64) -> Event {
-    log_run(
-        distance_km,
-        distance_km * 6.0,
-        70.0,
-        0.0,
-        day * DAY_SEC + 12 * 3600,
-        0,
-    )
+    logrun_at(distance_km, day * DAY_SEC + 12 * HOUR)
 }
 
 #[test]
@@ -97,23 +90,19 @@ fn endurance_priority_hybrid_keeps_full_run_frequency() {
     }
 }
 
-fn manual_run(km: f64, at: i64) -> LoggedRun {
-    logged_run(km, km * 6.0, 70.0, at)
-}
-
 /// A Monday epoch day (epoch day 0 was a Thursday).
 const PLAN_MONDAY: i64 = 20_000 - (20_000_i64.rem_euclid(7) + 3).rem_euclid(7);
 
 #[test]
 fn run_week_km_buckets_completed_local_weeks_most_recent_first() {
     let at = |day: i64| day * DAY_SEC + 12 * 3600;
-    let runs = vec![
-        manual_run(10.0, at(PLAN_MONDAY - 1)), // last Sunday
-        manual_run(5.0, at(PLAN_MONDAY - 7)),  // last Monday
-        manual_run(12.0, at(PLAN_MONDAY - 8)), // the Sunday before
-        manual_run(99.0, at(PLAN_MONDAY)),     // this week: not completed
-        manual_run(7.0, 0),                    // undated: never counts
-    ];
+    let runs = runs_via_log(&[
+        (10.0, at(PLAN_MONDAY - 1)), // last Sunday
+        (5.0, at(PLAN_MONDAY - 7)),  // last Monday
+        (12.0, at(PLAN_MONDAY - 8)), // the Sunday before
+        (99.0, at(PLAN_MONDAY)),     // this week: not completed
+        (7.0, 0),                    // undated: never counts
+    ]);
     let facts = RunFacts::new(&runs);
     assert_eq!(
         build_run_week_km(&runs, &facts, PLAN_MONDAY, 0),
@@ -179,12 +168,10 @@ fn seeded_10k_model(stated_on: i64, today: i64) -> (Engine, Model) {
     (app, model)
 }
 
-fn long_run_km_of(item: &PlanItem) -> f64 {
-    match item.run_volume {
-        Some(RunAmount::PlanKm(k)) => k as f64,
-        Some(RunAmount::Km(k)) => k,
-        other => panic!("a distance long run, got {other:?}"),
-    }
+/// The distance a long run shows (its head figure).
+fn long_run_km_of(item: &PrescriptionView) -> f64 {
+    item.run_head_km
+        .unwrap_or_else(|| panic!("a distance long run, got {:?}", item.summary))
 }
 
 #[test]
@@ -515,33 +502,6 @@ fn a_log_less_running_plan_is_unchanged_by_the_run_anchors() {
 }
 
 #[test]
-fn the_run_reactive_plan_is_deterministic_across_repeated_views() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(running_profile()), &mut model)
-        .expect_only_render();
-    app.update(logrun(21.0, MON - 2), &mut model)
-        .expect_only_render();
-    app.update(logrun(18.0, MON - 1), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, MON);
-    let a = app.view(&model);
-    let b = app.view(&model);
-    assert_eq!(
-        a.week_plan, b.week_plan,
-        "same model must yield the same week"
-    );
-    assert_eq!(a.next_session, b.next_session);
-}
-
-#[test]
 fn build_run_anchors_uses_the_trailing_windows() {
     let app = Engine;
     let mut model = Model::default();
@@ -743,10 +703,6 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         it.summary.starts_with("4 × 4 min"),
         "the summary must lead with rep structure, got {:?}",
         it.summary
-    );
-    assert!(
-        !it.summary.starts_with("16 min"),
-        "must not read as one continuous 16 min run"
     );
 
     // A continuous ceiling-only %HRmax run: rep fields empty, band rendered

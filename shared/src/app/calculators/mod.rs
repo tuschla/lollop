@@ -14,8 +14,6 @@ pub(super) use lift_calcs::{build_hypertrophy_plan, build_protein_targets, calcu
 #[cfg(test)]
 pub(super) use race::race_band;
 pub(super) use race::to_race_view;
-#[cfg(test)]
-pub(super) use training_load::{LoadFigures, load_figures};
 pub(super) use training_load::{build_srpe_load, build_training_load};
 pub(super) use weekly_report::build_weekly_report;
 

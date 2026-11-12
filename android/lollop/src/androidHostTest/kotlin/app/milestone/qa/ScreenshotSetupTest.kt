@@ -25,10 +25,8 @@ import app.milestone.HealthScreen
 import app.milestone.LiftGoal
 import app.milestone.ParqQuestion
 import app.milestone.ProfileDraft
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
-import app.milestone.ResistanceModality
 import app.milestone.draftFacts
 import app.milestone.todayEpochDay
 import java.util.Locale
@@ -175,15 +173,12 @@ class ScreenshotSetupTest {
     /** Both, hypertrophy-led lifting + a half-marathon: lift days, priority muscle,
      *  training days, race date + recent race, longest run, one cleared PAR-Q+ Yes
      *  and a recent break with its restart date. */
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
+    private fun hybridProfile(): Event = QaHarness.strengthProfile().copy(
         liftGoal = LiftGoal.Hypertrophy,
         goalDistance = GoalDistance.HalfMarathon,
         concurrentGoal = ConcurrentGoal.Hypertrophy,
-        weeklySets = 12,
         runningDaysPerWeek = 3,
         runningKmPerWeek = 30.0,
-        advanced = false,
         bodyweightKg = 78.0,
         ageYears = 34.0,
         health = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.Medication, true))).health
@@ -199,34 +194,22 @@ class ScreenshotSetupTest {
     )
 
     /** Lift-only calisthenics strength: meet date + equipment rows. */
-    private fun calisProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.General,
-        concurrentGoal = ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        advanced = false,
-        bodyweightKg = 72.0,
-        ageYears = 30.0,
-        resistanceModality = ResistanceModality.Calisthenics,
+    private fun calisProfile(): Event = QaHarness.calisthenicsProfile().copy(
         liftDaysPerWeek = 3,
         trainingWeekdays = threeDays,
         meetEpochDay = today + 56,
         calisEquipment = CalisEquipment(pull_up_bar = true, rings = true),
     )
 
-    /** A pure 10K runner who opted into the two short strength sessions. */
-    private fun runnerProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
+    /** A pure 10K runner (no bodyweight given) who opted into the two short
+     *  strength sessions. */
+    private fun runnerProfile(): Event = QaHarness.strengthProfile().copy(
         goalDistance = GoalDistance.TenK,
         concurrentGoal = ConcurrentGoal.EndurancePriority,
         weeklySets = 0,
         runningDaysPerWeek = 4,
         runningKmPerWeek = 32.0,
-        advanced = false,
+        bodyweightKg = null,
         ageYears = 29.0,
         trainingWeekdays = 0b1010101,
         goalRaceEpochDay = today + 70,

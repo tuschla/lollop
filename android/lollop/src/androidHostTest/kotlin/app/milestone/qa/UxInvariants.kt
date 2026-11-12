@@ -34,8 +34,8 @@ object UxInvariants {
      *  summary rendered twice on one screen is a duplicate render. */
     private const val SUMMARY_MIN_CHARS = 30
 
-    /** Android's minimum comfortable touch target. */
-    private val MIN_TOUCH = 48.dp
+    /** Android's minimum comfortable touch target; every touch-target check uses it. */
+    val MIN_TOUCH = 48.dp
 
     data class Violation(val kind: String, val detail: String, val path: String) {
         override fun toString() = "[$kind] $detail  @ $path"

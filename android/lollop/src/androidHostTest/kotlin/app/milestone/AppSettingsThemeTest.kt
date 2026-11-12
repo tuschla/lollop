@@ -12,43 +12,11 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The persisted theme name (`AppSettings`, key `app_theme`) resolves through
- * [AppTheme.from]: current names round-trip, the names retired by the 2026-10-10
- * redesign land on the theme that replaced each, anything else on the default.
- */
-class AppThemeTest {
-
-    @Test
-    fun currentNames_roundTrip() {
-        for (t in AppTheme.entries) assertEquals(t, AppTheme.from(t.name))
-    }
-
-    @Test
-    fun retiredNames_migrateToTheirSuccessor() {
-        assertEquals(AppTheme.Rose, AppTheme.from("Beton"))
-        assertEquals(AppTheme.Meadow, AppTheme.from("Werkstatt"))
-        assertEquals(AppTheme.Iris, AppTheme.from("Signal"))
-    }
-
-    @Test
-    fun missingOrUnknownName_fallsBackToPaper() {
-        assertEquals(AppTheme.Paper, AppTheme.from(null))
-        assertEquals(AppTheme.Paper, AppTheme.from("Neon"))
-    }
-
-    @Test
-    fun enumOrder_isRoseMeadowIrisPaper() {
-        assertEquals(
-            listOf(AppTheme.Rose, AppTheme.Meadow, AppTheme.Iris, AppTheme.Paper),
-            AppTheme.entries.toList(),
-        )
-    }
-}
-
-/**
  * A fresh install starts on Paper with the system accent ON; switching to
  * Rose/Meadow/Iris turns it OFF, back to Paper turns it ON, and an install from
- * before this default keeps what it rendered.
+ * before this default keeps what it rendered. The preference keys are written as
+ * literals on purpose: they are what earlier builds stored on the device, so a
+ * renamed key must fail here rather than silently reset every install's theme.
  */
 @RunWith(RobolectricTestRunner::class)
 class AppSettingsThemeTest {

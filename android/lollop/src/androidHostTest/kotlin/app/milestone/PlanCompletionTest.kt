@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -211,16 +212,25 @@ class PlanCompletionTest {
 
     @Test
     fun actionMessagesStayUpLongEnoughAndHonourTheAccessibilityTimeout() {
-        assertEquals(10_000L, actionMessageMillis(long = false, a11y = null))
-        assertEquals(15_000L, actionMessageMillis(long = true, a11y = null))
+        val short = actionMessageMillis(long = false, a11y = null)
+        val long = actionMessageMillis(long = true, a11y = null)
+        assertTrue("a long message stays up longer: $long ms vs $short ms", long > short)
+        // The system's accessibility timeout is asked about the message as it is
+        // (text with an action control, from its own duration) and has the last word.
+        val asked = mutableListOf<Long>()
         val slowReader = object : AccessibilityManager {
             override fun calculateRecommendedTimeoutMillis(
                 originalTimeoutMillis: Long,
                 containsIcons: Boolean,
                 containsText: Boolean,
                 containsControls: Boolean,
-            ): Long = if (containsControls && containsText) 60_000L else originalTimeoutMillis
+            ): Long {
+                asked += originalTimeoutMillis
+                return if (containsControls && containsText) 60_000L else originalTimeoutMillis
+            }
         }
         assertEquals(60_000L, actionMessageMillis(long = false, a11y = slowReader))
+        assertEquals(60_000L, actionMessageMillis(long = true, a11y = slowReader))
+        assertEquals(listOf(short, long), asked)
     }
 }

@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppFileNames
 import app.milestone.OpenDest
 import app.milestone.openIntent
 import app.milestone.R
@@ -25,9 +24,12 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isRoot
 import app.milestone.TRACKER_MAP_FRAME_TAG
 import org.junit.After
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -36,7 +38,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
-import java.io.File
 
 /**
  * The tracker's Finish review asks how hard the whole run was (CR-10) and
@@ -74,62 +75,32 @@ class RunFinishEffortTest {
         QaHarness.freshProcess()
     }
 
-    /**
-     * Tap Save run and stand in for the foreground service's stop confirmation
-     * (the service never runs under Robolectric). The clock is held while the tap
-     * lands so the screen's stop-confirm timeout can't be auto-advanced past
-     * before `tracking` flips; then wait for the WHOLE save (event-log append +
-     * session reset) to finish, so no save turn is left queued on the process-wide
-     * serial consumer for a later test to trip over. Returns the saved line.
-     */
-    private fun saveAndAwaitLoggedRun(): String {
-        rule.mainClock.autoAdvance = false
-        try {
-            rule.onNodeWithText(str(R.string.track_btn_save_run)).performClick()
-            RunSession.markStopped()
-        } finally {
-            rule.mainClock.autoAdvance = true
-        }
-        val log = File(ctx.filesDir, AppFileNames.EVENT_LOG)
-        rule.waitUntil(15_000) {
-            // The semantics fetch idles the main looper, where the save's serial
-            // consumer turn runs; a bare file check would never let it progress.
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            log.exists() && log.readText().contains("LogRunTrack") &&
-                !RunSession.saving.value && RunSession.points.value.isEmpty()
-        }
-        return log.readLines().last { it.contains("LogRunTrack") }
-    }
-
-    private fun openTracker() {
+    private fun openFinishReview() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         QaHarness.seedRecordingRun()
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        val stop = str(R.string.track_btn_stop)
-        rule.waitUntil(30_000) { rule.onAllNodesWithText(stop).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText(stop).performClick()
-        rule.waitUntil(10_000) { rule.onAllNodesWithText(str(R.string.track_finish_title)).fetchSemanticsNodes().isNotEmpty() }
+        rule.launchOnTracker()
+        rule.stopToFinishReview()
     }
 
     @Test
     fun finishReview_effort7_saveSendsLogRunTrackWithSessionRpe7() {
-        openTracker()
+        openFinishReview()
         rule.pickRating("effort-scale", 7)
         rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().performClick()
-        val line = saveAndAwaitLoggedRun()
-        assertTrue(line, line.contains("\"session_rpe\":7"))
-        assertTrue(line, line.contains("\"workout_type\":\"Interval\""))
+        val saved = rule.saveRunAndAwait()
+        assertEquals(7, saved["session_rpe"]?.jsonPrimitive?.int)
+        assertEquals("Interval", saved["workout_type"]?.jsonPrimitive?.content)
     }
 
     @Test
     fun finishReview_meetsEveryInvariant_atFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
-        openTracker()
+        openFinishReview()
         val hits = UxInvariants.check(rule, rule.density)
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
         // Save stays reachable without scrolling: the chips scroll above the pinned row.
-        val line = saveAndAwaitLoggedRun()
-        assertTrue("an unrated run sends no rating: $line", !line.contains("session_rpe"))
+        val saved = rule.saveRunAndAwait()
+        assertNull("an unrated run sends no rating: $saved", saved["session_rpe"])
     }
 
     /**
@@ -182,8 +153,7 @@ class RunFinishEffortTest {
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
 
         // Stopping a guided run preselects its type from the plan (interval band).
-        rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        rule.waitUntil(10_000) { rule.onAllNodesWithText(str(R.string.track_finish_title)).fetchSemanticsNodes().isNotEmpty() }
+        rule.stopToFinishReview()
         rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().assertIsSelected()
     }
 
@@ -196,25 +166,9 @@ class RunFinishEffortTest {
     fun preStart_onlyTheStatusPillFloatsOverTheMap() {
         AppSettings.setShowRouteMaps(ctx, true)
         // Lifts and runs, so the Log chooser offers Track run.
-        QaHarness.seedLog(
-            ctx,
-            listOf(
-                app.milestone.Event.SetProfile(
-                    progressionCadence = app.milestone.ProgressionCadence.WeekToWeek,
-                    liftGoal = app.milestone.LiftGoal.MaxStrength,
-                    goalDistance = app.milestone.GoalDistance.FiveK,
-                    concurrentGoal = app.milestone.ConcurrentGoal.Strength,
-                    weeklySets = 12,
-                    runningDaysPerWeek = 3,
-                    runningKmPerWeek = 20.0,
-                    advanced = false,
-                    bodyweightKg = 80.0,
-                    ageYears = 30.0,
-                ),
-            ),
-        )
+        QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile()))
         rule.launchApp()
-        rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).performClick()
+        rule.openLogChooser()
         val trackRun = hasText(str(R.string.main_track_run_title)) and hasClickAction()
         rule.assertCountEventually(trackRun, 1)
         rule.waitForIdle()

@@ -38,7 +38,7 @@ class FormattingJvmParityTest {
 
     @Test
     fun halfUpFixed_matchesStringFormat() {
-        for (v in samples()) {
+        for (v in samples() + listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
             for (d in 0..3) {
                 assertEquals("%.${d}f of $v", String.format(Locale.US, "%.${d}f", v), halfUpFixed(v, d))
             }

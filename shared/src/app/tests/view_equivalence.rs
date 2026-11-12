@@ -4,9 +4,6 @@
 //! silently change output. A legitimate output change re-pins the table:
 //! `VIEW_EQ_DUMP=/tmp/dir cargo test -p shared view_equivalence` writes each
 //! JSON for diffing and prints the new hashes.
-//!
-//! `view_timing_large_history` (ignored) times the same fixture at three
-//! years: `cargo test --release -p shared view_timing -- --ignored --nocapture`.
 
 use super::*;
 use serde_json::json;
@@ -87,7 +84,7 @@ pub(super) fn big_history(days: i64) -> (Engine, Model) {
             &mut model,
             ev(json!({"SetToday": {"epoch_day": d, "utc_offset_sec": 0}})),
         );
-        let wd = (d - 4).rem_euclid(7);
+        let wd = wd(d);
         let week = (d - start) / 7;
         let deload = if week % 4 == 3 { 0.9 } else { 1.0 };
         let prog = (1.0 + 0.002 * week as f64) * deload;
@@ -386,43 +383,4 @@ fn view_equivalence_large_history() {
         got, GOLDEN,
         "serialized ViewModel changed; new table: {got:?}"
     );
-}
-
-#[test]
-#[ignore = "timing probe; run in release with --ignored --nocapture"]
-fn view_timing_large_history() {
-    use std::time::Instant;
-    let t = Instant::now();
-    let (app, mut model) = big_history(3 * 365);
-    eprintln!("replay 3y: {:?}", t.elapsed());
-    let _ = app.update(
-        ev(json!({"SetToday": {"epoch_day": END_MON, "utc_offset_sec": 0}})),
-        &mut model,
-    );
-
-    let time = |label: &str, model: &Model| {
-        let n = 5;
-        let t = Instant::now();
-        let mut bytes = 0;
-        for _ in 0..n {
-            bytes = serde_json::to_vec(&app.view(model))
-                .expect("serializes")
-                .len();
-        }
-        eprintln!("{label}: {:?}/view ({bytes} B JSON)", t.elapsed() / n);
-    };
-    time("view+serialize (memos warm after first)", &model);
-    let mut entry = 9_000_000;
-    let t = Instant::now();
-    let n = 5;
-    for k in 0..n {
-        entry += 1;
-        let _ = app.update(
-            ev(json!({"LogSet": {"exercise": "Bench Press", "weight_kg": 90.0, "reps": 5, "rpe": 8.0,
-                "observed_at": END_MON * DAY_SEC + 40_000 + k * 120, "entry_id": entry}})),
-            &mut model,
-        );
-        let _ = serde_json::to_vec(&app.view(&model)).expect("serializes");
-    }
-    eprintln!("refresh after a new set: {:?}/view", t.elapsed() / n as u32);
 }

@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 
 /// Easy pace (min/km) the plan counts unanchored minutes at
 /// (extracted/13-running-update.md:115: "count these minutes at 6:30/km").
-const ACCOUNTING_MIN_PER_KM: f64 = 6.5;
+const ACCOUNTING_MIN_PER_KM: f64 = running::ACCOUNTING_EASY_PACE_SEC_PER_KM / 60.0;
 
 fn week_of(d: i64) -> usize {
     ((d - DAY0) / 7) as usize
@@ -39,9 +39,9 @@ struct DayRec {
     row: PlanRow,
     /// Warm-up sets logged before each exercise's first work set.
     warm_ups: BTreeMap<String, usize>,
-    /// Performance-drop cuts in force after the day's sets: lifts the anchors
-    /// derate for an e1RM drop (AUTOREG-E1RM-GATE-001) and readiness
-    /// adjustments citing that gate (today's per-item cut).
+    /// Performance-drop cuts the evening view shows after the day's sets:
+    /// plan items the e1RM gate scaled and readiness rows citing that gate
+    /// or deloading for an e1RM decline.
     perf_cuts: Vec<String>,
 }
 
@@ -136,18 +136,6 @@ fn is_lift(row: &PlanRow) -> bool {
     matches!(row.session_type, SessionType::Lift(_))
 }
 
-/// The STR-WARMUP-001 ramp before a work set at `work` kg
-/// (extracted/13-logging-warmup.md:12: ≈40 % × 5–8 → 60 % × 3–5 → 80 % × 1–3
-/// of the working load), on the 2.5 kg grid, steps at or above the work load
-/// or at or below the empty bar dropped.
-fn ramp(work: f64) -> Vec<(f64, u32)> {
-    [(0.4, 5), (0.6, 3), (0.8, 2)]
-        .into_iter()
-        .map(|(f, r)| (((work * f) / 2.5).round() * 2.5, r))
-        .filter(|(kg, _)| *kg > 20.0 && *kg < work)
-        .collect()
-}
-
 fn simulate(a: Athlete) -> Life {
     let app = Engine;
     let mut m = Model::default();
@@ -226,13 +214,13 @@ fn simulate(a: Athlete) -> Life {
             last_kg.insert(it.exercise.clone(), kg);
             if a.warm_ups
                 && let Some(work) = it.load_kg
-                && crate::exercise::is_barbell_lift(&it.exercise)
             {
-                let steps = ramp(work);
+                // The ramp the set screen offers before the first work set.
+                let steps = strength::warm_up_ramp(&it.exercise, work, false).value;
                 warm_ups.insert(it.exercise.clone(), steps.len());
-                for (w, r) in steps {
+                for s in steps {
                     // Warm-ups go unrated (extracted/13-logging-warmup.md:25).
-                    send(&mut m, log_set(&it.exercise, w, r, 0.0, t));
+                    send(&mut m, log_set(&it.exercise, s.kg, s.reps, 0.0, t));
                     t += 90;
                 }
             }
@@ -241,6 +229,7 @@ fn simulate(a: Athlete) -> Life {
                 t += i64::from(it.rest_sec.max(60));
             }
         }
+        let vm = app.view(&m);
         if let Some(row) = working_plan(&m)
             .week_plan
             .into_iter()
@@ -250,43 +239,35 @@ fn simulate(a: Athlete) -> Life {
                 day: d,
                 row,
                 warm_ups,
-                perf_cuts: perf_cuts(&m, d),
+                perf_cuts: perf_cuts(&vm),
             });
         }
     }
     Life { weeks, days }
 }
 
-/// The performance-drop cuts in force on day `d` after its sets are logged:
-/// the lifts whose anchors carry an e1RM-drop derate, and the readiness
-/// adjustments citing the e1RM gate (AUTOREG-E1RM-GATE-001; its +3.5 %
-/// suggestion aside) or deloading for an e1RM decline (autoreg-022).
-fn perf_cuts(m: &Model, d: i64) -> Vec<String> {
-    use crate::schema::Adjustment;
-    let cx = ViewCtx::new(m);
-    let mut cuts: Vec<String> = cx
-        .lift_anchors_now()
-        .derates
+/// The performance-drop cuts `vm` shows: plan items whose evidence the e1RM
+/// gate took over (a lift its anchors derate for an e1RM drop), and readiness
+/// rows citing that gate (AUTOREG-E1RM-GATE-001; its "you can add" suggestion
+/// aside) or deloading for an e1RM decline (AUTOREG-DELOAD-001, autoreg-022).
+fn perf_cuts(vm: &ViewModel) -> Vec<String> {
+    let gate = |c: &str| cites(c, "AUTOREG-E1RM-GATE-001");
+    let mut cuts: Vec<String> = vm
+        .week_plan
         .iter()
-        .filter(|r| matches!(r.cause, crate::plan::DerateCause::E1rmDrop))
-        .map(|r| format!("{} derated to {:.0}%", r.exercise, r.frac * 100.0))
+        .chain(&vm.next_week_plan)
+        .flat_map(|r| &r.items)
+        .filter(|it| gate(&it.evidence.citation))
+        .map(|it| format!("{} cut: {}", it.exercise, it.summary))
         .collect();
-    let increase = |a: &Adjustment| match a {
-        Adjustment::ForItem { adjustment, .. } => {
-            matches!(**adjustment, Adjustment::IncreaseLoadPct(_))
-        }
-        a => matches!(a, Adjustment::IncreaseLoadPct(_)),
-    };
-    let picture = readiness_picture(m, &cx.days, m.profile(), Some(d));
     cuts.extend(
-        picture
-            .adjustments(m, &cx.days)
+        vm.adjustments
             .iter()
             .filter(|a| {
-                a.claim_id() == claims::AUTOREG_E1RM_GATE_001 && !increase(&a.value)
-                    || a.claim_id() == claims::AUTOREG_DELOAD_001
+                gate(&a.evidence.citation) && !a.summary.contains("can add")
+                    || cites(&a.evidence.citation, "AUTOREG-DELOAD-001")
             })
-            .map(|a| format!("readiness {:?}", a.value)),
+            .map(|a| format!("readiness: {}", a.summary)),
     );
     cuts
 }
@@ -1213,34 +1194,6 @@ fn compliant_athletes_never_get_a_performance_drop_cut() {
     assert!(cuts.is_empty(), "compliant sessions cut: {cuts:#?}");
 }
 
-/// Table 1 MEV per muscle (extracted/03-hypertrophy.md:520-530).
-const TABLE1_MEV: &[(&str, f32)] = &[
-    ("Chest", 10.0),
-    ("Back", 10.0),
-    ("Quads", 8.0),
-    ("Hamstrings", 6.0),
-    ("Side delts", 8.0),
-    ("Rear delts", 6.0),
-    ("Biceps", 6.0),
-    ("Triceps", 6.0),
-    ("Calves", 6.0),
-];
-
-/// Table 1 MAV high per muscle, the default ramp's end
-/// (extracted/03-hypertrophy.md:504-505, :520-530).
-const TABLE1_MAV_HIGH: &[(&str, u8)] = &[
-    ("Chest", 20),
-    ("Back", 22),
-    ("Quads", 18),
-    ("Hamstrings", 16),
-    ("Glutes", 12),
-    ("Side delts", 22),
-    ("Rear delts", 18),
-    ("Biceps", 20),
-    ("Triceps", 14),
-    ("Calves", 16),
-];
-
 /// A 4-day intermediate hypertrophy lifter: rep ranges by exercise type
 /// (03-hypertrophy.md:142, :164), rest (03-hypertrophy.md:416-417;
 /// 13-hypertrophy-update.md:11-12), RIR 1–3 ramping toward 1 through the
@@ -1306,9 +1259,12 @@ fn hypertrophy_plan_follows_the_hypertrophy_tables() {
         }
         if let Some(p) = &w.program {
             for mv in &p.muscle_volume {
-                if let Some((_, cap)) = TABLE1_MAV_HIGH.iter().find(|(m, _)| *m == mv.muscle) {
+                if let Some(&(.., cap, _)) = KB_TABLE1
+                    .iter()
+                    .find(|r| r.0.eq_ignore_ascii_case(&mv.muscle))
+                {
                     assert!(
-                        mv.target_sets <= *cap,
+                        mv.target_sets <= cap,
                         "week {i} {}: target {} > MAV high {cap} (03-hypertrophy.md:504-505)",
                         mv.muscle,
                         mv.target_sets
@@ -1452,7 +1408,10 @@ fn hypertrophy_week_delivers_at_least_mev_for_every_muscle_it_trains() {
     for (i, w) in life.weeks.iter().enumerate().filter(|(i, _)| i % 6 != 5) {
         let p = w.program.as_ref().expect("program card");
         for mv in &p.muscle_volume {
-            let Some((_, mev)) = TABLE1_MEV.iter().find(|(m, _)| *m == mv.muscle) else {
+            let Some(&(_, _, mev, ..)) = KB_TABLE1
+                .iter()
+                .find(|r| r.0.eq_ignore_ascii_case(&mv.muscle))
+            else {
                 continue;
             };
             // A muscle the plan has no exercise for is named in the note.
@@ -1464,7 +1423,7 @@ fn hypertrophy_week_delivers_at_least_mev_for_every_muscle_it_trains() {
             }
             // Table 1 MEV (extracted/03-hypertrophy.md:520-530; MEV is the
             // mesocycle start point, :534).
-            if mv.target_sets > 0 && mv.delivered_sets < *mev {
+            if mv.target_sets > 0 && mv.delivered_sets < f32::from(mev) {
                 short.push(format!("week {i}: {}", mv.label));
             }
         }

@@ -44,7 +44,8 @@ for i, l in enumerate(lines):
         cats["strictmode"].append((phase, ctx(12)))
     elif pid in pids and re.search(r"OutOfMemoryError|Throwing OutOfMemory", l):
         cats["oom"].append((phase, ctx(20)))
-    elif re.search(r"ForegroundServiceDidNotStart|ForegroundServiceStartNotAllowed|RemoteServiceException|"
+    # `am crash` raises RemoteServiceException$CrashedByAdbException: induced, not an FGS failure.
+    elif re.search(r"ForegroundServiceDidNotStart|ForegroundServiceStartNotAllowed|RemoteServiceException(?!\$CrashedByAdbException)|"
                    r"startForegroundService\(\) did not then call", l) and APP in "\n".join(lines[i:i + 5]):
         cats["fgs"].append((phase, ctx(15)))
     if pid in pids and lvl in ("E", "F"):

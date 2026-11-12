@@ -28,7 +28,6 @@ import app.milestone.groupLiftSessions
 import app.milestone.showLifting
 import app.milestone.showRunning
 import app.milestone.train_blocked
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -54,8 +53,8 @@ import org.robolectric.RuntimeEnvironment
  * The bugs the walk found are pinned in [LayoutRegressionTest]; the walk
  * tolerates none of them, so it guards them too.
  *
- * Replay: every failure prints the start state, seed, step, the action trace and
- * the environment that replays it.
+ * Each walk is seeded per start state, so it is deterministic: every failure
+ * names the start state, seed and step, with the action trace that led there.
  */
 @RunWith(RobolectricTestRunner::class)
 class RandomUiWalkTest : UiProbeTest() {
@@ -82,30 +81,12 @@ class RandomUiWalkTest : UiProbeTest() {
     private val screensSeen = HashSet<String>()
 
     private fun walk(s: Start) {
-        val only = System.getenv("UIWALK_STATE")
-        assumeTrue("UIWALK_STATE=$only selects another walk", only.isNullOrBlank() || only.equals(s.name, ignoreCase = true))
-        val steps = System.getenv("UIWALK_STEPS")?.toIntOrNull() ?: DEFAULT_STEPS
-        val fixed = System.getenv("UIWALK_SEED")?.toLongOrNull()
-        // Long mode: UIWALK_SEEDS=n walks n consecutive seeds from each start.
-        val count = if (fixed != null) 1 else System.getenv("UIWALK_SEEDS")?.toIntOrNull() ?: 1
-        // UIWALK_FIRST=k starts the long mode at the k-th seed (fresh seeds per run).
-        val first = System.getenv("UIWALK_FIRST")?.toIntOrNull() ?: 0
-        // UIWALK_KEEPGOING=1 reports every failing seed instead of stopping at the first.
-        val keepGoing = System.getenv("UIWALK_KEEPGOING") == "1"
-        val failures = ArrayList<String>()
-        for (k in 0 until count) {
-            if (k > 0) freshProcess()
-            try {
-                walkOnce(s, fixed ?: (BASE_SEED + s.ordinal * 7_919L + (first + k) * 104_729L), steps)
-            } catch (e: AssertionError) {
-                // A framework assertion (not [fail]) carries no seed: give it the replay line.
-                val err = if (e is ProbeFailure) e else walkError("${e.javaClass.simpleName}: ${e.message}").apply { initCause(e) }
-                if (!keepGoing) throw err
-                println("UIWALK-FAIL " + err.message)
-                failures += err.message.orEmpty().lineSequence().first()
-            }
+        try {
+            walkOnce(s, BASE_SEED + s.ordinal * 7_919L, STEPS)
+        } catch (e: AssertionError) {
+            // A framework assertion (not [fail]) carries no seed: give it the walk's context.
+            throw if (e is ProbeFailure) e else walkError("${e.javaClass.simpleName}: ${e.message}").apply { initCause(e) }
         }
-        if (failures.isNotEmpty()) throw AssertionError("${failures.size} of $count walks failed:\n" + failures.joinToString("\n"))
     }
 
     private fun walkOnce(s: Start, walkSeed: Long, steps: Int) {
@@ -119,12 +100,9 @@ class RandomUiWalkTest : UiProbeTest() {
         landscape = false
         val rng = java.util.Random(seed)
 
-        if (s == Start.MilesLb) QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
-        seedEvents(s)?.let { QaHarness.seedLog(ctx, it) }
+        seedStart(s)
         trace += "boot $s"
-        guard("boot") {
-            if (s == Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()
-        }
+        if (s == Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()
         settle()
         checkAll(afterBack = null)
 
@@ -135,7 +113,6 @@ class RandomUiWalkTest : UiProbeTest() {
             val wasBack = actOnce(rng)
             settle()
             checkAll(afterBack = if (wasBack) before else null)
-            if (DEBUG) println("UIWALK step $i\n${screenDump()}")
         }
         step = steps + 1
         endOfWalkChecks()
@@ -234,16 +211,23 @@ class RandomUiWalkTest : UiProbeTest() {
         trace += "   (skipped: ${e.javaClass.simpleName}: ${e.message?.lineSequence()?.firstOrNull()?.take(160)})"
     }
 
+    /** Recreate the Activity and wait until its new window shows a Compose root. */
     private fun recreate() {
         checkNotNull(lastScenario).recreate()
-        rule.waitUntil(15_000) { roots().isNotEmpty() }
+        rule.waitUntil(15_000) {
+            rule.waitForIdle()
+            composeRoots().isNotEmpty()
+        }
     }
 
     private fun processDeath() {
         val beforeModel = EventDispatcher.model.value
         QaHarness.killProcess()
         lastScenario = launchMain()
-        rule.waitUntil(30_000) { roots().isNotEmpty() && EventDispatcher.model.value != null }
+        rule.waitUntil(30_000) {
+            rule.waitForIdle()
+            composeRoots().isNotEmpty() && EventDispatcher.model.value != null
+        }
         settle()
         val after = EventDispatcher.model.value
         if (beforeModel != null && after != null) {
@@ -251,12 +235,6 @@ class RandomUiWalkTest : UiProbeTest() {
             val a = entrySignature(after)
             if (a != b) fail("process death changed the entries:\n before $b\n after  $a")
         }
-    }
-
-    /** Idle with framework hiccups skipped and an app crash failing the walk. */
-    override fun idle() {
-        guard("idle") { rule.waitForIdle() }
-        guard("idle") { roots() }
     }
 
     /** What Back's progress is judged against: the screen before it, plus what
@@ -304,7 +282,7 @@ class RandomUiWalkTest : UiProbeTest() {
             .filterNot { v -> v.kind == "duplicate-action-in-card" && sharedCards.any { "in card \"$it\"" in v.detail } }
             .map { it.toString() } + smallTargets().map { "[small-touch-target] $it" }
         if (ux.isNotEmpty()) fail("UX invariants:\n" + ux.take(12).joinToString("\n"))
-        val text = textProblems(typed)
+        val text = rule.textProblems(typed)
         if (text.isNotEmpty()) fail("text cut off / overlapping (${text.size}):\n" + text.take(12).joinToString("\n"))
         // The pinned hold banner is never overlapped (INVARIANT 3): not by the
         // bottom nav, not by the Log button, text or not.
@@ -434,13 +412,15 @@ class RandomUiWalkTest : UiProbeTest() {
 
     private fun endOfWalkChecks() {
         trace += "end: process death + relaunch"
-        guard("end-of-walk process death") { processDeath() }
+        processDeath()
         settle()
         checkAll(afterBack = null)
     }
 
-    private fun SemanticsNode.isSheet() =
-        flatten(this).any { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == SHEET_SCRIM } }
+    private fun SemanticsNode.isSheet(): Boolean {
+        val scrim = sheetScrimLabel
+        return flatten(this).any { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == scrim } }
+    }
 
     private fun SemanticsNode.isDialog() = flatten(this).any { n -> n.config.getOrNull(SemanticsProperties.IsDialog) != null }
 
@@ -453,7 +433,7 @@ class RandomUiWalkTest : UiProbeTest() {
     /** The M3 date picker, or the editor's "Logged at" time picker dialog. */
     private fun SemanticsNode.isPicker(): Boolean {
         val labels = flatten(this).map { labelOf(it) }.toSet()
-        return "Select date" in labels ||
+        return libraryString("m3c_date_picker_title") in labels ||
             (str(R.string.log_logged_at) in labels && str(R.string.log_ok) in labels && flatten(this).none { it.config.getOrNull(SemanticsProperties.TestTag) == "editor-primary" })
     }
 
@@ -468,24 +448,15 @@ class RandomUiWalkTest : UiProbeTest() {
 
     override fun fail(msg: String): Nothing = throw walkError(msg)
 
-    private fun walkError(msg: String): ProbeFailure {
-        val replay = "UIWALK_STATE=${start.name} UIWALK_SEED=$seed UIWALK_STEPS=$step"
-        return ProbeFailure(
-            "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
-                "replay: $replay ./gradlew :lollop:testAndroidHostTest --tests 'app.milestone.qa.RandomUiWalkTest'\n" +
-                "trace:\n" + trace.takeLast(200).joinToString("\n") + "\n" +
-                "screen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" },
-        )
-    }
+    private fun walkError(msg: String): ProbeFailure = ProbeFailure(
+        "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
+            "trace:\n" + trace.takeLast(200).joinToString("\n") + "\n" +
+            "screen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" },
+    )
 
     companion object {
-        private val DEFAULT_STEPS = 150
+        private const val STEPS = 150
         private const val BASE_SEED = 0x5EED_0A1CL
-
-        /** `UIWALK_DEBUG=1` prints every screen after its step (for replays). */
-        private val DEBUG = System.getenv("UIWALK_DEBUG") == "1"
-
-        private const val SHEET_SCRIM = "Close sheet"
 
         /** [UxInvariants] kinds gated here; the touch target is [smallTargets]'. */
         private val UX_KINDS = UxInvariants.KINDS - "small-touch-target"

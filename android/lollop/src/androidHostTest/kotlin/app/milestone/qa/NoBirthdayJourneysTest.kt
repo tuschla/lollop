@@ -16,9 +16,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.EventDispatcher
 import app.milestone.R
-import app.milestone.epochDayLabel
 import app.milestone.train_blocked
-import java.time.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,12 +51,6 @@ class NoBirthdayJourneysTest {
     private val doNotTrain get() = str(R.string.main_do_not_train)
     private val ageLabel get() = str(R.string.setup_row_age)
 
-    /** 35 on the pinned Monday. */
-    private val adultBirthday = LocalDate.of(1991, 3, 12).toEpochDay()
-    private val adultDigits = "03121991"
-
-    private fun born(day: Long, age: Int) = str(R.string.setup_birthday_value, epochDayLabel(day), age)
-
     /** The birthday's "Prefer not to say" radio (the Sex row's value of the same
      *  words is a row, not a radio). */
     private fun skipChip() = hasText(str(R.string.setup_birthday_skip)) and hasClickAction() and
@@ -70,10 +62,10 @@ class NoBirthdayJourneysTest {
     fun setupPreferNotToSay_generatesAPlanWithNoHold_andProfileAddsTheBirthdayLater() {
         rule.launchAppExpectingSetup()
         rule.walkLiftSetup(birthdayDigits = null)
-        rule.assertTextCountEventually(str(R.string.setup_about_pick_hint), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_about_pick_hint)), 1)
 
         rule.skipBirthday()
-        rule.assertTextCountEventually(str(R.string.setup_birthday_skipped_note), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_birthday_skipped_note)), 1)
         rule.onNode(hasText(str(R.string.setup_btn_next)) and hasClickAction()).assertIsEnabled()
         rule.setupNext()
         rule.setupNext()
@@ -90,7 +82,7 @@ class NoBirthdayJourneysTest {
         rule.waitForState { EventDispatcher.model.value?.next_session != null }
         assertFalse(EventDispatcher.model.value!!.train_blocked)
         assertNull(EventDispatcher.model.value!!.hold_reason)
-        rule.assertTextCountEventually(doNotTrain, 0)
+        rule.assertCountEventually(hasText(doNotTrain), 0)
         rule.assertCountEventually(sessionShown(), 1)
 
         rule.openProfileAnswersAt(profileRow(ageLabel))
@@ -98,14 +90,14 @@ class NoBirthdayJourneysTest {
         rule.onNode(profileRow(ageLabel)).performClick()
         rule.waitForIdle()
         rule.onNode(skipChip()).performScrollTo().assertIsSelected()
-        rule.assertTextCountEventually(str(R.string.setup_birthday_skipped_note), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_birthday_skipped_note)), 1)
 
-        assertEquals(true, rule.pickBirthday(str(R.string.setup_birthday_add), adultDigits))
+        assertEquals(true, rule.pickBirthday(str(R.string.setup_birthday_add), ADULT_BIRTHDAY_DIGITS))
         rule.waitForState { EventDispatcher.model.value?.profile?.birth_epoch_day == adultBirthday }
         assertEquals(35.0, EventDispatcher.model.value!!.profile!!.age_years!!, 0.0)
         rule.assertCountEventually(profileRow(ageLabel) and hasText(born(adultBirthday, 35)), 1)
         rule.onNode(skipChip()).assertIsNotSelected()
-        rule.assertTextCountEventually(str(R.string.setup_birthday_skipped_note), 0)
+        rule.assertCountEventually(hasText(str(R.string.setup_birthday_skipped_note)), 0)
         assertFalse(EventDispatcher.model.value!!.train_blocked)
     }
 
@@ -128,7 +120,7 @@ class NoBirthdayJourneysTest {
         assertFalse(payload.containsKey("birth_epoch_day"))
         rule.assertCountEventually(profileRow(ageLabel) and hasText(str(R.string.setup_age_not_given)), 1)
         rule.onNode(skipChip()).assertIsSelected()
-        rule.assertTextCountEventually(str(R.string.setup_birthday_add), 1)
+        rule.assertCountEventually(hasText(str(R.string.setup_birthday_add)), 1)
         assertFalse(EventDispatcher.model.value!!.train_blocked)
         assertNull(EventDispatcher.model.value!!.hold_reason)
     }

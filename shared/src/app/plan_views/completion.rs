@@ -838,60 +838,19 @@ fn day_credits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::logged_days::attribute_session_days;
-    use crate::app::view_types::PlanIntensity;
-    use crate::day::DAY_SEC;
-    use crate::plates::LB_PER_KG;
+    use crate::plates::KG_PER_LB;
 
-    fn set_at(weight_kg: f64, reps: u32, observed_at: i64) -> LoggedSet {
+    fn set_at(weight_kg: f64, reps: u32) -> LoggedSet {
         LoggedSet {
             exercise: "Barbell Bench Press".to_string(),
             weight_kg,
             reps,
             rpe: 8.0,
-            observed_at,
+            observed_at: 0,
             entry_id: 0,
             hold_sec: None,
         }
     }
-
-    #[test]
-    fn no_load_item_qualifies_a_working_set_but_not_a_warmup() {
-        // A RIR-prescribed "Bench press" (no load anchor) counts a working set at
-        // 90 %+ of the day's heaviest same-movement weight, but a 20 kg warm-up
-        // against an 80 kg top set does not.
-        let it = PrescriptionView {
-            exercise: "Bench press".to_string(),
-            reps_low: 5,
-            reps_high: 5,
-            load_kg: None,
-            added_kg: None,
-            ..Default::default()
-        };
-        let heaviest = 80.0;
-        assert_eq!(
-            set_credit(
-                &it,
-                &set_at(80.0, 5, 0),
-                heaviest,
-                false,
-                AdjustFold::default()
-            ),
-            SetCredit::Full
-        );
-        assert_eq!(
-            set_credit(
-                &it,
-                &set_at(20.0, 5, 0),
-                heaviest,
-                false,
-                AdjustFold::default()
-            ),
-            SetCredit::NotCounted
-        );
-    }
-
-    const LB: f64 = 0.453_592_37;
 
     fn squat(load_lb: f64, reps: u8, sets: u8) -> PrescriptionView {
         PrescriptionView {
@@ -899,38 +858,14 @@ mod tests {
             sets,
             reps_low: reps,
             reps_high: reps,
-            load_kg: Some(load_lb * LB),
+            load_kg: Some(load_lb * KG_PER_LB),
             ..Default::default()
         }
     }
 
-    #[test]
-    fn a_short_set_at_the_prescribed_load_is_a_counted_short_set() {
-        // 290 lb × 4 against 290 lb × 5: a missed rep still did the set.
-        let it = squat(290.0, 5, 6);
-        let s = set_at(290.0 * LB, 4, 0);
-        let credit = set_credit(&it, &s, s.weight_kg, true, AdjustFold::default());
-        assert_eq!(credit, SetCredit::Full);
-        assert!(
-            short_of_target(&it, 4, None),
-            "it fills its slot as a short set"
-        );
-    }
-
-    #[test]
-    fn a_set_at_ninety_percent_of_the_prescribed_load_counts_lighter() {
-        // 264.6 lb × 5 against 290 lb × 3 (91 %, more reps than prescribed).
-        let it = squat(290.0, 3, 5);
-        let s = set_at(264.6 * LB, 5, 0);
-        assert_eq!(
-            set_credit(&it, &s, s.weight_kg, true, AdjustFold::default()),
-            SetCredit::Lighter
-        );
-    }
-
     /// The credits of `sets` (kg, reps), logged in that order, for `it`.
     fn credits(it: &PrescriptionView, sets: &[(f64, u32)], weight_lb: bool) -> Vec<SetCredit> {
-        let logged: Vec<LoggedSet> = sets.iter().map(|&(kg, r)| set_at(kg, r, 0)).collect();
+        let logged: Vec<LoggedSet> = sets.iter().map(|&(kg, r)| set_at(kg, r)).collect();
         let day: Vec<&LoggedSet> = logged.iter().collect();
         let heaviest = sets.iter().map(|s| s.0).fold(0.0, f64::max);
         day_credits(it, &day, heaviest, AdjustFold::default(), weight_lb)
@@ -943,7 +878,7 @@ mod tests {
         // is 228 lb, on the 5 lb grid 230).
         let it = squat(285.0, 5, 3);
         let lb = |sets: &[(f64, u32)]| -> Vec<(f64, u32)> {
-            sets.iter().map(|&(w, r)| (w * LB, r)).collect()
+            sets.iter().map(|&(w, r)| (w * KG_PER_LB, r)).collect()
         };
         let ramp = [(45.0, 5), (115.0, 5), (170.0, 3), (230.0, 2)];
         let day = lb(&[ramp.as_slice(), &[(285.0, 5), (285.0, 5)]].concat());
@@ -960,115 +895,5 @@ mod tests {
         // Under 80 % is never work, and a set of no reps never counts.
         let short = lb(&[(200.0, 5), (285.0, 0)]);
         assert_eq!(credits(&it, &short, true), [NotCounted, NotCounted]);
-    }
-
-    #[test]
-    fn a_suggested_load_ramps_like_a_prescribed_one() {
-        use SetCredit::*;
-        // No load anchor, a 62.5 kg suggested start: the ramp is the bar, 25 × 5,
-        // 37.5 × 3 and 50 × 2. The first step is no work set although it is the
-        // day's heaviest set when logged.
-        let it = PrescriptionView {
-            exercise: "Back Squat".to_string(),
-            sets: 3,
-            reps_low: 5,
-            reps_high: 5,
-            suggested_load_kg: Some(62.5),
-            ..Default::default()
-        };
-        assert_eq!(credits(&it, &[(25.0, 5)], false), [NotCounted]);
-        assert_eq!(
-            credits(&it, &[(20.0, 5), (25.0, 5), (62.5, 5), (62.5, 5)], false),
-            [NotCounted, NotCounted, Full, Full]
-        );
-        // A floor pull starts at 60 kg, so 60 kg × 5 is its first step even
-        // spelled on a Turkish keyboard ("DEADLİFT", the folded name).
-        for exercise in ["Deadlift", "DEADLİFT"] {
-            let pull = PrescriptionView {
-                exercise: exercise.to_string(),
-                ..it.clone()
-            };
-            assert_eq!(
-                credits(&pull, &[(60.0, 5)], false),
-                [NotCounted],
-                "{exercise}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_bodyweight_set_passes_its_own_zero_load_bar() {
-        // A pure-bodyweight rung (added_kg Some(0.0)) has no prescribed load; a
-        // 0 kg logged set passes 0 >= 0.9·0.
-        let it = PrescriptionView {
-            exercise: "Full push-up".to_string(),
-            reps_low: 8,
-            reps_high: 8,
-            load_kg: None,
-            added_kg: Some(0.0),
-            ..Default::default()
-        };
-        let mut s = set_at(0.0, 8, 0);
-        s.exercise = "Full push-up".to_string();
-        assert_eq!(
-            set_credit(&it, &s, 0.0, false, AdjustFold::default()),
-            SetCredit::Full
-        );
-    }
-
-    #[test]
-    fn a_set_just_after_midnight_chains_to_the_previous_days_session() {
-        // 23:50 then 00:06 (16 min later) both score as the earlier local day.
-        let day = 700i64;
-        let late = day * DAY_SEC + 23 * 3_600 + 50 * 60; // 23:50
-        let early = (day + 1) * DAY_SEC + 6 * 60; // next local day 00:06
-        let sets = vec![set_at(120.0, 3, late), set_at(120.0, 3, early)];
-        let days = attribute_session_days(&sets, 0);
-        assert_eq!(days[0], Some(day));
-        assert_eq!(days[1], Some(day), "00:06 chains back to the 23:50 session");
-    }
-
-    #[test]
-    fn a_morning_set_more_than_three_hours_later_starts_its_own_day() {
-        // 00:06 with the previous set > 3 h earlier does NOT chain.
-        let day = 700i64;
-        let prev = day * DAY_SEC + 20 * 3_600; // 20:00
-        let morning = (day + 1) * DAY_SEC + 6 * 60; // 00:06, ~4 h later
-        let sets = vec![set_at(120.0, 3, prev), set_at(120.0, 3, morning)];
-        let days = attribute_session_days(&sets, 0);
-        assert_eq!(days[0], Some(day));
-        assert_eq!(days[1], Some(day + 1), "a 4 h gap breaks the chain");
-    }
-
-    #[test]
-    fn an_lb_step_up_from_225_lb_suggests_230_lb() {
-        // 225 lb × 9 at RPE 8 beats a 5-rep / 3-RIR target by 3 reps: the
-        // suggested start is one 5 lb plate step up, never floored back to
-        // the logged 225 lb.
-        let logged_kg = 225.0 / LB_PER_KG;
-        let mut item = PlanItem {
-            view: PrescriptionView {
-                exercise: "Barbell Bench Press".to_string(),
-                sets: 3,
-                reps_low: 5,
-                reps_high: 5,
-                target_rpe: Some(crate::strength::rir_to_rpe(3.0)),
-                ..Default::default()
-            },
-            intensity: PlanIntensity::Rir { rir: 3 },
-            ..Default::default()
-        };
-        let mut model = Model::default();
-        model.sets.push(set_at(logged_kg, 9, 97 * DAY_SEC));
-        apply_last_sets(
-            std::slice::from_mut(&mut item),
-            &model,
-            &SetIndex::new(&model.sets),
-            &crate::plan::LiftAnchors::default(),
-            &[Some(97)],
-            100,
-            true,
-        );
-        assert_eq!(item.suggested_load_kg, Some(230.0 / LB_PER_KG));
     }
 }

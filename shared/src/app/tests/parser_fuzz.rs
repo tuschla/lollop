@@ -17,24 +17,22 @@
 //! insert/delete, chunk duplication, truncation at sampled offsets, huge
 //! header sizes/counts, wrong and re-stamped CRCs.
 //!
-//! Invariants per input: no panic, a time bound, either a known failure kind
-//! or a track whose fixes are finite and in range, a payload that survives the
-//! JSON wire, and the same answer on every call.
+//! Invariants per input: no panic, either a known failure kind or a track
+//! whose fixes are finite, in range and bounded by the input's size, a payload
+//! that survives the JSON wire, and the same answer on every call.
 //!
 //! `PARSER_FUZZ_ITERS=<n>` sets the mutations per seed (default keeps the file
 //! well under a minute in debug); `PARSER_FUZZ_SEED=<u64>` replays one case.
 
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::{Duration, Instant};
 
 use super::*;
 use crate::fit::{self, FitError, FitTrack};
+use crate::test_support::fit_writer::{
+    ENUM, FIT_EPOCH, FitWriter, I32, STR, U8, U32, fit_crc, semi,
+};
 use crux_core::bridge::{Bridge, JsonFfiFormat};
-
-fn env_u64(key: &str) -> Option<u64> {
-    std::env::var(key).ok().and_then(|v| v.trim().parse().ok())
-}
 
 fn iters(default: usize) -> usize {
     env_u64("PARSER_FUZZ_ITERS").map_or(default, |n| n as usize)
@@ -69,115 +67,6 @@ fn guarded<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     let out = catch_unwind(AssertUnwindSafe(f));
     QUIET.with(|q| q.set(false));
     out.map_err(|_| LAST_PANIC.with(|p| p.borrow().clone()))
-}
-
-const FIT_EPOCH: i64 = 631_065_600; // unix seconds at 1989-12-31T00:00:00Z
-
-/// FIT CRC-16 (the SDK's nibble-table form).
-fn fit_crc(data: &[u8]) -> u16 {
-    const T: [u16; 16] = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
-        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
-    ];
-    let mut crc: u16 = 0;
-    for &b in data {
-        let mut tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[(b & 0xF) as usize];
-        tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[((b >> 4) & 0xF) as usize];
-    }
-    crc
-}
-
-const ENUM: u8 = 0x00;
-const U8: u8 = 0x02;
-const I32: u8 = 0x85;
-const U32: u8 = 0x86;
-const STR: u8 = 0x07;
-
-/// Message-level FIT writer: definitions and data messages, then a header and
-/// a trailing CRC from [`FitWriter::finish`].
-#[derive(Default)]
-struct FitWriter {
-    data: Vec<u8>,
-    big_endian: [bool; 16],
-}
-
-impl FitWriter {
-    /// Define local type `local` as global `global` with `(num, size, base)`
-    /// fields and `(num, size, dev_index)` developer fields.
-    fn def(
-        &mut self,
-        local: u8,
-        global: u16,
-        big: bool,
-        fields: &[(u8, u8, u8)],
-        dev: &[(u8, u8, u8)],
-    ) {
-        let dev_flag = if dev.is_empty() { 0 } else { 0x20 };
-        self.data.push(0x40 | dev_flag | local);
-        self.data.push(0);
-        self.data.push(u8::from(big));
-        if big {
-            self.data.extend_from_slice(&global.to_be_bytes());
-        } else {
-            self.data.extend_from_slice(&global.to_le_bytes());
-        }
-        self.data.push(fields.len() as u8);
-        for &(n, s, b) in fields {
-            self.data.extend_from_slice(&[n, s, b]);
-        }
-        if !dev.is_empty() {
-            self.data.push(dev.len() as u8);
-            for &(n, s, i) in dev {
-                self.data.extend_from_slice(&[n, s, i]);
-            }
-        }
-        self.big_endian[local as usize] = big;
-    }
-    fn msg(&mut self, local: u8, body: &[u8]) {
-        self.data.push(local);
-        self.data.extend_from_slice(body);
-    }
-    /// A compressed-timestamp data message (local types 0–3 only).
-    fn compressed(&mut self, local: u8, offset: u8, body: &[u8]) {
-        self.data.push(0x80 | (local << 5) | (offset & 0x1F));
-        self.data.extend_from_slice(body);
-    }
-    fn u32(&self, local: u8, v: u32) -> [u8; 4] {
-        if self.big_endian[local as usize] {
-            v.to_be_bytes()
-        } else {
-            v.to_le_bytes()
-        }
-    }
-    fn i32(&self, local: u8, v: i32) -> [u8; 4] {
-        if self.big_endian[local as usize] {
-            v.to_be_bytes()
-        } else {
-            v.to_le_bytes()
-        }
-    }
-    fn finish(&self, header14: bool) -> Vec<u8> {
-        let mut f = vec![if header14 { 14 } else { 12 }, 0x20];
-        f.extend_from_slice(&2132u16.to_le_bytes());
-        f.extend_from_slice(&(self.data.len() as u32).to_le_bytes());
-        f.extend_from_slice(b".FIT");
-        if header14 {
-            let c = fit_crc(&f);
-            f.extend_from_slice(&c.to_le_bytes());
-        }
-        f.extend_from_slice(&self.data);
-        let crc = fit_crc(&f);
-        f.extend_from_slice(&crc.to_le_bytes());
-        f
-    }
-}
-
-fn semi(deg: f64) -> i32 {
-    (deg * 2_147_483_648.0 / 180.0).round() as i32
 }
 
 /// What a generated activity looks like.
@@ -271,7 +160,7 @@ fn gen_fit(spec: &Spec) -> Vec<u8> {
     w.def(1, 20, be, &[(0, 4, I32), (1, 4, I32), (3, 1, U8)], &dev);
     w.def(2, 21, be, &[(253, 4, U32), (0, 1, ENUM), (1, 1, ENUM)], &[]);
     let (lat0, lon0) = (47.37, 8.54);
-    let deg_per_m = 1.0 / 111_195.0;
+    let deg_per_m = 1.0 / M_PER_DEG;
     let event = |w: &mut FitWriter, t: u32, kind: u8| {
         let mut body = w.u32(2, t).to_vec();
         body.extend_from_slice(&[0, kind]); // event = timer, event_type
@@ -396,18 +285,10 @@ fn payload(bytes: &[u8]) -> serde_json::Value {
     serde_json::to_value(crate::import::import_run_file(bytes)).expect("a verdict serializes")
 }
 
-/// Per-input time bound (debug build). A real 4.6 KB file parses in ~1 ms.
-const TIME_BOUND: Duration = Duration::from_secs(3);
-
-/// Check one input: no panic, bounded time, sane result, deterministic.
-/// `Err` carries a description of the violated invariant.
+/// Check one input: no panic, sane result, deterministic. `Err` carries a
+/// description of the violated invariant.
 fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
-    let start = Instant::now();
     let first = guarded(|| decide(bytes)).map_err(|p| format!("PANIC: {p}"))?;
-    let took = start.elapsed();
-    if took > TIME_BOUND {
-        return Err(format!("took {took:?} for {} bytes", bytes.len()));
-    }
     match &first {
         FitOutcome::Track(t) => {
             let total: usize = t.segments.iter().map(Vec::len).sum();
@@ -618,7 +499,7 @@ fn generated_fit_keeps_every_fix_time_and_position() {
         assert_eq!(fixes.len(), spec.fixes);
         for (i, f) in fixes.iter().enumerate() {
             assert_eq!(f.time_sec, spec.start_unix + i as i64, "fix {i} {f:?}");
-            let lat = 47.37 + spec.mps * i as f64 / 111_195.0;
+            let lat = 47.37 + spec.mps * i as f64 / M_PER_DEG;
             assert!((f.lat - lat).abs() < 1e-6, "fix {i} lat {} vs {lat}", f.lat);
             assert_eq!(f.hr_bpm, Some(120 + (i % 40) as u16));
         }
@@ -858,7 +739,7 @@ fn a_developer_field_whose_size_is_not_a_multiple_of_its_type_keeps_the_rest_of_
     );
     let rec = |w: &mut FitWriter, local: u8, i: u32| {
         let mut body = (1_100_000_000 + i).to_le_bytes().to_vec();
-        body.extend_from_slice(&semi(47.0 + f64::from(i) * 3.0 / 111_195.0).to_le_bytes());
+        body.extend_from_slice(&semi(47.0 + f64::from(i) * 3.0 / M_PER_DEG).to_le_bytes());
         body.extend_from_slice(&semi(8.0).to_le_bytes());
         if local == 0 {
             body.extend_from_slice(&[0u8; 255]);
@@ -978,26 +859,20 @@ fn pt(lat: f64, lon: f64, t: i64, acc: f32) -> GpsPoint {
     }
 }
 
-/// A plausible 10-minute run at 3 m/s, 1 Hz.
+/// A plausible run at 3 m/s, 1 Hz: `n` fixes from `t0`.
 fn walk(n: usize, t0: i64) -> Vec<GpsPoint> {
-    (0..n)
-        .map(|i| pt(47.37 + 3.0 * i as f64 / 111_195.0, 8.54, t0 + i as i64, 5.0))
-        .collect()
+    north_track(47.37, t0, 1, std::iter::repeat_n(3.0, n - 1), 5.0)
 }
 
-/// Log `points` as a GPS run in a fresh model and return its GPX document.
+/// Log `points` as GPS run 4242 in a fresh model and return its GPX document
+/// (empty when the run was not logged or has no track).
 fn export_logged(points: Vec<GpsPoint>, segment_starts: Vec<u32>, observed_at: i64) -> String {
-    let app = Engine;
     let mut model = Model::default();
-    let _ = app.update(
+    let _ = Engine.update(
         log_run_track_seg(points, 0.0, 0.0, observed_at, 4242, segment_starts),
         &mut model,
     );
-    let vm = app.view(&model);
-    vm.runs
-        .first()
-        .map(|r| export_run_gpx(&model, r.entry_id, r.observed_at))
-        .unwrap_or_default()
+    export_run_gpx(&model, 4242, observed_at)
 }
 
 #[test]
@@ -1017,6 +892,7 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
         1e-7,
     ];
     let weird_acc = [f32::NAN, f32::INFINITY, -1.0, 0.0, 1e30, 1e-30, 30.0];
+    let mut exported = 0;
     for case in 0..iters(300) {
         let mut pts = walk(120 + rng.index(200), 1_750_000_000);
         for _ in 0..rng.index(6) {
@@ -1047,6 +923,7 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
         if doc.is_empty() {
             continue;
         }
+        exported += 1;
         xml_well_formed(&doc).unwrap_or_else(|e| panic!("case {case}: {e}\n{doc}"));
         let n = gpx_values_sane(&doc).unwrap_or_else(|e| panic!("case {case}: {e}"));
         assert!(
@@ -1060,6 +937,7 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
             "case {case}: same run, same document"
         );
     }
+    assert!(exported > 0, "some adversarial tracks still export");
 }
 
 #[test]

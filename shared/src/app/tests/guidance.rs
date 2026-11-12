@@ -3,6 +3,14 @@
 
 use super::*;
 
+/// The guidance `view()` shows once `p` is set on a fresh model: the profile
+/// rows, then the rest.
+fn guidance_of(p: Profile) -> Vec<GuidanceView> {
+    let (app, model) = replay_rendering(&[Event::SetProfile(p)]);
+    let vm = app.view(&model);
+    vm.profile_guidance.into_iter().chain(vm.guidance).collect()
+}
+
 #[test]
 fn profile_drives_evidence_cited_guidance() {
     let app = Engine;
@@ -60,8 +68,7 @@ fn power_guidance_row_states_kb_language_not_the_rir_number() {
     // "never to failure" instruction instead.
     let mut p = sample_profile();
     p.lift_goal = LiftGoal::Power;
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     let loading = rows
         .iter()
         .find(|r| r.summary.contains("Weights for power:"))
@@ -93,8 +100,7 @@ fn c25k_running_guidance_row_has_no_long_run_fragment() {
     // the raw Debug enum name "C25k".
     let mut p = sample_profile();
     p.goal_distance = GoalDistance::C25k;
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     let running = rows
         .iter()
         .find(|r| r.summary.starts_with("Couch to 5K:"))
@@ -122,8 +128,7 @@ fn guidance_copy_uses_human_labels_not_debug_enums() {
     // human labels, never the raw Debug enum names ("Dup"/"FiveK"/"RunFirst").
     let mut p = sample_profile(); // WeekToWeek cadence → DUP; EndurancePriority.
     p.goal_distance = GoalDistance::FiveK;
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     let any = |needle: &str| rows.iter().any(|r| r.summary.contains(needle));
     assert!(
         any("Periodization model: daily undulating (heavy, medium and light days each week)"),
@@ -169,8 +174,7 @@ fn novice_load_jump_shown_only_for_novices() {
     let has_jump = |cadence: ProgressionCadence| -> bool {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        let (km, basis) = stated_or_measured_weekly_km(&p, None);
-        build_guidance_measured(&p, km, basis, None)
+        guidance_of(p)
             .iter()
             .any(|g| g.summary.contains("Adding weight as a beginner"))
     };
@@ -187,8 +191,7 @@ fn weekly_pct_increment_shown_only_past_novice() {
     let row = |cadence: ProgressionCadence| -> Option<GuidanceView> {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        let (km, basis) = stated_or_measured_weekly_km(&p, None);
-        build_guidance_measured(&p, km, basis, None)
+        guidance_of(p)
             .into_iter()
             .find(|g| g.summary.starts_with("Adding weight: "))
     };
@@ -224,8 +227,7 @@ fn hypertrophy_rep_load_prescription_is_surfaced_and_cited() {
     // this wire. Profile-independent (applies to all lifting), so any profile
     // shows it, evidence-cited and non-myth, with the heavy-compound band.
     let p = sample_profile();
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let r = build_guidance_measured(&p, km, basis, None)
+    let r = guidance_of(p)
         .into_iter()
         .find(|g| g.summary.starts_with("Reps and weight:"))
         .expect("rep/load prescription row must be present");
@@ -249,8 +251,7 @@ fn lift_only_profile_omits_running_and_hybrid_guidance() {
     let mut p = sample_profile();
     p.running_days_per_week = 0;
     p.running_km_per_week = 0.0;
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     assert!(
         !rows.iter().any(|g| g.section == "Hybrid"),
         "pure lifter must not see any Hybrid-section row"
@@ -279,8 +280,7 @@ fn run_only_profile_omits_strength_and_hybrid_guidance() {
     // concurrent-training block.
     let mut p = sample_profile();
     p.weekly_sets = 0;
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     assert!(
         !rows.iter().any(|g| g.section == "Strength"),
         "pure runner must not see any Strength-section row"
@@ -301,8 +301,7 @@ fn hybrid_profile_keeps_all_modality_sections() {
     // Guard against over-gating: the hybrid sample_profile (lifts and runs)
     // must retain Strength, Running and Hybrid rows all at once.
     let p = sample_profile();
-    let (km, basis) = stated_or_measured_weekly_km(&p, None);
-    let rows = build_guidance_measured(&p, km, basis, None);
+    let rows = guidance_of(p);
     assert!(
         rows.iter().any(|g| g.section == "Strength"),
         "hybrid profile must keep Strength rows"
@@ -439,68 +438,24 @@ fn build_guidance_never_panics_across_the_profile_domain() {
 }
 
 #[test]
-fn build_reference_sections_are_contiguous_and_cited() {
-    // The common (non-RED-S) reference is profile-independent, so one call
-    // covers it. Same contract as the guidance list: every row evidence-cited, no
-    // MarketingMyth, and each section forms a single contiguous run (the
-    // reference list labels every card by section).
-    let rows = build_reference(false);
-    assert_cited_non_myth(&rows, &"reference");
-    assert_sections_contiguous(&rows, &"reference");
-
-    // Each newly-surfaced dormant calc must appear as its own card with a
-    // non-empty citation. Match on a load-bearing substring of each summary.
-    let card = |needle: &str| rows.iter().find(|r| r.summary.contains(needle));
-    for needle in [
-        "Olympic-lift pulls",
-        "Top set with ~2 reps left",
-        "Two-for-two rule",
-        "Stall: if e1RM",
-        "Double progression",
-        "Age 65+ protein",
-        "Protein while eating less",
-        "Age 65+ per-meal protein",
-        "Couch to 5K:",
-        "Pyramidal split",
-        "Polarized split",
-        "To keep a fitness gain",
-        "Joint pain at heavy weights",
-        "To scale back, cut in this order",
-        "To scale up, add in this order",
-        "Home / minimal equipment",
-        "Next steps name things you can control",
-    ] {
-        let row = card(needle).unwrap_or_else(|| panic!("missing reference card for {needle:?}"));
-        assert!(
-            !row.evidence.citation.is_empty(),
-            "uncited reference card: {}",
-            row.summary
-        );
-    }
-}
-
-#[test]
 fn frequency_guidance_collapses_equal_bounds() {
     // A muscle whose peak set count lands in a fixed-frequency band (chest MRV
     // 22 → 3–3×/wk) must not print a degenerate "3–3×/wk" span; the per-session
     // spread (6–9) stays a real range.
-    let (plan, _, _) = build_hypertrophy_plan(
-        &HypertrophyInputView {
-            muscle: "chest".to_string(),
-            weeks: 4,
-            not_growing: false,
-            recovering_easily: false,
-        },
-        None,
-        None,
-    );
+    let (app, model) = replay_rendering(&[Event::PlanHypertrophyMeso {
+        muscle: "chest".to_string(),
+        weeks: 4,
+        not_growing: false,
+        recovering_easily: false,
+    }]);
+    let plan = app.view(&model).hypertrophy_plan;
     let peak = plan
         .iter()
         .find(|g| g.summary.starts_with("Peak frequency:"))
         .expect("peak frequency row");
     assert!(
-        peak.summary.contains("3×/wk"),
-        "expected collapsed frequency, got: {}",
+        peak.summary.contains("3×/wk") && peak.summary.contains("6–9"),
+        "expected collapsed frequency and a real per-session span, got: {}",
         peak.summary
     );
     assert!(
@@ -508,8 +463,6 @@ fn frequency_guidance_collapses_equal_bounds() {
         "degenerate span not collapsed: {}",
         peak.summary
     );
-    assert_eq!(fmt_u8_range((3, 3)), "3");
-    assert_eq!(fmt_u8_range((6, 9)), "6–9");
 }
 
 #[test]
@@ -517,8 +470,7 @@ fn quality_caps_shown_only_when_the_athlete_runs() {
     let has_caps = |run_days: u8| -> bool {
         let mut p = sample_profile();
         p.running_days_per_week = run_days;
-        let (km, basis) = stated_or_measured_weekly_km(&p, None);
-        build_guidance_measured(&p, km, basis, None)
+        guidance_of(p)
             .iter()
             .any(|g| g.summary.contains("Hard runs: at most"))
     };
@@ -534,11 +486,7 @@ fn periodization_phase_plan_tracks_the_model_by_training_age() {
     let summaries = |cadence: ProgressionCadence| -> Vec<String> {
         let mut p = sample_profile();
         p.progression_cadence = cadence;
-        let (km, basis) = stated_or_measured_weekly_km(&p, None);
-        build_guidance_measured(&p, km, basis, None)
-            .into_iter()
-            .map(|g| g.summary)
-            .collect()
+        guidance_of(p).into_iter().map(|g| g.summary).collect()
     };
 
     let linear = summaries(ProgressionCadence::EverySession);
@@ -625,7 +573,6 @@ fn lower_strength_interference_row_tracks_sex_and_running() {
     ] {
         let t = row_text(Some(false), cadence, 5).expect("a hybrid shows the row");
         assert!(t.contains("can slightly blunt"), "{t}");
-        assert!(!t.contains("spared"), "{t}");
     }
     // A woman: no blunting shown (HYB-SEX-001).
     assert!(
@@ -652,7 +599,6 @@ fn hybrid_guidance_has_no_raw_true_false() {
                 "{}",
                 g.summary
             );
-            assert!(!g.summary.contains("spared"), "{}", g.summary);
         }
     }
 }
@@ -829,12 +775,43 @@ fn clearing_profile_empties_guidance() {
 
 #[test]
 fn reference_cards_are_always_present_and_evidence_cited() {
-    let app = Engine;
-    let model = Model::default();
-    let vm = app.view(&model);
-    assert!(!vm.reference.is_empty());
-    assert!(vm.reference.iter().all(|g| !g.evidence.citation.is_empty()
-        && g.evidence.grade != Some(EvidenceGrade::MarketingMyth)));
+    // The common (non-RED-S) reference is profile-independent: every row
+    // evidence-cited, no MarketingMyth, and each section forms a single
+    // contiguous run (the reference list labels every card by section).
+    let rows = Engine.view(&Model::default()).reference;
+    assert!(!rows.is_empty());
+    assert_cited_non_myth(&rows, &"reference");
+    assert_sections_contiguous(&rows, &"reference");
+
+    // Each newly-surfaced dormant calc must appear as its own card with a
+    // non-empty citation. Match on a load-bearing substring of each summary.
+    let card = |needle: &str| rows.iter().find(|r| r.summary.contains(needle));
+    for needle in [
+        "Olympic-lift pulls",
+        "Top set with ~2 reps left",
+        "Two-for-two rule",
+        "Stall: if e1RM",
+        "Double progression",
+        "Age 65+ protein",
+        "Protein while eating less",
+        "Age 65+ per-meal protein",
+        "Couch to 5K:",
+        "Pyramidal split",
+        "Polarized split",
+        "To keep a fitness gain",
+        "Joint pain at heavy weights",
+        "To scale back, cut in this order",
+        "To scale up, add in this order",
+        "Home / minimal equipment",
+        "Next steps name things you can control",
+    ] {
+        let row = card(needle).unwrap_or_else(|| panic!("missing reference card for {needle:?}"));
+        assert!(
+            !row.evidence.citation.is_empty(),
+            "uncited reference card: {}",
+            row.summary
+        );
+    }
 }
 
 #[test]

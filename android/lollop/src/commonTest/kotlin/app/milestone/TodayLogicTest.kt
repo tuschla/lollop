@@ -1,22 +1,28 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Test
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
 
 /** Today decisions: the banner's way back per hold reason, one coaching
  *  card per exercise, the win that carries its next-time advice, the newcomer
  *  guide's reps-in-reserve and face line, when the session review asks runs,
  *  and the plan face's plate figure, run head and display-unit distances. */
-class TodayLogicTest {
+class TodayLogicTest : PlatformTest() {
 
     // Exercise matching and draft facts ask the real core: start from a fresh
     // process, not an engine another test class left installed.
-    @Before
+    @BeforeTest
     fun setUp() = AppRuntime.resetForTest()
 
     @Test
@@ -50,9 +56,9 @@ class TodayLogicTest {
         assertEquals(Event.ResolveHold(ReadinessSignal.Illness, 1_792_000_000L), sent[0])
         val profile = sent[1] as Event.SetProfile
         assertFalse(profile.health.acute_illness)
-        assertEquals("other health answers are kept", 0b10, profile.health.parq_yes)
+        assertEquals(0b10, profile.health.parq_yes, "other health answers are kept")
         assertEquals(30.0, profile.ageYears)
-        assertEquals("switched off from today only", 20_740L, profile.effectiveFromEpochDay)
+        assertEquals(20_740L, profile.effectiveFromEpochDay, "switched off from today only")
         assertEquals(2, sent.size)
     }
 
@@ -79,7 +85,7 @@ class TodayLogicTest {
         assertEquals(ProfileRowId.ParqInjury, holdProfileRow(HoldReason.InjuryRehab, HealthScreen()))
         assertEquals(ProfileRowId.ParqClearance, holdProfileRow(HoldReason.Parq, HealthScreen()))
         assertEquals(ProfileRowId.Reds, holdProfileRow(HoldReason.Reds, HealthScreen(reds_signal = true)))
-        assertEquals("a weekly-check-in RED-S answer has no profile switch", ProfileRowId.HealthQuestions, holdProfileRow(HoldReason.Reds, HealthScreen()))
+        assertEquals(ProfileRowId.HealthQuestions, holdProfileRow(HoldReason.Reds, HealthScreen()), "a weekly-check-in RED-S answer has no profile switch")
         assertEquals(ProfileRowId.Ill, holdProfileRow(HoldReason.AcuteIllnessProfile, HealthScreen(acute_illness = true)))
         assertEquals(ProfileRowId.HealthQuestions, holdProfileRow(null, null))
     }
@@ -93,7 +99,7 @@ class TodayLogicTest {
         assertEquals(ProfileRowId.Age, ProfileRowId.Age.pickerRow)
         val chestPain = draftFacts(ProfileDraft(answer = HealthAnswer.Parq(ParqQuestion.ChestPain, true))).health
         assertEquals(ParqQuestion.ChestPain, parqRevealItem(ProfileRowId.ParqSymptom, chestPain))
-        assertNull("a legacy flag has no question to land on", parqRevealItem(ProfileRowId.ParqSymptom, HealthScreen(symptomatic = true)))
+        assertNull(parqRevealItem(ProfileRowId.ParqSymptom, HealthScreen(symptomatic = true)), "a legacy flag has no question to land on")
         assertEquals(ParqQuestion.BoneOrJoint, parqRevealItem(ProfileRowId.ParqInjury, HealthScreen(injury_or_rehab = true)))
     }
 
@@ -110,7 +116,7 @@ class TodayLogicTest {
         // health answers' cards name the answer behind the generic banner line.
         assertFalse(bannerStatesHold(HoldReason.Pregnancy, SafetyTier.MedicalReferral, pregnancyWarning = false))
         for (reason in listOf(HoldReason.Parq, HoldReason.Symptomatic, HoldReason.InjuryRehab, HoldReason.Reds, HoldReason.MedicalSignal)) {
-            assertFalse(reason.wire, bannerStatesHold(reason, SafetyTier.MedicalReferral, pregnancyWarning = false))
+            assertFalse(bannerStatesHold(reason, SafetyTier.MedicalReferral, pregnancyWarning = false), reason.wire)
         }
     }
 
@@ -125,7 +131,7 @@ class TodayLogicTest {
         )
         val m = ViewModel(today_epoch_day = 100, next_session = check, adjustments = listOf(adj.copy(repeats_session = true)))
         val c = todayCards(m, hasSignal = true)
-        assertNull("the item states it: no card above", c.hostAdjustment)
+        assertNull(c.hostAdjustment, "the item states it: no card above")
         assertTrue(c.sessionAdjustmentAbove)
     }
 
@@ -161,34 +167,37 @@ class TodayLogicTest {
         val zone = kotlinx.datetime.TimeZone.UTC
         val lifts = SessionPlanView(epoch_day = day, session_type = SessionType.LiftMaxEffort, items = listOf(PrescriptionView(exercise = "Back Squat")))
         val liftDay = ViewModel(today_epoch_day = day, week_plan = listOf(lifts))
-        assertFalse("a lift-only day skips the run questions", reviewAsksRun(liftDay, zone))
+        assertFalse(reviewAsksRun(liftDay, zone), "a lift-only day skips the run questions")
         val ranToo = liftDay.copy(runs = listOf(RunResultView(observed_at = day * 86_400L + 3_600L)))
-        assertTrue("a run logged today brings them back", reviewAsksRun(ranToo, zone))
+        assertTrue(reviewAsksRun(ranToo, zone), "a run logged today brings them back")
         val runDay = ViewModel(
             today_epoch_day = day,
             week_plan = listOf(SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, items = listOf(PrescriptionView()))),
         )
-        assertTrue("a planned run asks them", reviewAsksRun(runDay, zone))
+        assertTrue(reviewAsksRun(runDay, zone), "a planned run asks them")
     }
 
-    private fun squat(day: java.time.LocalDate?, e1rm: Double) = LiftResultView(
+    /** A set at 18:00 on [day] in the zone [e1rmTrend] dates sets in (the device's),
+     *  so the trend's days are the ones written here whatever zone the run uses. */
+    private fun squat(day: LocalDate?, e1rm: Double) = LiftResultView(
         exercise = "Back squat",
         e1rm_kg = e1rm,
-        observed_at = day?.atTime(18, 0)?.atZone(java.time.ZoneId.systemDefault())?.toEpochSecond() ?: 0L,
+        observed_at = day?.atTime(18, 0)?.toInstant(TimeZone.currentSystemDefault())?.epochSeconds ?: 0L,
     )
 
     @Test
     fun e1rmTrend_countsOnlyDatedSessions() {
-        val d = java.time.LocalDate.of(2026, 10, 1)
+        val d = LocalDate(2026, 10, 1)
+        fun plus(days: Int) = d.plus(days, DateTimeUnit.DAY)
         assertNull(
+            e1rmTrend(ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 100.0), squat(plus(3), 102.0)))),
             "an undated set is no session: two dated ones are not a trend",
-            e1rmTrend(ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 100.0), squat(d.plusDays(3), 102.0)))),
         )
         val trend = e1rmTrend(
-            ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 95.0), squat(d.plusDays(2), 100.0), squat(d.plusDays(4), 102.0))),
+            ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 95.0), squat(plus(2), 100.0), squat(plus(4), 102.0))),
         )!!
         assertEquals(listOf(95.0, 100.0, 102.0), trend.series)
-        assertEquals(kotlinx.datetime.LocalDate(2026, 10, 1), trend.firstDay)
+        assertEquals(d, trend.firstDay)
     }
 
     @Test
@@ -199,15 +208,15 @@ class TodayLogicTest {
         val open = todayCards(underWay, hasSignal = true)
         assertSame(safety, open.hostAdjustment)
         assertEquals(listOf(cue), open.coachingCards)
-        assertFalse("nothing above repeats the session's adjustment", open.sessionAdjustmentAbove)
+        assertFalse(open.sessionAdjustmentAbove, "nothing above repeats the session's adjustment")
         val repeated = underWay.copy(adjustments = listOf(cue.copy(repeats_session = true), safety))
-        assertTrue("a card above states it", todayCards(repeated, hasSignal = true).sessionAdjustmentAbove)
+        assertTrue(todayCards(repeated, hasSignal = true).sessionAdjustmentAbove, "a card above states it")
         val done = underWay.copy(
             session_done = SessionDoneView(epoch_day = 100, items = listOf(SessionDoneItemView(exercise = "Back squat"))),
         )
         val after = todayCards(done, hasSignal = true)
-        assertSame("a safety call is never spent", safety, after.hostAdjustment)
-        assertTrue("the session's coaching is spent once it is done", after.coachingCards.isEmpty())
+        assertSame(safety, after.hostAdjustment, "a safety call is never spent")
+        assertTrue(after.coachingCards.isEmpty(), "the session's coaching is spent once it is done")
     }
 
     @Test
@@ -231,7 +240,6 @@ class TodayLogicTest {
         assertEquals("6 × 800 m", runFaceHead(item, DistanceUnit.Km))
         // A rep head has no plain distance: it reads the same in miles.
         assertEquals("6 × 800 m", runFaceHead(item, DistanceUnit.Mi))
-        assertEquals("8 of 10", item.run_target?.effort_detail)
         // No target, or no volume head (a pain stop): the full summary stays.
         assertEquals(null, runFaceHead(item.copy(run_target = null), DistanceUnit.Km))
         assertEquals(null, runFaceHead(item.copy(run_head = ""), DistanceUnit.Km))

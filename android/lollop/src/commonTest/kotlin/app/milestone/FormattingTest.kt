@@ -8,7 +8,8 @@ import kotlin.test.assertFailsWith
  * The shell's number formatting reads the same on every platform. The table is
  * what `String.format(Locale.US, "%.Nf", v)` prints on the JVM (java.util.Formatter
  * rounds the shortest decimal digits half up): on Android [formatFixed] IS that
- * call, on iOS it is [halfUpFixed], so this pins both to Java's output.
+ * call, on iOS it is [halfUpFixed], so this pins both to Java's output. The port
+ * itself is compared with `String.format` on the JVM by FormattingJvmParityTest.
  */
 class FormattingTest {
 
@@ -61,13 +62,6 @@ class FormattingTest {
     fun formatFixed_printsWhatJavaPrints() {
         for ((v, expected) in fixedTable) {
             expected.forEachIndexed { decimals, want -> assertEquals(want, formatFixed(v, decimals), "formatFixed($v, $decimals)") }
-        }
-    }
-
-    @Test
-    fun halfUpFixed_printsWhatJavaPrints() {
-        for ((v, expected) in fixedTable) {
-            expected.forEachIndexed { decimals, want -> assertEquals(want, halfUpFixed(v, decimals), "halfUpFixed($v, $decimals)") }
         }
     }
 

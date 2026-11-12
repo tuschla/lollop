@@ -19,11 +19,9 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.isSelectable
-import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -50,14 +48,11 @@ import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
 import app.milestone.LiftResultView
 import app.milestone.MainActivity
-import app.milestone.OpenDest
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.RunSession
 import app.milestone.TestClock
 import app.milestone.runDistLabel
-import app.milestone.openIntent
 import app.milestone.segmentKm
 import app.milestone.todayEpochDay
 import app.milestone.utcOffsetSec
@@ -84,69 +79,16 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 
 /**
- * Process death for the offline scenario suite. Android kills a backgrounded app's
- * process and later starts a NEW one on the same disk: every singleton (the native
- * core, the dispatcher's model, the run session, in-memory settings) is gone, while
- * the event log, the run sidecar and SharedPreferences remain, and, when the user
- * comes back from Recents, the Activity gets its saved-instance Bundle back.
- *
- * [kill] wipes exactly the process-scoped state (unlike [QaHarness.reset], it keeps
- * every file and preference). [saveState] captures the Bundle the OS would keep,
- * round-tripped through a Parcel as across a real process boundary;
- * [relaunchWithState] starts the new process's Activity from it.
- */
-internal object ProcessDeath {
-    private var restored: ActivityController<MainActivity>? = null
-
-    /** Close any Activity and drop every process-scoped singleton, keeping disk. */
-    fun kill(ctx: Context) {
-        restored?.let { c -> runCatching { c.pause().stop().destroy() } }
-        restored = null
-        QaHarness.killProcess()
-    }
-
-    /** The current Activity's saved-instance state as the OS keeps it for a killed
-     *  task, after a Parcel round trip, and its parcelled size in bytes. */
-    fun saveState(): Pair<Bundle, Int> {
-        val out = Bundle()
-        val act = checkNotNull(lastScenario) { "no launched Activity" }
-        act.onActivity { InstrumentationRegistry.getInstrumentation().callActivityOnSaveInstanceState(it, out) }
-        val p = Parcel.obtain()
-        try {
-            out.writeToParcel(p, 0)
-            val size = p.dataSize()
-            p.setDataPosition(0)
-            val back = Bundle.CREATOR.createFromParcel(p)
-            back.classLoader = MainActivity::class.java.classLoader
-            return back to size
-        } finally {
-            p.recycle()
-        }
-    }
-
-    /** Start the new process's Activity from [state] (back from Recents) and wait
-     *  for boot hydration. */
-    fun relaunchWithState(rule: ComposeTestRule, state: Bundle) {
-        restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup(state) }
-        rule.waitUntil(30_000) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
-        }
-        rule.waitForIdle()
-    }
-
-    /** Close an Activity started by [relaunchWithState] at the end of a test. */
-    fun teardown() {
-        restored?.let { c -> runCatching { c.pause().stop().destroy() } }
-        restored = null
-    }
-}
-
-/**
  * Activity recreation (rotation, theme/locale change) and process death in the
  * middle of the app's stateful flows, against the design rule that a config change
  * mid-entry keeps the open sheet and its fields (AppScaffold: "a rotation mid-entry
  * keeps the sheet OPEN on the same editor (the editors' own fields are already
  * rememberSaveable)") and the event-log rule that only COMMITTED entries persist.
+ *
+ * Process death: Android kills a backgrounded app's process and later starts a NEW
+ * one on the same disk; every singleton is gone, the event log, the run sidecar and
+ * SharedPreferences remain, and, when the user comes back from Recents, the Activity
+ * gets its saved-instance Bundle back ([saveState], [relaunchWithState]).
  *
  * Every scenario checks: nothing committed is lost, nothing is logged twice, the
  * app doesn't crash, the restored screen is the one the user left (or, after a
@@ -179,10 +121,54 @@ class RestoreRoundtripTest {
     @After
     fun tearDown() {
         QaHarness.teardown()
-        ProcessDeath.teardown()
+        closeRestored()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
         QaHarness.freshProcess()
+    }
+
+    /** The Activity [relaunchWithState] started; [QaHarness.teardown] closes only a launched scenario. */
+    private var restored: ActivityController<MainActivity>? = null
+
+    private fun closeRestored() {
+        restored?.pause()?.stop()?.destroy()
+        restored = null
+    }
+
+    /** Process death ([QaHarness.killProcess]), closing a relaunched Activity too. */
+    private fun killProcess() {
+        closeRestored()
+        QaHarness.killProcess()
+    }
+
+    /** The current Activity's saved-instance state as the OS keeps it for a killed
+     *  task, after a Parcel round trip (as across a real process boundary), and its
+     *  parcelled size in bytes. */
+    private fun saveState(): Pair<Bundle, Int> {
+        val out = Bundle()
+        val act = checkNotNull(lastScenario) { "no launched Activity" }
+        act.onActivity { InstrumentationRegistry.getInstrumentation().callActivityOnSaveInstanceState(it, out) }
+        val p = Parcel.obtain()
+        try {
+            out.writeToParcel(p, 0)
+            val size = p.dataSize()
+            p.setDataPosition(0)
+            val back = Bundle.CREATOR.createFromParcel(p)
+            back.classLoader = MainActivity::class.java.classLoader
+            return back to size
+        } finally {
+            p.recycle()
+        }
+    }
+
+    /** Start the new process's Activity from [state] (back from Recents) and wait
+     *  for boot hydration. */
+    private fun relaunchWithState(state: Bundle) {
+        restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup(state) }
+        rule.waitUntil(30_000) {
+            rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
+        }
+        rule.waitForIdle()
     }
 
     private fun recreate() {
@@ -225,45 +211,39 @@ class RestoreRoundtripTest {
         // Rotation with the typed weight not yet saved: the loop and the draft stay.
         recreate()
         rule.assertCountEventually(weightWell("122.5"), 1)
-        rule.assertTextCountEventually(str(R.string.log_set_header_n_of_n, 1, 4), 1)
+        rule.assertCountEventually(hasText(str(R.string.log_set_header_n_of_n, 1, 4)), 1)
         assertEquals("a draft is never logged by a rotation", 0, todaysSets("Back Squat").size)
 
         // Save, and rotate before the core has even answered.
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         recreate()
         rule.waitForState { todaysSets("Back Squat").size == 1 }
-        rule.assertTextCountEventually(str(R.string.log_set_header_n_of_n, 2, 4), 1)
+        rule.assertCountEventually(hasText(str(R.string.log_set_header_n_of_n, 2, 4)), 1)
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
         assertEquals("seeded + one", 2, logCount("LogSet"))
 
         // Backgrounded, killed, restored from Recents: the loop comes back on set 2.
-        val (state, size) = ProcessDeath.saveState()
+        val (state, size) = saveState()
         assertSavedStateFitsABinderTransaction(size)
-        ProcessDeath.kill(ctx)
-        ProcessDeath.relaunchWithState(rule, state)
+        killProcess()
+        relaunchWithState(state)
         rule.waitForState { todaysSets("Back Squat").size == 1 }
         assertEquals(0, rule.countOf(hasText(str(R.string.log_set_header_n_of_n, 1, 4))))
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
 
         // A cold start (no saved state): Today, the set replayed once, no editor.
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
         assertEquals(0, rule.countOf(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)))
         assertEquals(2, logCount("LogSet"))
     }
 
-    private fun openMorningCheckin() {
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
-        rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-        rule.waitForNode(hasTestTag("checkin-sleep"))
-    }
-
     @Test
     fun aHalfAnsweredMorningCheckinKeepsItsAnswersAcrossRotationAndSubmitsOnce() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        openMorningCheckin()
+        rule.openMorningCheckin()
         rule.pickRating("checkin-sleep", 2)
         rule.pickRating("checkin-soreness", 4)
         val sleep = ratingState("checkin-sleep")
@@ -276,13 +256,13 @@ class RestoreRoundtripTest {
         assertEquals("nothing submitted by a rotation", 0, logCount("SubmitCheckin"))
 
         rule.pickRating("checkin-mood", 3)
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForState { logCount("SubmitCheckin") == 1 && model.checked_in_today }
         recreate()
         rule.waitForState { EventDispatcher.model.value != null }
         assertEquals("one check-in after a rotation", 1, logCount("SubmitCheckin"))
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertTrue(model.checked_in_today)
         val echo = checkNotNull(model.latest_checkin)
@@ -292,47 +272,24 @@ class RestoreRoundtripTest {
         assertEquals(1, logCount("SubmitCheckin"))
     }
 
-    private fun launchOnTracker() {
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
-    }
-
-    private fun stopToFinishReview() {
-        rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        rule.waitForNode(hasText(str(R.string.track_finish_title)))
-    }
-
-    /** Save the run as the tracker's Save does, standing in for the service's stop
-     *  confirmation (no service runs under Robolectric), and wait for the whole save. */
-    private fun saveRunAndAwait() {
-        rule.mainClock.autoAdvance = false
-        try {
-            rule.onNodeWithText(str(R.string.track_btn_save_run)).performClick()
-            RunSession.markStopped()
-        } finally {
-            rule.mainClock.autoAdvance = true
-        }
-        rule.waitForState { logCount("LogRunTrack") >= 1 && !RunSession.saving.value && RunSession.points.value.isEmpty() }
-    }
-
     @Test
     fun theFinishReviewSurvivesRotationWithItsRatingAndTheRunSavesOnce() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         QaHarness.seedRecordingRun()
-        launchOnTracker()
-        stopToFinishReview()
+        rule.launchOnTracker()
+        rule.stopToFinishReview()
         rule.pickRating("effort-scale", 7)
-        rule.onNodeWithText("Interval").performScrollTo().performClick()
+        rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().performClick()
         val effort = ratingState("effort-scale")
 
         recreate()
         rule.waitForNode(hasText(str(R.string.track_finish_title)))
         assertEquals("the effort answer is kept", effort, ratingState("effort-scale"))
-        rule.onNodeWithText("Interval").performScrollTo().assertIsSelected()
+        rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().assertIsSelected()
         assertEquals("the captured track is untouched", 21, RunSession.points.value.size)
         assertEquals(0, logCount("LogRunTrack"))
 
-        saveRunAndAwait()
+        rule.saveRunAndAwait()
         recreate()
         rule.waitForState { model.runs.size == 1 }
         assertEquals("one run after a rotation", 1, logCount("LogRunTrack"))
@@ -341,7 +298,7 @@ class RestoreRoundtripTest {
         assertEquals("Interval", saved["workout_type"]!!.jsonPrimitive.content)
         assertEquals(0, rule.countOf(hasText(str(R.string.track_finish_title))))
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals(1, model.runs.size)
         assertEquals(7, model.runs.single().session_rpe)
@@ -383,10 +340,10 @@ class RestoreRoundtripTest {
         assertEquals(1, logCount("AmendRunMeta"))
 
         // Killed in the background with the detail open; back from Recents.
-        val (state, size) = ProcessDeath.saveState()
+        val (state, size) = saveState()
         assertSavedStateFitsABinderTransaction(size)
-        ProcessDeath.kill(ctx)
-        ProcessDeath.relaunchWithState(rule, state)
+        killProcess()
+        relaunchWithState(state)
         rule.waitForNode(hasTestTag("run-trim"))
         assertEquals(2, model.runs.size)
         assertEquals(6, model.runs.single { it.entry_id == run.entryId }.session_rpe)
@@ -449,7 +406,7 @@ class RestoreRoundtripTest {
         assertEquals(10.1 * (50.5 - 15.0) / 50.5, trimmedKm, 0.15)
         assertEquals(2, model.runs.size)
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals(2, model.runs.size)
         assertEquals(trimmedKm, model.runs.single { it.entry_id == run.entryId }.distance_km, 1e-9)
@@ -484,10 +441,10 @@ class RestoreRoundtripTest {
         level.answer(rule)
 
         // Killed in the background mid-setup, restored from Recents.
-        val (state, size) = ProcessDeath.saveState()
+        val (state, size) = saveState()
         assertSavedStateFitsABinderTransaction(size)
-        ProcessDeath.kill(ctx)
-        ProcessDeath.relaunchWithState(rule, state)
+        killProcess()
+        relaunchWithState(state)
         rule.waitUntil(15_000) { onSetupScreen("level") }
         assertFalse("no profile was written mid-setup", File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
         next()
@@ -509,7 +466,7 @@ class RestoreRoundtripTest {
         assertEquals("five ticked weekdays", 5, Integer.bitCount(checkNotNull(p.training_weekdays)))
         assertEquals(java.time.LocalDate.of(1991, 3, 12).toEpochDay(), p.birth_epoch_day)
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals("no second setup after a cold start", 0, rule.countOf(hasText(str(R.string.setup_step_train_q))))
         assertEquals(p, model.profile)
@@ -519,7 +476,7 @@ class RestoreRoundtripTest {
     fun aColdStartMidSetupStartsTheSetupOverWithNothingSaved() {
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule, stopAt = "days")
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchAppExpectingSetup()
         assertTrue("back on the first question", onSetupScreen("train"))
         assertFalse(File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
@@ -531,17 +488,8 @@ class RestoreRoundtripTest {
         QaHarness.seedLog(
             ctx,
             listOf(
-                Event.SetProfile(
-                    progressionCadence = ProgressionCadence.WeekToWeek,
-                    liftGoal = LiftGoal.Hypertrophy,
-                    goalDistance = GoalDistance.TenK,
-                    concurrentGoal = ConcurrentGoal.Hypertrophy,
-                    weeklySets = 12,
-                    runningDaysPerWeek = 3,
-                    runningKmPerWeek = 30.0,
-                    advanced = false,
-                    bodyweightKg = 81.7,
-                    ageYears = 30.0,
+                QaHarness.hybridTenKProfile().copy(
+                    liftGoal = LiftGoal.Hypertrophy, concurrentGoal = ConcurrentGoal.Hypertrophy, runningKmPerWeek = 30.0, bodyweightKg = 81.7,
                 ),
                 Event.ComputeProtein(81.7, masters = false, deficit = true),
             ),
@@ -569,10 +517,10 @@ class RestoreRoundtripTest {
         rule.waitForNode(hasTestTag("calc-result"))
         assertHeadline(headline)
 
-        val (state, size) = ProcessDeath.saveState()
+        val (state, size) = saveState()
         assertSavedStateFitsABinderTransaction(size)
-        ProcessDeath.kill(ctx)
-        ProcessDeath.relaunchWithState(rule, state)
+        killProcess()
+        relaunchWithState(state)
         rule.waitForNode(hasTestTag("calc-result"))
         assertHeadline(headline)
         assertEquals(95.0, model.protein_input?.bodyweight_kg)
@@ -593,17 +541,12 @@ class RestoreRoundtripTest {
 
     @Test
     fun themeAndUnitSwitchesSurviveRotationAndProcessDeathAndAWeightUnitRoundTripChangesNothingElse() {
-        val profile = Event.SetProfile(
-            progressionCadence = ProgressionCadence.WeekToWeek,
-            liftGoal = LiftGoal.MaxStrength,
-            goalDistance = GoalDistance.TenK,
-            concurrentGoal = ConcurrentGoal.Strength,
-            weeklySets = 12,
+        val profile = QaHarness.hybridTenKProfile().copy(
             runningDaysPerWeek = 2,
             runningKmPerWeek = 15.0,
-            advanced = false,
             female = true,
             bodyweightKg = 63.4,
+            ageYears = null,
             restingHrBpm = 54.0,
             measuredHrMax = 188.0,
             recentRace = RecentRace(distance_km = 10.0, time_sec = 52 * 60, epoch_day = todayEpochDay() - 20),
@@ -640,13 +583,13 @@ class RestoreRoundtripTest {
         rule.onNode(hasText(AppTheme.Meadow.name) and isSelectable()).assertIsSelected()
 
         // Cold start: only what was saved can bring them back.
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
         assertEquals(DistanceUnit.Mi, model.profile!!.distance_unit)
         assertTrue(model.profile!!.weight_lb)
         rule.selectTab(str(R.string.main_dest_history))
-        rule.selectHistoryFilter(str(R.string.main_segment_runs))
+        rule.selectTab(str(R.string.main_segment_runs))
         rule.scrollToText(runDistLabel(8.0, DistanceUnit.Mi))
 
         // Back to kg and km: the profile is the one the user had, field for field
@@ -850,9 +793,9 @@ class RestoreRoundtripTest {
         RunSession.recordingStarted()
         val live = liveSnapshot()
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
-        rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_resume_run_title)), 1)
         rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals(live.km, RunSession.distanceKm.value, 1e-9)
@@ -865,8 +808,8 @@ class RestoreRoundtripTest {
         assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertEquals(pts.size, RunSession.points.value.size)
 
-        stopToFinishReview()
-        saveRunAndAwait()
+        rule.stopToFinishReview()
+        rule.saveRunAndAwait()
         assertEquals(1, logCount("LogRunTrack"))
         rule.waitForState { model.runs.size == 1 }
         val saved = model.runs.single()
@@ -875,7 +818,7 @@ class RestoreRoundtripTest {
         ActiveRunStore.flush()
         assertFalse("the sidecar of a saved run is gone", File(ctx.filesDir, AppFileNames.ACTIVE_RUN).exists())
 
-        ProcessDeath.kill(ctx)
+        killProcess()
         rule.launchApp()
         assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertEquals(1, model.runs.size)
@@ -890,7 +833,7 @@ class RestoreRoundtripTest {
         feedLive(pts, t0, baseElapsedMs = 5_000)
         RunSession.recordingStarted()
         val live = liveSnapshot()
-        launchOnTracker()
+        rule.launchOnTracker()
         repeat(2) {
             recreate()
             rule.waitForNode(hasText(str(R.string.track_btn_stop)))
@@ -918,7 +861,7 @@ class RestoreRoundtripTest {
         assertEquals(0, model.runs.size)
 
         // A crash before the second fix: nothing to resume.
-        ProcessDeath.kill(ctx)
+        killProcess()
         ActiveRunStore.start(ctx)
         ActiveRunStore.begin()
         ActiveRunStore.append(GpsPoint(52.5, 13.4, now - 5, 5.0), segmentStart = false)

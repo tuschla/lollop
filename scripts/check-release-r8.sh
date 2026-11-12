@@ -5,13 +5,13 @@
 # (ClassNotFoundException, NoSuchMethodException, "Failed to create an instance",
 # UnsatisfiedLinkError).
 #
-# Checks on the R8 output dex (dexdump) and the merged release manifest:
+# Checks on the release APK (its dex through dexdump, its manifest through aapt2,
+# its libshared.so) and R8's mapping:
 #   jni        app.milestone.core.JniCore keeps its name and a NATIVE method for
-#              every Java_app_milestone_core_JniCore_* export in
-#              shared/src/ffi/jni.rs
+#              every Java_app_milestone_core_JniCore_* symbol libshared.so exports
 #   manifest   every activity / service / receiver / provider and every
-#              androidx.startup initializer of the merged manifest exists under
-#              its manifest name with a public no-arg constructor
+#              androidx.startup initializer of the manifest exists under its
+#              manifest name with a public no-arg constructor
 #   room       every Room database implementation (`*_Impl` extending
 #              androidx.room.RoomDatabase; WorkManager's WorkDatabase_Impl, pulled
 #              in by Glance) keeps the no-arg constructor Room calls reflectively
@@ -24,10 +24,11 @@
 #
 #   scripts/check-release-r8.sh
 #
-# Checks the output of the last `gradlew :app:assembleRelease` (or
-# :app:minifyReleaseWithR8); scripts/build.sh and CI's release job run it after
-# that build. Exit 0 when every check passes. Needs the Android SDK
-# (build-tools dexdump) and python3.
+# Checks the outputs of the last `gradlew :app:assembleRelease` (the APK that
+# outputs/apk/release/output-metadata.json names, outputs/mapping/release/
+# mapping.txt); scripts/build.sh and CI's release job run it after that build.
+# Exit 0 when every check passes. Needs the Android SDK (build-tools dexdump and
+# aapt2) and python3.
 set -euo pipefail
 
 . "$(dirname "$0")/lib/env.sh"
@@ -39,27 +40,25 @@ case "${1:-}" in
 esac
 
 DEXDUMP="$(build_tool dexdump)" || exit 2
+AAPT2="$(build_tool aapt2)" || exit 2
 
-shopt -s nullglob
-DEX=("$BUILD_DIR"/intermediates/dex/release/minifyReleaseWithR8/*.dex)
-shopt -u nullglob
-MANIFEST="$BUILD_DIR/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml"
-[[ ${#DEX[@]} -gt 0 ]] || { echo "no R8 dex under $BUILD_DIR/intermediates/dex/release/minifyReleaseWithR8" >&2; exit 2; }
-[[ -f "$MANIFEST" ]] || { echo "no merged release manifest: $MANIFEST" >&2; exit 2; }
+APKS="$BUILD_DIR/outputs/apk/release"
+[[ -f "$APKS/output-metadata.json" ]] || { echo "no release APK listing: $APKS/output-metadata.json" >&2; exit 2; }
+APK="$APKS/$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["elements"][0]["outputFile"])' "$APKS/output-metadata.json")"
+MAPPING="$BUILD_DIR/outputs/mapping/release/mapping.txt"
+[[ -f "$APK" ]] || { echo "no release APK: $APK" >&2; exit 2; }
+[[ -f "$MAPPING" ]] || { echo "no R8 mapping: $MAPPING" >&2; exit 2; }
 
 OUT="$BUILD_DIR/outputs/r8-check"
-MAPPING="$BUILD_DIR/intermediates/mapping/release/minifyReleaseWithR8/mapping.txt"
-[[ -f "$MAPPING" ]] || { echo "no R8 mapping: $MAPPING" >&2; exit 2; }
 mkdir -p "$OUT"
-"$DEXDUMP" "${DEX[@]}" >"$OUT/dexdump.txt" 2>/dev/null
-echo "==> checking ${#DEX[@]} dex file(s) against $MANIFEST"
+"$DEXDUMP" "$APK" >"$OUT/dexdump.txt" 2>/dev/null
+"$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" >"$OUT/manifest.txt"
+echo "==> checking $APK"
 
-python3 - "$OUT/dexdump.txt" "$MANIFEST" "$REPO_ROOT/shared/src/ffi/jni.rs" "$MAPPING" <<'PY'
-import re, sys
-import xml.etree.ElementTree as ET
+python3 - "$OUT/dexdump.txt" "$OUT/manifest.txt" "$APK" "$MAPPING" <<'PY'
+import re, struct, sys, zipfile
 
-dump, manifest, ffi, mapping = sys.argv[1:5]
-ANDROID = "{http://schemas.android.com/apk/res/android}"
+dump, manifest, apk, mapping = sys.argv[1:5]
 
 # R8 renames a superclass nothing keeps (androidx.room.RoomDatabase itself): the
 # mapping's class lines (`original -> renamed:`) give the original names back.
@@ -139,34 +138,83 @@ def extends(cls, base):
             return True
     return False
 
-# jni: every Rust export has a NATIVE method on the unrenamed JniCore class.
+# jni: every JniCore symbol a packaged libshared.so exports has a NATIVE method on
+# the unrenamed JniCore class.
+def dynamic_symbols(elf):
+    """The defined dynamic symbols of a 64-bit little-endian ELF file."""
+    if elf[:6] != b"\x7fELF\x02\x01":
+        return set()
+    shoff, = struct.unpack_from("<Q", elf, 0x28)
+    shentsize, shnum = struct.unpack_from("<HH", elf, 0x3A)
+    sections = [struct.unpack_from("<IIQQQQIIQQ", elf, shoff + i * shentsize) for i in range(shnum)]
+    names = set()
+    for _, kind, _, _, off, size, link, _, _, entsize in sections:
+        if kind != 11:  # SHT_DYNSYM
+            continue
+        strtab = sections[link][4]
+        for sym in range(off, off + size, entsize):
+            name, _, _, shndx = struct.unpack_from("<IBBH", elf, sym)
+            if shndx:
+                start = strtab + name
+                names.add(elf[start:elf.index(b"\0", start)].decode())
+    return names
+
 JNI_CLASS = "app.milestone.core.JniCore"
-exports = sorted(set(re.findall(r"fn Java_app_milestone_core_JniCore_(\w+)", open(ffi).read())))
-found("jni", exports, "Java_app_milestone_core_JniCore_* export in shared/src/ffi/jni.rs")
+PREFIX = "Java_" + JNI_CLASS.replace(".", "_") + "_"
+with zipfile.ZipFile(apk) as z:
+    libs = [z.read(n) for n in z.namelist() if re.fullmatch(r"lib/[^/]+/libshared\.so", n)]
+found("jni", libs, "lib/<abi>/libshared.so in the APK")
+exports = sorted({s[len(PREFIX):] for elf in libs for s in dynamic_symbols(elf) if s.startswith(PREFIX)})
+found("jni", exports, f"{PREFIX}* symbol exported by libshared.so")
 check(JNI_CLASS in classes, f"jni: class {JNI_CLASS} kept under its JNI name")
 core = classes.get(JNI_CLASS, {"methods": []})
 for name in exports:
     check(any(n == name and "NATIVE" in a for n, _, a in core["methods"]),
-          f"jni: {JNI_CLASS}.{name} is a kept native method (Java_app_milestone_core_JniCore_{name})")
+          f"jni: {JNI_CLASS}.{name} is a kept native method ({PREFIX}{name})")
 
-# manifest: components and androidx.startup initializers.
-root = ET.parse(manifest).getroot()
-pkg = root.get("package") or "app.milestone"
+# manifest: components and androidx.startup initializers. aapt2's `dump xmltree`
+# prints "E: tag (line=N)" for an element and "A: name=value" for each of its
+# attributes, indented by depth.
+def read_manifest(path):
+    root, stack = None, []
+    for line in open(path, encoding="utf-8"):
+        depth = len(line) - len(line.lstrip(" "))
+        m = re.match(r"E: (\S+) \(line=\d+\)$", line.strip())
+        if m:
+            el = {"tag": m.group(1), "depth": depth, "attrs": {}, "children": []}
+            while stack and stack[-1]["depth"] >= depth:
+                stack.pop()
+            if stack:
+                stack[-1]["children"].append(el)
+            else:
+                root = el
+            stack.append(el)
+            continue
+        m = re.match(r'A: (?:http://schemas\.android\.com/apk/res/android:)?(\w+)(?:\(0x[0-9a-f]+\))?="([^"]*)"', line.strip())
+        if m and stack:
+            stack[-1]["attrs"][m.group(1)] = m.group(2)
+    return root
+
+def children(el, tag):
+    return [c for c in el["children"] if c["tag"] == tag]
+
+root = read_manifest(manifest)
+pkg = root["attrs"]["package"]
 def fq(name):
     if name.startswith("."):
         return pkg + name
     return name if "." in name else f"{pkg}.{name}"
-app = root.find("application")
+app, = children(root, "application")
 names = []
-if app.get(ANDROID + "name"):
-    names.append(("application", fq(app.get(ANDROID + "name"))))
+if app["attrs"].get("name"):
+    names.append(("application", fq(app["attrs"]["name"])))
 for tag in ("activity", "service", "receiver", "provider"):
-    for el in app.findall(tag):
-        names.append((tag, fq(el.get(ANDROID + "name"))))
-for prov in app.findall("provider"):
-    for md in prov.findall("meta-data"):
-        if md.get(ANDROID + "value") == "androidx.startup":
-            names.append(("startup initializer", fq(md.get(ANDROID + "name"))))
+    for el in children(app, tag):
+        names.append((tag, fq(el["attrs"]["name"])))
+for prov in children(app, "provider"):
+    for md in children(prov, "meta-data"):
+        if md["attrs"].get("value") == "androidx.startup":
+            names.append(("startup initializer", fq(md["attrs"]["name"])))
 found("manifest", names, "manifest component")
 for kind, cls in names:
     present = cls in classes

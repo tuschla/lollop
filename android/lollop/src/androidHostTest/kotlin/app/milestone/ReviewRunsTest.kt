@@ -3,7 +3,6 @@ package app.milestone
 import android.content.Context
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
-import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
@@ -64,18 +63,17 @@ class ReviewRunsTest {
 
     @Test
     fun anOldSidecarWithoutSegmentMarkersStillRecoversByGapRule() {
-        // A sidecar from an older app carries no "seg" keys. It still recovers
-        // every fix, with boundaries re-derived from fix-time gaps only.
-        val f = File(ctx.filesDir, AppFileNames.ACTIVE_RUN)
+        // A sidecar from an older app carries no "seg" keys: its fixes were appended
+        // with no segment start. It still recovers every fix, with boundaries
+        // re-derived from fix-time gaps only.
         ActiveRunStore.start(ctx)
-        val lines = buildList {
-            add("{\"run\":\"active\"}")
-            for (t in 0 until 20) add("{\"lat\":0.0,\"lon\":${t * 3e-5},\"observed_at\":${1_790_000_000 + t},\"accuracy_m\":5.0}")
-            // 60 s without a fix (a gap over MAX_FIX_GAP_SEC), then 10 more.
-            for (t in 80 until 90) add("{\"lat\":0.0,\"lon\":${t * 3e-5},\"observed_at\":${1_790_000_000 + t},\"accuracy_m\":5.0}")
-            add("{\"lat\":0.0,\"lon\":0.1,\"obse") // torn final line
-        }
-        f.writeText(lines.joinToString("\n"))
+        ActiveRunStore.begin()
+        fun fix(t: Int) = ActiveRunStore.append(GpsPoint(0.0, t * 3e-5, 1_790_000_000L + t, 5.0), segmentStart = false)
+        for (t in 0 until 20) fix(t)
+        // 60 s without a fix (a gap over MAX_FIX_GAP_SEC), then 10 more.
+        for (t in 80 until 90) fix(t)
+        ActiveRunStore.flush()
+        AppFiles.append(ctx.appFile(AppFileNames.ACTIVE_RUN), "{\"lat\":0.0,\"lon\":0.1,\"obse") // torn final line
         val recovered = ActiveRunStore.recover()
         assertEquals(30, recovered.size)
         assertEquals(emptyList<Int>(), recovered.segmentStarts)
@@ -84,6 +82,6 @@ class ReviewRunsTest {
         // The gap leg is a boundary; 28 one-second legs remain moving.
         assertEquals(28L, RunSession.elapsedSec.value)
         RunSession.reset()
-        f.delete()
+        ActiveRunStore.clearSync()
     }
 }

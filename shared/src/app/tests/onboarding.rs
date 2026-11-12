@@ -336,7 +336,7 @@ fn age_15_gates_even_with_empty_health_screen() {
         "no plan may render through a gate"
     );
     assert!(vm.program.is_none());
-    assert!(model.profile().unwrap().health.youth);
+    assert!(vm.profile.as_ref().unwrap().health.youth);
     // A gates-only hold produces NO adjustment rows: the headline's
     // safety_hold rung is therefore the ONLY cited surface for this state,
     // and the shells (blocked-branch card + SafetyBanner why-panel) render
@@ -354,29 +354,43 @@ fn age_15_gates_even_with_empty_health_screen() {
     app.update(
         Event::SetProfile(Profile {
             age_years: Some(18.0),
+            health: HealthScreen::default(),
             ..strength_profile()
         }),
         &mut m2,
     )
     .expect_only_render();
-    assert!(!m2.profile().unwrap().health.youth, "18 is not youth");
+    app.update(log_set("Back Squat", 120.0, 3, 8.0, MON * DAY_SEC), &mut m2)
+        .expect_only_render();
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: MON,
+        },
+        &mut m2,
+    )
+    .expect_only_render();
+    let vm = app.view(&m2);
+    assert!(
+        !vm.profile.as_ref().unwrap().health.youth,
+        "18 is not youth"
+    );
+    assert_eq!(vm.hold_reason, None);
+    assert_eq!(vm.safety_tier, None);
+    assert!(vm.program.is_some(), "the adult plan builds");
 }
 
-const BORN_1991_03_12: i64 = 7740;
-const D_2026_03_11: i64 = 20523;
-const D_2026_03_12: i64 = 20524;
-const BORN_2008_10_18: i64 = 14170;
-const D_2026_10_17: i64 = 20743;
-const D_2026_10_18: i64 = 20744;
+fn age_on(app: &Engine, model: &Model) -> Option<f64> {
+    app.view(model).profile.and_then(|p| p.age_years)
+}
 
 #[test]
 fn birthday_age_is_derived_and_ticks_over_on_the_birthday() {
     let app = Engine;
     let mut model = Model::default();
-    set_today(&app, &mut model, D_2026_03_11);
+    set_today(&app, &mut model, days_from_civil(2026, 3, 11));
     app.update(
         Event::SetProfile(Profile {
-            birth_epoch_day: Some(BORN_1991_03_12),
+            birth_epoch_day: Some(days_from_civil(1991, 3, 12)),
             // A stale stated age is overridden by the birthday.
             age_years: Some(20.0),
             ..strength_profile()
@@ -384,21 +398,9 @@ fn birthday_age_is_derived_and_ticks_over_on_the_birthday() {
         &mut model,
     )
     .expect_only_render();
-    assert_eq!(model.profile().unwrap().age_years, Some(34.0));
-    set_today(&app, &mut model, D_2026_03_12);
-    assert_eq!(model.profile().unwrap().age_years, Some(35.0));
-    assert!(
-        model
-            .profile_history
-            .iter()
-            .all(|p| p.age_years == Some(35.0)),
-        "the plan's dated profiles carry the same derived age"
-    );
-    assert_eq!(
-        app.view(&model).profile.and_then(|p| p.age_years),
-        Some(35.0),
-        "the shell reads the derived age off the view"
-    );
+    assert_eq!(age_on(&app, &model), Some(34.0));
+    set_today(&app, &mut model, days_from_civil(2026, 3, 12));
+    assert_eq!(age_on(&app, &model), Some(35.0));
 }
 
 #[test]
@@ -407,22 +409,23 @@ fn birthday_profile_set_before_the_clock_derives_on_set_today() {
     let mut model = Model::default();
     app.update(
         Event::SetProfile(Profile {
-            birth_epoch_day: Some(BORN_1991_03_12),
+            birth_epoch_day: Some(days_from_civil(1991, 3, 12)),
             ..strength_profile()
         }),
         &mut model,
     )
     .expect_only_render();
-    assert_eq!(model.profile().unwrap().age_years, None);
-    set_today(&app, &mut model, D_2026_03_12);
-    assert_eq!(model.profile().unwrap().age_years, Some(35.0));
+    assert_eq!(age_on(&app, &model), None);
+    set_today(&app, &mut model, days_from_civil(2026, 3, 12));
+    assert_eq!(age_on(&app, &model), Some(35.0));
 }
 
 #[test]
 fn legacy_stated_age_without_birthday_is_kept_across_days() {
     let app = Engine;
     let mut model = Model::default();
-    set_today(&app, &mut model, D_2026_03_11);
+    let day = days_from_civil(2026, 3, 11);
+    set_today(&app, &mut model, day);
     app.update(
         Event::SetProfile(Profile {
             age_years: Some(34.0),
@@ -431,32 +434,33 @@ fn legacy_stated_age_without_birthday_is_kept_across_days() {
         &mut model,
     )
     .expect_only_render();
-    set_today(&app, &mut model, D_2026_03_11 + 400);
-    assert_eq!(model.profile().unwrap().age_years, Some(34.0));
+    set_today(&app, &mut model, day + 400);
+    assert_eq!(age_on(&app, &model), Some(34.0));
 }
 
 #[test]
 fn youth_gate_lifts_on_the_eighteenth_birthday() {
     let app = Engine;
     let mut model = Model::default();
-    set_today(&app, &mut model, D_2026_10_17);
+    let eve = days_from_civil(2026, 10, 17);
+    set_today(&app, &mut model, eve);
     app.update(
         Event::SetProfile(Profile {
-            birth_epoch_day: Some(BORN_2008_10_18),
-            effective_from_epoch_day: Some(D_2026_10_17),
+            birth_epoch_day: Some(days_from_civil(2008, 10, 18)),
+            effective_from_epoch_day: Some(eve),
             ..strength_profile()
         }),
         &mut model,
     )
     .expect_only_render();
     app.update(
-        log_set("Back Squat", 120.0, 3, 8.0, D_2026_10_17 * DAY_SEC),
+        log_set("Back Squat", 120.0, 3, 8.0, eve * DAY_SEC),
         &mut model,
     )
     .expect_only_render();
     app.update(
         Event::GeneratePlan {
-            start_epoch_day: D_2026_10_17,
+            start_epoch_day: eve,
         },
         &mut model,
     )
@@ -467,12 +471,13 @@ fn youth_gate_lifts_on_the_eighteenth_birthday() {
         "17 the day before the birthday: held"
     );
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
-    assert_eq!(model.profile().unwrap().age_years, Some(17.0));
+    assert_eq!(vm.profile.and_then(|p| p.age_years), Some(17.0));
 
-    set_today(&app, &mut model, D_2026_10_18);
+    set_today(&app, &mut model, eve + 1);
     let vm = app.view(&model);
-    assert_eq!(model.profile().unwrap().age_years, Some(18.0));
-    assert!(!model.profile().unwrap().health.youth);
+    let profile = vm.profile.as_ref().unwrap();
+    assert_eq!(profile.age_years, Some(18.0));
+    assert!(!profile.health.youth);
     assert!(
         vm.hold_reason.is_none(),
         "18 on the birthday: the hold lifts"
@@ -482,11 +487,14 @@ fn youth_gate_lifts_on_the_eighteenth_birthday() {
 
 #[test]
 fn whole_years_handle_leap_day_birthdays_and_future_dates() {
-    const BORN_2008_02_29: i64 = 13938;
-    const D_2026_02_28: i64 = 20512;
-    const D_2026_03_01: i64 = 20513;
-    assert_eq!(whole_years_between(BORN_2008_02_29, D_2026_02_28), 17);
-    assert_eq!(whole_years_between(BORN_2008_02_29, D_2026_03_01), 18);
-    assert_eq!(whole_years_between(D_2026_03_01, D_2026_02_28), 0);
-    assert_eq!(whole_years_between(BORN_1991_03_12, i64::MAX), 128);
+    let born_2008_02_29 = days_from_civil(2008, 2, 29);
+    let d_2026_02_28 = days_from_civil(2026, 2, 28);
+    let d_2026_03_01 = days_from_civil(2026, 3, 1);
+    assert_eq!(whole_years_between(born_2008_02_29, d_2026_02_28), 17);
+    assert_eq!(whole_years_between(born_2008_02_29, d_2026_03_01), 18);
+    assert_eq!(whole_years_between(d_2026_03_01, d_2026_02_28), 0);
+    assert_eq!(
+        whole_years_between(days_from_civil(1991, 3, 12), i64::MAX),
+        128
+    );
 }

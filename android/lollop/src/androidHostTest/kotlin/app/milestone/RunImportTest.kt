@@ -30,20 +30,11 @@ class RunImportTest {
 
     /** A GPX with one `<trkseg>` per segment of (lat, unix second) fixes on the meridian,
      *  each `<trk>` typed [type] when given. */
-    private fun gpx(vararg tracks: List<List<Pair<Double, Long>>>, type: String? = null): ByteArray = buildString {
-        append("<?xml version=\"1.0\"?><gpx version=\"1.1\">")
-        for (segments in tracks) {
-            append("<trk>")
-            if (type != null) append("<type>$type</type>")
-            for (seg in segments) {
-                append("<trkseg>")
-                for ((lat, t) in seg) append("<trkpt lat=\"$lat\" lon=\"0.0\"><time>${java.time.Instant.ofEpochSecond(t)}</time></trkpt>")
-                append("</trkseg>")
-            }
-            append("</trk>")
-        }
-        append("</gpx>")
-    }.toByteArray()
+    private fun gpx(vararg tracks: List<List<Pair<Double, Long>>>, type: String? = null): ByteArray =
+        gpxDocument(*tracks.map { meridianTrack(it, type) }.toTypedArray()).toByteArray()
+
+    private fun meridianTrack(segments: List<List<Pair<Double, Long>>>, type: String? = null) =
+        GpxTrack(segments.map { seg -> seg.map { (lat, t) -> GpsPoint(lat, 0.0, t, 0.0) } }, type)
 
     private fun track(endSec: Long, metresPerFix: Double, fixes: Int = 61): List<List<Pair<Double, Long>>> {
         val start = endSec - (fixes - 1) * 10L
@@ -107,9 +98,7 @@ class RunImportTest {
     @Test
     fun eachGpxTrackIsItsOwnRunWithItsOwnSport() {
         // A run and a ride in one GPX: the run imports, the ride is refused.
-        val doc = gpx(easyRun(10_000)).decodeToString()
-            .replace("<trk>", "<trk><type>running</type>")
-            .replace("</gpx>", gpx(easyRun(20_000), type = "cycling").decodeToString().substringAfter("<gpx version=\"1.1\">"))
+        val doc = gpxDocument(meridianTrack(easyRun(10_000), "running"), meridianTrack(easyRun(20_000), "cycling"))
         val p = plan(listOf(ParsedRunFile("day.gpx", read(doc.toByteArray()))))
         assertEquals(listOf(10_000L), p.runs.map { it.event.observedAt })
         assertTrue(p.failures.isEmpty())
@@ -152,49 +141,35 @@ class RunImportTest {
 
     @Test
     fun summaryNamesEverySkippedFileWithItsReason() {
-        val res = ctx.resources
         val skipped = listOf(
             RunImportFailure("broken.gpx", ImportFailure.NoTrack),
             RunImportFailure("bike.fit", ImportFailure.NotARun, "cycling"),
         )
-        val s = runImportSummary(res, imported = 7, newestImportedAt = 1_700_000_000L, duplicates = 2, failures = skipped)
-        val head = res.getQuantityString(R.plurals.import_result_many, 7, 7) + " · " +
-            res.getQuantityString(R.plurals.main_import_summary_duplicates, 2, 2)
-        val lines = res.getString(
-            R.string.import_skip_item, "broken.gpx", res.getString(R.string.import_reason_no_track),
-        ) + ", " + res.getString(
-            R.string.import_skip_item, "bike.fit", res.getString(R.string.import_reason_not_a_run, "cycling"),
+        val s = runImportSummary(ctx.resources, imported = 7, newestImportedAt = 1_700_000_000L, duplicates = 2, failures = skipped)
+        assertEquals(
+            "Imported 7 runs · 2 already in history. Skipped: broken.gpx (no GPS points), bike.fit (a cycling activity, not a run)",
+            s.text,
         )
-        assertEquals(res.getString(R.string.import_result_with_skipped, head, lines), s.text)
         assertTrue("two skips are named inline, no details list", s.details.isEmpty())
     }
 
     @Test
     fun summaryMovesManySkippedFilesBehindDetails() {
-        val res = ctx.resources
         val skipped = (1..3).map { RunImportFailure("f$it.gpx", ImportFailure.ImplausiblePace) }
-        val s = runImportSummary(res, imported = 0, newestImportedAt = null, duplicates = 0, failures = skipped)
-        assertEquals(
-            res.getString(
-                R.string.import_result_with_skipped_count,
-                res.getString(R.string.import_result_none),
-                res.getQuantityString(R.plurals.import_result_skipped_count, 3, 3),
-            ),
-            s.text,
-        )
-        assertEquals(skipped.map { importFailureLine(res, it) }, s.details)
-        assertTrue(s.details.all { it.contains(res.getString(R.string.import_reason_implausible_pace)) })
+        val s = runImportSummary(ctx.resources, imported = 0, newestImportedAt = null, duplicates = 0, failures = skipped)
+        assertEquals("No runs imported. Skipped 3 files", s.text)
+        assertEquals((1..3).map { "f$it.gpx (pace too fast for a run)" }, s.details)
     }
 
     @Test
     fun aSingleImportedRunNamesItsDateAndOnlyDuplicatesKeepTheDuplicateMessage() {
         val res = ctx.resources
         assertEquals(
-            res.getString(R.string.import_result_one, importDateLabel(1_700_000_000L)),
+            "Imported a run from ${importDateLabel(1_700_000_000L)}",
             runImportSummary(res, imported = 1, newestImportedAt = 1_700_000_000L, duplicates = 0, failures = emptyList()).text,
         )
         assertEquals(
-            res.getString(R.string.main_import_duplicate),
+            "Already imported: a logged run ends at the same time",
             runImportSummary(res, imported = 0, newestImportedAt = null, duplicates = 3, failures = emptyList()).text,
         )
     }

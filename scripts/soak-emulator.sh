@@ -237,7 +237,7 @@ gps_run() {
   if scroll_to eq "${STR[history_run_easy]}" 6 && row="$(find_node eq "${STR[history_run_easy]}")"; then
     ui_texts >"$G/history-texts.txt"
     # The row's own figures: the first "X mi · pace · time" line after its title.
-    hist="$(awk -v t="${STR[history_run_easy]}" 'f && /^text=[0-9.]+ (mi|km) · /{sub(/^text=/,""); print; exit} $0=="text=" t{f=1}' "$G/history-texts.txt")"
+    hist="$(awk -v t="${STR[history_run_easy]}" 'f && /^text=[0-9.]+( |\302\240)(mi|km) · /{sub(/^text=/,""); print; exit} $0=="text=" t{f=1}' "$G/history-texts.txt")"
     shot gps-10-history-row
     read -r -a p <<<"$row"; tap_xy "${p[0]}" "${p[1]}"
     wait_text eq "${STR[history_workout_type]}" 10

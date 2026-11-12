@@ -3,15 +3,15 @@
 
 use super::*;
 
-fn rpe_input_at(value: f64, observed_at: i64) -> ReadinessInput {
+fn signal_at(signal: ReadinessSignal, value: f64, observed_at: i64) -> ReadinessInput {
     ReadinessInput {
-        signal: ReadinessSignal::Rpe,
-        value,
         observed_at,
-        streak: 0,
-        pain: None,
-        effort_min: None,
+        ..input(signal, value)
     }
+}
+
+fn rpe_input_at(value: f64, observed_at: i64) -> ReadinessInput {
+    signal_at(ReadinessSignal::Rpe, value, observed_at)
 }
 
 #[test]
@@ -65,14 +65,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
     // A 21-day-old PAIN report must NOT expire: safety persists (HARD RULE 3).
     let mut stale_pain = Model::default();
     app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            signal: ReadinessSignal::Pain,
-            value: 1.0,
-            observed_at: (today - 21) * DAY_SEC,
-            streak: 0,
-            pain: None,
-            effort_min: None,
-        }),
+        Event::SubmitReadiness(pain_row(1.0, None, (today - 21) * DAY_SEC)),
         &mut stale_pain,
     )
     .expect_only_render();
@@ -91,13 +84,8 @@ fn a_stale_e1rm_decline_stays_protective_while_a_stale_increase_expires() {
     // 1.0) must NEVER expire into optimism (HARD RULE 3): the reduce still fires.
     let app = Engine;
     let today = 100i64;
-    let e1rm_at = |ratio: f64, observed_at: i64| ReadinessInput {
-        signal: ReadinessSignal::EstimatedOneRm,
-        value: ratio,
-        observed_at,
-        streak: 0,
-        pain: None,
-        effort_min: None,
+    let e1rm_at = |ratio: f64, observed_at: i64| {
+        signal_at(ReadinessSignal::EstimatedOneRm, ratio, observed_at)
     };
     let has_reduce = |vm: &ViewModel| {
         vm.adjustments

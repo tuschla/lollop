@@ -28,7 +28,7 @@ const OFFSET: i64 = 7_200;
 
 /// Unix seconds of local `hour` on local day `day` at [`OFFSET`].
 fn local(day: i64, hour: i64) -> i64 {
-    day * DAY_SEC + hour * 3_600 - OFFSET
+    local_at(day, hour, 0, OFFSET)
 }
 
 /// The app plus the full event log fed to it, so a scenario can replay,
@@ -60,10 +60,7 @@ impl Sim {
     }
 
     fn today(&mut self, day: i64, offset: i64) {
-        self.ev(Event::SetToday {
-            epoch_day: day,
-            utc_offset_sec: offset,
-        });
+        self.ev(set_today_off_ev(day, offset));
     }
 
     fn report(&mut self, signal: ReadinessSignal, value: f64, at: i64) {
@@ -83,11 +80,12 @@ impl Sim {
 
     /// Replay `events` on a fresh model.
     fn replayed(events: &[Event]) -> Sim {
-        let mut s = Sim::new();
-        for e in events {
-            s.ev(e.clone());
+        let (app, model) = replay(events);
+        Sim {
+            app,
+            model,
+            log: events.to_vec(),
         }
-        s
     }
 }
 
@@ -780,21 +778,26 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
     let vm = s.vm();
     assert!(vm.hold_reason.is_none());
     assert_no_load_increase(&vm, "return");
-    assert!(vm.next_session.is_some(), "a session after recovery");
-    let plan = working_plan(&s.model);
-    let ns = plan
-        .hero_day
-        .and_then(|d| plan.row(d))
-        .expect("a session after recovery");
-    assert!(!ns.items.is_empty());
-    for it in &ns.items {
+    let ns = vm.next_session.as_ref().expect("a session after recovery");
+    assert!(
+        ns.items.iter().any(|it| it.return_check),
+        "a fever's first session back is the return check: {:?}",
+        ns.items.iter().map(|it| &it.summary).collect::<Vec<_>>()
+    );
+    for it in ns.items.iter().filter(|it| !it.return_check) {
         if it.is_run() {
             assert!(
                 it.run_structure.is_none(),
                 "a structured quality run on the first day back: {}",
                 it.summary
             );
-            if let Some(RunAmount::Minutes(m)) = it.run_volume {
+            // The minutes the run leads with ("20 min easy").
+            let minutes = it
+                .summary
+                .split_once(" min")
+                .and_then(|(head, _)| head.rsplit([' ', '–']).next())
+                .and_then(|n| n.parse::<f64>().ok());
+            if let Some(m) = minutes {
                 assert!(m <= 20.0, "return run over 20 min: {}", it.summary);
             }
             if let Some(t) = &it.run_target {
@@ -811,17 +814,13 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
                     "{t:?}"
                 );
             }
-        } else {
-            match it.intensity {
-                PlanIntensity::Rir { rir } => assert!(rir >= 3, "{}: RIR {rir}", it.summary),
-                PlanIntensity::RirRange { lo, .. } => assert!(lo >= 3, "{}", it.summary),
-                PlanIntensity::PercentE1rm { reduced_from, .. } => assert!(
-                    reduced_from.is_some() || it.return_check,
-                    "{}: a %1RM lift not eased on the first day back",
-                    it.summary
-                ),
-                PlanIntensity::Prose => {}
-            }
+        } else if let Some(rpe) = it.target_rpe {
+            // At least 3 reps in reserve (RPE 7) on every lift.
+            assert!(
+                rpe <= 7.0,
+                "{}: RPE {rpe} on the first day back",
+                it.summary
+            );
         }
     }
 }

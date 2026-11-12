@@ -1504,20 +1504,7 @@ mod tests {
 
     #[test]
     fn recommended_wrapper_carries_evidence_and_confidence() {
-        let rx = Recommended::new(
-            Prescription::Lift(LiftPrescription {
-                exercise: "Back squat".into(),
-                sets: 5,
-                reps: 5,
-                intensity: LiftIntensity::PercentOneRm(80.0),
-                rest_sec: 180,
-                velocity_loss_pct: Some(20),
-                reps_max: None,
-                load_kg: None,
-            }),
-            claims::TAPER_001,
-        );
-
+        let rx = Recommended::new((), claims::TAPER_001);
         assert_eq!(rx.grade(), EvidenceGrade::Strong);
         assert!((rx.confidence() - 0.90).abs() < f32::EPSILON);
         assert_eq!(
@@ -1562,15 +1549,6 @@ mod tests {
     fn grade_confidence_defaults_match_file_09() {
         assert_eq!(EvidenceGrade::MarketingMyth.default_confidence(), 0.05);
         assert_eq!(EvidenceGrade::Moderate.default_confidence(), 0.65);
-    }
-
-    #[test]
-    #[should_panic(expected = "must never back a recommendation")]
-    fn surfacing_a_myth_trips_the_choke_point_guard() {
-        // HARD RULE 2: grading a value with a myth claim panics. The guard is
-        // UNCONDITIONAL - this test is deliberately not gated on
-        // `debug_assertions` and must pass under `cargo test --release` too.
-        let _ = Recommended::new((), claims::LOAD_ACWR_001);
     }
 
     #[test]

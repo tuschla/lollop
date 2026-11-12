@@ -354,7 +354,7 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
             // Tone (`copy_tone`): rendered copy only, references verbatim; a
             // spoken subject is the summary's own words, cut at a length.
             if !dormant && key != "citation" && key != "subject" {
-                for rule in super::copy_tone::tone_hits(path, s) {
+                for rule in super::copy_tone::tone_hits(s) {
                     record(out, path.clone(), rule, s, scenario);
                 }
             }
@@ -417,7 +417,7 @@ fn marks_violations(
     scenario: &str,
     out: &mut Hits,
 ) {
-    use crate::app::text_parts::{glossary_spans, spoken_subject};
+    use crate::app::text_parts::{glossary_spans, is_prose, spoken_subject};
     let at = |field: &str| {
         if path.is_empty() {
             field.to_string()
@@ -457,10 +457,8 @@ fn marks_violations(
                 scenario,
             );
         }
-        // The shell's old rule is the oracle: over 90 UTF-16 units is prose.
         if map.contains_key("subject")
-            && map.get("prose").and_then(Value::as_bool).unwrap_or(false)
-                != (text.encode_utf16().count() > 90)
+            && map.get("prose").and_then(Value::as_bool).unwrap_or(false) != is_prose(text)
         {
             record(out, at("prose"), "marks: prose".into(), text, scenario);
         }
@@ -583,25 +581,6 @@ fn miles_violations(v: &Value, path: &mut String, scenario: &str, out: &mut Hits
     }
 }
 
-/// Shell-side local time: `hour` o'clock on local day `d` as a UTC stamp.
-fn at(d: i64, hour: i64, offset: i64) -> i64 {
-    d * DAY_SEC + hour * HOUR - offset
-}
-
-/// A short GPS track heading north at `pace` s/km.
-fn track(start: i64, km: f64, pace: f64) -> Vec<GpsPoint> {
-    let n = ((km * pace) / 5.0) as usize + 1;
-    let deg_per_s = 1.0 / pace / 111.0;
-    (0..n)
-        .map(|i| GpsPoint {
-            lat: 48.0 + deg_per_s * 5.0 * i as f64,
-            lon: 11.0 + ((i as f64) / 30.0).sin() * 0.0003,
-            observed_at: start + 5 * i as i64,
-            accuracy_m: 5.0,
-        })
-        .collect()
-}
-
 /// Sends `e` and records it, so a history can be replayed under overlays
 /// (`Model` is not `Clone`).
 fn send(app: &Engine, model: &mut Model, log: &mut Vec<Event>, e: Event) {
@@ -657,7 +636,7 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
                 &mut model,
                 &mut log,
                 ev(json!({"SubmitCheckin": {
-                    "observed_at": at(d, 7, offset),
+                    "observed_at": local_at(d, 7, 0, offset),
                     "sleep_quality": rng.pick(2, 5),
                     "soreness": rng.pick(1, 4),
                     "mood": rng.pick(2, 5),
@@ -669,7 +648,7 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
             );
         }
         let skip_day = rng.next() < 0.15;
-        let mut t = at(d, 17, offset);
+        let mut t = local_at(d, 17, 0, offset);
         if d < plan_day {
             if skip_day {
                 continue;
@@ -705,7 +684,14 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
                     &app,
                     &mut model,
                     &mut log,
-                    log_run(km, km * 6.0, 72.0, 0.0, at(d, 7, offset) + 1_800, next_id()),
+                    log_run(
+                        km,
+                        km * 6.0,
+                        72.0,
+                        0.0,
+                        local_at(d, 7, 0, offset) + 1_800,
+                        next_id(),
+                    ),
                 );
             }
             continue;
@@ -724,20 +710,31 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
             }
             if let Some(km) = item.run_head_km.or(item.run_target.as_ref().map(|_| 5.0)) {
                 let km = km * if lighter { 0.6 } else { 1.0 };
-                let begin = at(d, 7, offset);
+                let begin = local_at(d, 7, 0, offset);
                 if rng.next() < 0.3 {
+                    // 5 s fixes due north at 5:30/km.
+                    let legs = std::iter::repeat_n(5_000.0 / 330.0, (km * 330.0 / 5.0) as usize);
                     send(
                         &app,
                         &mut model,
                         &mut log,
-                        log_run_track(track(begin, km, 330.0), 74.0, 0.0, begin, next_id()),
+                        log_run_track(
+                            north_track(48.0, begin, 5, legs, 5.0),
+                            74.0,
+                            0.0,
+                            begin,
+                            next_id(),
+                        ),
                     );
                 } else {
-                    let mut e = log_run(km, km * 5.8, 74.0, 0.0, begin, next_id());
-                    if let Event::LogRun { session_rpe, .. } = &mut e {
-                        *session_rpe = Some(rng.pick(3, 8));
-                    }
-                    send(&app, &mut model, &mut log, e);
+                    let e = log_run(km, km * 5.8, 74.0, 0.0, begin, next_id());
+                    let rpe = rng.pick(3, 8);
+                    send(
+                        &app,
+                        &mut model,
+                        &mut log,
+                        with_run_meta(e, None, Some(rpe), None),
+                    );
                 }
                 continue;
             }
@@ -1055,16 +1052,17 @@ fn strings<'a>(v: &'a Value, path: &mut String, out: &mut Vec<(String, &'a str)>
     }
 }
 
-/// Phrases that describe something already logged or reported. On a day with
-/// nothing logged, none of them may be pinned on "today".
-const READING_PHRASES: [&str; 7] = [
+/// Phrases that state a reading happened today, as the core words them: the
+/// e1RM row's "came up short" / "today's top set" and the readiness signal
+/// states of a reading dated today (wellness "low today", resting HR "high
+/// this morning" / "high today"). On a day with nothing logged, none of them
+/// may be pinned on "today" or "this morning".
+const READING_PHRASES: [&str; 5] = [
     "came up short",
     "today's top set",
-    "top set today",
-    "logged today",
-    "checked in today",
-    "today's run",
-    "today's check-in",
+    "low today",
+    "high this morning",
+    "high today",
 ];
 
 /// "today" attached to an earlier reading: a stale view (nothing logged, no
@@ -1087,9 +1085,10 @@ fn today_on_stale(vm: &ViewModel, json: &Value, scenario: &str, out: &mut Hits) 
             continue;
         }
         let lower = s.to_lowercase();
-        let pinned = READING_PHRASES
-            .iter()
-            .find(|p| lower.contains(**p) && (p.contains("today") || has_word_ci(s, "today")));
+        let pinned = READING_PHRASES.iter().find(|p| {
+            lower.contains(**p)
+                && (p.contains("today") || p.contains("this morning") || has_word_ci(s, "today"))
+        });
         if let Some(p) = pinned {
             record(
                 out,

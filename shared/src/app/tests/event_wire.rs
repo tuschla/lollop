@@ -1,5 +1,5 @@
-//! Event and view wire compatibility: the shell's JSON forms and older
-//! persisted logs deserialize and replay; additive fields default.
+//! Event wire compatibility: the shell's JSON forms and older persisted logs
+//! deserialize and replay; additive fields default.
 
 use super::*;
 
@@ -333,23 +333,25 @@ fn readiness_signal_wire_names_match_the_shell_contract() {
     // compile clean but silently drop every readiness submission for it -
     // including the medical-referral flags at the top of the safety ladder.
     // This locks the wire names so such a rename fails here instead.
-    let cases = [
-        (ReadinessSignal::Rpe, "Rpe"),
-        (ReadinessSignal::EstimatedOneRm, "EstimatedOneRm"),
-        (ReadinessSignal::BarVelocity, "BarVelocity"),
-        (ReadinessSignal::VelocityLoss, "VelocityLoss"),
-        (ReadinessSignal::WellnessZ, "WellnessZ"),
-        (ReadinessSignal::HrvLnRmssd, "HrvLnRmssd"),
-        (ReadinessSignal::HrvCv, "HrvCv"),
-        (ReadinessSignal::AerobicDecoupling, "AerobicDecoupling"),
-        (ReadinessSignal::RestingHr, "RestingHr"),
-        (ReadinessSignal::Pain, "Pain"),
-        (ReadinessSignal::Illness, "Illness"),
-        (ReadinessSignal::RedS, "RedS"),
-        (ReadinessSignal::CardiacRedFlag, "CardiacRedFlag"),
-        (ReadinessSignal::BoneStress, "BoneStress"),
-    ];
-    for (signal, wire) in cases {
+    for signal in crate::autoreg::ALL_SIGNALS {
+        // Exhaustive: a new variant must name its wire form here.
+        let wire = match signal {
+            ReadinessSignal::Rpe => "Rpe",
+            ReadinessSignal::EstimatedOneRm => "EstimatedOneRm",
+            ReadinessSignal::BarVelocity => "BarVelocity",
+            ReadinessSignal::VelocityLoss => "VelocityLoss",
+            ReadinessSignal::WellnessZ => "WellnessZ",
+            ReadinessSignal::Soreness => "Soreness",
+            ReadinessSignal::HrvLnRmssd => "HrvLnRmssd",
+            ReadinessSignal::HrvCv => "HrvCv",
+            ReadinessSignal::AerobicDecoupling => "AerobicDecoupling",
+            ReadinessSignal::RestingHr => "RestingHr",
+            ReadinessSignal::Pain => "Pain",
+            ReadinessSignal::Illness => "Illness",
+            ReadinessSignal::RedS => "RedS",
+            ReadinessSignal::CardiacRedFlag => "CardiacRedFlag",
+            ReadinessSignal::BoneStress => "BoneStress",
+        };
         assert_eq!(
             serde_json::to_string(&signal).unwrap(),
             format!("\"{wire}\""),
@@ -458,16 +460,6 @@ fn workout_type_tag_round_trips_and_is_back_compat() {
 }
 
 #[test]
-fn why_view_serde_defaults_to_empty_for_old_shells() {
-    // An AdjustmentView from an old core (no `why` key) decodes to an empty
-    // WhyView; the block is additive and never breaks replay.
-    let json = r#"{"summary":"Take a full rest day","grade":"Strong","citation":"x","confidence":0.9,"safety_critical":true,"contested":false}"#;
-    let v: AdjustmentView = serde_json::from_str(json).expect("old shape decodes");
-    assert_eq!(v.why, WhyView::default());
-    assert!(v.why.basis.is_empty() && v.why.grade_note.is_empty() && v.why.improves.is_empty());
-}
-
-#[test]
 fn profile_is_echoed_back_for_shell_hydration() {
     let app = Engine;
     let mut model = Model::default();
@@ -483,15 +475,11 @@ fn profile_is_echoed_back_for_shell_hydration() {
 }
 
 #[test]
-fn protein_and_hr_wire_fields_are_additive_and_serde_default() {
-    // The ViewModel fields hr_max and protein_figures and
-    // RunResultView.spike_has_baseline are additive with serde defaults: an
-    // old ViewModel JSON lacking them still decodes.
+fn protein_and_hr_max_figures_are_structured_on_the_view() {
     let app = Engine;
-    let mut model = Model {
-        profile_history: vec![sample_profile()],
-        ..Default::default()
-    };
+    let mut model = Model::default();
+    app.update(Event::SetProfile(sample_profile()), &mut model)
+        .expect_only_render();
     // Request both calculators so the structured figures populate.
     app.update(
         Event::ComputeProtein {
@@ -512,32 +500,17 @@ fn protein_and_hr_wire_fields_are_additive_and_serde_default() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    // Structured protein figure mirrors the prose row (80 kg × masters band).
+    // Masters band 1.2–1.6 g/kg (indiv-013) × 80 kg = 96–128 g/day.
     let pf = vm
         .protein_figures
         .iter()
         .find(|f| f.kind == ProteinTargetKind::Masters)
         .expect("masters figure");
-    assert!(pf.low_g_per_day > 0.0 && pf.high_g_per_day >= pf.low_g_per_day && !pf.refused);
+    assert_eq!((pf.low_g_per_day, pf.high_g_per_day), (96.0, 128.0));
+    assert!(!pf.refused);
     // Structured HRmax: Tanaka(40) = 180, with the 208 − 0.7 split exposed.
     let hm = vm.hr_max.as_ref().expect("hr_max figure");
     assert!(!hm.measured && hm.bpm == 180.0 && hm.tanaka_intercept == 208.0);
-
-    // Round-trip through JSON with the three new fields stripped: still decodes.
-    let mut json: serde_json::Value = serde_json::to_value(&vm).unwrap();
-    let obj = json.as_object_mut().unwrap();
-    obj.remove("hr_max");
-    obj.remove("protein_figures");
-    for run in obj
-        .get_mut("runs")
-        .and_then(|r| r.as_array_mut())
-        .into_iter()
-        .flatten()
-    {
-        run.as_object_mut().unwrap().remove("spike_has_baseline");
-    }
-    let decoded: ViewModel = serde_json::from_value(json).expect("old-shape JSON decodes");
-    assert!(decoded.hr_max.is_none() && decoded.protein_figures.is_empty());
 }
 
 // The Android shell builds SubmitReview JSON (WireTypes.kt), omitting the

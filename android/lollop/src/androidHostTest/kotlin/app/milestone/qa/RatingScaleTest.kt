@@ -31,6 +31,7 @@ import app.milestone.AppClock
 import app.milestone.AppliedCueLoads
 import app.milestone.EffortScale
 import app.milestone.EventDispatcher
+import app.milestone.JvmDefaultsRule
 import app.milestone.LiftResultView
 import app.milestone.LocalEditorPinnedActions
 import app.milestone.LogSetEditor
@@ -74,12 +75,12 @@ class RatingScaleTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private val savedLocale: Locale = Locale.getDefault()
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
 
     @After
     fun tearDown() {
         EventDispatcher.model.value = null
-        Locale.setDefault(savedLocale)
     }
 
     private var picked: Int? = null

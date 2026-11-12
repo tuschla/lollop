@@ -4,19 +4,6 @@
 
 use super::*;
 
-fn checkin_ev(day: i64, sleep: u8, sore: u8, mood: u8) -> Event {
-    Event::SubmitCheckin(CheckinInput {
-        observed_at: day * DAY_SEC + 100,
-        sleep_quality: Some(sleep),
-        soreness: Some(sore),
-        mood: Some(mood),
-        fatigue: None,
-        stress: None,
-        resting_hr_bpm: None,
-        hrv_rmssd_ms: None,
-    })
-}
-
 #[test]
 fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
     // The acceptance path: a fresh user does one morning check-in (sleep 2
@@ -25,7 +12,7 @@ fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
     // the user is never asked to enter one.
     let app = Engine;
     let mut model = Model::default();
-    app.update(checkin_ev(0, 2, 4, 3), &mut model)
+    app.update(checkin_ev(100, 2, 4, 3), &mut model)
         .expect_only_render();
 
     let vm = app.view(&model);
@@ -59,7 +46,7 @@ fn a_floor_morning_before_the_baseline_is_very_low_not_below_normal() {
     let app = Engine;
     let mut model = Model::default();
     set_today(&app, &mut model, 0);
-    app.update(checkin_ev(0, 1, 5, 1), &mut model)
+    app.update(checkin_ev(100, 1, 5, 1), &mut model)
         .expect_only_render();
     let vm = app.view(&model);
     assert!(
@@ -100,13 +87,13 @@ fn seven_checkins_build_a_baseline_and_surface_a_human_derived_state() {
     // Six good, slightly varying baseline days, then a rough seventh.
     for d in 0..6 {
         let ev = if d % 2 == 0 {
-            checkin_ev(d, 5, 2, 4)
+            checkin_ev(d * DAY_SEC + 100, 5, 2, 4)
         } else {
-            checkin_ev(d, 4, 3, 4)
+            checkin_ev(d * DAY_SEC + 100, 4, 3, 4)
         };
         app.update(ev, &mut model).expect_only_render();
     }
-    app.update(checkin_ev(6, 2, 4, 3), &mut model)
+    app.update(checkin_ev(6 * DAY_SEC + 100, 2, 4, 3), &mut model)
         .expect_only_render();
 
     let vm = app.view(&model);
@@ -144,7 +131,7 @@ fn checkins_and_old_readiness_logs_coexist() {
     let app = Engine;
     let mut model = Model::default();
     for d in 0..7 {
-        app.update(checkin_ev(d, 4, 3, 4), &mut model)
+        app.update(checkin_ev(d * DAY_SEC + 100, 4, 3, 4), &mut model)
             .expect_only_render();
     }
     // A legacy raw advanced-mode signal on top.
@@ -368,14 +355,8 @@ fn hrv_ending_yesterday_with_active_baseline_reports_rolling_gate() {
     for day in 0..=21 {
         app.update(
             Event::SubmitCheckin(CheckinInput {
-                observed_at: day * DAY_SEC + 100,
-                sleep_quality: Some(3),
-                soreness: Some(2),
-                mood: Some(3),
-                fatigue: None,
-                stress: None,
-                resting_hr_bpm: None,
                 hrv_rmssd_ms: Some(50.0),
+                ..checkin(day * DAY_SEC + 100, 3, 2, 3)
             }),
             &mut model,
         )
@@ -383,20 +364,8 @@ fn hrv_ending_yesterday_with_active_baseline_reports_rolling_gate() {
     }
     // Day 22: a wellness-only check-in, so the newest check-in day (22) is
     // later than the newest HRV day (21, "yesterday").
-    app.update(
-        Event::SubmitCheckin(CheckinInput {
-            observed_at: 22 * DAY_SEC + 100,
-            sleep_quality: Some(3),
-            soreness: Some(2),
-            mood: Some(3),
-            fatigue: None,
-            stress: None,
-            resting_hr_bpm: None,
-            hrv_rmssd_ms: None,
-        }),
-        &mut model,
-    )
-    .expect_only_render();
+    app.update(checkin_ev(22 * DAY_SEC + 100, 3, 2, 3), &mut model)
+        .expect_only_render();
 
     let src = app.view(&model).autoreg_source.expect("source row");
     assert!(
@@ -503,7 +472,14 @@ fn readiness_summary_all_clear_rows_carry_no_fabricated_evidence() {
 fn signal_groups_metadata_fences_the_red_flag_block() {
     let app = Engine;
     let vm = app.view(&Model::default());
-    assert_eq!(vm.signal_groups.len(), 15);
+    assert_eq!(vm.signal_groups.len(), crate::autoreg::ALL_SIGNALS.len());
+    for s in crate::autoreg::ALL_SIGNALS {
+        assert_eq!(
+            vm.signal_groups.iter().filter(|g| g.signal == s).count(),
+            1,
+            "{s:?} is listed exactly once"
+        );
+    }
     for red in [
         ReadinessSignal::Pain,
         ReadinessSignal::Illness,
@@ -548,13 +524,8 @@ fn maxed_checkin_soreness_downgrades_and_reads_high_on_the_strip() {
     app.update(
         Event::SubmitCheckin(CheckinInput {
             observed_at: 100,
-            sleep_quality: None,
             soreness: Some(5),
-            mood: None,
-            fatigue: None,
-            stress: None,
-            resting_hr_bpm: None,
-            hrv_rmssd_ms: None,
+            ..CheckinInput::default()
         }),
         &mut model,
     )
@@ -590,13 +561,8 @@ fn a_soreness_answer_from_an_earlier_day_never_says_today() {
     app.update(
         Event::SubmitCheckin(CheckinInput {
             observed_at: sunday * DAY_SEC + 8 * 3600,
-            sleep_quality: None,
             soreness: Some(5),
-            mood: None,
-            fatigue: None,
-            stress: None,
-            resting_hr_bpm: None,
-            hrv_rmssd_ms: None,
+            ..CheckinInput::default()
         }),
         &mut model,
     )

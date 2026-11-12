@@ -8,7 +8,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Locale
 import kotlinx.datetime.TimeZone
-import org.junit.After
+import org.junit.Rule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -20,10 +20,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class AppLocaleTest {
 
-    private val savedLocale: Locale = Locale.getDefault()
-
-    @After
-    fun restoreLocale() = Locale.setDefault(savedLocale)
+    @get:Rule val jvmDefaults = JvmDefaultsRule()
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
     private val zone = TimeZone.UTC

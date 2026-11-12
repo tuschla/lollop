@@ -25,9 +25,9 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.espresso.Espresso
 import app.milestone.Core
+import app.milestone.CoreConstants
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
 import app.milestone.PrescriptionView
 import app.milestone.R
 import app.milestone.ReadinessSignal
@@ -44,8 +44,8 @@ import org.robolectric.RuntimeEnvironment
 
 /**
  * Fixed layout and accessibility cases at large font scales and in landscape,
- * most of them first seen by [RandomUiWalkTest] (the `UIWALK_*` line in a KDoc
- * replays that walk), checked with the walk's own probes.
+ * most of them first seen by [RandomUiWalkTest] (a KDoc names the walk's start,
+ * seed and step), checked with the walk's own probes.
  */
 @RunWith(RobolectricTestRunner::class)
 class LayoutRegressionTest : UiProbeTest() {
@@ -54,7 +54,7 @@ class LayoutRegressionTest : UiProbeTest() {
 
     /** An illness hold with a pain report on top: the hold banner with two resolve actions. */
     private fun illnessAndPain(): List<Event> =
-        listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + runs(2) +
+        listOf(QaHarness.hybridFiveKProfile()) + runs(2) +
             Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning) + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning + 600)
 
     private fun screenTexts(): List<String> = allUnmergedRoots().flatMap { flatten(it) }.flatMap { n ->
@@ -84,9 +84,9 @@ class LayoutRegressionTest : UiProbeTest() {
     @Test
     fun landscapeLogRun_keypadOpensInView() {
         landscape()
-        QaHarness.seedLog(ctx, listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)))
+        QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile()))
         rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log)) and hasClickAction()).performClick()
+        rule.onNode(logFab).performClick()
         settle()
         rule.onNode(hasText(str(R.string.main_log_run_title)) and hasClickAction()).performClick()
         settle()
@@ -105,7 +105,7 @@ class LayoutRegressionTest : UiProbeTest() {
     fun exerciseSearch_keepsItsAccessibleName() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log)) and hasClickAction()).performClick()
+        rule.onNode(logFab).performClick()
         settle()
         rule.onNode(hasText(str(R.string.main_log_set_title)) and hasClickAction()).performClick()
         settle()
@@ -126,7 +126,7 @@ class LayoutRegressionTest : UiProbeTest() {
     @Test
     fun kgWeightField_showsAnLbDerivedLoadAtTwoDecimals() {
         val at = QaHarness.daysAgoAtMidday(1)
-        val lbDerivedKg = 225.0 / 2.2046226218
+        val lbDerivedKg = 225.0 / CoreConstants.LB_PER_KG
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.LogSet("Bench Press", lbDerivedKg, 5, 8.0, at, at * 1000)))
         rule.launchApp()
         rule.onNode(hasText(str(R.string.main_dest_history)) and hasClickAction()).performClick()
@@ -162,7 +162,7 @@ class LayoutRegressionTest : UiProbeTest() {
         QaHarness.seedLog(ctx, illnessAndPain())
         rule.launchApp()
         settle()
-        val overlaps = textProblems().filter { it.startsWith("overlap:") }
+        val overlaps = rule.textProblems().filter { it.startsWith("overlap:") }
         assertTrue("no text overlaps another:\n" + overlaps.joinToString("\n") + "\n" + screenDump(), overlaps.isEmpty())
     }
 
@@ -198,8 +198,8 @@ class LayoutRegressionTest : UiProbeTest() {
         assertTrue("the hold banner is never overlapped and Log stays reachable:\n" + bad.joinToString("\n"), bad.isEmpty())
     }
 
-    /** `UIWALK_STATE=Runner UIWALK_SEED=1594695423 UIWALK_STEPS=49`: at 130 % font
-     *  the week strip's done ✓ (the non-colour done cue) is whole. */
+    /** RandomUiWalkTest (Runner, seed 1594695423, step 49): at 130 % font the week
+     *  strip's done ✓ (the non-colour done cue) is whole. */
     @Test
     fun weekStripDoneMark_font130_isNotCutOff() {
         RuntimeEnvironment.setFontScale(1.3f)
@@ -226,12 +226,12 @@ class LayoutRegressionTest : UiProbeTest() {
             n.isVisible() && n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == "\u2713" }
         }
         assertTrue("precondition: today's week-strip day shows its done ✓:\n${screenDump()}", marks.isNotEmpty())
-        val cut = textProblems().filter { it.startsWith("cut off: \"\u2713\"") }
+        val cut = rule.textProblems().filter { it.startsWith("cut off: \"\u2713\"") }
         assertTrue("the done ✓ is not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
     }
 
-    /** `UIWALK_STATE=PainHold UIWALK_SEED=1595153934 UIWALK_STEPS=65`: at 200 % font
-     *  the set loop's "Last: 100 kg × 3 · 3 reps left" line beside "Edit" is whole. */
+    /** RandomUiWalkTest (PainHold, seed 1595153934, step 65): at 200 % font the set
+     *  loop's "Last: 100 kg × 3 · 3 reps left" line beside "Edit" is whole. */
     @Test
     fun setLoopLastSetLine_font200_isNotCutOff() {
         RuntimeEnvironment.setFontScale(2f)
@@ -244,12 +244,12 @@ class LayoutRegressionTest : UiProbeTest() {
         val prefix = str(R.string.log_last_set, "")
         val line = screenTexts().firstOrNull { it.startsWith(prefix) }
         assertTrue("precondition: the loop shows the last set's line:\n${screenDump()}", line != null)
-        val cut = textProblems().filter { it.startsWith("cut off: \"$prefix") }
+        val cut = rule.textProblems().filter { it.startsWith("cut off: \"$prefix") }
         assertTrue("the last set's line \"$line\" is not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
     }
 
-    /** `UIWALK_STATE=Lifter UIWALK_SEED=1593027678 UIWALK_STEPS=157`: at 200 % font a
-     *  typed 6-character weight ("127.52") shows whole in the loop's Edit set dialog
+    /** RandomUiWalkTest (Lifter, seed 1593027678, step 157): at 200 % font a typed
+     *  6-character weight ("127.52") shows whole in the loop's Edit set dialog
      *  (Keypad.kt `fittedValueStyle` steps the figure down, then wraps). */
     @Test
     fun keypadValueField_font200_showsASixCharacterWeightWhole() {
@@ -278,13 +278,12 @@ class LayoutRegressionTest : UiProbeTest() {
         }
         settle()
         assertTrue("precondition: the weight field shows the typed 127.52:\n${screenDump()}", "127.52" in screenTexts())
-        val cut = textProblems().filter { it.startsWith("cut off: \"127.52\"") }
+        val cut = rule.textProblems().filter { it.startsWith("cut off: \"127.52\"") }
         assertTrue("the weight field shows 127.52 whole:\n" + cut.joinToString("\n"), cut.isEmpty())
     }
 
-    /** `UIWALK_STATE=MilesLb UIWALK_SEED=1592776843 UIWALK_STEPS=214`: at 200 % font
-     *  on set 1 of a barbell lift, every logged warm-up step's done mark ("✓ ×3") is
-     *  whole. */
+    /** RandomUiWalkTest (MilesLb, seed 1592776843, step 214): at 200 % font on set 1
+     *  of a barbell lift, every logged warm-up step's done mark ("✓ ×3") is whole. */
     @Test
     fun warmUpDoneMark_font200_isNotCutOff() {
         RuntimeEnvironment.setFontScale(2f)
@@ -310,14 +309,13 @@ class LayoutRegressionTest : UiProbeTest() {
         settle()
         val marks = screenTexts().filter { it.startsWith("\u2713\u00A0") }
         assertTrue("precondition: the warm-up row shows a done step per warm-up:\n${screenDump()}", marks.size == steps.size)
-        val cut = textProblems().filter { it.startsWith("cut off: \"\u2713") }
+        val cut = rule.textProblems().filter { it.startsWith("cut off: \"\u2713") }
         assertTrue("the done warm-up steps $marks are not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
     }
 
-    /** `UIWALK_STATE=LongHistory UIWALK_SEED=1593292569 UIWALK_STEPS=149`: in
-     *  landscape at 200 % font, the dialog "Move" opens on a session the core cannot
-     *  move shows the core's whole reason ("No other day this week works. On
-     *  Thursday, …"). */
+    /** RandomUiWalkTest (LongHistory, seed 1593292569, step 149): in landscape at
+     *  200 % font, the dialog "Move" opens on a session the core cannot move shows
+     *  the core's whole reason ("No other day this week works. On Thursday, …"). */
     @Test
     fun moveBlockedDialog_landscapeFont200_showsTheWholeReason() {
         landscape()
@@ -333,7 +331,7 @@ class LayoutRegressionTest : UiProbeTest() {
         val reason = blocked!!.move_blocked_reason!!
         tapMove(blocked.title)
         assertTrue("precondition: the dialog shows the core's reason \"$reason\":\n${screenDump()}", reason in screenTexts())
-        val cut = textProblems().filter { it.startsWith("cut off: \"${reason.take(20)}") }
+        val cut = rule.textProblems().filter { it.startsWith("cut off: \"${reason.take(20)}") }
         assertTrue("the move-blocked reason is shown whole:\n" + cut.joinToString("\n"), cut.isEmpty())
     }
 
@@ -345,7 +343,7 @@ class LayoutRegressionTest : UiProbeTest() {
     fun moveDayPicker_landscapeFont200_reachesEveryTargetDay() {
         landscape()
         RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, listOf(profile(runDays = 1, runKm = 6.0)))
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile().copy(runningDaysPerWeek = 1, runningKmPerWeek = 6.0)))
         rule.launchApp()
         settle()
         val vm = EventDispatcher.model.value!!

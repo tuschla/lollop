@@ -6,20 +6,6 @@
 use super::*;
 use crate::schema::{PainDetail, PainKind, PainTrend};
 
-fn interval_item() -> PlanItem {
-    PlanItem {
-        view: PrescriptionView {
-            summary: "6 × 4 min · Interval pace".into(),
-            intensity_label: "Interval pace".into(),
-            rep_volume: "4 min".into(),
-            ..PrescriptionView::default()
-        },
-        rep_count: 6,
-        rep_amount: Some(RunAmount::Minutes(4.0)),
-        ..PlanItem::default()
-    }
-}
-
 fn pain_at(kind: PainKind, location: Option<&str>, observed_at: i64) -> ReadinessInput {
     ReadinessInput {
         observed_at,
@@ -86,92 +72,139 @@ fn logged_first_set_two_rpe_over_target_lowers_that_lifts_remaining_load() {
     );
 }
 
+/// `signal` at `value`, suppressed for `streak` days, reported on `day`.
+fn reported(signal: ReadinessSignal, value: f64, streak: u8, day: i64) -> Event {
+    Event::SubmitReadiness(ReadinessInput {
+        observed_at: day * DAY_SEC + 60,
+        streak,
+        ..input(signal, value)
+    })
+}
+
+/// The item of today's session for `exercise`.
+fn hero_item(app: &Engine, model: &Model, exercise: &str) -> PrescriptionView {
+    app.view(model)
+        .next_session
+        .expect("today's session")
+        .items
+        .into_iter()
+        .find(|i| i.exercise == exercise)
+        .unwrap_or_else(|| panic!("{exercise} today"))
+}
+
 #[test]
 fn single_low_hrv_week_holds_a_lift_at_its_load_and_eases_runs() {
-    // HRV below the SWC band (no 3-day streak) only holds lift progression;
-    // runs go easy with their duration kept.
-    let recs = crate::autoreg::tests::adjustments(&[input(ReadinessSignal::HrvLnRmssd, -0.8)]);
-    assert!(
-        recs.iter()
-            .any(|r| matches!(r.value, Adjustment::CapTopEnd { .. })),
-        "{recs:?}"
+    // HRV below the SWC band (no 3-day streak) only holds lift progression:
+    // the lift keeps its planned load, one rep further from failure. Runs go
+    // easy with their distance kept.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        reported(ReadinessSignal::HrvLnRmssd, -0.8, 0, MON),
+        &mut model,
+    )
+    .expect_only_render();
+    let squat = hero_item(&app, &model, "Back Squat");
+    assert_eq!(squat.load_kg, Some(117.5), "the planned load stays");
+    assert_eq!(squat.target_rpe, Some(6.0), "RPE 7 one rep further off");
+
+    let runner = Profile {
+        goal_distance: GoalDistance::FiveK,
+        weekly_sets: 0,
+        running_days_per_week: 4,
+        running_km_per_week: 40.0,
+        ..strength_profile()
+    };
+    let (app, mut model) = planned_on(runner, [], MON);
+    let tempo = app
+        .view(&model)
+        .week_plan
+        .into_iter()
+        .find(|s| s.session_type == SessionType::Run(RunSessionType::Tempo))
+        .expect("a tempo day");
+    set_today(&app, &mut model, tempo.epoch_day);
+    app.update(
+        reported(ReadinessSignal::HrvLnRmssd, -0.8, 0, tempo.epoch_day),
+        &mut model,
+    )
+    .expect_only_render();
+    let run = app.view(&model).next_session.expect("the tempo day").items[0].clone();
+    assert_eq!(
+        run.face_lead, tempo.items[0].face_lead,
+        "the distance stays"
     );
-    assert!(!recs.iter().any(|r| r.value == Adjustment::DowngradeSession));
-    let mut ns = session(vec![lift_item("Back squat", 100.0), interval_item()]);
-    apply_adjustments_to_session(&mut ns, &recs, false);
-    assert_eq!(ns.items[0].load_kg, Some(100.0), "the planned load stays");
-    assert_eq!(ns.items[0].intensity, PlanIntensity::Rir { rir: 3 });
     assert!(
-        ns.items[1].summary.contains("24 min"),
-        "{}",
-        ns.items[1].summary
-    );
-    assert!(
-        ns.items[1].summary.contains("Easy"),
-        "{}",
-        ns.items[1].summary
+        run.intensity_label.starts_with("Easy")
+            && !tempo.items[0].intensity_label.starts_with("Easy"),
+        "{} → {}",
+        tempo.items[0].intensity_label,
+        run.intensity_label
     );
 }
 
 #[test]
 fn readiness_downgrade_keeps_numbers_one_level_down() {
     // A multi-day wellness downgrade = −5 % load + one more rep in reserve,
-    // never a load-less card.
-    let mut ns = session(vec![lift_item("Back squat", 100.0)]);
-    apply_adjustments_to_session(
-        &mut ns,
-        &[AdjustmentKind::WellnessLower.call(Adjustment::DowngradeSession, claims::WELLNESS_001)],
-        false,
-    );
-    let it = &ns.items[0];
-    let kg = it.load_kg.expect("a numeric load");
-    assert!((kg - 95.0).abs() < 2.6, "≈0.95 × planned, got {kg}");
-    assert_eq!(it.intensity, PlanIntensity::Rir { rir: 3 });
+    // never a load-less card: 117.5 kg less 5 %, down to the 2.5 kg grid.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        reported(
+            ReadinessSignal::WellnessZ,
+            -1.5,
+            crate::autoreg::WELLNESS_MULTIDAY_STREAK,
+            MON,
+        ),
+        &mut model,
+    )
+    .expect_only_render();
+    let squat = hero_item(&app, &model, "Back Squat");
+    assert_eq!(squat.load_kg, Some(110.0));
+    assert_eq!(squat.target_rpe, Some(6.0), "RPE 7 one rep further off");
 }
 
 #[test]
 fn knee_pain_stops_leg_work_and_keeps_upper_body_work() {
     // A localized sharp pain stops only the movements that load it.
-    let inputs = [pain_at(PainKind::SharpJoint, Some("Left knee"), 100)];
-    let recs = crate::autoreg::tests::adjustments(&inputs);
-    assert!(
-        !recs.iter().any(|r| r.value == Adjustment::Stop),
-        "{recs:?}"
-    );
+    let knee = pain_at(PainKind::SharpJoint, Some("Left knee"), MON * DAY_SEC + 60);
     assert_eq!(
-        crate::autoreg::tests::resolve_safety_for_goal(&inputs, None),
+        crate::autoreg::tests::resolve_safety_for_goal(std::slice::from_ref(&knee), None),
         Some(SafetyTier::Pain)
     );
-    let mut ns = session(vec![
-        lift_item("Back squat", 100.0),
-        lift_item("Bench press", 80.0),
-        interval_item(),
-    ]);
-    apply_adjustments_to_session(&mut ns, &recs, false);
-    assert!(
-        ns.items[0].summary.contains("skip"),
-        "{}",
-        ns.items[0].summary
+    let (app, mut model) = planned_on(
+        strength_profile(),
+        [
+            log_set("Back Squat", 120.0, 3, 8.0, (MON - 1) * DAY_SEC),
+            log_set("Bench press", 80.0, 5, 8.0, (MON - 1) * DAY_SEC),
+        ],
+        MON,
     );
-    assert!(ns.items[0].done && ns.items[0].load_kg.is_none());
-    assert_eq!(
-        ns.items[1].load_kg,
-        Some(80.0),
-        "upper-body work goes ahead"
-    );
-    assert!(!ns.items[1].done);
-    assert!(ns.items[2].summary.contains("skip"), "runs load the knee");
-
-    let (app, mut model) = planned_strength_model(true);
-    app.update(Event::SubmitReadiness(inputs[0].clone()), &mut model)
+    app.update(Event::SubmitReadiness(knee.clone()), &mut model)
         .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.hold_reason.is_none());
+    assert!(vm.hold_reason.is_none(), "{:?}", vm.hold_reason);
     assert!(
         vm.hold_resolutions
             .iter()
             .any(|h| h.signal == ReadinessSignal::Pain)
     );
+    for leg in ["Back Squat", "Deadlift"] {
+        let it = hero_item(&app, &model, leg);
+        assert_eq!(it.status, ItemStatus::SkippedPain, "{it:?}");
+        assert!(
+            it.summary.contains("skip") && it.load_kg.is_none(),
+            "{it:?}"
+        );
+    }
+    let bench = hero_item(&app, &model, "Bench press");
+    assert!(
+        bench.load_kg.is_some() && bench.status == ItemStatus::Open,
+        "upper-body work goes ahead: {bench:?}"
+    );
+    // Runs load the knee.
+    let (app, mut model) = planned_on(running_profile(), [], MON);
+    app.update(Event::SubmitReadiness(knee), &mut model)
+        .expect_only_render();
+    let run = app.view(&model).next_session.expect("today's run").items[0].clone();
+    assert_eq!(run.status, ItemStatus::SkippedPain, "{run:?}");
     // An unmapped / bare report keeps the whole-day stop.
     let bare = crate::autoreg::tests::adjustments(&[input(ReadinessSignal::Pain, 1.0)]);
     assert_eq!(bare[0].value, Adjustment::Stop);

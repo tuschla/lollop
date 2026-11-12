@@ -107,7 +107,8 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 import org.jetbrains.compose.resources.stringResource
 
-private const val UndoWindowMs = 8_000L
+/** How long the loop's "Logged … · Undo" row stays after a set. */
+internal const val UndoWindowMs = 8_000L
 
 /** Snackbar-style "Logged … · Undo" row above the loop's primary action. The
  *  line is announced politely once, so a screen-reader user hears what was saved.

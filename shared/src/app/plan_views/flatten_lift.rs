@@ -315,6 +315,14 @@ fn rep_range_arm(
     // itself (`hypertrophy::load_step_kg`, STR-LOADPROG-001 ≤ +10 %).
     // `load_kg` is f32: an on-grid lb load can come back a hair under its grid
     // point, so it reaches the grid through `f32_load_ceil`.
+    let drop = derate.is_some_and(|d| d.cause == crate::plan::DerateCause::E1rmDrop);
+    // An e1RM-drop cut (autoreg-006) takes ~5 % off the last working load. A
+    // load re-derived from that same hard session already sits under it: it
+    // is not cut twice.
+    let rederived_under_cut = drop
+        && last_kg
+            .zip(l.load_kg)
+            .is_some_and(|(w, kg)| f64::from(kg) < w * frac);
     let load = l.load_kg.filter(|kg| *kg > 0.0).and_then(|kg| {
         let kg = f64::from(kg);
         match last_kg {
@@ -328,14 +336,16 @@ fn rep_range_arm(
                     (grid > 0.0).then_some(grid)
                 }
             }
+            Some(w) if drop && kg < w => {
+                round_load_or_drop(f32_load_ceil(kg).min(w * frac), weight_lb)
+            }
             _ => round_load_or_drop(f32_load_ceil(kg) * frac, weight_lb),
         }
     });
     let last_shown = last.filter(|w| w.weight_kg > 0.0 && load.is_some());
     // An e1RM-drop cut also leaves one more rep in reserve, as on the %1RM
     // arm (autoreg-006).
-    let drop_cut =
-        load.is_some() && derate.is_some_and(|d| d.cause == crate::plan::DerateCause::E1rmDrop);
+    let drop_cut = load.is_some() && drop;
     let effort_rir = if drop_cut { (n + 1).min(4).max(n) } else { n };
     let anchored_on = last_shown
         .map(|w| {
@@ -401,7 +411,7 @@ fn rep_range_arm(
                 l.reps
             ),
         ),
-        (Some(kg), _) if drop_cut => loaded(
+        (Some(kg), _) if drop_cut && !rederived_under_cut => loaded(
             kg,
             format!(
                 ", scaled to {:.0}% {}. ",

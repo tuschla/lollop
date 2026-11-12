@@ -19,7 +19,6 @@ import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -27,12 +26,13 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppClock
+import app.milestone.LoopRepeatGuardMs
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.LiftResultView
 import app.milestone.R
 import app.milestone.TestClock
+import app.milestone.UndoWindowMs
 import app.milestone.overtrainingWeekEdgeLabels
 import app.milestone.repsLeftText
 import app.milestone.train_blocked
@@ -83,11 +83,9 @@ class GymFloorFlowTest {
     /** The weight well, spoken with its value ("Weight, 100 kg"). */
     private fun weightWell(shown: String) = hasContentDescription("${str(R.string.log_field_weight)}, $shown kg")
 
-    private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()
-
-    /** The lifter rests before the next set (also clears the double-tap guard). */
-    private fun rest(sec: Long = 90) {
-        TestClock.offsetMillis += sec * 1000L
+    /** The next set comes after the loop's double-tap guard, as a real one does. */
+    private fun nextSetLater() {
+        TestClock.offsetMillis += LoopRepeatGuardMs
     }
 
     private fun todaysSets(exercise: String): List<LiftResultView> =
@@ -102,12 +100,12 @@ class GymFloorFlowTest {
         rule.openLoopFor("Back Squat")
         // The ± chip's "+2.5" is a figure, not a string resource.
         rule.onNodeWithText("+2.5").performClick()
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 4), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 4)), 1)
         rule.onNodeWithTag("editor-primary").assert(hasText(str(R.string.log_primary_set_n_of_n, 2, 4)))
-        rest()
-        logSet()
-        rule.assertTextCountEventually(setHeader(3, 4), 1)
+        nextSetLater()
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(3, 4)), 1)
         assertEquals("both sets carry the load the lifter chose", listOf(120.0, 120.0), todaysSets("Back Squat").map { it.weight_kg })
     }
 
@@ -116,14 +114,15 @@ class GymFloorFlowTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         rule.openLoopFor("Back Squat")
-        logSet()
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 4), 1)
-        // A later, deliberate set still logs; it lands as set 2, so the double tap
-        // added nothing (the serial core applied every earlier event first).
-        rest()
-        logSet()
-        rule.assertTextCountEventually(setHeader(3, 4), 1)
+        rule.tapEditorPrimary()
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 4)), 1)
+        // A later, deliberate set still logs as soon as the guard has passed; it
+        // lands as set 2, so the double tap added nothing (the serial core applied
+        // every earlier event first).
+        nextSetLater()
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(3, 4)), 1)
         assertEquals(2, todaysSets("Back Squat").size)
     }
 
@@ -144,11 +143,11 @@ class GymFloorFlowTest {
         // The whole effort scale is on screen in the loop: one tap, no scrolling.
         val rpeEight = effortCell(2)
         rule.onNode(rpeEight).assertIsDisplayed().performClick()
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 3), 1)
-        rest()
-        logSet()
-        rule.assertTextCountEventually(setHeader(3, 3), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 3)), 1)
+        nextSetLater()
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(3, 3)), 1)
         assertEquals(
             "set 1 carries the athlete's rating; set 2 was not rated and stays unrated",
             listOf(8.0, 0.0),
@@ -161,10 +160,10 @@ class GymFloorFlowTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         rule.openLoopFor("Back Squat")
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 4), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 4)), 1)
         rule.onNodeWithText(str(R.string.log_undo)).performClick()
-        rule.assertTextCountEventually(setHeader(1, 4), 1)
+        rule.assertCountEventually(hasText(setHeader(1, 4)), 1)
         assertTrue("the undone set is gone", todaysSets("Back Squat").isEmpty())
         val squat = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }
@@ -176,19 +175,27 @@ class GymFloorFlowTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         rule.openLoopFor("Back Squat")
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 4), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 4)), 1)
         // While the undo row names the set just logged, the header's "Last: … · Edit"
         // line stays out (one statement of the set, not two); it returns once the
         // undo window closes.
         val editLast = hasContentDescription(strPrefix(R.string.log_edit_set_cd), substring = true)
         rule.onAllNodesWithText(str(R.string.log_undo)).assertCountEquals(1)
         rule.onAllNodes(editLast).assertCountEquals(0)
-        rule.mainClock.advanceTimeBy(9_000L)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(9))
-        rule.assertCountEventually(editLast, 1)
+        // On the paused test clock: still out just before the window ends, back just after.
+        rule.mainClock.autoAdvance = false
+        try {
+            rule.mainClock.advanceTimeBy(UndoWindowMs - 1_000)
+            rule.onAllNodes(editLast).assertCountEquals(0)
+            rule.mainClock.advanceTimeBy(1_500)
+            shadowOf(Looper.getMainLooper()).idle()
+            rule.onAllNodes(editLast).assertCountEquals(1)
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
         rule.onNode(editLast).performClick()
-        rule.assertTextCountEventually(str(R.string.log_set_title_edit), 1)
+        rule.assertCountEventually(hasText(str(R.string.log_set_title_edit)), 1)
     }
 
     @Test
@@ -204,7 +211,7 @@ class GymFloorFlowTest {
         rule.onNode(weightWell(shown)).performClick()
         rule.onNode(hasText("6") and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
         rule.onNode(hasText("0") and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
-        logSet()
+        rule.tapEditorPrimary()
         // Not counted as set 1, and the working load comes back for the next set.
         rule.assertCountEventually(weightWell(shown), 1)
         rule.onAllNodesWithText(setHeader(1, 4)).assertCountEquals(1)
@@ -218,10 +225,10 @@ class GymFloorFlowTest {
         rule.openLoopFor("Back Squat")
         val restSec = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }.rest_sec
-        logSet()
+        rule.tapEditorPrimary()
         // The loop's readout: Today's rest pill under the sheet speaks the same words.
         rule.assertCountEventually(hasTestTag("rest-readout") and hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true), 1)
-        rest(restSec + 5L)
+        TestClock.offsetMillis += (restSec + 5L) * 1000L
         rule.assertCountEventually(hasContentDescription(str(R.string.plan_rest_done_cd), substring = true), 1)
     }
 
@@ -229,7 +236,7 @@ class GymFloorFlowTest {
     fun anOffPlanExerciseLoopsToo() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_log_set_title)).performClick()
         rule.onNode(hasSetTextAction()).performTextInput("Curl")
         // A new name is confirmed with "+ Add"; then weight, reps and effort show.
@@ -237,9 +244,9 @@ class GymFloorFlowTest {
         rule.typeWeight("10")
         // The unset reps row opens centred on the common 8–10 band, so 5 is scrolled to.
         rule.onNode(hasText("5") and hasAnyAncestor(hasTestTag("reps-scale"))).performScrollTo().performClick()
-        logSet()
+        rule.tapEditorPrimary()
         // The sheet stays open on the next set of the same exercise.
-        rule.assertTextCountEventually(str(R.string.log_set_header_n, 2), 1)
+        rule.assertCountEventually(hasText(str(R.string.log_set_header_n, 2)), 1)
         rule.onAllNodes(hasSetTextAction() and hasText("Curl")).assertCountEquals(1)
         assertEquals(listOf(10.0), todaysSets("Curl").map { it.weight_kg })
     }
@@ -251,11 +258,11 @@ class GymFloorFlowTest {
         rule.openLoopFor("Back squat")
         rule.typeWeight("60")
         repeat(3) { i ->
-            logSet()
-            if (i < 2) rule.assertTextCountEventually(setHeader(i + 2, 3), 1)
-            rest()
+            rule.tapEditorPrimary()
+            if (i < 2) rule.assertCountEventually(hasText(setHeader(i + 2, 3)), 1)
+            nextSetLater()
         }
-        rule.assertTextCountEventually(str(R.string.plan_item_complete), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_item_complete)), 1)
         // A strength goal's hinge is the competition deadlift (STRENGTH-10).
         rule.onNodeWithText(str(R.string.plan_next_exercise, "Deadlift")).performClick()
         rule.assertCountEventually(hasTestTag("loop-exercise") and hasText("Deadlift"), 1)
@@ -263,7 +270,7 @@ class GymFloorFlowTest {
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
         // Back on Today: the squat is a collapsed ✓ row and the other three are open.
         // ("3/3" is a bare figure pair, not a string resource.)
-        rule.assertTextCountEventually("3/3", 1)
+        rule.assertCountEventually(hasText("3/3"), 1)
         rule.onAllNodes(
             hasClickAction() and hasContentDescription(str(R.string.plan_log_set_n_of_n, 1, 3), substring = true),
         ).assertCountEquals(3)
@@ -312,8 +319,8 @@ class GymFloorFlowTest {
         rule.onNode(effortCell(0)).assertIsDisplayed()
         rule.onNodeWithTag("editor-primary").assertIsDisplayed()
         rule.onNode(effortCell(2)).performClick()
-        logSet()
-        rule.assertTextCountEventually(setHeader(2, 4), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 4)), 1)
         assertEquals(listOf(8.0), todaysSets("Back Squat").map { it.rpe })
     }
 
@@ -347,50 +354,22 @@ class GymFloorFlowTest {
         rule.onNode(hasText(str(R.string.log_last_time, last.summary), substring = true))
             .performScrollTo().assertIsDisplayed()
         // An untouched Save (reps prefilled from the band) logs exactly that weight.
-        logSet()
+        rule.tapEditorPrimary()
         rule.waitForState { todaysSets(item.exercise).isNotEmpty() }
         assertEquals(expectedKg, todaysSets(item.exercise).first().weight_kg, 1e-9)
-    }
-
-    @Test
-    fun thePrefillFallsBackFromPrescribedToSuggestedToLastSet() {
-        val last = app.milestone.ItemSetView(weight_kg = 12.0, reps = 12, rpe = 8.0, summary = "12 kg × 12 @ RPE 8")
-        val rx = { p: app.milestone.PrescriptionView ->
-            app.milestone.prescriptionPrefill(p, app.milestone.WeightUnit.Kg)
-        }
-        // An isolation lift with only a prior set starts from that set's weight.
-        assertEquals(12.0, rx(app.milestone.PrescriptionView(exercise = "Lateral raise", last_set = last)).weightKgVerbatim!!, 0.0)
-        // The core's suggestion wins over the raw last set, a prescribed load over both.
-        assertEquals(
-            14.0,
-            rx(app.milestone.PrescriptionView(exercise = "Lateral raise", last_set = last, suggested_load_kg = 14.0)).weightKgVerbatim!!,
-            0.0,
-        )
-        assertEquals(
-            100.0,
-            rx(app.milestone.PrescriptionView(exercise = "Squat", load_kg = 100.0, suggested_load_kg = 14.0, last_set = last)).weightKgVerbatim!!,
-            0.0,
-        )
-        // The effort target stays a hint, and a ballistic item carries none.
-        val jump = app.milestone.PrescriptionView(
-            exercise = "Box jump",
-            target_rpe = 8.0,
-            calis = app.milestone.CalisItemView(ballistic = true),
-        )
-        assertEquals(null, rx(jump).targetRpe)
     }
 
     @Test
     fun theWeeklyCheckinSendsTheListedSignsAndCanBeCleared() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_sleep)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
         val (minWeeks, nforWeeks) = overtrainingWeekEdgeLabels()
         rule.onNodeWithText(str(R.string.log_weekly_signs_1to2, minWeeks, nforWeeks)).performScrollTo().performClick()
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         rule.waitForState { journeyLog().any { it.variant == "SubmitWeeklyCheckin" } }
         val payload = journeyLog().last { it.variant == "SubmitWeeklyCheckin" }.payload
         val signs = payload["overtraining_signs"]!!.jsonObject
@@ -401,22 +380,11 @@ class GymFloorFlowTest {
         rule.waitForState { EventDispatcher.model.value?.weekly_checkin_present == true }
 
         // Reopened, the sheet offers to clear the check-in in force.
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_clear)).performScrollTo().performClick()
         rule.onNode(hasText(str(R.string.log_weekly_clear_confirm)) and hasAnyAncestor(isDialog())).performClick()
         rule.waitForState { EventDispatcher.model.value?.weekly_checkin_present == false }
-    }
-
-    private fun openCheckinWithRequiredAnswers() {
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
-        rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-        // Each scale is one RatingScale tagged "checkin-<key>".
-        rule.waitUntil(5_000) { rule.onAllNodes(hasTestTag("checkin-sleep")).fetchSemanticsNodes().isNotEmpty() }
-        // Any answer opens Save; answer 3 on the first three scales.
-        for (key in listOf("sleep", "soreness", "mood")) {
-            rule.pickRating("checkin-$key", 3)
-        }
     }
 
     private fun lastIllnessValue(): Double =
@@ -427,11 +395,15 @@ class GymFloorFlowTest {
     fun headColdOnTheCheckinDowngradesWithoutHoldingTraining() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        openCheckinWithRequiredAnswers()
+        rule.openMorningCheckin()
+        // Any answer opens Save; answer 3 on the first three scales.
+        for (key in listOf("sleep", "soreness", "mood")) {
+            rule.pickRating("checkin-$key", 3)
+        }
         // The helper line says what each answer means for training.
         rule.onNodeWithText(str(R.string.log_illness_help), substring = true).performScrollTo().assertIsDisplayed()
         rule.onNodeWithText(str(R.string.log_illness_above_neck), substring = true).performScrollTo().performClick()
-        rule.onNodeWithTag("editor-primary").performClick()
+        rule.tapEditorPrimary()
         // The published model, not just the log line: the view can lag the append.
         rule.waitForState { resolveLabels().isNotEmpty() }
         // A head cold is the above-neck tier: easier sessions, training not held.
@@ -452,7 +424,7 @@ class GymFloorFlowTest {
         TestClock.offsetMillis += 20 * 60_000L
         lastScenario!!.moveToState(Lifecycle.State.STARTED)
         lastScenario!!.moveToState(Lifecycle.State.RESUMED)
-        rule.assertTextCountEventually(str(R.string.main_rest_day_next_overline).uppercase(Locale.US), 1)
+        rule.assertCountEventually(hasText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US)), 1)
         rule.onAllNodesWithText(logFirstSet, substring = true).assertCountEquals(0)
     }
 }

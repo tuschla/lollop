@@ -24,12 +24,8 @@ import app.milestone.TodayState
 import app.milestone.TodaySurfaceView
 import app.milestone.ViewModel
 import app.milestone.YouthActivityView
-import app.milestone.nextLocalMidnightMillis
 import app.milestone.planDateLabel
 import java.io.File
-import java.time.LocalDateTime
-import java.time.ZoneId
-import kotlinx.datetime.toKotlinTimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -159,16 +155,6 @@ class WidgetSnapshotTest {
         // Local midnight: the snapshot's day again.
         assertFalse(WidgetSnapshotStore.markStale(ctx, force = false, today = day))
         assertEquals(marks + 1, WidgetSnapshotStore.staleMarks.value)
-    }
-
-    @Test
-    fun midnightAlarmIsTheNextLocalMidnight() {
-        val zone = ZoneId.of("Europe/Berlin")
-        val now = LocalDateTime.of(2026, 10, 24, 23, 59, 30).atZone(zone).toInstant().toEpochMilli()
-        val expected = LocalDateTime.of(2026, 10, 25, 0, 0).atZone(zone).toInstant().toEpochMilli()
-        assertEquals(expected, nextLocalMidnightMillis(now, zone.toKotlinTimeZone()))
-        // Exactly at midnight: the following one, never now.
-        assertEquals(expected + 24 * 3_600_000L + 3_600_000L, nextLocalMidnightMillis(expected, zone.toKotlinTimeZone()))
     }
 
     @Test

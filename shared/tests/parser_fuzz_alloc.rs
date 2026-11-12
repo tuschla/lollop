@@ -65,69 +65,46 @@ fn peak_during<T>(_held: &MutexGuard<'_, ()>, f: impl FnOnce() -> T) -> (T, usiz
     (out, PEAK.load(Ordering::Relaxed).saturating_sub(base))
 }
 
-fn fit_crc(data: &[u8]) -> u16 {
-    const T: [u16; 16] = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
-        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
-    ];
-    let mut crc: u16 = 0;
-    for &b in data {
-        let mut tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[(b & 0xF) as usize];
-        tmp = T[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ T[((b >> 4) & 0xF) as usize];
-    }
-    crc
-}
+// The unit tests' FIT writer; this binary uses only part of it.
+#[allow(dead_code)]
+#[path = "../src/test_support/fit_writer.rs"]
+mod fit_writer;
 
-fn finish(data: &[u8]) -> Vec<u8> {
-    let mut f = vec![14u8, 0x20];
-    f.extend_from_slice(&2132u16.to_le_bytes());
-    f.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    f.extend_from_slice(b".FIT");
-    let c = fit_crc(&f);
-    f.extend_from_slice(&c.to_le_bytes());
-    f.extend_from_slice(data);
-    let c = fit_crc(&f);
-    f.extend_from_slice(&c.to_le_bytes());
-    f
-}
-
-fn semi(d: f64) -> i32 {
-    (d * 2_147_483_648.0 / 180.0).round() as i32
-}
+use fit_writer::{FitWriter, I32, U8, U32, semi};
 
 /// A plain 1 Hz run: `record` = timestamp, lat, lon, heart_rate (14 bytes).
 fn run_fit(fixes: u32) -> Vec<u8> {
-    let mut d = vec![0x40, 0, 0];
-    d.extend_from_slice(&20u16.to_le_bytes());
-    d.push(4);
-    d.extend_from_slice(&[253, 4, 0x86, 0, 4, 0x85, 1, 4, 0x85, 3, 1, 0x02]);
+    // Metres per degree of latitude on the core's sphere.
+    let m_per_deg = shared::gps::EARTH_RADIUS_M.to_radians();
+    let mut w = FitWriter::default();
+    w.def(
+        0,
+        20,
+        false,
+        &[(253, 4, U32), (0, 4, I32), (1, 4, I32), (3, 1, U8)],
+        &[],
+    );
     for i in 0..fixes {
-        d.push(0);
-        d.extend_from_slice(&(1_100_000_000 + i).to_le_bytes());
-        d.extend_from_slice(&semi(47.0 + f64::from(i % 50_000) * 3.0 / 111_195.0).to_le_bytes());
-        d.extend_from_slice(&semi(8.0).to_le_bytes());
-        d.push(140);
+        let mut body = (1_100_000_000 + i).to_le_bytes().to_vec();
+        body.extend_from_slice(&semi(47.0 + f64::from(i % 50_000) * 3.0 / m_per_deg).to_le_bytes());
+        body.extend_from_slice(&semi(8.0).to_le_bytes());
+        body.push(140);
+        w.msg(0, &body);
     }
-    finish(&d)
+    w.finish(true)
 }
 
 /// The same size spent on what a device writes besides positions: an unknown
 /// message (global 0xFF00) carrying one 255-byte uint8 array per message, the
 /// worst case for decoded size per wire byte.
 fn array_fit(messages: u32) -> Vec<u8> {
-    let mut d = vec![0x40, 0, 0];
-    d.extend_from_slice(&0xFF00u16.to_le_bytes());
-    d.push(1);
-    d.extend_from_slice(&[0, 255, 0x02]);
+    let mut w = FitWriter::default();
+    w.def(0, 0xFF00, false, &[(0, 255, U8)], &[]);
     for i in 0..messages {
-        d.push(0);
-        d.extend((0..255u32).map(|k| ((i + k) % 250) as u8));
+        let body: Vec<u8> = (0..255u32).map(|k| ((i + k) % 250) as u8).collect();
+        w.msg(0, &body);
     }
-    finish(&d)
+    w.finish(true)
 }
 
 fn import(bytes: &[u8]) -> bool {

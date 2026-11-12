@@ -1,105 +1,23 @@
 package app.milestone
 
-import app.milestone.core.CoreBridge
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-
-/**
- * A stand-in for the Rust core with the parts of its contract the engine relies on:
- * an event naming a known variant ([EventLog.variantOf]) is accepted (`[]`), any
- * other line is dropped (no bytes); a [poison] line answers `panic_reset` and
- * empties the core, as the FFI firewall does; the view's `input_count` is the
- * number of events applied, so a test can tell a fresh view from a stand-in;
- * compaction drops every `LogSet` a later `ClearSets` supersedes and reports
- * non-JSON lines as torn.
- */
-internal class ScriptedCore : CoreBridge {
-    val applied = mutableListOf<String>()
-    var poison: Set<String> = emptySet()
-    var viewFails = false
-
-    private fun error(kind: ErrorKind, context: String) =
-        coreJson.encodeToString(ErrorEnvelope.serializer(), ErrorEnvelope(CoreError(kind, context))).encodeToByteArray()
-
-    override fun update(event: ByteArray): ByteArray {
-        val line = event.decodeToString()
-        if (line in poison) {
-            applied.clear()
-            return error(ErrorKind.PanicReset, "update")
-        }
-        if (EventLog.variantOf(line) == null) return ByteArray(0)
-        applied += line
-        return "[]".encodeToByteArray()
-    }
-
-    override fun view(): ByteArray =
-        if (viewFails) {
-            error(ErrorKind.Panic, "view")
-        } else {
-            coreJson.encodeToString(ViewModel.serializer(), ViewModel(input_count = applied.size)).encodeToByteArray()
-        }
-
-    override fun parseRunFile(file: ByteArray): ByteArray? = null
-
-    override fun exportGpx(run: ByteArray): ByteArray = ByteArray(0)
-
-    override fun runTrack(run: ByteArray): ByteArray? = null
-
-    override fun trackFigures(event: ByteArray): ByteArray? = null
-
-    override fun exerciseKeys(names: Array<String>): ByteArray? = null
-
-    override fun warmUpRamp(query: ByteArray): ByteArray? = null
-
-    override fun draftFacts(draft: ByteArray): ByteArray? = null
-
-    override fun thinTrack(track: ByteArray): ByteArray? = null
-
-    override fun importedHrPct(hr: ByteArray): ByteArray? = null
-
-    override fun reset(): ByteArray {
-        applied.clear()
-        return ByteArray(0)
-    }
-
-    override fun compactLog(lines: Array<String>): ByteArray {
-        val lastClear = lines.indexOfLast { EventLog.variantOf(it) == "ClearSets" }
-        val entryId = Regex("\"entry_id\":(\\d+)")
-        return buildJsonObject {
-            putJsonArray("dropped") {
-                lines.indices.filter { it < lastClear && EventLog.variantOf(lines[it]) == "LogSet" }.forEach { add(it) }
-            }
-            putJsonArray("torn") {
-                lines.indices.filter { runCatching { Json.parseToJsonElement(lines[it]) }.isFailure }.forEach { add(it) }
-            }
-            put("max_entry_id", lines.maxOfOrNull { entryId.find(it)?.groupValues?.get(1)?.toLong() ?: 0L } ?: 0L)
-            put("plan_removed", false)
-        }.toString().encodeToByteArray()
-    }
-}
-
-expect fun newTempDir(): AppPath
 
 /**
  * The engine both platforms run ([DurableCore] + [EventLog] over [AppFiles]) on a
- * scripted core and a real file: replay, append, a torn tail, compaction, a core
- * panic reset, a degraded log and a stale view. Runs on the JVM (host tests) and
+ * stand-in core ([FakeCore]) and a real file: replay, append, a torn tail,
+ * compaction, a core panic reset, a degraded log and a stale view. Runs on the JVM (host tests) and
  * on iOS (simulator), where it also exercises the POSIX file seam.
  */
-class DurableCoreTest {
+class DurableCoreTest : PlatformTest() {
     private val dir = newTempDir()
-    private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
+    private val log = fileIn(dir, AppFileNames.EVENT_LOG)
 
-    private fun core(script: ScriptedCore = ScriptedCore()) = script to DurableCore(script)
+    private fun core(script: FakeCore = FakeCore()) = script to DurableCore(script)
 
     private fun set(id: Long) = Event.LogSet("Back Squat", 100.0, 5, 8.0, observedAt = 1_725_904_800, entryId = id)
 
@@ -184,25 +102,29 @@ class DurableCoreTest {
 
     @Test
     fun compactionDropsSupersededLinesAndRewritesALogWorthIt() {
-        val old = (1L..40L).map { wire(set(it)) }
-        write(old + wire(Event.ClearSets) + wire(set(41)))
+        // Just enough dropped lines for a rewrite, in a log too long for their share to count.
+        val dropped = EventLog.REWRITE_MIN_DROPPED_LINES
+        val old = (1L..dropped).map { wire(set(it)) }
+        val kept = listOf(wire(Event.ClearSets), wire(set(dropped + 1L))) +
+            (1..dropped * EventLog.REWRITE_MIN_DROPPED_SHARE_INVERSE - 1).map { wire(Event.ComputeHrZones(30.0 + it)) }
+        write(old + kept)
         val (script, engine) = core()
         engine.restoreFrom(log)
-        val kept = listOf(wire(Event.ClearSets), wire(set(41)))
         assertEquals(kept, script.applied, "the compacted replay")
-        assertEquals(kept, lines(), "40 dropped lines are worth a rewrite")
-        assertEquals(41L, EventLog.read(log, engine).maxEntryId, "boot raises the entry ids above this")
+        assertEquals(kept, lines(), "$dropped dropped lines are worth a rewrite")
+        assertEquals(dropped + 1L, EventLog.read(log, engine).maxEntryId, "boot raises the entry ids above this")
     }
 
     @Test
     fun aSmallCompactionLeavesTheDiskAlone() {
-        val fill = (2L..60L).map { wire(Event.ComputeHrZones(30.0 + it)) }
+        // One dropped line in a log one line longer than the share that rewrites.
+        val fill = (1..EventLog.REWRITE_MIN_DROPPED_SHARE_INVERSE - 1).map { wire(Event.ComputeHrZones(30.0 + it)) }
         val original = listOf(wire(set(1)), wire(Event.ClearSets)) + fill
         write(original)
         val (script, engine) = core()
         engine.restoreFrom(log)
         assertEquals(original.drop(1), script.applied)
-        assertEquals(original, lines(), "dropping one line of 61 is not worth an fsync")
+        assertEquals(original, lines(), "dropping one line of ${original.size} is not worth an fsync")
     }
 
     @Test
@@ -238,7 +160,7 @@ class DurableCoreTest {
     @Test
     fun aLineThatResetsTheCoreOnReplayIsSkippedAndReportedStale() {
         write(listOf(wire(set(1)), wire(set(2)), wire(set(3))))
-        val script = ScriptedCore().apply { poison = setOf(wire(set(2))) }
+        val script = FakeCore().apply { poison = setOf(wire(set(2))) }
         val (_, engine) = core(script)
         engine.restoreFrom(log)
         assertEquals(listOf(wire(set(1)), wire(set(3))), script.applied)
@@ -276,7 +198,7 @@ class DurableCoreTest {
     @Test
     fun anUnavailableCoreRefusesEventsAndNeverTouchesTheLog() {
         write(listOf(wire(set(1))))
-        val script = ScriptedCore().apply { viewFails = true }
+        val script = FakeCore().apply { viewFails = true }
         val (_, engine) = core(script)
         assertFalse(engine.probe())
         assertTrue(engine.unavailable)

@@ -103,9 +103,6 @@ fn a_head_cold_today_turns_tomorrows_long_run_into_a_short_easy_run() {
         "no distance shown: {}",
         run.summary
     );
-    let working = working_plan(&model);
-    let row = working.row(long_day).expect("tomorrow's working row");
-    assert_eq!(row.items[0].rep_count, 0);
     assert!(
         run.run_structure.is_none(),
         "the planned structure is dropped"

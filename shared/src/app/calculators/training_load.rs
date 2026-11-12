@@ -10,13 +10,13 @@ use crate::{load, running};
 
 /// The fitness–fatigue figures a [`TrainingLoadView`] states, rounded as
 /// shown, and what the chain counted.
-pub(in crate::app) struct LoadFigures {
+struct LoadFigures {
     /// Chronic Training Load (fitness): EWMA τ=42 d of daily load.
-    pub(in crate::app) ctl: f64,
+    ctl: f64,
     /// Acute Training Load (fatigue): EWMA τ=7 d of daily load.
-    pub(in crate::app) atl: f64,
+    atl: f64,
     /// Training Stress Balance (form) entering the next day: CTL − ATL.
-    pub(in crate::app) tsb: f64,
+    tsb: f64,
     days: u32,
     counted: u32,
     skipped: u32,
@@ -32,7 +32,7 @@ pub(in crate::app) struct LoadFigures {
 /// summed into this chain. Time enters only via each event's `observed_at`
 /// and the shell-supplied local today the chain runs through (no clock in the
 /// core).
-pub(in crate::app) fn load_figures(model: &Model, facts: &RunFacts) -> Option<LoadFigures> {
+fn load_figures(model: &Model, facts: &RunFacts) -> Option<LoadFigures> {
     use std::collections::BTreeMap;
 
     let mut daily: BTreeMap<i64, f64> = BTreeMap::new();

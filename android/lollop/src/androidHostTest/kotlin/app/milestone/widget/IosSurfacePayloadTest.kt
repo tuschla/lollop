@@ -2,17 +2,21 @@ package app.milestone.widget
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.graphics.Color
 import app.milestone.AppTheme
 import app.milestone.DarkMode
+import app.milestone.DarkStatusColors
+import app.milestone.JvmDefaultsRule
+import app.milestone.LIVE_CHIP_MAX_CHARS
 import app.milestone.R
 import app.milestone.RestNextSet
 import app.milestone.RestRun
 import app.milestone.RunSurfacePhase
 import app.milestone.RunSurfaceState
+import app.milestone.StatusColors
 import app.milestone.planDateLabel
 import java.util.Locale
 import kotlin.time.Instant
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -20,6 +24,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -35,16 +40,14 @@ class IosSurfacePayloadTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
     private val res get() = ctx.resources
     private val day = WidgetFixtures.DAY
-    private lateinit var locale: Locale
+
+    @get:Rule
+    val jvmDefaults = JvmDefaultsRule()
 
     @Before
     fun englishUs() {
-        locale = Locale.getDefault()
         Locale.setDefault(Locale.US)
     }
-
-    @After
-    fun restoreLocale() = Locale.setDefault(locale)
 
     private fun state(name: String) = WidgetFixtures.states(res).getValue(name)
 
@@ -55,19 +58,18 @@ class IosSurfacePayloadTest {
 
     @Test
     fun theWidgetPayloadCarriesTheCommonFaces() {
-        val lift = state("lift").snapshot
         val p = payload("lift")
-        val face = widgetFace(lift, day, res)
-        assertEquals(face.title, p.face.title)
-        assertEquals(face.overline, p.face.overline)
+        // The fixture's lift day: four open lifts, Back Squat first, 1 of 4 sessions done this week.
+        assertEquals("Heavy day", p.face.title)
+        assertEquals(res.getString(R.string.widget_overline_day, res.getString(R.string.widget_overline_today), planDateLabel(day)), p.face.overline)
         assertEquals(planDateLabel(day), p.face.date)
-        assertEquals(face.status, p.face.status)
-        assertEquals(face.brief, p.face.brief)
+        assertEquals("4 exercises · Back Squat first", p.face.status)
+        assertEquals("Back Squat", p.face.brief)
         assertEquals(WidgetInk.Body, p.face.titleInk)
         assertEquals(listOf("log_set", "log"), p.face.actions.map { it.dest })
         assertEquals(listOf(SurfaceIcon.LogSet, SurfaceIcon.Log), p.face.actions.map { it.icon })
         val week = checkNotNull(p.face.week)
-        assertEquals(face.week, week.text)
+        assertEquals(res.getQuantityString(R.plurals.main_week_done_count, 4, 1, 4), week.text)
         assertEquals(1 to 4, week.done to week.planned)
         assertEquals(7, week.days.size)
         assertEquals(listOf("\u2713" to WidgetInk.Done, "\u25CF" to WidgetInk.Accent, "\u00A0" to WidgetInk.Faint), week.days.take(3).map { it.glyph to it.ink })
@@ -86,16 +88,23 @@ class IosSurfacePayloadTest {
     /** Every slot count, up to every line, cut as the Android widget cuts it. */
     @Test
     fun theBodyIsCutForEverySlotCount() {
-        val lift = widgetFace(state("lift").snapshot, day, res)
         val body = payload("lift").face.body
         assertEquals(0, body.lead)
-        assertEquals(lift.items.size + 1, body.fits.size)
-        body.fits.forEachIndexed { n, lines -> assertEquals("$n slots", visibleLines(lift.lead, lift.items, n, res), lines) }
-        assertEquals(res.getQuantityString(R.plurals.widget_more_items, 2, 2), body.fits[3].last())
+        val items = listOf("Back Squat" to "5×3 @\u00A0117.5\u00A0kg", "Deadlift" to "3×5", "Bench press" to "3×5", "Cable row" to "3×5")
+            .map { (name, detail) -> res.getString(R.string.widget_item_line, name, detail) }
+        fun more(n: Int) = res.getQuantityString(R.plurals.widget_more_items, n, n)
+        // A count stands in for two or more cut items, never for one.
+        assertEquals(
+            listOf(emptyList(), items.take(1), listOf(items[0], more(3)), listOf(items[0], items[1], more(2)), items),
+            body.fits,
+        )
         // A finished session: its lead lines first, then the item.
         val done = payload("done").face
         assertEquals(2, done.body.lead)
-        assertEquals(widgetFace(state("done").snapshot, day, res).lead, done.body.fits[2])
+        assertEquals(
+            listOf(res.getString(R.string.widget_session_done), res.getString(R.string.widget_next, "Heavy volume day", planDateLabel(day + 2))),
+            done.body.fits[2],
+        )
         // The hero carries its own lines: "Session done" above it, the next session's items under it.
         val hero = checkNotNull(done.hero)
         assertFalse(hero.figure)
@@ -110,8 +119,10 @@ class IosSurfacePayloadTest {
     fun aLongLoneLeadLineHasItsShortForm() {
         val rest = widgetFace(state("rest").snapshot, day, res)
         val short = checkNotNull(payload("rest").face.shortBody)
+        // The measure the Android widget cuts by, so the extension decides as it does.
         assertEquals(textEm(rest.lead.single()), short.leadEm)
-        assertEquals(listOf(rest.brief), short.body.fits[1])
+        // 2025-10-30, two days on, is a Thursday.
+        assertEquals(listOf(res.getString(R.string.widget_next_day, "Thu")), short.body.fits[1])
         assertTrue(textEm(rest.brief!!) < short.leadEm)
         // A lead line that is its own short form has none.
         assertNull(payload("hold").face.shortBody)
@@ -149,10 +160,20 @@ class IosSurfacePayloadTest {
     fun theColoursFollowTheAppsDarkMode() {
         val system = payload("lift", AppTheme.Iris, DarkMode.System)
         assertNotEquals(system.light, system.dark)
-        assertEquals(AppTheme.Iris.dark.ink(WidgetInk.Accent, dark = true).hex(), system.dark.accent)
-        assertEquals(AppTheme.Iris.light.ink(WidgetInk.Done, dark = false).hex(), system.light.done)
+        assertEquals(AppTheme.Iris.dark.accent.hex(), system.dark.accent)
+        assertEquals(AppTheme.Iris.light.accent.hex(), system.light.accent)
+        // The done mark: the deep green on light grounds, the lighter one on dark.
+        assertEquals(StatusColors().done.hex(), system.light.done)
+        assertEquals(DarkStatusColors.done.hex(), system.dark.done)
         assertEquals(system.dark, payload("lift", AppTheme.Iris, DarkMode.Dark).light)
         assertEquals(system.light, payload("lift", AppTheme.Iris, DarkMode.Light).dark)
+    }
+
+    /** The colour the extension parses: `#AARRGGBB`, upper case, eight digits. */
+    @Test
+    fun coloursAreArgbHex() {
+        assertEquals("#FF5A3FC0", Color(0xFF5A3FC0).hex())
+        assertEquals("#0A0B0C0D", Color(0x0A0B0C0D).hex())
     }
 
     @Test
@@ -197,7 +218,7 @@ class IosSurfacePayloadTest {
             val l = live(phase)
             assertFalse(phase.name, l.canPause)
             assertNotNull(phase.name, l.text)
-            assertTrue("chip ${l.chip}", l.chip.length <= 7)
+            assertTrue("chip ${l.chip}", l.chip.length <= LIVE_CHIP_MAX_CHARS)
         }
         val mi = runLiveOf(RunSurfaceState(RunSurfacePhase.Recording, 600, 1.609344, 6.0, miles = true), AppTheme.Iris, res)
         assertEquals("1.00 mi", mi.distance)

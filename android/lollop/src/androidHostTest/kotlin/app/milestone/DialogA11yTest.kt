@@ -1,9 +1,6 @@
 package app.milestone
 
-import android.view.View
-import android.view.ViewGroup
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -11,15 +8,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.test.core.app.ApplicationProvider
-import app.milestone.ConfirmDialog
-import app.milestone.DateAnswerRow
-import app.milestone.MilestoneTheme
-import app.milestone.ObservedAtRow
-import app.milestone.PrescriptionView
-import app.milestone.R
-import app.milestone.SetSlotsRow
+import app.milestone.qa.composeRoots
+import app.milestone.qa.flatten
+import app.milestone.qa.str
+import app.milestone.qa.talkBackOn
+import app.milestone.qa.talkBackOrder
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,15 +34,8 @@ class DialogA11yTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun str(id: Int) = ApplicationProvider.getApplicationContext<android.content.Context>().getString(id)
-
-    @org.junit.Before
-    fun talkBackOn() {
-        val am = ApplicationProvider.getApplicationContext<android.content.Context>()
-            .getSystemService(android.view.accessibility.AccessibilityManager::class.java)
-        org.robolectric.Shadows.shadowOf(am).setEnabled(true)
-        org.robolectric.Shadows.shadowOf(am).setTouchExplorationEnabled(true)
-    }
+    @Before
+    fun setUp() = talkBackOn()
 
     @Test
     fun control_confirmDialogReadsCancelBeforeOkUnderRtl() {
@@ -95,11 +83,8 @@ class DialogA11yTest {
 
     private fun assertStartToEnd(first: String, second: String) {
         val root = composeRoots().last()
-        root.forceAccessibilityForTesting(true)
-        val unmerged = root.semanticsOwner.unmergedRootSemanticsNode
-        root.view.accessibilityNodeProvider?.createAccessibilityNodeInfo(flatten(unmerged).drop(1).first().id)
-        val order = traversal(root)
-        val byId = flatten(unmerged).associateBy { it.id }
+        val order = talkBackOrder(root)
+        val byId = flatten(root.semanticsOwner.unmergedRootSemanticsNode).associateBy { it.id }
         fun indexOf(label: String) = order.indexOfFirst { id -> byId[id]?.let { textUnder(it).contains(label) } == true }
         val a = indexOf(first)
         val b = indexOf(second)
@@ -111,46 +96,4 @@ class DialogA11yTest {
     private fun textUnder(n: SemanticsNode): String =
         (listOfNotNull(n.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text }) +
             n.children.map(::textUnder)).joinToString(" ")
-
-    private fun flatten(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap(::flatten)
-
-    private fun traversal(root: ViewRootForTest): List<Int> {
-        val view = root.view
-        val f = generateSequence<Class<*>>(view.javaClass) { it.superclass }.firstNotNullOf { c ->
-            runCatching { c.getDeclaredField("composeAccessibilityDelegate") }.getOrNull()
-        }.apply { isAccessible = true }
-        val delegate = f.get(view)!!
-        val map = delegate.javaClass.getMethod("getIdToBeforeMap\$ui").invoke(delegate)
-        val get = map.javaClass.getMethod("getOrDefault", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-        val next = HashMap<Int, Int>()
-        val targets = HashSet<Int>()
-        for (n in flatten(root.semanticsOwner.unmergedRootSemanticsNode)) {
-            val v = get.invoke(map, n.id, Int.MIN_VALUE) as Int
-            if (v != Int.MIN_VALUE) {
-                next[n.id] = v
-                targets += v
-            }
-        }
-        val head = next.keys.firstOrNull { it !in targets } ?: return emptyList()
-        val out = ArrayList<Int>()
-        var cur: Int? = head
-        val seen = HashSet<Int>()
-        while (cur != null && seen.add(cur)) {
-            out += cur
-            cur = next[cur]
-        }
-        return out
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun composeRoots(): List<ViewRootForTest> {
-        val wmg = Class.forName("android.view.WindowManagerGlobal")
-        val inst = wmg.getMethod("getInstance").invoke(null)
-        val views = (wmg.getDeclaredField("mViews").apply { isAccessible = true }.get(inst) as List<View>).toList()
-        fun View.all(): Sequence<View> = sequence {
-            yield(this@all)
-            if (this@all is ViewGroup) for (i in 0 until childCount) yieldAll(getChildAt(i).all())
-        }
-        return views.flatMap { w -> w.all().filter { it is ViewRootForTest && it.isShown }.map { it as ViewRootForTest }.toList() }
-    }
 }

@@ -31,7 +31,6 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
-import java.util.TimeZone
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -42,6 +41,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -61,8 +61,8 @@ import org.robolectric.annotation.Config
 class LatinDigitSurfacesTest {
     private val app: Application = ApplicationProvider.getApplicationContext()
     private val nm get() = shadowOf(app.getSystemService(NotificationManager::class.java))
-    private val savedLocale: Locale = Locale.getDefault()
-    private val savedZone: TimeZone = TimeZone.getDefault()
+
+    @get:Rule val jvmDefaults = JvmDefaultsRule()
 
     @Before
     fun setUp() {
@@ -77,8 +77,6 @@ class LatinDigitSurfacesTest {
     fun tearDown() {
         SessionReminder.setEnabled(app, false)
         RunSession.reset()
-        Locale.setDefault(savedLocale)
-        TimeZone.setDefault(savedZone)
         TestClock.offsetMillis = 0L
     }
 
@@ -117,15 +115,8 @@ class LatinDigitSurfacesTest {
     /** A 20-minute GPX run at 6:00 /km ending [daysAgo] days before today. */
     private fun gpxRun(name: String, daysAgo: Int): android.net.Uri {
         val end = QaHarness.daysAgoAtMidday(daysAgo)
-        val doc = buildString {
-            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-            append("<gpx version=\"1.1\" creator=\"test\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n<trk><trkseg>")
-            for (i in 0..120) {
-                append("<trkpt lat=\"%.7f\" lon=\"0.0\">".format(Locale.US, i * 27.8 / 111_195.0))
-                append("<time>").append(Instant.ofEpochSecond(end - (120 - i) * 10L)).append("</time></trkpt>\n")
-            }
-            append("</trkseg></trk></gpx>\n")
-        }
+        val fixes = (0..120).map { i -> GpsPoint(i * 27.8 / 111_195.0, 0.0, end - (120 - i) * 10L, 0.0) }
+        val doc = gpxDocument(GpxTrack(listOf(fixes)))
         val f = File(app.cacheDir, "latin-digits/$name").apply { parentFile!!.mkdirs(); writeText(doc) }
         return android.net.Uri.fromFile(f)
     }

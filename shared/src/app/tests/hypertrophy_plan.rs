@@ -3,7 +3,6 @@
 //! volume planner agrees with the plan.
 
 use super::*;
-use crate::schema::{LiftIntensity, Prescription};
 
 fn hyp_profile() -> Profile {
     Profile {
@@ -57,7 +56,8 @@ fn hypertrophy_card_adds_load_after_top_of_range() {
 
 #[test]
 fn hypertrophy_card_holds_load_below_top() {
-    let vm = planned_with(&[(60.0, 10, 8.0), (60.0, 10, 8.0), (60.0, 10, 8.0)]);
+    // 3×10 at RPE 7, week 1's 3-RIR target: same load, one rep more.
+    let vm = planned_with(&[(60.0, 10, 7.0), (60.0, 10, 7.0), (60.0, 10, 7.0)]);
     let it = pulldown(&vm);
     assert_eq!(it.load_kg, Some(60.0), "{it:?}");
     assert_eq!((it.reps_low, it.reps_high), (11, 12));
@@ -66,30 +66,31 @@ fn hypertrophy_card_holds_load_below_top() {
 
 #[test]
 fn last_working_takes_the_top_load_sets_of_the_newest_session() {
-    let mk = |kg: f64, reps: u32, day: i64, i: i64| LoggedSet {
-        exercise: "Incline DB curl".into(),
-        weight_kg: kg,
-        reps,
-        rpe: 8.0,
-        observed_at: day * DAY_SEC + i * 120,
-        entry_id: 0,
-        hold_sec: None,
-    };
+    // The card carries the newest session's top-load sets (60 kg × 10, 9):
+    // not the older session's 50 kg, not the lighter back-off set.
     let sets = [
-        mk(10.0, 15, 98, 0), // older session, ignored
-        mk(12.0, 14, 100, 0),
-        mk(12.0, 13, 100, 1),
-        mk(8.0, 20, 100, 2), // lighter back-off set, not a working set
+        (50.0, 10, 7.0, POS_MON - 3),
+        (60.0, 10, 7.0, POS_MON - 1),
+        (60.0, 9, 7.0, POS_MON - 1),
+        (40.0, 15, 7.0, POS_MON - 1),
     ];
-    let index = SetIndex::new(&sets);
-    let refs: Vec<(&LoggedSet, NameFacts)> = index.with_facts(&sets).collect();
-    let lw = build_last_working(&refs, &AnchorCtx::default(), 101, 0);
-    assert_eq!(lw.len(), 1);
-    assert_eq!(lw[0].weight_kg, 12.0);
-    assert_eq!(lw[0].sets, vec![(14, 8.0), (13, 8.0)]);
-    assert_eq!(lw[0].age_days, 1);
-    // Past the 56-day horizon it drops out.
-    assert!(build_last_working(&refs, &AnchorCtx::default(), 100 + 57, 0).is_empty());
+    let it = hyp_card(hyp_profile(), "Lat pulldown", &sets, POS_MON);
+    assert_eq!(it.load_kg, Some(60.0));
+    assert_eq!(it.anchored_on, "Last: 60 kg × 10, 9");
+    // A month-old last session after weeks without any lifting is carried at
+    // the 4–8 wk re-entry 70 % (60 → 42 → 40 kg); a day older the card no
+    // longer carries a load at all.
+    let carried = |back: i64| {
+        hyp_card(
+            hyp_profile(),
+            "Lat pulldown",
+            &[(60.0, 10, 7.0, POS_MON - back)],
+            POS_MON,
+        )
+        .load_kg
+    };
+    assert_eq!(carried(30), Some(40.0));
+    assert_eq!(carried(31), None);
 }
 
 #[test]
@@ -136,123 +137,106 @@ fn program_card_shows_delivered_sets_per_muscle() {
 
 #[test]
 fn planner_ramp_equals_plan_ramp() {
-    let p = hyp_profile();
-    let pp = PlanProfile::new(&p);
-    let bw = crate::plan::lift_block_position(&pp, 0).block_weeks;
-    let (rows, _, _) = build_hypertrophy_plan(
-        &HypertrophyInputView {
+    // The meso planner for the plan's own block shows the ramp the plan runs:
+    // week 1 opens at the athlete's own 12 sets fitted to the 32-set day. 12
+    // sets for every muscle over 3 full-body days packs past 32 a day, so the
+    // plan (and the planner with it) trims it to 11, never down to MEV 10.
+    let (app, mut model) = planned_on(hyp_profile(), [], MON);
+    let program = app.view(&model).program.expect("program card");
+    let chest = program
+        .muscle_volume
+        .iter()
+        .find(|r| r.muscle == "Chest")
+        .expect("a chest row")
+        .target_sets;
+    app.update(
+        Event::PlanHypertrophyMeso {
             muscle: "chest".into(),
-            weeks: bw,
+            weeks: program.weeks_total,
             not_growing: false,
             recovering_easily: false,
         },
-        Some(&pp),
-        None,
+        &mut model,
+    )
+    .expect_only_render();
+    let vm = app.view(&model);
+    assert_eq!(vm.hypertrophy_ramp, [11, 11, 12, 12, 13, 13]);
+    assert_eq!(
+        chest, vm.hypertrophy_ramp[0],
+        "the plan's week 1 is the planner's"
     );
-    let days = pp.shape().lift_days;
-    let plan_ramp: Vec<String> = (1..=bw)
-        .map(|w| {
-            crate::plan::hypertrophy_week_targets(&pp, w, bw, days)
-                .iter()
-                .find(|t| t.muscle == "chest")
-                .unwrap()
-                .target
-                .to_string()
-        })
+    let rows: Vec<&str> = vm
+        .hypertrophy_plan
+        .iter()
+        .map(|r| r.summary.as_str())
         .collect();
-    let expected = format!("Weekly set ramp: {}", plan_ramp.join(" → "));
     assert!(
-        rows.iter().any(|r| r.summary.starts_with(&expected)),
-        "planner must show the plan's ramp {expected:?}: {:?}",
-        rows.iter().map(|r| &r.summary).collect::<Vec<_>>()
-    );
-    // Week 1 opens at the athlete's own 12 sets fitted to the 32-set day: 12
-    // sets for every muscle over 3 full-body days packs past 32 a day, so the
-    // plan (and the planner with it) trims it to 11, never down to MEV 10.
-    assert_eq!(plan_ramp[0], "11");
-    assert!(
-        rows.iter()
-            .any(|r| r.summary.contains("trimmed so no lift day")),
-        "{:?}",
-        rows.iter().map(|r| &r.summary).collect::<Vec<_>>()
+        rows.iter().any(|r| r
+            .starts_with("Weekly set ramp: 11 → 11 → 12 → 12 → 13 → 13 (trimmed so no lift day")),
+        "{rows:?}"
     );
     // The RIR row is the plan's own 1–3 schedule (never 4 for a non-novice).
     let rir = rows
         .iter()
-        .find(|r| r.summary.starts_with("Reps left by week:"))
+        .find(|r| r.starts_with("Reps left by week:"))
         .expect("RIR row");
-    assert!(!rir.summary.contains('4'), "{}", rir.summary);
-    assert!(rir.summary.ends_with('1'), "{}", rir.summary);
+    assert!(!rir.contains('4'), "{rir}");
+    assert!(rir.ends_with('1'), "{rir}");
 }
 
-fn range_rx(reps: u8, load_kg: f32) -> Rx {
-    RxBasis::Workout.rx(
-        Prescription::Lift(crate::schema::LiftPrescription {
-            exercise: "Lateral raise".into(),
-            sets: 3,
-            reps,
-            intensity: LiftIntensity::Rir(2),
-            rest_sec: 60,
-            velocity_loss_pct: None,
-            reps_max: Some(20),
-            load_kg: Some(load_kg),
-        }),
-        claims::HYP_DOUBLEPROG_001,
-    )
-}
-
-fn last_raise(kg: f64, reps: u32) -> crate::plan::Anchors {
-    crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            last_working: vec![crate::plan::LastWorking {
-                exercise: "Lateral raise".into(),
-                weight_kg: kg,
-                sets: vec![(reps, 0.0); 3],
-                age_days: 3,
-            }],
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+/// The first `exercise` card of a hypertrophy week planned from `start` after
+/// `sets` — `(kg, reps, rpe, epoch day)` — of it.
+fn hyp_card(
+    profile: Profile,
+    exercise: &str,
+    sets: &[(f64, u32, f64, i64)],
+    start: i64,
+) -> PrescriptionView {
+    let history = sets
+        .iter()
+        .enumerate()
+        .map(|(i, &(kg, reps, rpe, day))| set_at(exercise, kg, reps, rpe, day, i as i64));
+    let (app, model) = planned_on(profile, history, start);
+    app.view(&model)
+        .week_plan
+        .into_iter()
+        .flat_map(|s| s.items)
+        .find(|i| i.exercise == exercise)
+        .unwrap_or_else(|| panic!("a {exercise} card"))
 }
 
 #[test]
 fn a_held_dumbbell_load_is_carried_exactly_as_logged() {
     // 6 kg × 13 → hold 6 kg for 14; never floored onto the 2.5 kg grid
     // (5 kg) while the card says "same weight as last time".
-    let it = flatten_prescription(
-        &range_rx(14, 6.0),
-        &last_raise(6.0, 13),
-        None,
-        false,
-        DistanceUnit::Km,
+    let it = hyp_card(
+        hyp_profile(),
+        "Lateral raise",
+        &[(6.0, 13, 7.0, MON - 1)],
+        MON,
     );
     assert_eq!(it.load_kg, Some(6.0));
     assert!(it.why.basis.contains("same weight"), "{}", it.why.basis);
     // A 15 lb dumbbell stays 15 lb for a lb profile.
+    let lb = Profile {
+        weight_lb: true,
+        ..hyp_profile()
+    };
     let w = 15.0 / LB_PER_KG;
-    let it = flatten_prescription(
-        &range_rx(14, w as f32),
-        &last_raise(w, 13),
-        None,
-        true,
-        DistanceUnit::Km,
-    );
+    let it = hyp_card(lb, "Lateral raise", &[(w, 13, 7.0, MON - 1)], MON);
     assert_eq!(it.load_kg, Some(w));
+    assert!(it.why.basis.contains("at 15 lb"), "{}", it.why.basis);
 }
 
 #[test]
 fn a_light_load_steps_up_by_at_most_ten_percent() {
     // The double-progression step is the smallest step capped at
     // STR-LOADPROG-001's +10 %, so a 6 kg raise goes to 6.6 kg, not 8.5 kg.
-    assert!((crate::hypertrophy::load_step_kg(6.0) - 0.6).abs() < 1e-9);
-    assert_eq!(crate::hypertrophy::load_step_kg(40.0), 2.5);
-    let it = flatten_prescription(
-        &range_rx(12, 6.6),
-        &last_raise(6.0, 20),
-        None,
-        false,
-        DistanceUnit::Km,
+    let it = hyp_card(
+        hyp_profile(),
+        "Lateral raise",
+        &[(6.0, 20, 7.0, MON - 1)],
+        MON,
     );
     let kg = it.load_kg.expect("a stepped load");
     assert!(kg > 6.0 && kg <= 6.6 + 1e-6, "{kg}");
@@ -263,41 +247,19 @@ fn a_light_load_steps_up_by_at_most_ten_percent() {
 fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
     // autoreg-006 ("cap session at planned RPE − 1 and reduce top-set load
     // ~5%", extracted/06-autoregulation.md:134) on a double-progression item:
-    // 60 kg × 0.95 floored to 55 kg, one more rep in reserve (RPE 8 → 7), and
-    // the card says why and cites AUTOREG-E1RM-GATE-001.
-    let anchors = crate::plan::Anchors {
-        lift: crate::plan::LiftAnchors {
-            e1rm: vec![("Bench Press".into(), 80.0)],
-            last_working: vec![crate::plan::LastWorking {
-                exercise: "Bench Press".into(),
-                weight_kg: 60.0,
-                sets: vec![(8, 9.0); 3],
-                age_days: 2,
-            }],
-            derates: vec![crate::plan::LiftDerate {
-                exercise: "Bench Press".into(),
-                frac: crate::autoreg::E1RM_REDUCE_RATIO,
-                cause: crate::plan::DerateCause::E1rmDrop,
-            }],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let rx = RxBasis::Workout.rx(
-        Prescription::Lift(crate::schema::LiftPrescription {
-            exercise: "Bench Press".into(),
-            sets: 3,
-            reps: 8,
-            intensity: LiftIntensity::Rir(2),
-            rest_sec: 120,
-            velocity_loss_pct: None,
-            reps_max: Some(12),
-            load_kg: Some(60.0),
-        }),
-        claims::HYP_DOUBLEPROG_001,
-    );
-    let it = flatten_prescription(&rx, &anchors, None, false, DistanceUnit::Km);
-    assert_eq!((it.load_kg, it.target_rpe), (Some(55.0), Some(7.0)));
+    // 60 kg × 7 at RPE 10 after two sessions of 60 kg × 8 at RPE 8 reads
+    // 74 kg, 7.5 % under the 80 kg estimate. Seven reps to failure are four at
+    // week 1's 3 reps left, so the card holds 60 kg (no re-derive); the cut
+    // takes it × 0.95, floored to 55 kg, with one more rep in reserve (3 → 4:
+    // RPE 7 → 6), and the card says why and cites AUTOREG-E1RM-GATE-001. The
+    // plan starts on a Monday with dated history.
+    let sets = [
+        (60.0, 8, 8.0, POS_MON - 10),
+        (60.0, 8, 8.0, POS_MON - 8),
+        (60.0, 7, 10.0, POS_MON - 1),
+    ];
+    let it = hyp_card(hyp_profile(), "Bench press", &sets, POS_MON);
+    assert_eq!((it.load_kg, it.target_rpe), (Some(55.0), Some(6.0)));
     assert!(
         it.evidence.citation.contains("Helms"),
         "{:?}",
@@ -310,8 +272,30 @@ fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
     );
 }
 
-/// 2026-01-05, a Monday.
-const DELOAD_START: i64 = 20_458;
+#[test]
+fn a_load_re_derived_from_a_dropped_session_is_not_cut_again() {
+    // 60 kg × 5 at RPE 10 after two sessions of 60 kg × 8 at RPE 8: an e1RM
+    // drop (70 kg against 80 kg), and five reps to failure are two at week 1's
+    // 3 reps left, too far under 6–10 to hold 60 kg, so the load is re-derived
+    // from that session: 70 kg × 76 % ≈ 53 kg. That is already more than the
+    // ~5 % cut under the last load (autoreg-006, 57 kg), so it is not cut again
+    // to 50 kg; the drop still leaves one more rep in reserve (RPE 6).
+    let sets = [
+        (60.0, 8, 8.0, POS_MON - 10),
+        (60.0, 8, 8.0, POS_MON - 8),
+        (60.0, 5, 10.0, POS_MON - 1),
+    ];
+    let it = hyp_card(hyp_profile(), "Bench press", &sets, POS_MON);
+    assert_eq!((it.load_kg, it.target_rpe), (Some(52.5), Some(6.0)));
+    assert!(
+        it.why.basis.contains("worked out for this rep range"),
+        "{}",
+        it.why.basis
+    );
+}
+
+/// The plan start of the deload followers.
+const DELOAD_START: i64 = DAY0;
 
 fn four_day_hyp_profile() -> Profile {
     Profile {
@@ -462,6 +446,7 @@ fn a_mid_week_profile_change_into_a_deload_still_skips_it() {
     );
     let wed = DELOAD_START + 35 + 2;
     let mut week5 = std::collections::BTreeMap::new();
+    let mut phases = std::collections::BTreeMap::new();
     for d in DELOAD_START..DELOAD_START + 42 {
         if d == wed {
             f.send(set_today_ev(d));
@@ -471,20 +456,16 @@ fn a_mid_week_profile_change_into_a_deload_still_skips_it() {
             }));
         }
         f.train(d);
+        if d == wed || d == wed - 2 {
+            phases.insert(d, Engine.view(&f.m).program.map(|p| p.phase));
+        }
         if (DELOAD_START + 28..DELOAD_START + 35).contains(&d) {
             week5.extend(f.last_kg.clone());
         }
     }
-    let monday = DELOAD_START + 42;
-    f.send(set_today_ev(monday));
-    let deload_days = {
-        let cx = ViewCtx::new(&f.m);
-        lift_deload_days(&f.m, &cx.days).0.to_vec()
-    };
-    assert!(
-        deload_days.contains(&wed) && !deload_days.contains(&(wed - 2)),
-        "deload days {deload_days:?}"
-    );
+    let deload = |d: i64| phases.get(&d).copied().flatten() == Some(MesoPhase::Deload);
+    assert!(deload(wed) && !deload(wed - 2), "week-5 phases {phases:?}");
+    f.send(set_today_ev(DELOAD_START + 42));
     let next = f.first_load("Bench Press").expect("bench next week");
     let before = week5["Bench Press"];
     assert!(

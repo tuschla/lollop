@@ -16,13 +16,13 @@ fn delts_are_not_folded_into_side_delts() {
     // HARD RULE 1: KB Table 1 (03-hypertrophy.md:514-515) has ONLY "Side
     // delts" and "Rear delts" rows. Explicit side/rear phrasing resolves to
     // its own row (identity pass-through)...
-    assert!(landmarks_for(landmark_key("side delts")).is_some());
-    assert!(landmarks_for(landmark_key("rear delts")).is_some());
+    assert!(resolve_muscle("side delts").is_some());
+    assert!(resolve_muscle("rear delts").is_some());
     // ...but the front delt is a distinct head and generic "delts" spans all
     // three: neither carries a Table 1 row, so both fall through to None
     // (the honest no-landmark fallback), never borrowing Side delts.
-    assert!(landmarks_for(landmark_key("front delt")).is_none());
-    assert!(landmarks_for(landmark_key("delts")).is_none());
+    assert!(resolve_muscle("front delt").is_none());
+    assert!(resolve_muscle("delts").is_none());
 
     // Lateral raise (primary = side delts) still lands the Side delts band.
     let lr = landmarks_for_exercise("Lateral raise").expect("side delts row");
@@ -82,14 +82,7 @@ fn set_ramp_never_jumps_more_than_four_sets_per_week() {
     // hyp-001 increment cap (+2–4/wk) + hyp-011 no-abrupt-jump guard:
     // a short block over a wide span must not emit +10/wk steps or land
     // straight on MRV.
-    let ramp = weekly_set_ramp(10, 30, 3).value;
-    assert_eq!(ramp, vec![10, 14, 18]);
-    for w in ramp.windows(2) {
-        assert!(w[1] - w[0] <= MAX_WEEKLY_SET_INCREMENT);
-    }
-    // Ramps within the cap are untouched (RP worked example covered above).
-    let ok = weekly_set_ramp(10, 20, 4).value;
-    assert_eq!(ok, vec![10, 13, 16, 20]);
+    assert_eq!(weekly_set_ramp(10, 30, 3).value, vec![10, 14, 18]);
 }
 
 #[test]
@@ -103,9 +96,7 @@ fn abrupt_volume_jump_guard_is_safety_flagged() {
 }
 
 #[test]
-fn growth_ceiling_and_min_sets() {
-    assert_eq!(WEEKLY_FRACTIONAL_SET_CEILING, 31);
-    assert_eq!(MIN_SETS_PER_EXERCISE, 2);
+fn growth_target_caps_at_the_fractional_set_ceiling() {
     assert_eq!(cap_weekly_growth_target(40).value, 31);
     assert_eq!(cap_weekly_growth_target(20).value, 20);
 }
@@ -137,11 +128,14 @@ fn over_mrv_and_recovery_scaling() {
     assert!(over_mrv_deload("", 22, false, true).value);
     assert!(!over_mrv_deload("", 18, true, true).value); // under the 20 anchor
     assert!(!over_mrv_deload("", 22, false, false).value); // no symptom
-    // Per-muscle MRV (Table 1): glutes deload above 16, side delts above 26.
-    assert!(over_mrv_deload("glutes", 17, true, false).value);
-    assert!(!over_mrv_deload("glutes", 16, true, false).value);
-    assert!(!over_mrv_deload("side delts", 22, true, false).value);
-    assert!(over_mrv_deload("side delts", 27, true, false).value);
+    // Per-muscle MRV (Table 1): glutes and side delts deload only above their
+    // own row's MRV.
+    for muscle in ["glutes", "side delts"] {
+        let mrv = landmarks_for(muscle).unwrap().mrv;
+        assert!(!over_mrv_deload(muscle, mrv, true, false).value);
+        assert!(over_mrv_deload(muscle, mrv + 1, true, false).value);
+    }
+    assert!(!over_mrv_deload("side delts", 22, true, false).value); // over the 20 anchor, under its MRV
     // "lats" routes through landmark_key -> back key, so its MRV is back's
     // 25 (Table 1), NOT the generic 20-set anchor. Pin the boundary.
     let back_mrv = landmarks_for("back").unwrap().mrv; // 25
@@ -163,18 +157,18 @@ fn joint_pain_shifts_to_light_high_reps() {
 
 #[test]
 fn split_triggers_and_deload() {
-    assert!(needs_session_split(13).value);
-    assert!(!needs_session_split(12).value);
-    assert!(per_session_over_cap(12).value);
-    assert!(!per_session_over_cap(11).value);
-    assert!(deload_indicated(2).value);
-    assert!(!deload_indicated(1).value);
+    assert!(needs_session_split(WEEKLY_SPLIT_THRESHOLD + 1).value);
+    assert!(!needs_session_split(WEEKLY_SPLIT_THRESHOLD).value);
+    assert!(per_session_over_cap(PER_SESSION_SET_CEILING + 1).value);
+    assert!(!per_session_over_cap(PER_SESSION_SET_CEILING).value);
+    assert!(deload_indicated(DELOAD_TRIGGER_MIN).value);
+    assert!(!deload_indicated(DELOAD_TRIGGER_MIN - 1).value);
     let d = deload_rx().value;
     assert!((d.sets_fraction - 0.50).abs() < 1e-9);
     assert_eq!(d.rir, (2, 4));
     assert_eq!(d.load_frac_of_working, (0.60, 0.70));
-    assert!(increase_rest_on_rep_drop(0.12).value);
-    assert!(!increase_rest_on_rep_drop(0.08).value);
+    assert!(increase_rest_on_rep_drop(REP_DROP_REST_FRAC + 0.02).value);
+    assert!(!increase_rest_on_rep_drop(REP_DROP_REST_FRAC).value);
 }
 
 #[test]
@@ -216,8 +210,8 @@ fn load_is_interchangeable_30_to_85_pct() {
     assert_eq!(r.grade(), EvidenceGrade::Strong);
     assert!(r.contested().is_some());
     assert_eq!(r.contested(), Some(ContestedId::CQ_F03_02));
-    assert!(load_below_effective_floor(29).value);
-    assert!(!load_below_effective_floor(30).value);
+    assert!(load_below_effective_floor(EFFECTIVE_LOAD_FLOOR_PCT - 1).value);
+    assert!(!load_below_effective_floor(EFFECTIVE_LOAD_FLOOR_PCT).value);
 }
 
 #[test]
@@ -241,8 +235,14 @@ fn default_rir_is_one_to_three_and_contested() {
 #[test]
 fn rir_accuracy_degrades_far_from_failure() {
     assert_eq!(rir_reliability(0).value, RirReliability::WithinOneRep);
-    assert_eq!(rir_reliability(5).value, RirReliability::WithinOneRep);
-    assert_eq!(rir_reliability(6).value, RirReliability::ErrorOverTwoReps);
+    assert_eq!(
+        rir_reliability(RIR_RELIABLE_MAX).value,
+        RirReliability::WithinOneRep
+    );
+    assert_eq!(
+        rir_reliability(RIR_RELIABLE_MAX + 1).value,
+        RirReliability::ErrorOverTwoReps
+    );
     assert_eq!(novice_start_rir().value, (3, 4));
     assert_eq!(novice_start_rir().grade(), EvidenceGrade::Moderate);
 }

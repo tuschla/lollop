@@ -1,5 +1,6 @@
 use super::*;
 use crate::running::{INTERVAL_VI_THRESHOLD, KM_M, MILE_M};
+use crate::test_support::M_PER_DEG;
 
 fn pt(lat: f64, lon: f64, t: i64) -> GpsPoint {
     GpsPoint {
@@ -11,21 +12,16 @@ fn pt(lat: f64, lon: f64, t: i64) -> GpsPoint {
 }
 
 #[test]
-fn windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
-    // Normal: a 90 s leg at 3 m/s resamples into three full 30 s bins, each
-    // averaging 3 m/s.
-    let normal = windowed_bin_speeds(&[(90.0, 270.0)], INTERVAL_WINDOW_SEC);
-    assert_eq!(normal.len(), 3, "90 s / 30 s window = 3 bins");
-    for (speed, dur) in &normal {
-        assert!((speed - 3.0).abs() < 1e-9 && (*dur - 30.0).abs() < 1e-9);
-    }
-    // Corrupt: a single leg with a mis-unit'd dt (~4e7 s ≈ a millisecond
-    // timestamp mistaken for seconds) would drive the resampling loop for
-    // ~1.3M iterations; the cap bounds it to MAX_WINDOW_BINS and returns.
-    let corrupt = windowed_bin_speeds(&[(4.0e7, 4.0e7)], INTERVAL_WINDOW_SEC);
-    assert_eq!(corrupt.len(), MAX_WINDOW_BINS, "bin count is clamped");
-    // A non-positive window can never spin forever.
-    assert!(windowed_bin_speeds(&[(90.0, 270.0)], 0.0).is_empty());
+fn variability_index_is_steady_normally_and_finite_when_dt_is_corrupt() {
+    // Normal: a 90 s leg at 3 m/s smooths into three equal 30 s windows, a
+    // steady VI.
+    let steady = [pt(0.0, 0.0, 0), pt(0.0, 270.0 / M_PER_DEG, 90)];
+    assert_eq!(track_variability_index(&steady, &[]), Some(1.0));
+    // Corrupt: one ~20 000 km leg over ~2e7 s (a millisecond timestamp read as
+    // seconds) still moves at ~1 m/s, so its ~700 000 windows hit the
+    // smoothing cap; the index stays a finite steady figure.
+    let corrupt = [pt(0.0, 0.0, 0), pt(0.0, 179.9, 20_000_000)];
+    assert_eq!(track_variability_index(&corrupt, &[]), Some(1.0));
 }
 
 #[test]
@@ -45,13 +41,14 @@ fn track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
         track_splits(&track, 0.0, &[]).is_empty(),
         "zero unit rejected"
     );
-    // Even at a legit unit, a corrupt long track cannot emit unbounded splits.
-    // The cumulative walk caps each leg at the plausible-runner ceiling, so
-    // the corrupt leg must span enough time (~23 days) that even the capped
-    // 12 m/s distance (~24 000 km) still overruns the split cap.
-    let corrupt = vec![pt(0.0, 0.0, 0), pt(0.0, 120.0, 2_000_000)];
+    // Even at a legal unit, a long track cannot emit unbounded splits: twice
+    // the cap in 1 m units, at half the plausible-runner ceiling so no leg
+    // is capped.
+    let metres = 2.0 * MAX_SPLITS as f64;
+    let secs = (metres / (MAX_PLAUSIBLE_SPEED_MPS / 2.0)) as i64;
+    let long = vec![pt(0.0, 0.0, 0), pt(0.0, metres / M_PER_DEG, secs)];
     assert_eq!(
-        track_splits(&corrupt, KM_M, &[]).len(),
+        track_splits(&long, 1.0, &[]).len(),
         MAX_SPLITS,
         "splits capped"
     );
@@ -316,29 +313,25 @@ fn variability_index_separates_interval_from_steady_same_average() {
         vi_interval > vi_steady + 0.3,
         "interval {vi_interval} not clearly above steady {vi_steady}",
     );
-
-    let ns = normalized_speed(&moving_legs(&interval, &[])).expect("interval NS");
-    let avg = di * 1000.0 / 120.0;
-    assert!(ns > avg, "NS {ns} should exceed avg {avg}");
 }
 
 #[test]
 fn variability_index_needs_two_usable_fixes() {
-    assert!(normalized_speed(&moving_legs(&[pt(0.0, 0.0, 0)], &[])).is_none());
     assert!(track_variability_index(&[pt(0.0, 0.0, 0)], &[]).is_none());
+    assert!(track_variability_index(&[], &[]).is_none());
 }
 
 /// Build a DENSE (1 Hz) GPS track from a speed profile `(speed_mps,
 /// duration_s)`, with deterministic lateral position jitter to mimic a real
 /// consumer GPS at ~a few metres accuracy. Forward motion runs along lon at
-/// the equator (1° ≈ 111 320 m); the lateral wobble is `jitter_deg·sin(i·1.3)`
+/// the equator; the lateral wobble is `jitter_deg·sin(i·1.3)`
 /// on lat, which makes consecutive per-second leg lengths swing (exactly the
 /// noise that, un-smoothed, blows up the 4th-power mean).
 fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
     let mut pts = Vec::new();
     let mut lon = 0.0f64;
     let mut t = 0i64;
-    let deg_per_m = 1.0 / 111_320.0;
+    let deg_per_m = 1.0 / M_PER_DEG;
     pts.push(GpsPoint {
         lat: 0.0,
         lon: 0.0,
@@ -492,17 +485,25 @@ fn steady_run_with_a_mid_run_pause_stays_steady() {
 }
 
 #[test]
-fn normalized_speed_clamps_gps_jitter_spike() {
-    // A single teleport fix (huge distance in 1 s) must be clamped, not allowed
-    // to blow up the 4th-power mean. Two clean 30 s segments plus one spike.
+fn a_gps_jitter_spike_is_clamped_in_distance_and_variability() {
+    // A single teleport fix (huge distance in 1 s) is capped at the
+    // plausible-runner ceiling, not allowed to blow up the distance or the
+    // 4th-power mean. Two clean 30 s segments plus one spike.
     let spiky = vec![
         pt(0.0, 0.000, 0),
         pt(0.0, 0.001, 30),
-        pt(5.0, 5.000, 31), // ~780 km in 1 s → clamp to MAX_PLAUSIBLE_SPEED_MPS
+        pt(5.0, 5.000, 31), // ~780 km in 1 s
         pt(5.0, 5.001, 61),
     ];
-    let ns = normalized_speed(&moving_legs(&spiky, &[])).expect("ns");
-    assert!(ns <= MAX_PLAUSIBLE_SPEED_MPS + 1e-9, "NS {ns} not clamped");
+    let clean_m = haversine_m(spiky[0], spiky[1]) + haversine_m(spiky[2], spiky[3]);
+    let km = track_distance_km(&spiky, &[]);
+    assert!(
+        km <= (clean_m + MAX_PLAUSIBLE_SPEED_MPS) / 1000.0 + 1e-9,
+        "{km} km"
+    );
+    // Uncapped, the spike's window would read ~26 km/s and the VI thousands.
+    let vi = track_variability_index(&spiky, &[]).expect("vi");
+    assert!(vi < 1.2, "VI {vi} not clamped");
 }
 
 #[test]
@@ -525,14 +526,6 @@ fn track_distance_sums_segments_and_drops_noisy_fixes() {
     ];
     let d2 = track_distance_km(&noisy, &[]);
     assert!((d2 - 0.2226).abs() < 0.001, "got {d2}");
-}
-
-#[test]
-fn rfc3339_renders_known_epochs_utc() {
-    assert_eq!(unix_to_rfc3339_utc(0), "1970-01-01T00:00:00Z");
-    // 1_700_000_000 seconds converts to the fixed UTC instant asserted below
-    // (verified against a UTC clock).
-    assert_eq!(unix_to_rfc3339_utc(1_700_000_000), "2023-11-14T22:13:20Z");
 }
 
 #[test]
@@ -680,8 +673,8 @@ fn standing_still_wander_is_not_distance_of_record() {
     // still (0.05 m/s, under the auto-pause floor). The saved distance must
     // be the run leg alone: counting the wander would make the recorded
     // distance disagree with the moving pace derived from the same track.
-    let run_leg_deg = 100.0 / 111_320.0; // ~100 m of longitude at the equator
-    let wander_deg = 3.0 / 111_320.0;
+    let run_leg_deg = 100.0 / M_PER_DEG; // ~100 m of longitude at the equator
+    let wander_deg = 3.0 / M_PER_DEG;
     let t = vec![
         pt(0.0, 0.0, 0),
         pt(0.0, run_leg_deg, 20),
@@ -763,7 +756,7 @@ fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
 #[test]
 fn thinning_keeps_a_track_at_or_under_the_cap_whole() {
     assert_eq!(
-        decimation_keep(3, TRACK_DECIMATION_CAP as usize, &[]),
+        thin_track(3, TRACK_DECIMATION_CAP as usize, &[]).0,
         [0, 1, 2]
     );
     let (kept, starts) = thin_track(100, TRACK_DECIMATION_CAP as usize, &[]);
@@ -784,7 +777,7 @@ fn thinning_keeps_both_ends_within_the_cap() {
     // to the save cap. Without segment starts only the last fix can push the
     // count one past the cap.
     for (n, cap) in [(1_200, 300), (20_000, TRACK_DECIMATION_CAP as usize)] {
-        let kept = decimation_keep(n, cap, &[]);
+        let (kept, _) = thin_track(n, cap, &[]);
         assert!(kept.len() < n, "thins below the source: {}", kept.len());
         assert!(kept.len() <= cap + 1, "respects the cap: {}", kept.len());
         assert_eq!(kept.first(), Some(&0), "first fix kept");

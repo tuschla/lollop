@@ -23,21 +23,17 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.Event
-import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
 import app.milestone.LiftGoal
-import app.milestone.OpenDest
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
+import app.milestone.RestAlarm
 import app.milestone.RunSession
-import app.milestone.openIntent
-import java.util.Locale
+import app.milestone.fmtClock
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -109,6 +105,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
 
     @After
     fun tearDown() {
+        releaseClock()
         QaHarness.teardown()
         RunSession.reset()
         QaHarness.freshProcess()
@@ -117,39 +114,11 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     private fun shot(scene: String) =
         rule.shot("adaptive-${window.name.lowercase()}-${variant.name.lowercase()}-$scene")
 
-    private fun waitForText(text: String, substring: Boolean = false) {
-        rule.waitForNode(hasText(text, substring = substring))
-        rule.waitForIdle()
-    }
-
-    private val logButton get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
-
-    private fun openChooser() {
-        rule.onNode(logButton).performClick()
-        waitForText(str(R.string.main_track_run_title))
-    }
-
-    private val squat = "Back squat"
-
-    private fun seedStrengthWithHistory() {
-        val prior = QaHarness.daysAgoAtMidday(2)
-        QaHarness.seedLog(
-            ctx,
-            listOf(
-                QaHarness.strengthProfile(),
-                Event.LogSet(squat, 120.0, 3, 8.0, prior - 1_800, (prior - 1_800) * 1000),
-                Event.LogSet("Row", 60.0, 8, 7.0, prior, prior * 1000),
-                Event.LogSet("Bench press", 60.0, 8, 7.0, prior + 600, prior * 1000 + 1),
-                Event.LogSet("Romanian deadlift", 80.0, 8, 7.0, prior + 1200, prior * 1000 + 2),
-            ),
-        )
-    }
-
     @Test
     fun today() {
-        seedStrengthWithHistory()
+        seedStrengthWithHistory(ctx)
         rule.launchApp()
-        waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
+        rule.waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
         shot("today")
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true))
             .performScrollTo().performClick()
@@ -164,7 +133,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         val thisMorning = QaHarness.daysAgoAtMidday(0) - 4 * 3_600L
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, thisMorning)))
         rule.launchApp()
-        waitForText("I'm pain-free now")
+        rule.waitForText("I'm pain-free now")
         shot("today-painhold")
     }
 
@@ -172,10 +141,10 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     fun setLoop() {
         QaHarness.seedLog(
             ctx,
-            listOf(QaHarness.strengthProfile(), Event.LogSet(squat, 120.0, 3, 8.0, QaHarness.daysAgoAtMidday(1), QaHarness.daysAgoAtMidday(1) * 1000)),
+            listOf(QaHarness.strengthProfile(), Event.LogSet(TYPED_SQUAT, 120.0, 3, 8.0, QaHarness.daysAgoAtMidday(1), QaHarness.daysAgoAtMidday(1) * 1000)),
         )
         rule.launchApp()
-        rule.openLoopFor(squat)
+        rule.openLoopFor(TYPED_SQUAT)
         rule.waitForIdle()
         shot("setloop")
         // The weight keypad up (a semantics tap: beside the keypad pane the well can
@@ -187,9 +156,13 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         shot("setloop-keypad")
         rule.onNode(hasClickAction() and hasText(str(R.string.log_keypad_done))).performScrollTo().performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag("editor-primary").performClick()
-        waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
+        rule.tapEditorPrimary()
+        rule.waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
         rule.waitForNode(hasText(str(R.string.log_undo)))
+        // The rest's first second, however long the steps above took on the wall clock.
+        val rest = checkNotNull(RestAlarm.running.value) { "the logged set started no rest" }
+        rule.holdClockInRest(rest.startMillis, secondsIn = 0)
+        rule.waitForNode(hasContentDescription(str(R.string.log_rest_left_cd, fmtClock(((rest.endAtMillis - rest.startMillis) / 1_000L).toInt()))))
         shot("setloop-rest")
     }
 
@@ -197,7 +170,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     fun logChooserAndRunEditor() {
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         shot("log-chooser")
         rule.onNodeWithText(str(R.string.main_log_run_title)).performScrollTo().performClick()
         rule.waitForNode(hasContentDescription(str(R.string.log_field_duration)))
@@ -205,35 +178,9 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         shot("log-run-editor")
     }
 
-    private fun seedRunsHistory() {
-        val manual = buildList<Pair<Long, Event>> {
-            for (w in 12 downTo 1) {
-                for (off in intArrayOf(6, 4, 2)) {
-                    val km = when (off) {
-                        2 -> 6.0 + w % 3
-                        4 -> 4.5 + w % 2
-                        else -> 11.0 + w % 4
-                    }
-                    val at = QaHarness.daysAgoAtMidday(7 * (w - 1) + off)
-                    add(at to Event.LogRun(km, km * 5.8, 0.0, observedAt = at, entryId = at * 1000))
-                }
-            }
-            var t = QaHarness.daysAgoAtMidday(3)
-            repeat(3) {
-                t += 180
-                add(t to Event.LogSet("Back Squat", 100.0, 5, 8.0, t, t * 1000))
-            }
-        }.sortedBy { it.first }.map { it.second }
-        val thisMorning = QaHarness.daysAgoAtMidday(0) - 5 * 3600
-        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
-        rule.launchApp()
-        rule.selectTab(str(R.string.main_dest_history))
-        waitForText(str(R.string.main_overline_last_7_days).uppercase(Locale.US))
-    }
-
     @Test
     fun historyRuns() {
-        seedRunsHistory()
+        rule.openRunsHistory(ctx, halfMarathon = false)
         shot("history-runs")
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText("Fastest 10K"))
         rule.onAllNodesWithText("Fastest 10K").onFirst().performClick()
@@ -275,21 +222,17 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText(header, substring = true))
         rule.waitForIdle()
         rule.onAllNodesWithText(header).onFirst().performSemanticsAction(SemanticsActions.OnClick)
-        waitForText(str(R.string.history_delete_session))
+        rule.waitForText(str(R.string.history_delete_session))
         shot("history-lift-session")
     }
 
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
+    private fun hybridProfile(): Event = QaHarness.strengthProfile().copy(
         liftGoal = LiftGoal.Hypertrophy,
         goalDistance = GoalDistance.TenK,
         concurrentGoal = ConcurrentGoal.Hypertrophy,
-        weeklySets = 12,
         runningDaysPerWeek = 3,
         runningKmPerWeek = 30.0,
-        advanced = false,
         bodyweightKg = 81.7,
-        ageYears = 30.0,
     )
 
     @Test
@@ -319,7 +262,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         val row = hasText(str(R.string.main_evidence_references_title)) and hasClickAction()
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(row)
         rule.onAllNodes(row).onFirst().performClick()
-        waitForText(str(R.string.main_evidence_references_body))
+        rule.waitForText(str(R.string.main_evidence_references_body))
         shot("evidence-references")
     }
 
@@ -342,19 +285,16 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     fun trackerPrestart() {
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
-        openChooser()
+        rule.openLogChooser()
         rule.onNodeWithText(str(R.string.main_track_run_title)).performScrollTo().performClick()
-        waitForText(str(R.string.track_plan_follow))
+        rule.waitForText(str(R.string.track_plan_follow))
         shot("track-prestart")
     }
 
     private fun openRecording() {
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         QaHarness.seedRecordingRun()
-        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        rule.waitUntil(30_000) {
-            rule.onAllNodesWithText(str(R.string.track_btn_stop)).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
-        }
+        rule.launchOnTracker()
         rule.waitForIdle()
     }
 
@@ -362,8 +302,8 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     fun trackerRecordingAndFinish() {
         openRecording()
         shot("track-recording")
-        rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        waitForText(str(R.string.track_finish_title))
+        rule.stopToFinishReview()
+        rule.waitForIdle()
         rule.pickRating("effort-scale", 7)
         // The word slot reads the pick, on the track or its large-font fallback grid.
         rule.onNode(hasText(str(R.string.history_effort_selected, 7, str(R.string.history_effort_anchor_7)))).assertExists()

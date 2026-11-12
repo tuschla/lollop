@@ -1,19 +1,18 @@
 package app.milestone
 
-import java.util.Locale
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
-/** JVM unit tests for the units math (no Android context). */
+/** The units math and the locale's default units. */
 class UnitsTest {
 
     @Test
     fun localeResolvesImperialCountriesToMiles() {
-        assertEquals(DistanceUnit.Mi, localeDistanceUnit(Locale("en", "US")))
-        assertEquals(DistanceUnit.Mi, localeDistanceUnit(Locale("en", "GB")))
-        assertEquals(DistanceUnit.Km, localeDistanceUnit(Locale("de", "DE")))
-        assertEquals(DistanceUnit.Km, localeDistanceUnit(Locale("fr", "FR")))
+        assertEquals(DistanceUnit.Mi, localeDistanceUnit(testLocale("en-US")))
+        assertEquals(DistanceUnit.Mi, localeDistanceUnit(testLocale("en-GB")))
+        assertEquals(DistanceUnit.Km, localeDistanceUnit(testLocale("de-DE")))
+        assertEquals(DistanceUnit.Km, localeDistanceUnit(testLocale("fr-FR")))
     }
 
     @Test
@@ -30,25 +29,22 @@ class UnitsTest {
         // put a full binary double on the wire (225 lb → 102.05828… unrounded).
         assertEquals(102.06, lbToKgWire(225.0), 1e-9)
         assertEquals(74.84, lbToKgWire(165.0), 1e-9)
-        // Round-trip stays stable at the app-wide %.1f lb display precision.
-        assertEquals("225.0", String.format(Locale.US, "%.1f", kgToLb(lbToKgWire(225.0))))
-        assertEquals("165.0", String.format(Locale.US, "%.1f", kgToLb(lbToKgWire(165.0))))
+        // Round-trip stays stable at the app-wide one-decimal lb display precision.
+        assertEquals("225.0", formatFixed(kgToLb(lbToKgWire(225.0)), 1))
+        assertEquals("165.0", formatFixed(kgToLb(lbToKgWire(165.0)), 1))
     }
 
     @Test
     fun metersToDisplayConvertsPerUnit() {
         assertEquals(1.0, metersToDisplay(1000.0, DistanceUnit.Km), 1e-9)
-        assertEquals(1.0, metersToDisplay(CoreConstants.MILE_M, DistanceUnit.Mi), 1e-9)
-        assertEquals(1609.344, CoreConstants.MILE_M, 1e-9)
+        assertEquals(1.0, metersToDisplay(1609.344, DistanceUnit.Mi), 1e-9)
     }
 
     @Test
     fun paceConvertsKmToMile() {
-        val minPerKm = 5.0
-        val minPerMi = paceInUnit(minPerKm, DistanceUnit.Mi)
-        assertEquals(minPerKm * (CoreConstants.MILE_M / 1000.0), minPerMi, 1e-9)
-        assertTrue("min/mi must exceed min/km", minPerMi > minPerKm)
-        assertEquals(minPerKm, paceInUnit(minPerKm, DistanceUnit.Km), 1e-9)
+        // 5:00 /km is 8:02.8 /mi (5 × 1.609344 min).
+        assertEquals(8.04672, paceInUnit(5.0, DistanceUnit.Mi), 1e-9)
+        assertEquals(5.0, paceInUnit(5.0, DistanceUnit.Km), 1e-9)
     }
 
     @Test
@@ -82,8 +78,8 @@ class UnitsTest {
     @Test
     fun kmMiRoundTripAndKnownValues() {
         // One mile is exactly 1.609344 km (NIST), so the pair is each other's inverse.
-        assertEquals(1.0, kmToMi(CoreConstants.MILE_M / 1000.0), 1e-9)
-        assertEquals(CoreConstants.MILE_M / 1000.0, miToKm(1.0), 1e-9)
+        assertEquals(1.0, kmToMi(1.609344), 1e-9)
+        assertEquals(1.609344, miToKm(1.0), 1e-9)
         assertEquals(10.0, miToKm(kmToMi(10.0)), 1e-9)
         assertEquals(6.21371, kmToMi(10.0), 1e-5)
     }
@@ -94,17 +90,17 @@ class UnitsTest {
         // a full binary double on the wire (6.2 mi → 9.9779328 km unrounded).
         assertEquals(9.98, miToKmWire(6.2), 1e-9)
         assertEquals(40.23, miToKmWire(25.0), 1e-9)
-        // Round-trip stays stable at the distance field's %.2f display precision.
-        assertEquals("6.20", String.format(Locale.US, "%.2f", kmToMi(miToKmWire(6.2))))
-        assertEquals("25.00", String.format(Locale.US, "%.2f", kmToMi(miToKmWire(25.0))))
+        // Round-trip stays stable at the distance field's two-decimal display precision.
+        assertEquals("6.20", formatFixed(kmToMi(miToKmWire(6.2)), 2))
+        assertEquals("25.00", formatFixed(kmToMi(miToKmWire(25.0)), 2))
     }
 
     @Test
     fun theMileDistanceCeilingSitsOnTheFieldGridAndSavesWithinTheKmLimit() {
         val max = runDistanceMax(DistanceUnit.Mi)
         // A ± chip coerced to the ceiling prints a value the field accepts.
-        val chipped = String.format(Locale.US, "%.2f", (62.0 + 0.5).coerceIn(0.0, max))
-        assertTrue("chip result $chipped must be <= $max", chipped.toDouble() <= max)
+        val chipped = formatFixed((62.0 + 0.5).coerceIn(0.0, max), 2)
+        assertTrue(chipped.toDouble() <= max, "chip result $chipped must be <= $max")
         assertEquals(100.0, miToKmWire(max), 1e-9)
         assertEquals(100.0, runDistanceMax(DistanceUnit.Km), 0.0)
     }
@@ -137,10 +133,10 @@ class UnitsTest {
 
     @Test
     fun localeSeedsWeightUnit() {
-        assertEquals(WeightUnit.Lb, localeWeightUnit(Locale.US))
-        assertEquals(WeightUnit.Kg, localeWeightUnit(Locale.GERMANY))
+        assertEquals(WeightUnit.Lb, localeWeightUnit(testLocale("en-US")))
+        assertEquals(WeightUnit.Kg, localeWeightUnit(testLocale("de-DE")))
         // The UK runs in miles but weighs people in kg/stones, never lb by default.
-        assertEquals(WeightUnit.Kg, localeWeightUnit(Locale.UK))
+        assertEquals(WeightUnit.Kg, localeWeightUnit(testLocale("en-GB")))
     }
 
     @Test

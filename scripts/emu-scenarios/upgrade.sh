@@ -100,11 +100,11 @@ reminder_on() {
   q on "${STR[reminder_label]}" <"$OUT/ui/mid-reminder-on.xml"
 }
 reminder_is_on() { reminder_row "$1" && q on "${STR[reminder_label]}" <"$OUT/ui/$1.xml"; }
-install_r() { # APK TAG
-  local r
-  r="$(install_apk "$1" -r)"
-  check INFO $S "install -r $2" "$r ($(basename "$1"), $(sha256sum "$1" | cut -c1-12)); version $(sh_ dumpsys package "$APP_ID" | sed -n 's/.*lastUpdateTime=//p' | head -1)"
-  [[ "$r" == Success ]]
+install_r() { # APK TAG: the PASS/FAIL row "install -r TAG"
+  local r ok
+  r="$(install_apk "$1" -r)"; ok=$?
+  expect $S "install -r $2" "$r ($(basename "$1"), $(sha256sum "$1" | cut -c1-12)); version $(sh_ dumpsys package "$APP_ID" | sed -n 's/.*lastUpdateTime=//p' | head -1)" \
+    test "$ok" -eq 0
 }
 facts() { echo "sets=$(EV count "$1" LogSet) runs=$(EV count "$1" LogRun) gps=$(EV count "$1" LogRunTrack) readiness=$(EV count "$1" SubmitReadiness) plans=$(EV count "$1" GeneratePlan) clearplan=$(EV count "$1" ClearPlan)"; }
 old_install() {
@@ -133,37 +133,37 @@ expect $S "old build: a GPS run through the tracker" "" old_run
 expect $S "old build: a pain report through Log › Report pain" "" report_pain
 tap_nav "${STR[main_dest_today]}"; evidence old-02-today-after
 pull_log "$OUT/logs/old.ndjson"
-check INFO $S "old log" "$(facts "$OUT/logs/old.ndjson")"
+observe $S "old log" "$(facts "$OUT/logs/old.ndjson")"
 home
 expect $S "old build: widget placed" "" place_widget
 OLD_WIDGET="$(widget_texts old-03-widget)"; echo "$OLD_WIDGET" >"$OUT/logs/old-widget.txt"
 expect $S "old build: tile added" "" add_tile
 OLD_TILE="$(tile_label old-04-tile)"; adb_ shell cmd statusbar collapse
-check INFO $S "old tile label" "'$OLD_TILE'"
+observe $S "old tile label" "'$OLD_TILE'"
 snapshot >"$OUT/logs/old-snapshot.json"
 launch; wait_text eq "${STR[main_dest_today]}" 20
 
 if [[ -n "$MID" ]]; then
   mark mid
-  install_r "$MID" mid || check FAIL $S "install -r mid" "see above"
+  install_r "$MID" mid
   launch
   expect $S "mid build boots on the old data" "Today rendered" wait_text pre "$HERO" 40
   expect $S "mid build: Session reminder switched on" "" reminder_on
   MID_ALARM="$(rem_alarm)"
-  check INFO $S "mid reminder alarm" "'$MID_ALARM'"
+  observe $S "mid reminder alarm" "'$MID_ALARM'"
   tap_nav "${STR[main_dest_today]}"
   pull_log "$OUT/logs/mid.ndjson"
-  check INFO $S "mid log" "$(facts "$OUT/logs/mid.ndjson")"
+  observe $S "mid log" "$(facts "$OUT/logs/mid.ndjson")"
   snapshot >"$OUT/logs/mid-snapshot.json"
 fi
 [[ -n "$MID" ]] && BEFORE="$OUT/logs/mid.ndjson" || BEFORE="$OUT/logs/old.ndjson"
 
 mark new
-install_r "$NEW" new || check FAIL $S "install -r new" "see above"
+install_r "$NEW" new
 # Before the first launch of the new build: what the system kept for it.
 expect $S "widget still bound after the update (before launch)" "dumpsys appwidget" wait_for 10 widget_bound
 W0="$(widget_texts new-01-widget-before-launch)"; echo "$W0" >"$OUT/logs/new-widget-before-launch.txt"
-check INFO $S "widget before launch" "$(tr '\n' '|' <<<"$W0")"
+observe $S "widget before launch" "$(tr '\n' '|' <<<"$W0")"
 if [[ -n "$MID" ]]; then
   wait_for 10 alarm_set
   A0="$(rem_alarm)"
@@ -180,7 +180,7 @@ expect $S "no guided setup over the old data" "" lacks_text eq "${STR[setup_skip
 evidence new-02-today
 expect $S "the old pain report still eases today" "ui/new-02-today.xml" q eq "PAIN · LEFT KNEE" <"$OUT/ui/new-02-today.xml"
 pull_log "$OUT/logs/new.ndjson"
-check INFO $S "new log" "$(facts "$OUT/logs/new.ndjson")"
+observe $S "new log" "$(facts "$OUT/logs/new.ndjson")"
 EV canon "$OUT/logs/new.ndjson" >"$OUT/logs/new.canon"
 # Every entry the old build logged is still there (boot compaction drops only
 # superseded lines).
@@ -204,24 +204,17 @@ for k in sorted(set(a) | set(b)):
     if a.get(k) != b.get(k):
         print(f"{k}: {json.dumps(a.get(k))[:200]} -> {json.dumps(b.get(k))[:200]}")
 PY
-check INFO $S "widget snapshot old → new" "$(tr '\n' '|' <"$OUT/logs/snapshot-diff.txt" | cut -c1-600)"
+observe $S "widget snapshot old → new" "$(tr '\n' '|' <"$OUT/logs/snapshot-diff.txt" | cut -c1-600)"
 k0="$(jfield kind <"$OUT/logs/old-snapshot.json")"; k1="$(jfield kind <"$OUT/logs/new-snapshot.json")"
 expect $S "widget snapshot keeps today's day kind" "kind $k0 → $k1" test -n "$k1" -a "$k0" = "$k1"
 W1="$(widget_texts new-04-widget)"; echo "$W1" >"$OUT/logs/new-widget.txt"
 expect $S "widget shows the same face after the update" "old $(tr '\n' '|' <<<"$OLD_WIDGET") / new $(tr '\n' '|' <<<"$W1")" test "$OLD_WIDGET" = "$W1"
 NEW_TILE="$(tile_label new-05-tile)"; adb_ shell cmd statusbar collapse
-# Today's face from the new snapshot (tileFace in widget/TileFace.kt reads
-# WidgetSnapshotStore.today(): not stale and dated the device's today). The old
-# build's label is only reported: 4728546 and 901d239 can show the manifest label
-# ("Log") until their next redraw.
-WANT_TILE="$(python3 -c "
-import datetime,json,sys,zoneinfo
-d=json.load(open(sys.argv[1]))
-today=datetime.datetime.fromtimestamp(int(sys.argv[2]),zoneinfo.ZoneInfo(sys.argv[3])).date()-datetime.date(1970,1,1)
-k='' if d.get('stale') or d.get('epochDay')!=today.days else d.get('kind')
-print(sys.argv[4] if k=='Run' and d.get('trackable') else sys.argv[5] if k=='Lift' and not d.get('sessionDone') else sys.argv[6])" \
-  "$OUT/logs/new-snapshot.json" "$(dev_now)" "$TZ0" "${STR[tile_start_run]}" "${STR[tile_log_set]}" "${STR[tile_log]}")"
-expect $S "tile still on Quick Settings, with today's face" "old '$OLD_TILE' → new '$NEW_TILE' (today's face '$WANT_TILE')" test -n "$NEW_TILE" -a "$NEW_TILE" = "$WANT_TILE"
+# Today is the seed's Easy run day (seed_basic), still trackable after the old
+# build's run: the tile offers the tracker. The old build's label is only
+# reported: 4728546 and 901d239 can show the manifest label ("Log") until their
+# next redraw.
+expect $S "tile still on Quick Settings, with today's face" "old '$OLD_TILE' → new '$NEW_TILE'" test "$NEW_TILE" = "${STR[tile_start_run]}"
 if [[ -n "$MID" ]]; then
   launch; wait_text eq "${STR[main_dest_today]}" 20
   expect $S "Session reminder still on" "shots/new-06-reminder.png" reminder_is_on new-06-reminder
@@ -232,7 +225,7 @@ fi
 adb_ shell am force-stop "$APP_ID"; launch
 expect $S "second launch of the new build" "Today rendered" wait_text pre "$HERO" 40
 pull_log "$OUT/logs/new-2.ndjson"
-check INFO $S "log after the second launch" "$(facts "$OUT/logs/new-2.ndjson")"
+observe $S "log after the second launch" "$(facts "$OUT/logs/new-2.ndjson")"
 
 mark mid-run
 home
@@ -242,7 +235,7 @@ if old_install; then
     sleep 25
     n0="$(sidecar_points)"
     pull_sidecar "$OUT/logs/mid-run-old-sidecar.ndjson"
-    install_r "$NEW" "new over a recording run" || check FAIL $S "install -r new mid-run" "see above"
+    install_r "$NEW" "new over a recording run"
     launch
     expect $S "new build offers to resume the old build's run" "sidecar $n0 fixes" wait_text eq "${STR[main_resume_run_title]}" 20
     evidence mid-run-01-resume-prompt

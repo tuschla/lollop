@@ -152,22 +152,18 @@ mod tests {
     }
 
     #[test]
-    fn fold_eq_agrees_with_fold() {
-        for (a, b) in [
-            ("İncline", "incline"),
-            ("Inclıne", "INCLINE"),
-            ("Straße", "STRASSE"),
-            ("STRAẞE", "strasse"),
-            ("Crème", "creme"),
-            ("ΣΚΟΥΑΤ", "σκουας"),
-            ("Жим", "жим"),
+    fn fold_eq_matches_spellings_that_fold_alike() {
+        for (a, b, same) in [
+            ("İncline", "incline", true),
+            ("Inclıne", "INCLINE", true),
+            ("Straße", "STRASSE", true),
+            ("STRAẞE", "strasse", true),
+            ("Crème", "creme", true),
+            ("Жим", "жим", true),
+            ("ΣΚΟΥΑΤ", "σκουας", false),
         ] {
-            assert_eq!(fold_eq(a, b), fold(a) == fold(b), "{a:?} {b:?}");
-            assert_eq!(
-                FoldKey::new(a).is(&fold(b)),
-                fold(a) == fold(b),
-                "{a:?} {b:?}"
-            );
+            assert_eq!(fold_eq(a, b), same, "{a:?} {b:?}");
+            assert_eq!(FoldKey::new(a).is(&fold(b)), same, "{a:?} {b:?}");
         }
     }
 

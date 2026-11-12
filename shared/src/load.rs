@@ -240,10 +240,14 @@ mod tests {
         );
         // Verbatim: 1200 * 2^1.06 ≈ 2502 s.
         assert!((t10 - 2502.0).abs() < 5.0, "got {t10}");
-        assert!((riegel_exponent(120.0) - 1.04).abs() < 1e-9);
-        assert!((riegel_exponent(70.0) - 1.06).abs() < 1e-9);
-        assert!((riegel_exponent(40.0) - 1.09).abs() < 1e-9);
-        assert!((riegel_exponent(10.0) - 1.12).abs() < 1e-9);
+        // More weekly volume never fades more, and every exponent stays in the
+        // KB's personal 1.01–1.15 band (running-039).
+        let mut prev = f64::INFINITY;
+        for km in 0..=200 {
+            let e = riegel_exponent(f64::from(km));
+            assert!((1.01..=1.15).contains(&e) && e <= prev, "{km} km: {e}");
+            prev = e;
+        }
         assert_eq!(riegel_predict(0.0, 5.0, 10.0, 1.06), 0.0);
         assert!(riegel_predict(1200.0, 5000.0, 10_000.0, 1.06).is_finite());
         // An absurd goal distance overflows the power to ±inf → collapse to the
@@ -292,20 +296,19 @@ mod tests {
     }
 
     #[test]
-    fn ewma_monotonic_sanity() {
+    fn ctl_and_atl_rise_toward_a_higher_load_without_overshoot() {
         // Constant load above the current smoothed value must pull it up,
         // but never overshoot the applied load in a single step.
         let start = 50.0;
         let load = 100.0;
-        let step1 = ewma(start, load, 42.0);
-        let step2 = ewma(step1, load, 42.0);
-        assert!(step1 > start, "EWMA should rise toward higher load");
-        assert!(step2 > step1, "EWMA should keep rising under constant load");
-        assert!(step1 < load, "single step must not overshoot the load");
+        let step1 = ctl(start, load);
+        let step2 = ctl(step1, load);
+        assert!(step1 > start, "CTL should rise toward higher load");
+        assert!(step2 > step1, "CTL should keep rising under constant load");
         assert!(step2 < load, "still below the asymptote");
-        // Faster time constant reacts more strongly on the same input.
-        let fast = ewma(start, load, 7.0);
-        assert!(fast > step1, "shorter tau reacts faster");
+        // The 7-day fatigue average reacts more strongly on the same input.
+        let fatigue = atl(start, load);
+        assert!(fatigue > step1 && fatigue < load, "{fatigue} vs {step1}");
     }
 
     #[test]

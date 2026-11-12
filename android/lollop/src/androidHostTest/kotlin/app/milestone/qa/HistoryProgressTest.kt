@@ -12,17 +12,16 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppFileNames
 import app.milestone.Event
 import app.milestone.R
-import app.milestone.AppSettings
-import java.io.File
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -89,7 +88,7 @@ class HistoryProgressTest {
         assertEquals(cells[0].left, cells[2].left, 0.5f)
         assertTrue("row 2 sits below row 1", cells[2].top >= cells[0].bottom - 0.5f)
         assertEquals(cells[0].width, cells[1].width, 1.5f)
-        cells.forEach { assertTrue("record cell ≥48dp", it.height >= with(rule.density) { 48.dp.toPx() } - 0.5f) }
+        cells.forEach { assertTrue("record cell ≥48dp", it.height >= with(rule.density) { UxInvariants.MIN_TOUCH.toPx() } - 0.5f) }
 
         // The run card carries only its most significant record as a chip.
         rule.scrollToText("Fastest 10K")
@@ -120,13 +119,12 @@ class HistoryProgressTest {
         rule.waitForIdle()
 
         // The card face reads the rating back from the core.
-        rule.assertTextCountEventually(str(R.string.history_effort_value, 7), 1)
+        rule.assertCountEventually(hasText(str(R.string.history_effort_value, 7)), 1)
         // The rating is one durable in-place edit, the wire form the core replays.
-        val log = File(ctx.filesDir, AppFileNames.EVENT_LOG).readText()
-        assertTrue(log, log.contains("\"AmendRunMeta\""))
-        assertTrue(log, log.contains("\"session_rpe\":7"))
+        val amend = journeyLog().single { it.variant == "AmendRunMeta" }.payload
+        assertEquals(7, amend["session_rpe"]?.jsonPrimitive?.int)
         // Rated, the Effort row states the rating with its CR-10 word.
-        rule.assertTextCountEventually(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7)), 1)
+        rule.assertCountEventually(hasText(str(R.string.run_effort_value, 7, str(R.string.history_effort_anchor_7))), 1)
         // The derived session-effort load lives behind the rating's "?", not on the face.
         val loadLine = strPrefix(R.string.history_training_load_value)
         rule.onAllNodesWithText(loadLine, substring = true).assertCountEquals(0)
@@ -147,7 +145,7 @@ class HistoryProgressTest {
         rule.onNodeWithText("Fastest 10K").performClick()
         rule.waitForIdle()
         // The route loads off the main thread; Trim appears once it has.
-        rule.waitUntil(10_000) { rule.onAllNodesWithTag("run-trim").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForNode(hasTestTag("run-trim"))
         rule.onNodeWithTag("run-delete").performScrollTo()
         val sheet = violations()
         assertTrue("UX invariant(s) violated on the run sheet:\n" + sheet.joinToString("\n"), sheet.isEmpty())

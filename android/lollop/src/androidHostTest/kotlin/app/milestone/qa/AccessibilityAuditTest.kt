@@ -2,7 +2,6 @@ package app.milestone.qa
 
 import android.graphics.Bitmap
 import android.view.View
-import android.view.accessibility.AccessibilityManager
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -35,7 +34,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -44,9 +42,8 @@ import kotlin.math.min
  * Accessibility audit over the REAL app and core: walks the main tabs (every
  * scroll page) and, by tapping every action on them, every sheet, dialog and
  * in-place panel they open, then audits what a screen reader gets from each
- * screen through the Compose semantics tree and the traversal order Compose hands
- * TalkBack (its accessibility delegate's traversal-before map, with touch
- * exploration on, as under TalkBack):
+ * screen through the Compose semantics tree and the order TalkBack visits it
+ * ([talkBackOrder], with touch exploration on, as under TalkBack):
  *
  *  - every action has a label and a role; switches, checkboxes, radios and tabs
  *    expose their checked / selected state;
@@ -68,12 +65,11 @@ import kotlin.math.min
  * The Material time picker's clock numbers are clickable with no role inside
  * library code ([MATERIAL_TIME_DIAL]); they are not reported.
  *
- * Configurations: font 1.0 / 2.0, light / dark, LTR / RTL (an Arabic locale). By default
- * the targeted tests and the regression pins run, plus one crawl: a hybrid athlete's
- * tabs and the sheets one tap away at font 2.0, dark, RTL. `A11Y_FULL=1` adds the
- * same crawl at font 1.0, light, LTR, the contrast pass over the 8 palettes and the
- * full crawl: every [Start] at all 8 configurations, two taps deep. Gradle caches a
- * passed test: add `--rerun` when only the environment changed.
+ * Configurations: font 1.0 / 2.0, light / dark, LTR / RTL (an Arabic locale). The
+ * targeted tests and the regression pins run, plus the crawl of a hybrid athlete's
+ * tabs and the sheets one tap away at font 2.0, dark, RTL and at font 1.0, light,
+ * LTR, and the contrast pass over the 8 palettes. `A11Y_FULL=1` (a weekly CI job)
+ * adds the full crawl: every [Start] at all 8 configurations, two taps deep.
  */
 @RunWith(RobolectricTestRunner::class)
 class AccessibilityAuditTest : UiProbeTest() {
@@ -99,15 +95,11 @@ class AccessibilityAuditTest : UiProbeTest() {
     fun hybridAthlete_landscape_font2_rtl() = audit(Start.Hybrid, Config(2f, dark = false, rtl = true, land = true), depth = 1)
 
     @Test
-    fun hybridAthlete_font1_light_ltr() {
-        assumeTrue("A11Y_FULL=1 runs the LTR crawl", FULL)
-        audit(Start.Hybrid, Config(1f, dark = false, rtl = false), depth = 1)
-    }
+    fun hybridAthlete_font1_light_ltr() = audit(Start.Hybrid, Config(1f, dark = false, rtl = false), depth = 1)
 
     /** Paper with the system accent is a fresh install's default. */
     @Test
     fun renderedTextContrast_everyTheme() {
-        assumeTrue("A11Y_FULL=1 runs the contrast pass", FULL)
         config = Config(1f, dark = false, rtl = false)
         launch(Start.Hybrid, config)
         val palettes = AppTheme.entries.map { it to false } + (AppTheme.Paper to true)
@@ -432,9 +424,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     }
 
     private fun launch(start: Start, c: Config, extra: List<Event> = emptyList()) {
-        val am = ctx.getSystemService(AccessibilityManager::class.java)
-        shadowOf(am).setEnabled(true)
-        shadowOf(am).setTouchExplorationEnabled(true)
+        talkBackOn()
         // RTL comes from an Arabic locale (the app has no Arabic strings, so the copy
         // stays English, as on such a phone): a bare `ldrtl` qualifier does not
         // survive setFontScale's configuration update and the activity lays out LTR.
@@ -442,8 +432,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         if (c.rtl) RuntimeEnvironment.setQualifiers("+ar-rEG")
         RuntimeEnvironment.setFontScale(c.font)
         AppSettings.setDarkMode(ctx, if (c.dark) DarkMode.Dark else DarkMode.Light)
-        if (start == Start.MilesLb) QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Mi)
-        (seedEvents(start).orEmpty() + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
+        seedStart(start, extra)
         this.start = start
         if (start == Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()
         settle()
@@ -453,19 +442,14 @@ class AccessibilityAuditTest : UiProbeTest() {
     private var launchSettings: Triple<AppTheme, Boolean, DarkMode>? = null
 
     private val materialSheetChrome: Set<String>
-        get() = MATERIAL_SHEET_CHROME.mapNotNull(::materialString).toSet()
+        get() = MATERIAL_SHEET_CHROME.mapNotNull(::libraryString).toSet()
 
     /** The Material time picker's clock-face numbers ("7 o'clock", "35 minutes") in the
      *  current locale: [MATERIAL_TIME_DIAL] with its number as any digits. */
     private val materialTimeDial: List<Regex>
-        get() = MATERIAL_TIME_DIAL.mapNotNull(::materialString).map { f ->
+        get() = MATERIAL_TIME_DIAL.mapNotNull(::libraryString).map { f ->
             Regex(f.split("%1\$d").joinToString("""\p{Nd}+""") { Regex.escape(it) })
         }
-
-    private fun materialString(name: String): String? =
-        listOf(ctx.packageName, "app.milestone", "androidx.compose.material3").firstNotNullOfOrNull { pkg ->
-            ctx.resources.getIdentifier(name, "string", pkg).takeIf { it != 0 }
-        }?.let { ctx.getString(it) }
 
     private fun isTimeDialNumber(n: SemanticsNode, dial: List<Regex> = materialTimeDial): Boolean =
         spoken(n).singleOrNull()?.let { s -> dial.any { it.matches(s) } } == true
@@ -505,8 +489,12 @@ class AccessibilityAuditTest : UiProbeTest() {
         val opened = roots().size > windows
         if (opened && depth >= 2) crawlOverlay(where)
         if (!opened && (tab == null || selectedTab() == tab) && roots().size == 1) {
-            // An in-place panel (a disclosure, a day of the week strip): tap it again to fold.
-            guard("refold $label") { tapLabel(roots().first(), label) }
+            // An in-place panel (a disclosure, a day of the week strip): tap it again to
+            // fold, when the action kept its label ("Close" may have become another word).
+            val again = flatten(roots().first()).any {
+                it.isVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null && labelOf(it) == label
+            }
+            if (again) guard("refold $label") { tapLabel(roots().first(), label) }
             settle()
         }
         if (tab != null) goHome(tab)
@@ -577,7 +565,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     }
 
     private fun relaunch() {
-        runCatching { QaHarness.teardown() }
+        QaHarness.teardown()
         rule.launchApp()
         settle()
     }
@@ -648,13 +636,8 @@ class AccessibilityAuditTest : UiProbeTest() {
     private class Win(val index: Int, val view: ViewRootForTest, val merged: SemanticsNode, val unmerged: SemanticsNode, val order: List<Int>)
 
     private fun windows(): List<Win> = composeRoots().mapIndexed { i, r ->
-        r.forceAccessibilityForTesting(true)
-        val merged = r.semanticsOwner.rootSemanticsNode
-        val unmerged = r.semanticsOwner.unmergedRootSemanticsNode
-        // Building any node info makes the delegate (re)compute its traversal map.
-        val provider = r.view.accessibilityNodeProvider
-        flatten(unmerged).drop(1).firstOrNull()?.let { provider?.createAccessibilityNodeInfo(it.id) }
-        Win(i, r, merged, unmerged, traversal(r))
+        val order = talkBackOrder(r)
+        Win(i, r, r.semanticsOwner.rootSemanticsNode, r.semanticsOwner.unmergedRootSemanticsNode, order)
     }
 
     private fun report(kind: String, detail: String) {
@@ -764,7 +747,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     private fun layoutOf(n: SemanticsNode): TextLayoutResult? {
         val get = n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action ?: return null
         val out = ArrayList<TextLayoutResult>()
-        return if (runCatching { get(out) }.getOrDefault(false)) out.firstOrNull() else null
+        return if (get(out)) out.firstOrNull() else null
     }
 
     private fun auditCustomControl(n: SemanticsNode) {
@@ -839,11 +822,11 @@ class AccessibilityAuditTest : UiProbeTest() {
         if (roots().size != 1 || roots().flatMap { flatten(it) }.any { labelOf(it) in materialSheetChrome }) return
         // A sheet or dialog still opening or closing has its window shown while its
         // Compose root is not (yet, or any more) registered, and its scrim draws over
-        // the activity: wait for its animation to settle, else do not sample.
-        var waits = 0
-        while (shownWindows().size > 1 && waits++ < OVERLAY_SETTLE_STEPS) {
-            rule.mainClock.advanceTimeBy(OVERLAY_SETTLE_STEP_MS)
+        // the activity: wait until its window is gone (closing) or its root is
+        // registered (opening, not sampled).
+        rule.waitUntil(OVERLAY_SETTLE_MS) {
             rule.waitForIdle()
+            shownWindows().size <= 1 || roots().size != 1
         }
         if (shownWindows().size > 1 || roots().size != 1) return
         val bmp = screenBitmap() ?: return
@@ -938,54 +921,19 @@ class AccessibilityAuditTest : UiProbeTest() {
         return Triple(contrastRatio(Color(glyph), Color(ground)), glyph, ground)
     }
 
-    private fun delegateOf(root: ViewRootForTest): Any {
-        val view = root.view
-        val f = generateSequence<Class<*>>(view.javaClass) { it.superclass }.firstNotNullOf { c ->
-            runCatching { c.getDeclaredField("composeAccessibilityDelegate") }.getOrNull()
-        }.apply { isAccessible = true }
-        return f.get(view)!!
-    }
-
-    /** The node ids in the order Compose tells TalkBack to visit them. */
-    private fun traversal(root: ViewRootForTest): List<Int> {
-        val delegate = delegateOf(root)
-        val map = delegate.javaClass.getMethod("getIdToBeforeMap\$ui").invoke(delegate)
-        val get = map.javaClass.getMethod("getOrDefault", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-        val next = HashMap<Int, Int>()
-        val targets = HashSet<Int>()
-        for (n in flatten(root.semanticsOwner.unmergedRootSemanticsNode)) {
-            val v = get.invoke(map, n.id, Int.MIN_VALUE) as Int
-            if (v != Int.MIN_VALUE) {
-                next[n.id] = v
-                targets += v
-            }
-        }
-        val head = next.keys.firstOrNull { it !in targets } ?: return emptyList()
-        val out = ArrayList<Int>()
-        var cur: Int? = head
-        val seen = HashSet<Int>()
-        while (cur != null && seen.add(cur)) {
-            out += cur
-            cur = next[cur]
-        }
-        return out
-    }
-
-    private fun composeRoots(): List<ViewRootForTest> =
-        windowViews().flatMap { w -> w.descendants().filter { it is ViewRootForTest && it.isShown }.map { it as ViewRootForTest }.toList() }
-
     private fun assertNoFindings() {
         if (findings.isNotEmpty()) throw AssertionError("${findings.size} accessibility findings:\n" + findings.values.take(40).joinToString("\n"))
     }
 
     companion object {
+        /** `A11Y_FULL=1` (set by the weekly CI job) runs [fullCrawl_everyStartEveryConfig]. */
         private val FULL = System.getenv("A11Y_FULL") == "1"
         private const val MAX_PAGES = 12
         private const val MAX_OVERLAY_PAGES = 3
         private const val BRAND = "lollop"
 
-        private const val OVERLAY_SETTLE_STEPS = 20
-        private const val OVERLAY_SETTLE_STEP_MS = 100L
+        /** Real time an opening or closing overlay window may take to settle. */
+        private const val OVERLAY_SETTLE_MS = 5_000L
 
         private val TABS = listOf(R.string.main_dest_today, R.string.main_dest_history, R.string.main_dest_profile)
 

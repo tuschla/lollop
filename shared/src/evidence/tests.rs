@@ -468,6 +468,37 @@ fn goal_framing_rule_is_moderate_and_contested() {
 }
 
 #[test]
+fn hyp_vol_dose_claim_is_registered_moderate() {
+    let c = claims::HYP_VOL_DOSE_001.entry();
+    assert_eq!(c.grade, EvidenceGrade::Moderate);
+    // The expert-opinion allocation caveat rides in its contradicting note
+    // (GRADE good-practice-statement precedent).
+    assert!(
+        c.contradicting.iter().any(|s| s.contains("no validated")),
+        "the no-validated-split-formula caveat must be recorded"
+    );
+}
+
+#[test]
+fn str_session_balance_claim_is_registered_moderate() {
+    let c = claims::STR_SESSION_BALANCE_001.entry();
+    assert_eq!(c.grade, EvidenceGrade::Moderate);
+    // The expert-opinion count/taxonomy caveat AND the running-emphasis caveat
+    // must both ride in the contradicting notes (GRADE good-practice-statement
+    // precedent: cite the principle, flag the unstudied parameters).
+    assert!(
+        c.contradicting.iter().any(|s| s.contains("expert-opinion")),
+        "the count/taxonomy expert-opinion caveat must be recorded"
+    );
+    assert!(
+        c.contradicting
+            .iter()
+            .any(|s| s.contains("running-focused hybrid")),
+        "the running-emphasis (balance-is-a-default) caveat must be recorded"
+    );
+}
+
+#[test]
 fn preprint_led_claims_never_exceed_expert_opinion() {
     // A claim whose lead citation is a not-yet-peer-reviewed
     // preprint cannot carry a Moderate or Strong badge.

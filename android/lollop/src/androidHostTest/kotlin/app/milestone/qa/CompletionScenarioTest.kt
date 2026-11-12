@@ -12,15 +12,11 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Core
 import app.milestone.Event
@@ -103,11 +99,11 @@ class CompletionScenarioTest {
         // action; the editor STAYS open on the next set (gym-floor loop), and
         // "Done for now" closes it.
         rule.typeWeight("60")
-        rule.onNodeWithTag("editor-primary").performClick()
-        rule.assertTextCountEventually(setHeader(2, 3), 1)
+        rule.tapEditorPrimary()
+        rule.assertCountEventually(hasText(setHeader(2, 3)), 1)
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
         rule.assertCountEventually(hasContentDescription(setsDone(1, 3)), 1)
-        rule.assertTextCountEventually(logSetOf(2, 3), 1)
+        rule.assertCountEventually(hasText(logSetOf(2, 3)), 1)
         // Only lifts exist, so History opens on the Lifts list.
         rule.selectTab(str(R.string.main_dest_history))
         rule.scrollToText("Back squat")
@@ -165,7 +161,7 @@ class CompletionScenarioTest {
             ),
         )
         rule.launchApp()
-        rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
+        rule.openLogChooser()
         rule.onNode(hasText(str(R.string.main_todays_plan, ""), substring = true)).performClick()
         // The squat is done, so the tile seeds the NEXT open item, not item 0: a
         // strength goal's hinge, the competition deadlift (STRENGTH-10).
@@ -203,15 +199,15 @@ class CompletionScenarioTest {
         rule.onAllNodesWithText(str(R.string.plan_skip_exercise))[0].performClick()
         // It collapses to a settled row marked skipped (0 sets: never "done"); the
         // other 3 stay open.
-        rule.assertTextCountEventually(str(R.string.plan_skipped), 1)
+        rule.assertCountEventually(hasText(str(R.string.plan_skipped)), 1)
         rule.onAllNodesWithText(str(R.string.plan_reopen)).assertCountEquals(1)
         rule.onAllNodes(logActions(logSetOf(1, 3))).assertCountEquals(3)
         // Reopen restores the open item with its first-set action. The done row sits
         // under the three open cards, below the fold, so scroll to the end of the list
         // (past the Log button inset) as a user would before tapping it.
-        rule.onAllNodes(hasScrollToIndexAction())[0].performTouchInput { swipeUp() }
+        rule.scrollTodayToEnd()
         rule.onNodeWithText(str(R.string.plan_reopen)).performClick()
-        rule.assertTextCountEventually(str(R.string.plan_reopen), 0)
+        rule.assertCountEventually(hasText(str(R.string.plan_reopen)), 0)
         // The reopened item returns at the top of the lazy Today list, which the
         // scroll above moved out of composition: scroll back up before counting.
         rule.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(0)

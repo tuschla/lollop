@@ -15,7 +15,6 @@ import androidx.glance.unit.ColorProvider
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppTheme
 import app.milestone.DarkMode
-import app.milestone.DayMark
 import app.milestone.HoldReason
 import app.milestone.OpenDest
 import app.milestone.Palette
@@ -45,35 +44,15 @@ import kotlin.math.pow
 class TodayWidgetContentTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
     private val res get() = ctx.resources
-    private val day = 20_389L // Tue 2025-10-28
+    private val day = WidgetFixtures.DAY
 
     @After
     fun resetFont() = RuntimeEnvironment.setFontScale(1f)
 
-    // Mon trained, today (Tue) next, Wed rest, Thu and Fri planned, a rest weekend.
-    private val week = listOf(
-        DayMark.Done, DayMark.Next, DayMark.Rest, DayMark.Planned,
-        DayMark.Planned, DayMark.Rest, DayMark.Rest,
-    ).mapIndexed { i, m -> WidgetWeekDay(day - 1 + i, m) }
+    private val week = WidgetFixtures.week
 
-    private fun liftDay() = widgetFace(
-        WidgetSnapshot(
-            epochDay = day,
-            kind = WidgetDayKind.Lift,
-            title = "Heavy day",
-            items = listOf(
-                WidgetItem(WidgetItemKind.Lift, "Back squat", "5×3 @\u00A0117.5\u00A0kg"),
-                WidgetItem(WidgetItemKind.Lift, "Deadlift", "3×5"),
-                WidgetItem(WidgetItemKind.Lift, "Bench press", "3×5"),
-                WidgetItem(WidgetItemKind.Lift, "Cable row", "3×5"),
-            ),
-            weekDone = 1,
-            weekPlanned = 4,
-            week = week,
-        ),
-        day,
-        res,
-    )
+    /** "Heavy day": four open lifts, Back Squat first. */
+    private fun liftDay() = widgetFace(WidgetFixtures.states(res).getValue("lift").snapshot, day, res)
 
     private val colors get() = widgetColors(ctx, AppTheme.Paper, DarkMode.System, dynamic = false)
 
@@ -175,7 +154,8 @@ class TodayWidgetContentTest {
             assertEquals(1, it.maxActions)
             assertFalse("no room for the label", it.labelled)
         }
-        layoutAt(cells4x1).let {
+        // 4×1: a status line that fits beside both actions keeps the primary labelled.
+        layoutAt(cells4x1, face = runDay()).let {
             assertEquals(WidgetShape.Line, it.shape)
             assertTrue(it.labelled)
             assertEquals(2, it.maxActions)
@@ -291,7 +271,7 @@ class TodayWidgetContentTest {
         for (c in listOf(cells2x2, cells2x3, five2x2, five3x2, five2x3)) assertFalse("hold $c", layoutAt(c, face = hold()).bigTitle)
         // A wrapped item line keeps its prescription whole: never a line ending on "@"
         // nor one starting with it ("Back squat · 5×3" / "@ 117.5 kg" on a 2×2, e37).
-        assertEquals("Back squat · 5×3 @\u00A0117.5\u00A0kg", liftDay().items.first())
+        assertEquals("Back Squat · 5×3 @\u00A0117.5\u00A0kg", liftDay().items.first())
         assertFalse(layoutAt(cells4x3).bigTitle)
     }
 
@@ -352,7 +332,7 @@ class TodayWidgetContentTest {
         setAppWidgetSize(hostStep(cells2x1))
         provideComposable { TodayWidgetContent(liftDay(), colors) }
         onNode(hasTextEqualTo("Heavy day")).assertExists()
-        onNode(hasTextEqualTo("Back squat")).assertExists()
+        onNode(hasTextEqualTo("Back Squat")).assertExists()
         // The tile's action as a round button, named for TalkBack; no Log at this size.
         onNode(hasContentDescriptionEqualTo(res.getString(R.string.tile_log_set))).assertExists()
         onNode(hasContentDescriptionEqualTo(res.getString(R.string.tile_log))).assertDoesNotExist()
@@ -367,7 +347,7 @@ class TodayWidgetContentTest {
         setAppWidgetSize(hostStep(cells4x3))
         provideComposable { TodayWidgetContent(liftDay(), colors) }
         onNode(hasTextEqualTo("Heavy day")).assertExists()
-        onNode(hasTextEqualTo("Back squat · 5×3 @\u00A0117.5\u00A0kg")).assertExists()
+        onNode(hasTextEqualTo("Back Squat · 5×3 @\u00A0117.5\u00A0kg")).assertExists()
         onNode(hasTextEqualTo("Cable row · 3×5")).assertExists()
         onNode(hasTextEqualTo(res.getString(R.string.tile_log_set))).assertExists()
         onNode(hasContentDescriptionEqualTo(res.getString(R.string.tile_log))).assertExists()

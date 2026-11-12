@@ -112,7 +112,8 @@ jobs:
     # android/lollop's GeneratedSourcesTest writes from the Kotlin payload code: the
     # day rule, the line cuts and layouts, the bundled fallback and strings, the App
     # Group lookup, the activity frames, and renders of every widget family, state
-    # and activity (artifact `widget-renders`).
+    # and activity (artifact `widget-renders`). The test of the payload the app
+    # wrote runs in the simulator job, which has one.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -126,7 +127,8 @@ jobs:
           mkdir -p build/widget-renders
           TEST_RUNNER_LOLLOP_RENDER_DIR="$PWD/build/widget-renders" xcodebuild test \
             -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
-            -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets
+            -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets \
+            -skip-testing:LollopWidgetsTests/LollopWidgetsTests/testThePayloadTheAppWroteReads
           find build/widget-renders -type f | wc -l
 
       - name: Upload the renders

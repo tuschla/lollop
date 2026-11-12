@@ -18,14 +18,7 @@ mod common;
 #[test]
 fn view_json_matches_snapshot() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/view_snapshot");
-    let mut cases: Vec<String> = fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("missing fixtures dir {}: {e}", dir.display()))
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter_map(|n| n.strip_suffix(".events.ndjson").map(str::to_owned))
-        .collect();
-    cases.sort();
-    assert!(!cases.is_empty(), "no view fixtures in {}", dir.display());
+    let cases = common::cases(&dir, ".events.ndjson");
     let bless = std::env::var_os("BLESS_VIEW_SNAPSHOT").is_some();
     let mut stale = Vec::new();
     let mut wanted = BTreeSet::new();

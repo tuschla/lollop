@@ -20,26 +20,8 @@ fn runner(days: u8, km: f64) -> Profile {
     }
 }
 
-fn setup(p: Profile, start: i64) -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    for e in [
-        set_today_ev(start),
-        Event::SetProfile(p),
-        Event::GeneratePlan {
-            start_epoch_day: start,
-        },
-    ] {
-        let _ = app.update(e, &mut model);
-    }
-    (app, model)
-}
-
 fn run(app: &Engine, model: &mut Model, km: f64, day: i64) {
-    let _ = app.update(
-        log_run(km, km * 6.0, 70.0, 0.0, day * DAY_SEC + 8 * 3600, 0),
-        model,
-    );
+    let _ = app.update(logrun_at(km, day * DAY_SEC + 8 * HOUR), model);
 }
 
 /// (day, session title, shown km) of every run item on a day after `from`.
@@ -62,13 +44,8 @@ fn runs_after(vm: &ViewModel, from: i64) -> Vec<(i64, String, Option<f64>, Strin
 
 fn lift(exercise: &str, kg: f64, day: i64) -> LoggedSet {
     LoggedSet {
-        hold_sec: None,
-        exercise: exercise.into(),
-        weight_kg: kg,
-        reps: 5,
-        rpe: 8.0,
-        observed_at: day * DAY_SEC + 3_600,
         entry_id: day as u64,
+        ..logged_set(exercise, kg, 5, 8.0, day * DAY_SEC + 3_600)
     }
 }
 
@@ -196,7 +173,7 @@ fn week_run_km(vm: &ViewModel, from: i64) -> f64 {
 /// 3 runs a week (Mon/Wed/Sat, 10 km) on days `MON..MON+weeks*7`, then
 /// nothing; today = `today_off` days after the last run.
 fn run_history(p: Profile, weeks: i64, today_off: i64) -> (Engine, Model, i64) {
-    let (app, mut model) = setup(p, MON);
+    let (app, mut model) = planned_on(p, [], MON);
     let mut last = MON;
     for d in 0..weeks * 7 {
         if matches!(d % 7, 0 | 2 | 5) {
@@ -233,7 +210,7 @@ fn an_old_declared_layoff_does_not_disable_run_reentry() {
 /// 3 runs/wk (Mon/Wed/Sat) for `weeks`, skipping days in `gap`; the last
 /// 5 weeks: one 18 km long run 40 days before today, else 8 km.
 fn long_history(p: Profile, gap: std::ops::Range<i64>) -> (Engine, Model, i64) {
-    let (app, mut model) = setup(p, MON);
+    let (app, mut model) = planned_on(p, [], MON);
     let end = 40 * 7;
     for d in 0..end {
         if !matches!(d % 7, 0 | 2 | 5) || gap.contains(&d) {
@@ -289,28 +266,11 @@ fn a_fresh_stated_longest_run_counts_after_an_old_break() {
     );
 }
 
-/// Distance km of the run prescriptions in a synthesized week.
-fn program_run_km(p: &crate::schema::Program) -> f64 {
-    use crate::schema::{Prescription, RunVolume};
-    p.mesocycle
-        .sessions
-        .iter()
-        .flat_map(|s| &s.prescriptions)
-        .filter_map(|r| match &r.value {
-            Prescription::Run(rx) => match rx.volume {
-                RunVolume::DistanceKm(k) => Some(k as f64),
-                _ => None,
-            },
-            _ => None,
-        })
-        .sum()
-}
-
 #[test]
 fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     // 3 × 8 km = 24 km/wk logged, 30 km/wk stated; one 8-day gap (days
     // 12 → 21) 37 weeks before today.
-    let (_, m, t) = long_history(runner(3, 30.0), 14..21);
+    let (app, m, t) = long_history(runner(3, 30.0), 14..21);
     let facts = RunFacts::new(&m.runs);
     // The gap is a 1–2 wk break the day after it (90 %, 1-week ramp) ...
     let fresh = crate::app::anchors::build_run_break(&m.runs, &facts, MON + 21, 0);
@@ -318,27 +278,15 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
         fresh.is_some_and(|b| b.reentry.active && b.reentry.volume_frac < 1.0),
         "{fresh:?}"
     );
-    // ... and its ramp ended long ago: it no longer shapes today's plan.
+    // ... and its ramp ended long ago: it no longer shapes today's plan, which
+    // equals the plan of the same athlete without the gap.
     let brk = crate::app::anchors::build_run_break(&m.runs, &facts, t, 0);
     assert_eq!(brk, None);
-    // The same anchors with and without that break.
-    let anchors = |run_break| crate::plan::Anchors {
-        run: crate::plan::RunAnchors {
-            recent_weekly_km: Some(24.0),
-            longest_recent_run_km: Some(8.0),
-            ..Default::default()
-        },
-        week_start_epoch_day: Some(t),
-        plan_start_epoch_day: Some(MON),
-        run_break,
-        ..Default::default()
-    };
-    let p = runner(3, 30.0);
-    let without = crate::plan::synthesize(&PlanProfile::new(&p), &anchors(None), 0).unwrap();
-    let with = crate::plan::synthesize(&PlanProfile::new(&p), &anchors(brk), 0).unwrap();
+    let (app0, m0, t0) = long_history(runner(3, 30.0), 0..0);
+    assert_eq!(t0, t);
     assert_eq!(
-        program_run_km(&with),
-        program_run_km(&without),
+        week_run_km(&app.view(&m), t),
+        week_run_km(&app0.view(&m0), t),
         "a 37-week-old 8-day gap still changes the week"
     );
 }
@@ -350,7 +298,7 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
 fn assert_more_volume_never_shrinks(kms: &[f64], profile: impl Fn(f64) -> Profile) {
     let mut prev: Option<(f64, f64, f64)> = None;
     for &km in kms {
-        let (app, m) = setup(profile(km), MON);
+        let (app, m) = planned_on(profile(km), [], MON);
         let vm = app.view(&m);
         let rows = runs_after(&vm, MON - 1);
         let total: f64 = rows.iter().filter_map(|r| r.2).sum();
@@ -579,7 +527,7 @@ fn the_shown_weekly_target_is_the_week_the_days_hold() {
                         ..runner(days, km)
                     };
                     let vdot = race_min.map(|m| crate::load::vdot(10_000.0, f64::from(m * 60)));
-                    let (app, mut m) = setup(p, MON);
+                    let (app, mut m) = planned_on(p, [], MON);
                     // A logged run, so the progress card (and its plan mark) shows.
                     run(&app, &mut m, (0.3 * km).floor(), MON - 2);
                     let vm = app.view(&m);
@@ -607,7 +555,7 @@ fn the_shown_weekly_target_is_the_week_the_days_hold() {
         }),
         ..runner(3, 60.0)
     };
-    let (app, mut m) = setup(p, MON);
+    let (app, mut m) = planned_on(p, [], MON);
     run(&app, &mut m, 20.0, MON - 2);
     let vm = app.view(&m);
     assert_eq!(vm.run_progress.expect("progress").planned_weekly_km, 50.8);
@@ -626,7 +574,7 @@ fn claim_three_day_long_run_examples() {
         (3, 60.0, 13.5),
         (4, 40.0, 12.0),
     ] {
-        let (app, m) = setup(runner(days, km), MON);
+        let (app, m) = planned_on(runner(days, km), [], MON);
         let vm = app.view(&m);
         let rows = runs_after(&vm, MON - 1);
         let long = long_run_km(&vm, MON - 1);
@@ -703,7 +651,7 @@ fn claim_plan_rest_days_and_no_history_are_no_break() {
 
 #[test]
 fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
-    let (_, m) = setup(runner(3, 40.0), MON);
+    let (_, m) = planned_on(runner(3, 40.0), [], MON);
     let it = planned_long_run_item(&m);
     let km = it.run_head_km.unwrap();
     let cites_share = it.why.basis.contains("25–30% of your weekly distance");
@@ -722,7 +670,7 @@ fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
         it.evidence.citation
     );
     // A 4-day week keeps its 30 % share and the claim's own statement.
-    let (_, m) = setup(runner(4, 40.0), MON);
+    let (_, m) = planned_on(runner(4, 40.0), [], MON);
     let it = planned_long_run_item(&m);
     assert_eq!(it.run_head_km, Some(12.0));
     assert!(
@@ -743,7 +691,7 @@ fn claim_reentry_plan_is_independent_of_log_order() {
         .collect();
     let mut views = Vec::new();
     for order in [false, true] {
-        let (app, mut m) = setup(runner(3, 30.0), MON);
+        let (app, mut m) = planned_on(runner(3, 30.0), [], MON);
         set_today(&app, &mut m, MON + 50);
         let mut ds = days.clone();
         if order {
@@ -882,7 +830,7 @@ fn run_reentry_ramps_back_to_full_and_ends() {
 fn a_longest_run_stated_after_the_break_counts_through_the_rebuild() {
     let mut out = Vec::new();
     for state_it in [false, true] {
-        let (app, mut m) = setup(runner(3, 24.0), MON);
+        let (app, mut m) = planned_on(runner(3, 24.0), [], MON);
         // Six weeks of 8 km runs with a 12 km Saturday long run, then three
         // weeks off; back on Monday with two 5 km runs.
         for d in 0..42 {

@@ -705,39 +705,4 @@ mod tests {
             LongLengthBias::LowToModerate
         );
     }
-
-    /// The name classifiers' hot path: `same_movement` and `movement_key`
-    /// compare every token with the equipment words and every name with the
-    /// legacy labels.
-    #[test]
-    #[ignore = "timing probe; run in release with --ignored --nocapture"]
-    fn name_classifier_timing() {
-        use std::hint::black_box;
-        let names = [
-            "Back squat",
-            "Barbell back squat",
-            "Bench press",
-            "Incline dumbbell curl",
-            "Cable row",
-            LEGACY_CABLE_ROW,
-            "Romanian deadlift",
-            "Pull-up",
-            "Overhead press",
-            "Smith machine back squat",
-            "Lat pulldown",
-            "Chest fly",
-        ];
-        let mut n = 0usize;
-        let t = std::time::Instant::now();
-        for i in 0..200_000usize {
-            let (a, b) = (names[i % names.len()], names[(i * 7 + 3) % names.len()]);
-            n += usize::from(same_movement(black_box(a), black_box(b)));
-        }
-        eprintln!("same_movement ×200k: {:?}", t.elapsed());
-        let t = std::time::Instant::now();
-        for i in 0..200_000usize {
-            n += movement_key(black_box(names[i % names.len()])).len();
-        }
-        eprintln!("movement_key ×200k: {:?} ({n})", t.elapsed());
-    }
 }

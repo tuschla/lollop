@@ -223,7 +223,7 @@ sc_tile() {
 # booted emulator: `--only tilefresh` with the emulator not running.
 sc_tilefresh() {
   local S=tilefresh TILE_S=tilefresh pid
-  check INFO $S "fresh boot" "device uptime $(sh_ cut -d. -f1 /proc/uptime) s at the start; APK installed by this run"
+  observe $S "device uptime at the start (fresh boot; APK installed by this run)" "$(sh_ cut -d. -f1 /proc/uptime) s"
   baseline_device; grant_perms
   pin_clock "$RUN_DAY"
   push_log "$(seed seed_basic "$SEED_DAY" 2)" || { check FAIL $S "seed pushed" "push_log failed"; return; }
@@ -336,7 +336,7 @@ sc_widget() {
   read -r ww wh <<<"$(widget_dp widget-run-day)"
   (( ww >= 200 )) && wide=1
   (( wh >= 184 )) && dated=1
-  check INFO $S "widget size" "${ww} × ${wh} dp: Log beside the primary $( ((wide)) && echo yes || echo no), date line $( ((dated)) && echo yes || echo no); shots/widget-run-day.png"
+  observe $S "widget size" "${ww} × ${wh} dp: Log beside the primary $( ((wide)) && echo yes || echo no), date line $( ((dated)) && echo yes || echo no); shots/widget-run-day.png"
   # The run line: "Run · 8 km · 5:40–6:00 /km", or on a card with room the run's
   # volume as the hero; a detail that is only a figure ("3.4 mi") is the hero
   # alone (visual-design-system § 10, Home screen widget, Hero).
@@ -350,7 +350,7 @@ sc_widget() {
   expect $S "run day: title, run line (or its figure as the hero), ${STR[tile_start_run]} (+ $log at ${ww} dp)" "title '$title'; run detail '$fig'; $t; shots/widget-run-day.png" \
     eval 'grep -qxF "text=$title" <<<"$t" && { grep -qF "text=$run_line" <<<"$tn" || { [[ -n "$fig" ]] && grep -qxF "text=$fig" <<<"$tn"; }; } && grep -qxF "text=${STR[tile_start_run]}" <<<"$t" && { ((!wide)) || grep -qxF "content-desc=$log" <<<"$t"; }'
   widget_tap run-track "${STR[tile_start_run]}" track
-  if ((wide)); then widget_tap run-log "$log" log; else check INFO $S "tap '$log'" "no $log beside the primary at ${ww} dp wide"; fi
+  if ((wide)); then widget_tap run-log "$log" log; else observe $S "tap '$log'" "not checked: no $log beside the primary at ${ww} dp wide"; fi
   widget_tap run-body "$open_today" today
 
   reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
@@ -488,7 +488,7 @@ sc_guided() {
     [[ "$(snap_field kind)" == Run && "$(snap_field trackable)" == True ]] && { found=$d; break; }
   done
   [[ -n "$found" ]] || { check FAIL $S "a C25k run day this week" "no run day found"; return; }
-  check INFO $S "C25k run day" "$found: $(snap_field title)"
+  check PASS $S "a C25k run day this week" "$found: $(snap_field title)"
   start_feeder guided
   open_tracker || { check FAIL $S "open tracker" "failed"; return; }
   wait_text re "${RX[track_pill_fresh_lock]}|^${STR[track_cd_pill_fresh_lock]}\$" 20; evidence guided-tracker
@@ -570,7 +570,7 @@ sc_rest() {
       "channel $(nfield rest-done "r['channel']"); title '$(nfield rest-done "r['extras'].get('android.title')")'; flags $(nfield rest-done "'|'.join(r['flags'])"); countdown $(cat "$OUT/logs/rest-done-countdown-notif.json"); chip '$c1'" \
       eval '[[ "$(nfield rest-done "r[\"channel\"]")" == "$REST_DONE_CHANNEL" && "$(promoted rest-done)" == False && "$(cat "$OUT/logs/rest-done-countdown-notif.json")" == null && -z "$c1" ]]'
   else
-    check INFO $S "rest end" "rest of ${left}s not waited out"
+    check FAIL $S "rest end" "not checked: the rest's ${left}s left is more than this case waits"
   fi
 }
 
@@ -602,7 +602,7 @@ rest_bg() {
   tap_log_set || { evidence "restbg-$c-no-primary"; check FAIL $S "$c: log a set" "no 'Log set N' button, or no LogSet logged"; return; }
   evidence "restbg-$c-loop"
   sh_ dumpsys alarm >"$OUT/logs/restbg-$c-alarm.txt"
-  check INFO $S "$c: app-op and alarm" "SCHEDULE_EXACT_ALARM '$(sh_ appops get "$APP_ID" SCHEDULE_EXACT_ALARM | head -1)'; $(grep -A4 "$ACTION_REST_END\|RestEndReceiver" "$OUT/logs/restbg-$c-alarm.txt" | grep -m2 -oE 'type=[^ ]+|window=[^ ]+|exactAllowReason=[^ ]+|flags=[^ ]+' | tr '\n' ' '); logs/restbg-$c-alarm.txt"
+  observe $S "$c: app-op and alarm" "SCHEDULE_EXACT_ALARM '$(sh_ appops get "$APP_ID" SCHEDULE_EXACT_ALARM | head -1)'; $(grep -A4 "$ACTION_REST_END\|RestEndReceiver" "$OUT/logs/restbg-$c-alarm.txt" | grep -m2 -oE 'type=[^ ]+|window=[^ ]+|exactAllowReason=[^ ]+|flags=[^ ]+' | tr '\n' ' '); logs/restbg-$c-alarm.txt"
   if [[ "$mode" == deny && $API -ge 31 ]]; then
     expect $S "$c: exact alarms off: the loop shows the notice" "ui/restbg-$c-loop.xml shots/restbg-$c-loop.png" has_text eq "${STR[log_exact_alarm_caption]}"
   else
@@ -633,7 +633,7 @@ rest_bg() {
   now="$(dev_now)"; [[ $(( end / 1000 - 10 - now )) -gt 0 ]] && sleep $(( end / 1000 - 10 - now ))
   st="$(proc_state)"
   sh_ dumpsys activity processes | grep -E "Proc #.*:$APP_ID" >"$OUT/logs/restbg-$c-proc.txt"
-  check INFO $S "$c: app 10 s before the rest end" "state '$st' (pid '$(app_pid)'); logs/restbg-$c-proc.txt"
+  observe $S "$c: app 10 s before the rest end" "state '$st' (pid '$(app_pid)'); logs/restbg-$c-proc.txt"
   if [[ "$mode" == allow ]]; then want=30; else want=900; fi
   wait_for $(( end / 1000 + want + 5 - $(dev_now) )) rest_done_posted "restbg-$c-done"
   sb_shot "restbg-$c-done"
@@ -741,36 +741,9 @@ sc_toggle() {
 REM_ID=$REMINDER_NOTIF_ID
 REM_PIN=1234
 REM_ALARM=""
-# rem_want [DAY]: "title<TAB>line<TAB>action" the reminder should show for the
-# stored snapshot's own day, or for its day ahead DAY (the copy rules of
-# reminderLine / reminderActionLabel in SessionReminder.kt, on the app's strings).
-rem_want() {
-  python3 - "$(snapshot)" "${1:+$(epoch_day "$1")}" "${STR[reminder_action_start_run]}" "${STR[reminder_action_log_first_set]}" \
-    "${STR[reminder_action_log_next_set]}" "${STR[reminder_line_single]}" "${STR[reminder_line_exercises.other]}" \
-    "${STR[reminder_line_progress]}" <<'PY'
-import json, re, sys
-d = json.loads(sys.argv[1])
-start_run, first_set, next_set, single, exercises, progress = sys.argv[3:9]
-fmt = lambda f, *a: re.sub(r"%(\d+)\$[sd]", lambda m: str(a[int(m.group(1)) - 1]), f)
-day = next(a for a in d["ahead"] if a["epochDay"] == int(sys.argv[2])) if sys.argv[2] else d
-items = day["items"]
-if day["kind"] == "Run":
-    r = next(i for i in items if i["kind"] == "Run" and not i["done"])
-    line, act = " · ".join(x for x in (r["detail"], r["pace"]) if x.strip()), start_run
-else:
-    lifts = [i for i in items if i["kind"] == "Lift"]
-    op = next(i for i in lifts if not i["done"])
-    done = sum(i["done"] for i in lifts)
-    if len(lifts) == 1:
-        line = fmt(single, op["name"], op["detail"]) if op["detail"] else op["name"]
-    elif done == 0:
-        line = fmt(exercises, len(lifts), op["name"])
-    else:
-        line = fmt(progress, done, len(lifts), op["name"])
-    act = next_set if done else first_set
-print(day["title"], line, act, sep="\t")
-PY
-}
+# rem_text TITLE LINE ACTION: the "title<TAB>line<TAB>action" a reminder shows (rem_case).
+rem_text() { printf '%s\t%s\t%s' "$@"; }
+snap_run_detail() { snapshot | python3 -c "import json,sys;print(next(i['detail'] for i in json.load(sys.stdin)['items'] if i['kind']=='Run'))"; }
 rem_open_lift() { snapshot | python3 -c "import json,sys;print(next(i['name'] for i in json.load(sys.stdin)['items'] if i['kind']=='Lift' and not i['done']))"; }
 rem_set_line() { echo "{\"LogSet\":{\"exercise\":\"$1\",\"weight_kg\":$2,\"reps\":$3,\"rpe\":8.0,\"observed_at\":$4,\"entry_id\":${4}000}}"; }
 # seed_basic plus the lift day's sets from 06:00, all but the last Cable row set.
@@ -835,7 +808,7 @@ rem_fire() {
   [[ -n "$a" && "$a" != "$2 07:45"* ]]
 }
 # rem_case CASE DAY WANT [MODE]: rem_fire, then the reminder must be posted
-# with WANT (rem_want) on the session_reminder channel (category reminder,
+# with WANT (rem_text) on the session_reminder channel (category reminder,
 # public on the lock screen, exactly one action), or nothing when WANT is empty.
 rem_case() {
   local c="$1" n t l a gt gl ga meta
@@ -909,7 +882,7 @@ sc_reminder() {
   # Its own week: a clock pinned before the system image's build date (API 37:
   # Oct 2026) is moved forward to it at boot, which the reboot case needs.
   local S=reminder SEED_DAY=2026-11-01 RUN_DAY=2026-11-02 REST_DAY=2026-11-03 LIFT_DAY=2026-11-04
-  local w t l a r p s rc ex a0 a1 n want t0 move_rx
+  local w lift_w t l a r p s rc ex a0 a1 n want t0 move_rx
   fresh "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
 
   mark reminder-profile
@@ -943,9 +916,10 @@ sc_reminder() {
     eval '[[ "$a1" == "$REST_DAY 07:45"* ]] && q re "^7:45\sAM$" <"$OUT/ui/rem-profile-time.xml" >/dev/null'
 
   # Run day: posted with the app in the background; its action from the lock
-  # screen, which takes the reminder down.
+  # screen, which takes the reminder down. The seed's Easy run has no pace
+  # target: the line is its distance.
   mark reminder-run
-  w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"
+  w="$(rem_text "$(snap_field title)" "$(snap_run_detail)" "${STR[reminder_action_start_run]}")"; IFS=$'\t' read -r t l a <<<"$w"
   rem_case run "$RUN_DAY" "$w" locked
   mark reminder-lock
   rem_lock "$a" "$t" track
@@ -979,10 +953,12 @@ sc_reminder() {
     eval '[[ "$n" != null && -n "$r" && "$(cat "$OUT/logs/rem-moved-notif.json")" == null && "$(snap_field kind)" == Rest ]]'
 
   # Lift day: the action from the shade takes the reminder down; the same
-  # day's alarm again posts nothing; then a content tap.
+  # day's alarm again posts nothing; then a content tap. The seed's lift day has
+  # four lifts, Back Squat first (seed_rem_lift_left logs them in that order).
   mark reminder-lift
   rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
-  w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
+  w="$(rem_text "$(snap_field title)" "$(fmt reminder_line_exercises.other 4 "Back Squat")" "${STR[reminder_action_log_first_set]}")"
+  lift_w="$w"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
   rem_case lift "$LIFT_DAY" "$w"
   s="(no '$a' in the shade)"
   tap_shade rem-lift-action eq "$a" "$t" && { wait_screen log_set 10; s="$(screen)"; }
@@ -1011,7 +987,7 @@ sc_reminder() {
   # which takes a posted reminder down.
   mark reminder-lift-next
   rem_reseed "$LIFT_DAY" seed_rem_lift_left
-  w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
+  w="$(rem_text "$t" "$(fmt reminder_line_progress 3 4 "Cable row")" "${STR[reminder_action_log_next_set]}")"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
   rem_case lift-next "$LIFT_DAY" "$w"
   s="(no '$a' in the shade)"
   tap_shade rem-next-action eq "$a" "$t" && { wait_screen log_set 10; s="$(screen)"; }
@@ -1051,11 +1027,11 @@ sc_reminder() {
   expect $S "done: today's run is logged" "snapshot kind '$(snap_field kind)', sessionDone $(snap_field sessionDone)" test "$(snap_field sessionDone)" = True
   rem_case "done" "$RUN_DAY" ""
 
-  # The app last ran on Tue (rest day); the clock moves to Wed morning.
+  # The app last ran on Tue (rest day); the clock moves to Wed morning: the lift
+  # day's reminder, from Tue's snapshot.
   mark reminder-ahead
   rem_reseed "$REST_DAY" seed_basic "$SEED_DAY" 2
-  w="$(rem_want "$LIFT_DAY")"
-  rem_case ahead "$LIFT_DAY" "$w"
+  rem_case ahead "$LIFT_DAY" "$lift_w"
   expect $S "ahead: posted from Tue's snapshot (its day ahead), app not opened" \
     "snapshot epochDay $(snap_field epochDay) (Tue $(epoch_day "$REST_DAY")), stale $(snap_field stale); focus '$(focus)'" \
     eval '[[ "$(snap_field epochDay)" == "$(epoch_day "$REST_DAY")" && "$(focus)" != "$APP_ID"* ]]'
@@ -1065,7 +1041,6 @@ sc_reminder() {
   # ahead again).
   mark reminder-tz
   rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
-  w="$(rem_want)"
   home
   want="$(date -d "$LIFT_DAY +1 day" +%F) 07:45"
   pin_clock "$LIFT_DAY" 08:43; wait_for 10 alarm_at "$want"; a0="$(rem_alarm)"
@@ -1073,9 +1048,9 @@ sc_reminder() {
   expect $S "time zone change (Berlin 08:43 → London 07:43), app in the background: alarm moved to 07:45 London" \
     "next '$a0' → '$a1'; device $(sh_ "date '+%F %T %Z'")" \
     eval '[[ "$a0" == "$want"* && "$a1" == "$LIFT_DAY 07:45"* ]]'
-  check INFO $S "tz: today's snapshot after the change (app process alive, not opened)" \
+  observe $S "tz: today's snapshot after the change (app process alive, not opened)" \
     "stale $(snap_field stale), zone '$(snap_field zone)'; app pid '$(app_pid)'"
-  rem_case tz "$LIFT_DAY" "$w" keep
+  rem_case tz "$LIFT_DAY" "$lift_w" keep
   # The same change with no app process: the receivers' process holds no model,
   # so today's snapshot stays stale and nothing posts until the app is opened.
   mark reminder-tz-cold
@@ -1087,7 +1062,7 @@ sc_reminder() {
   n="$(app_pid)"; [[ -n "$n" ]] && sh_ kill -9 "$n"; wait_for 5 app_gone
   # The receivers' answer to the change: 3 s.
   sh_ cmd alarm set-timezone Europe/London >/dev/null; sleep 3
-  check INFO $S "tz-cold: app process killed before the change, not opened (by design nothing posts: today's snapshot is stale)" \
+  observe $S "tz-cold: app process killed before the change, not opened (by design nothing posts: today's snapshot is stale)" \
     "pid '$n' killed; snapshot stale $(snap_field stale), zone '$(snap_field zone)'; alarm '$(rem_alarm)'"
   rem_case tz-cold "$LIFT_DAY" "" keep
 
@@ -1099,7 +1074,6 @@ sc_reminder() {
   mark reminder-reboot
   pin_clock "$LIFT_DAY" 08:00
   rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
-  w="$(rem_want)"
   home
   pin_clock "$LIFT_DAY" 07:42; wait_for 10 alarm_at "$LIFT_DAY 07:45"; a0="$(rem_alarm)"
   reboot_device
@@ -1112,7 +1086,7 @@ sc_reminder() {
     "before '$a0', after boot '$a1' (want '$want', ~$((SECONDS - t0)) s after boot_completed); device $(sh_ "date '+%F %T %Z'"), uptime $(sh_ cut -d. -f1 /proc/uptime) s; focus '$(focus)'" \
     eval '[[ "$a1" == "$want"* && "$(focus)" != "$APP_ID"* ]]'
   wake
-  if [[ "$want" == "$LIFT_DAY 07:45" ]]; then rem_case reboot "$LIFT_DAY" "$w" keep; else rem_case reboot "$LIFT_DAY" "$w"; fi
+  if [[ "$want" == "$LIFT_DAY 07:45" ]]; then rem_case reboot "$LIFT_DAY" "$lift_w" keep; else rem_case reboot "$LIFT_DAY" "$lift_w"; fi
 }
 
 trap session_cleanup EXIT

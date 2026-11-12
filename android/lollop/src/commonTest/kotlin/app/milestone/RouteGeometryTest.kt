@@ -146,14 +146,14 @@ class RouteGeometryTest {
         assertEquals(l.ys[0].first(), l.sy, 0f)
         // No two placed centres closer than the marker spacing.
         for (i in 0 until l.placed) for (j in i + 1 until l.placed) {
-            assertTrue(hypot(l.marks[i * 3] - l.marks[j * 3], l.marks[i * 3 + 1] - l.marks[j * 3 + 1]) >= 28f)
+            assertTrue(hypot(l.marks[i * 3] - l.marks[j * 3], l.marks[i * 3 + 1] - l.marks[j * 3 + 1]) >= MarkerSpacingDp)
         }
         // Pills: inside the bounds, apart, sized by the font.
         for (pill in listOf(l.pillA, l.pillB)) {
             assertTrue(pill.left >= 0f && pill.right <= 300f && pill.top >= 0f && pill.bottom <= 1200f)
-            assertEquals(16f + 8f, pill.bottom - pill.top, 1e-4f)
+            assertEquals((metrics.descent - metrics.ascent) + 2 * PillPadYDp, pill.bottom - pill.top, 1e-4f)
         }
-        assertEquals("Finish".length * 7f + 16f, l.pillA.right - l.pillA.left, 1e-4f)
+        assertEquals(metrics.width("Finish") + 2 * PillPadXDp, l.pillA.right - l.pillA.left, 1e-4f)
         assertFalse(l.pillA.intersects(l.pillB))
     }
 
@@ -166,6 +166,10 @@ class RouteGeometryTest {
         l.layout(track, fit, RouteRect(0f, 0f, 100f, 100f), RouteDrawOptions())
         assertTrue(l.placed < 12)
         assertEquals(-1, l.marks[2].toInt(), "the finish is placed first")
+        // What stays keeps the marker spacing.
+        for (i in 0 until l.placed) for (j in i + 1 until l.placed) {
+            assertTrue(hypot(l.marks[i * 3] - l.marks[j * 3], l.marks[i * 3 + 1] - l.marks[j * 3 + 1]) >= MarkerSpacingDp)
+        }
     }
 
     @Test

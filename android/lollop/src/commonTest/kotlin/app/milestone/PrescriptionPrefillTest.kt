@@ -1,8 +1,8 @@
 package app.milestone
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.Test
 
 /**
  * [prescriptionPrefill] turns a coach [PrescriptionView] into a NEW-entry
@@ -41,7 +41,7 @@ class PrescriptionPrefillTest {
             target_rpe = 7.0,
         )
         val rx = prescriptionPrefill(p, WeightUnit.Kg)
-        assertNull("an RIR lift has no load to prefill", rx.weightText)
+        assertNull(rx.weightText, "an RIR lift has no load to prefill")
         assertNull(rx.weightKgVerbatim)
         // The target rides along as a HINT; the seeded editor value stays unrated.
         assertEquals(7.0, rx.targetRpe!!, 0.0)
