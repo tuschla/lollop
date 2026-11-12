@@ -1277,7 +1277,7 @@ impl Gen {
             resting_hr_bpm: self.opt_f(0.4, 40.0, 80.0),
             measured_hr_max: self.opt_f(0.3, 160.0, 210.0),
             weight_lb: self.rng.chance(0.2),
-            distance_unit: self.rng.pick(&DISTANCE_UNITS),
+            distance_unit: Some(self.rng.pick(&DISTANCE_UNITS)),
             // The Android shell always dates an edit with the core's today
             // (`ProfileDraft.toEvent(model.today())`); an undated edit is a
             // legacy or hand-edited log.

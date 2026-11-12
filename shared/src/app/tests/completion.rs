@@ -1336,7 +1336,7 @@ fn session_done_carries_run_numbers_and_says_of_plan_when_short() {
         format!("{} mi", tenths.trim_end_matches(".0"))
     };
     let miles = Profile {
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..model.profile().cloned().expect("a profile")
     };
     app.update(Event::SetProfile(miles), &mut model)

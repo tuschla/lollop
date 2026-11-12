@@ -19,6 +19,8 @@ class UnitsTest {
     fun theProfileUnitWinsAndTheLocaleCoversThePreSetupApp() {
         assertEquals(DistanceUnit.Km, ViewModel(profile = Profile(distance_unit = DistanceUnit.Km)).distanceUnit())
         assertEquals(DistanceUnit.Mi, ViewModel(profile = Profile(distance_unit = DistanceUnit.Mi)).distanceUnit())
+        // Unstated (an older build's profile before boot states it): km, as the core renders it.
+        assertEquals(DistanceUnit.Km, ViewModel(profile = Profile()).distanceUnit())
         assertEquals(localeDistanceUnit(), ViewModel().distanceUnit())
         assertEquals(localeDistanceUnit(), (null as ViewModel?).distanceUnit())
     }

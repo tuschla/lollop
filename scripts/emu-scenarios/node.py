@@ -1,6 +1,8 @@
 """Query a uiautomator dump read on stdin (`dump` or `dump --windows`).
 
-argv: mode [text] [anchor]
+argv: [within ID] mode [text] [anchor]
+  within ID        prefix: query only the subtree of the first node whose
+                   resource-id ends with ':id/ID' (exit 1 when there is none).
   eq|pre|re TEXT   print "cx cy x1 y1 x2 y2 <label>" of the first node whose text or
                    content-desc equals / starts with / regex-matches TEXT (only
                    nodes AFTER the first node labelled exactly ANCHOR, when given);
@@ -24,9 +26,13 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-mode = sys.argv[1]
-want = sys.argv[2] if len(sys.argv) > 2 else ""
-anchor = sys.argv[3] if len(sys.argv) > 3 else None
+args = sys.argv[1:]
+scope = None
+if args[:1] == ["within"]:
+    scope, args = args[1], args[2:]
+mode = args[0]
+want = args[1] if len(args) > 1 else ""
+anchor = args[2] if len(args) > 2 else None
 raw = sys.stdin.read()
 # `uiautomator dump --windows` wraps every window's <hierarchy> in <displays>.
 i, j = raw.find("<?xml"), raw.rfind("</displays>")
@@ -34,6 +40,10 @@ j = j + 11 if j >= 0 else raw.rfind("</hierarchy>") + 12
 if i < 0 or j < 12:
     sys.exit(2)
 root = ET.fromstring(raw[i:j])
+if scope is not None:
+    root = next((n for n in root.iter("node") if n.get("resource-id", "").endswith(":id/" + scope)), None)
+    if root is None:
+        sys.exit(1)
 
 
 def bounds(n):

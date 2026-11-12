@@ -92,7 +92,7 @@ settled() {
   done
   printf '%s\n' "$a"
 }
-# python3 node.py over stdin: q MODE [TEXT [ANCHOR]] (node.py's modes).
+# python3 node.py over stdin: q [within ID] MODE [TEXT [ANCHOR]] (node.py's modes).
 q() { python3 "$HELP/node.py" "$@"; }
 # A string resource with its %N$s / %N$d arguments filled: fmt KEY ARG...
 fmt() {
@@ -378,10 +378,11 @@ open_set_editor() {
   tap_node eq "${STR[main_log]}" || return 1
   tap_node eq "${STR[main_log_set_title]}" || return 1
   wait_text eq "${STR[log_field_exercise]}" 8 || return 1
-  # An editor with no exercise chosen has no weight row: choose Back Squat.
-  has_text pre "${STR[log_field_weight]}, " && return 0
-  tap_node eq "Back Squat" || return 1
-  wait_text pre "${STR[log_field_weight]}, " 5
+  # No exercise chosen yet: the search field shows its hint. Choose Back Squat.
+  if has_text eq "${STR[log_exercise_search_hint]}"; then tap_node eq "Back Squat" || return 1; fi
+  # The weight row of the chosen exercise (below the fold at large font and
+  # display sizes).
+  scroll_to pre "${STR[log_field_weight]}, " 4
 }
 # tap_scroll MODE TEXT: tap MODE TEXT inside the editor, scrolling its content to
 # reveal it (large fonts / display sizes push the weight and reps rows below the
@@ -528,6 +529,17 @@ notif() {
 }
 # nfield NAME EXPR: EXPR (python, the notif() record bound to r) of logs/NAME-notif.json.
 nfield() { python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(eval(sys.argv[2]) if r else '')" "$OUT/logs/$1-notif.json" "$2" 2>/dev/null; }
+# snooze_others: snooze (30 days) every notification other packages have posted.
+# System UI posts its keyboard tutorial ("Navigate using your keyboard") ~20 s
+# after boot, dated by the real clock: ahead of the pinned one, it ranks first
+# on the lock screen and takes the one full slot there.
+snooze_others() {
+  local k keys
+  mapfile -t keys < <(sh_ cmd notification list | grep -v "^[0-9-]*|$APP_ID|")
+  for k in "${keys[@]}"; do
+    sh_ cmd notification snooze --for $((30 * 86400 * 1000)) "'$k'" >/dev/null
+  done
+}
 promoted() { nfield "$1" "'PROMOTED_ONGOING' in r['flags']"; }
 # ocr_find SHOT WORD: "cx cy" of the first word OCR'd as exactly WORD on
 # shots/SHOT.png (tesseract; any installed Latin-script language data).
@@ -594,8 +606,34 @@ alarm_set() { [[ -n "$(rem_alarm)" ]]; }
 # A tile label as Quick Settings shows it: the label, or (API 37's icon-only
 # tile, content-desc) "<label>, <subtitle>" when the tile has a subtitle.
 TILE_RE="^(${STR[tile_log]}|${STR[tile_log_set]}|${STR[tile_start_run]}|${STR[tile_run_recording]})(, .+)?\$"
-_tile_read() { wdump "$1" && wfind "$1" re "$TILE_RE" | cut -d' ' -f7-; }
+# qsfind DUMP MODE TEXT: wfind in the expanded Quick Settings panel of
+# ui/DUMP.xml only (the launcher's Today widget has buttons with the tile's
+# labels).
+qsfind() { q within quick_settings_panel "$2" "$3" <"$OUT/ui/$1.xml"; }
+_tile_read() { wdump "$1" && qsfind "$1" re "$TILE_RE" | cut -d' ' -f7-; }
 _tile_seen() { [[ -n "$(_tile_read "$1")" ]]; }
+# System UI's NotificationShade window (shade, Quick Settings, keyguard) is
+# visible: from the first frame of an expand until a collapse has finished.
+shade_window_up() {
+  sh_ dumpsys window windows |
+    awk '/^ *Window #[0-9]+ Window\{.* NotificationShade\}:$/ { w = 1 } w && /isVisible=/ { v = /isVisible=true/; exit } END { exit !v }'
+}
+shade_window_gone() { ! shade_window_up; }
+_qs_shown() { wdump "$1" && q within quick_settings_panel texts <"$OUT/ui/$1.xml" >/dev/null; }
+# qs_open NAME: expand Quick Settings, dumped as ui/NAME.xml. An expand sent
+# while a collapse is still animating is dropped, so it waits for the shade
+# window to go (the keyguard keeps it up), and sends it again while the panel
+# stays closed.
+qs_open() {
+  local i
+  keyguard_showing || wait_for 5 shade_window_gone || log "qs_open: the shade window is still up"
+  for i in 1 2 3; do
+    adb_ shell cmd statusbar expand-settings
+    wait_for 5 _qs_shown "$1" && return 0
+  done
+  log "qs_open: Quick Settings not expanded (ui/$1.xml)"
+  return 1
+}
 # tile_label NAME: open Quick Settings and dump it as ui/NAME.xml; echo the
 # tile's label and leave the panel open (collapse it with `cmd statusbar
 # collapse`). The subtitle (the widget's title for today) is written to
@@ -603,13 +641,13 @@ _tile_seen() { [[ -n "$(_tile_read "$1")" ]]; }
 # so the label is read until two reads agree.
 tile_label() {
   local i l w h
-  adb_ shell cmd statusbar expand-settings
+  qs_open "$1" || return 1
   read -r w h <<<"$(screen_size)"
   for i in 1 2 3; do
     if wait_for 5 _tile_seen "$1"; then
       l="$(settled _tile_read "$1")"
       if [[ -n "$l" ]]; then
-        q texts <"$OUT/ui/$1.xml" | sed -n 's/^[a-z-]*=//p' | grep -E "$TILE_RE" |
+        q within quick_settings_panel texts <"$OUT/ui/$1.xml" | sed -n 's/^[a-z-]*=//p' | grep -E "$TILE_RE" |
           grep -m1 ', ' | sed 's/^[^,]*, //' >"$OUT/ui/$1.subtitle"
         echo "${l%%, *}"; return 0
       fi
@@ -620,9 +658,9 @@ tile_label() {
   return 1
 }
 # tile_node DUMP LABEL: "cx cy ..." of the tile labelled LABEL (with or without
-# its subtitle) in ui/DUMP.xml.
+# its subtitle) in the Quick Settings panel of ui/DUMP.xml.
 # shellcheck disable=SC2016
-tile_node() { wfind "$1" re "^$(printf '%s' "$2" | sed 's/[][\.*^$()+?{}|]/\\&/g')(, .+)?\$"; }
+tile_node() { qsfind "$1" re "^$(printf '%s' "$2" | sed 's/[][\.*^$()+?{}|]/\\&/g')(, .+)?\$"; }
 _tile_shown() { tile_label tile-added >/dev/null; local r=$?; adb_ shell cmd statusbar collapse; return $r; }
 # add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
 # on the QS panel (it takes a while to bind on API 34).

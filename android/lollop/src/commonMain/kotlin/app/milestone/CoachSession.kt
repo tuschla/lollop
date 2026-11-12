@@ -8,10 +8,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
@@ -27,7 +28,9 @@ import app.milestone.resources.main_save_failed
 import app.milestone.resources.track_action_resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.nullable
 import org.jetbrains.compose.resources.stringResource
@@ -45,7 +48,6 @@ internal class CoachSession(
     showSetupState: MutableState<Boolean>,
     setupInitialState: MutableState<Event.SetProfile?>,
     showTrackerState: MutableState<Boolean>,
-    showResumePromptState: MutableState<Boolean>,
     val markOnboardingDone: () -> Unit,
     /** A pending [OpenDest] from an open intent or URL; [CoachScaffold] applies and clears it. */
     val openRequest: OpenRequests,
@@ -57,11 +59,6 @@ internal class CoachSession(
     var showSetup by showSetupState
     var setupInitial by setupInitialState
     var showTracker by showTrackerState
-    var showResumePrompt by showResumePromptState
-
-    /** The interrupted run's fixes boot read for the resume offer, so Resume reuses
-     *  them instead of re-reading the file; null once consumed. */
-    var recoveredRun: RecoveredTrack? = null
 }
 
 @Composable
@@ -114,10 +111,6 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // recording. The saveable flag keeps them on the map across recreation.
     val showTrackerState = rememberSaveable { mutableStateOf(false) }
 
-    // A crash-recovery sidecar is offered for resume, never resumed unasked; a
-    // stale sidecar (newest fix older than RESUME_STALE_SEC) is discarded outright.
-    val showResumePromptState = rememberSaveable { mutableStateOf(false) }
-
     val session = remember {
         CoachSession(
             loadedState = loadedState,
@@ -125,7 +118,6 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             showSetupState = showSetupState,
             setupInitialState = setupInitialState,
             showTrackerState = showTrackerState,
-            showResumePromptState = showResumePromptState,
             markOnboardingDone = markOnboardingDone,
             openRequest = openRequest,
             tracker = platformRunTracker(),
@@ -176,13 +168,17 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             }
             val tracker = session.tracker
             if (!RunSession.tracking.value && RunSession.points.value.isEmpty() && tracker.hasInterruptedRun(ctx)) {
-                val recovered = withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
-                if (resumable(recovered, wallClockMillis() / 1000)) {
-                    session.recoveredRun = recovered
-                    session.showResumePrompt = true
-                } else {
-                    // Under 2 fixes, or a dead run that must not become a multi-hour run.
-                    tracker.discardInterruptedRun()
+                // Raised from the read itself: the check is done for the process, so a
+                // screen closed while the run is read (this effect cancelled) must still
+                // leave the offer for the next one.
+                withContext(Dispatchers.IO) {
+                    val recovered = tracker.recoverInterruptedRun(ctx)
+                    if (resumable(recovered, wallClockMillis() / 1000)) {
+                        ResumeOffer.raise(recovered)
+                    } else {
+                        // Under 2 fixes, or a dead run that must not become a multi-hour run.
+                        tracker.discardInterruptedRun()
+                    }
                 }
             }
         }
@@ -216,6 +212,34 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
 }
 
 /**
+ * The interrupted run offered for resume, held for the process until the offer
+ * is answered: boot's once-per-process check raises it, and the screen showing it
+ * may close first (after an update Android reopens the app's screen just as the
+ * user opens it, then closes the first), so any later screen shows it. Only the
+ * most recently composed screen does, so two screens that exist at once never
+ * both offer it.
+ */
+internal object ResumeOffer {
+    private class State {
+        val pending = MutableStateFlow<RecoveredTrack?>(null)
+        val hosts = mutableStateListOf<Any>()
+    }
+
+    private val state by ProcessLocal { State() }
+
+    val pending: StateFlow<RecoveredTrack?> get() = state.pending
+
+    internal val hosts: MutableList<Any> get() = state.hosts
+
+    fun raise(recovered: RecoveredTrack) {
+        state.pending.value = recovered
+    }
+
+    /** The offered run, for the first answer only; null once answered. */
+    fun take(): RecoveredTrack? = state.pending.getAndUpdate { null }
+}
+
+/**
  * Crash-recovery consent: an interrupted run's sidecar is offered, never silently
  * resumed. Discard leaves nothing behind; Resume repopulates the track and
  * restarts the recording service, or, without a precise-location grant (revoked
@@ -227,11 +251,15 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
 @Composable
 internal fun ResumeRunDialog(session: CoachSession) {
     val ctx = currentPlatformContext()
-    // Remembered before the visibility return so the Resume coroutine outlives the
-    // dialog leaving composition.
-    val scope = rememberCoroutineScope()
     val tracker = session.tracker
-    if (!session.showResumePrompt) return
+    val token = remember { Any() }
+    DisposableEffect(token) {
+        ResumeOffer.hosts += token
+        onDispose { ResumeOffer.hosts -= token }
+    }
+    val isTop by remember { derivedStateOf { ResumeOffer.hosts.lastOrNull() === token } }
+    val pending by ResumeOffer.pending.collectAsState()
+    if (pending == null || !isTop) return
     // A run started since boot owns the sidecar now (Start truncated the
     // interrupted one): resuming would replace its live track and discarding would
     // delete its crash-recovery file, so both just drop the stale offer.
@@ -241,37 +269,24 @@ internal fun ResumeRunDialog(session: CoachSession) {
         text = { Text(stringResource(Res.string.main_resume_run_message)) },
         confirmButton = {
             TextButton(onClick = {
-                session.showResumePrompt = false
-                if (RunSession.runActive) {
-                    session.recoveredRun = null
-                    return@TextButton
+                val recovered = ResumeOffer.take() ?: return@TextButton
+                if (RunSession.runActive) return@TextButton
+                RunSession.restore(recovered)
+                if (tracker.hasLocationPermission(ctx)) {
+                    tracker.startRecording(ctx)
+                } else {
+                    // No grant (revoked mid-run, or a lapsed one-time grant): a
+                    // start now would only fail the location service and strand the
+                    // run. Hold it as a capture; the tracker asks for location and
+                    // restarts recording once it is granted.
+                    RunSession.awaitLocationForResume()
                 }
-                scope.launch {
-                    val recovered = session.recoveredRun
-                        ?: withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
-                    session.recoveredRun = null
-                    if (recovered.size >= 2) {
-                        RunSession.restore(recovered)
-                        if (tracker.hasLocationPermission(ctx)) {
-                            tracker.startRecording(ctx)
-                        } else {
-                            // No grant (revoked mid-run, or a lapsed one-time grant): a
-                            // start now would only fail the location service and strand the
-                            // run. Hold it as a capture; the tracker asks for location and
-                            // restarts recording once it is granted.
-                            RunSession.awaitLocationForResume()
-                        }
-                        session.showTracker = true
-                    } else {
-                        tracker.discardInterruptedRun()
-                    }
-                }
+                session.showTracker = true
             }) { Text(stringResource(Res.string.track_action_resume)) }
         },
         dismissButton = {
             TextButton(onClick = {
-                session.showResumePrompt = false
-                session.recoveredRun = null
+                ResumeOffer.take() ?: return@TextButton
                 if (!RunSession.runActive) tracker.discardInterruptedRun()
             }) { Text(stringResource(Res.string.main_discard), color = DangerText) }
         },

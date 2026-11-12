@@ -550,8 +550,9 @@ sc_lowmem() {
 sc_update() {
   local S=update m0 m1 u r x ok
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
-  # Miles: the seed's profile has the core's default, km.
-  set_distance_unit mi
+  # Kilometres: the seed's profile states no unit, so its first boot gives it the
+  # en-US locale's, mi; a reset to the locale's would show.
+  set_distance_unit km
   open_set_editor && editor_fill && tap_log_set; close_editor
   pull_log "$OUT/logs/update-before.ndjson"; m0="$(md5sum <"$OUT/logs/update-before.ndjson" | cut -c1-12)"
   r="$(install_apk "$APK" -r)"; ok=$?
@@ -561,7 +562,7 @@ sc_update() {
   launch
   expect $S "app boots after the update" "Today rendered" wait_text pre "${STR[main_todays_session]}" 30
   u="$(plan_unit)"; evidence update-01-after
-  expect $S "settings survive the update (distance unit mi)" "plan distance unit '$u'" test "$u" = mi
+  expect $S "settings survive the update (distance unit km)" "plan distance unit '$u'" test "$u" = km
 
   mark update-mid-run
   start_feeder update
@@ -647,7 +648,7 @@ sc_backup() {
 
 FIVE="$OUT/seed/five-year.ndjson"
 gen_five_year() {
-  [[ -s "$FIVE" && $REGEN -eq 0 ]] && return 0
+  [[ -s "$FIVE" && $REGEN -eq 0 ]] && grep -q '^longest_run_km=' "$FIVE.facts" 2>/dev/null && return 0
   log "generating the 5-year LongHistorySeed log (gradle :lollop:exportLongHistorySeed)"
   gradle_build_dir_init "$OUT/logs/seed.init.gradle.kts" "$HOME/.cache/emuscenarios-build"
   (cd "$REPO_ROOT/android" &&
@@ -697,14 +698,12 @@ boot_long() {
   LAST_STARTS="$all"
 }
 median3() { tr ' ' '\n' <<<"$1" | grep -E '^[0-9]+$' | sort -n | sed -n '2p'; }
-# The longest run of the 5-year log as History shows it: its whole km or mi
-# (the Auto unit follows the locale).
+# The longest run of the 5-year log as History shows it (the seed's
+# longest_run_km fact: a tracked run): its whole km or mi (whichever unit the
+# profile states; one that states none takes the locale's at boot).
 longest_rx() {
-  python3 - "$FIVE" <<'PY'
-import json, sys
-km = max(e["LogRun"]["distance_km"] for e in map(json.loads, open(sys.argv[1])) if isinstance(e, dict) and "LogRun" in e)
-print(f"^({int(km)}(\\.[0-9]+)?[ \\u00a0]km|{int(km / 1.609344)}(\\.[0-9]+)?[ \\u00a0]mi)$")
-PY
+  local km; km="$(sed -n 's/^longest_run_km=//p' "$FIVE.facts")"
+  python3 -c 'import sys;km=float(sys.argv[1]);print(f"^({int(km)}(\\.[0-9]+)?[ \\u00a0]km|{int(km / 1.609344)}(\\.[0-9]+)?[ \\u00a0]mi)$")' "$km"
 }
 history_longest_ok() {
   local rx; rx="$(longest_rx)"

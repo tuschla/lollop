@@ -142,7 +142,7 @@ fn weekly_report_runs_the_volume_system_over_the_latest_week() {
     assert!(has("1 hard session"), "rows: {report:#?}");
     // A miles profile reads the long-run row in miles.
     let miles = Profile {
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..base_profile()
     };
     app.update(Event::SetProfile(miles), &mut model)

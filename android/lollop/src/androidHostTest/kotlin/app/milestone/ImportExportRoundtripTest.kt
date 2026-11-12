@@ -524,7 +524,8 @@ class ImportExportRoundtripTest {
 
         QaHarness.teardown()
         QaHarness.reset(ctx)
-        QaHarness.legacyDistanceUnit(ctx, app.milestone.DistanceUnit.Km)
+        // A fresh install on the same US phone keeps no unit setting: the km the
+        // original showed travels in the backup's profile.
         rule.launchAppExpectingSetup()
 
         val summary = importBackupAndReboot(backup)
@@ -558,6 +559,26 @@ class ImportExportRoundtripTest {
         assertEquals(1, EventDispatcher.model.value!!.lifts.size)
         assertNull("restoring a plan-less backup must not invent a plan", EventDispatcher.model.value!!.program)
         assertTrue(EventDispatcher.model.value!!.plan_removed)
+    }
+
+    /** An older build kept the distance unit on the phone ("System": the locale's),
+     *  so its backup's profile states none. Restored into a fresh install on a US
+     *  phone it reads in miles, as that build showed it there, and the restored log
+     *  states the unit, so the next backup carries it. */
+    @Test
+    fun aBackupWhoseProfileStatesNoUnitReadsInThePhonesUnitOnceRestored() {
+        val backup = File(ctx.cacheDir, "backup/4728546.ndjson").apply {
+            parentFile!!.mkdirs()
+            writeBytes(fixture("upgrade/4728546.backup.ndjson"))
+        }
+        assertTrue("the backup states no unit", backup.readLines().none { "distance_unit" in it })
+        // A fresh install on a US phone: no unit setting left by an older build.
+        QaHarness.reset(ctx)
+        assertEquals(DistanceUnit.Mi, localeDistanceUnit())
+        rule.launchAppExpectingSetup()
+        importBackupAndReboot(backup)
+        assertEquals(DistanceUnit.Mi, EventDispatcher.model.value!!.profile!!.distance_unit)
+        assertTrue("the restored log states the unit", QaHarness.logLines(ctx).any { "\"distance_unit\":\"Mi\"" in it })
     }
 
     @Test

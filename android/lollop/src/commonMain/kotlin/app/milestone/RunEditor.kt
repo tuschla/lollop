@@ -51,7 +51,7 @@ private fun runEditEvent(
     // was given as % of max or not at all.
     avgHrBpm: Double?,
 ): Event = when {
-    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt = observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
+    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt = observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec(observedAt))
     // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
     else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }

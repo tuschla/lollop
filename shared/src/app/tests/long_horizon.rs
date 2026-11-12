@@ -1107,7 +1107,7 @@ impl Sim {
             .map(|t| format!("{right} user sees {t:?}"))
             .collect();
         // The distance lines the core renders in the profile's unit.
-        let (wrong_d, wrong_pace) = match self.profile.distance_unit {
+        let (wrong_d, wrong_pace) = match self.profile.display_distance_unit() {
             DistanceUnit::Km => ("mi", "/mi"),
             DistanceUnit::Mi => ("km", "/km"),
         };
@@ -2228,7 +2228,7 @@ fn goal_and_unit_switcher() {
         if i == at(1) {
             s.edit_profile(|p| {
                 p.weight_lb = true;
-                p.distance_unit = DistanceUnit::Mi;
+                p.distance_unit = Some(DistanceUnit::Mi);
             });
         } else if i == at(2) {
             s.edit_profile(|p| {
@@ -2240,7 +2240,7 @@ fn goal_and_unit_switcher() {
         } else if i == at(3) {
             s.edit_profile(|p| {
                 p.weight_lb = false;
-                p.distance_unit = DistanceUnit::Km;
+                p.distance_unit = Some(DistanceUnit::Km);
             });
         } else if i == at(4) {
             s.edit_profile(|p| {
@@ -2251,7 +2251,7 @@ fn goal_and_unit_switcher() {
         } else if i == at(5) {
             s.edit_profile(|p| {
                 p.weight_lb = true;
-                p.distance_unit = DistanceUnit::Mi;
+                p.distance_unit = Some(DistanceUnit::Mi);
                 p.running_days_per_week = 5;
             });
         }

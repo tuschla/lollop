@@ -196,7 +196,7 @@ fn build_safety_guidance(
     // leading Safety block so the section stays contiguous with the gates.
     let bsi = hybrid::bsi_surveillance_flag(weekly_km);
     if bsi.value {
-        let unit = p.distance_unit;
+        let unit = p.display_distance_unit();
         let bsi_text = format!(
             "Bone stress: you run {}, above ~{}. Watch for pain in one spot on a bone, and eat enough for your training",
             weekly_basis_text(weekly_km, weekly_basis, unit),

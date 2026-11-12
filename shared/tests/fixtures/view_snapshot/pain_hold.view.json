@@ -1725,7 +1725,7 @@
     "resting_hr_bpm": 52.0,
     "measured_hr_max": null,
     "weight_lb": false,
-    "distance_unit": "Km",
+    "distance_unit": null,
     "resistance_modality": "Weights",
     "effective_from_epoch_day": null,
     "lift_days_per_week": null,

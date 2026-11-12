@@ -29,7 +29,7 @@ fn saved_card(points: Vec<GpsPoint>, unit: DistanceUnit) -> RunResultView {
     let mut model = Model::default();
     if unit == DistanceUnit::Mi {
         let p = Profile {
-            distance_unit: unit,
+            distance_unit: Some(unit),
             ..base_profile()
         };
         let _ = app.update(Event::SetProfile(p), &mut model);

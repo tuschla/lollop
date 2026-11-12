@@ -256,9 +256,10 @@ impl Model {
     }
 
     /// The unit core-rendered distances read in: the profile's, km before one
-    /// exists.
+    /// exists or when it states none.
     pub(super) fn distance_unit(&self) -> DistanceUnit {
-        self.profile().map_or(DistanceUnit::Km, |p| p.distance_unit)
+        self.profile()
+            .map_or(DistanceUnit::Km, Profile::display_distance_unit)
     }
 
     /// The weekly check-in in force: the latest one, unless cleared since.

@@ -381,7 +381,7 @@ private fun LazyListScope.UnitsSection(ctx: PlatformContext, model: ViewModel, o
                         SegmentedEnumRow(
                             label = stringResource(Res.string.main_label_distance_units),
                             values = listOf(DistanceUnit.Km, DistanceUnit.Mi),
-                            current = draft.distanceUnit,
+                            current = draft.distanceUnit ?: model.distanceUnit(),
                             display = {
                                 when (it) {
                                     DistanceUnit.Km -> res.getString(Res.string.main_unit_km)

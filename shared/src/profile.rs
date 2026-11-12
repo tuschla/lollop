@@ -27,8 +27,8 @@ pub enum ResistanceModality {
 }
 
 /// The distance unit every core-rendered distance and pace reads in: `Km`
-/// (default, so a profile line from before the choice replays metric) or
-/// `Mi`. Display-only, like `Profile::weight_lb`: numeric fields stay km.
+/// (default) or `Mi`. Display-only, like `Profile::weight_lb`: numeric fields
+/// stay km.
 #[derive(
     Serialize,
     Deserialize,
@@ -185,9 +185,10 @@ pub struct Profile {
     pub weight_lb: bool,
     /// The unit distances and paces are rendered in (`DistanceUnit`). Like
     /// `weight_lb` it changes text only: plan, history and every numeric
-    /// field stay km.
-    #[serde(default)]
-    pub distance_unit: DistanceUnit,
+    /// field stay km. `None` = unstated: a profile line from before the
+    /// choice (older builds kept the unit on the phone), rendered in km
+    /// (`Profile::display_distance_unit`); the shell states one at boot.
+    pub distance_unit: Option<DistanceUnit>,
     /// Resistance-training modality: `Weights` (default) or `Calisthenics`.
     /// A calisthenics profile routes lift days through the leverage-ladder
     /// synthesizer (`plan::calisthenics_session`).
@@ -252,6 +253,12 @@ impl Profile {
             Some(day) => (day, self.edited_at.unwrap_or(i64::MIN)),
             None => (i64::MIN, i64::MIN),
         }
+    }
+
+    /// The unit core-rendered distances read in: the stated one, km when the
+    /// profile states none.
+    pub(crate) fn display_distance_unit(&self) -> DistanceUnit {
+        self.distance_unit.unwrap_or_default()
     }
 
     /// The declared layoff's return day: `None` without a layoff (`weeks_off`
@@ -660,7 +667,7 @@ fn run_slot_count(profile: &Profile, goal_table: usize, lead: Option<HybridLead>
 pub(crate) mod test_support {
     use crate::hybrid::ConcurrentGoal;
     use crate::individualization::ProgressionCadence;
-    use crate::profile::{DistanceUnit, Profile, ResistanceModality};
+    use crate::profile::{Profile, ResistanceModality};
     use crate::running::GoalDistance;
     use crate::schema::HealthScreen;
     use crate::strength::LiftGoal;
@@ -693,7 +700,7 @@ pub(crate) mod test_support {
             resting_hr_bpm: None,
             measured_hr_max: None,
             weight_lb: false,
-            distance_unit: DistanceUnit::Km,
+            distance_unit: None,
             effective_from_epoch_day: None,
             edited_at: None,
             lift_days_per_week: None,

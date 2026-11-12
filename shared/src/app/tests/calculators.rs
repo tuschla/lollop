@@ -621,7 +621,7 @@ fn race_prediction_notes_flag_stale_input_and_marathon_optimism() {
     // A miles user reads the optimism note in miles.
     app.update(
         Event::SetProfile(Profile {
-            distance_unit: DistanceUnit::Mi,
+            distance_unit: Some(DistanceUnit::Mi),
             ..base_profile()
         }),
         &mut model,

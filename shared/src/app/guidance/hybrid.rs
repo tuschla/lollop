@@ -81,7 +81,7 @@ pub(super) fn build_hybrid_guidance(
         let mid = (llc.value.volume_reduction_frac.0 + llc.value.volume_reduction_frac.1) / 2.0;
         let llc_text = format!(
             "With your running ({}), leg lifting is kept to {} days a week and leg sets are trimmed by about {:.0}% (guideline {}%).",
-            weekly_basis_text(weekly_km, weekly_basis, p.distance_unit),
+            weekly_basis_text(weekly_km, weekly_basis, p.display_distance_unit()),
             llc.value.max_lower_sessions,
             mid * 100.0,
             fmt_frac_pct_range(

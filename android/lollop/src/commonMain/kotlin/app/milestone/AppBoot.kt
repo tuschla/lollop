@@ -82,20 +82,23 @@ internal suspend fun bootTurn(
         }
         store.edit { remove(KEY_PLAN_CLEARED) }
     }
-    // Upgrade from builds that kept the distance unit in the settings store: the
-    // profile takes it once, as a dated edit like the Profile screen's. Without a
-    // profile it waits for the guided setup, which takes it as its first answer.
-    val legacyUnit = settings.legacyDistanceUnit()
+    // A profile that states no distance unit comes from builds that kept the unit in
+    // the settings store (a log upgraded in place, or restored from such a build's
+    // backup): it takes the unit those builds showed, their setting, else the
+    // locale's, once, as a dated edit like the Profile screen's. Without a profile
+    // an older build's setting waits for the guided setup, which takes it as its
+    // first answer.
     val profile = v.profile
-    if (legacyUnit != null && profile != null) {
-        val applied = profile.distance_unit == legacyUnit || withContext(CoreDispatcher) {
-            engine.send(Event.SetProfile.from(profile).effectiveFrom(v.today()).copy(distanceUnit = legacyUnit))
+    if (profile != null) {
+        val stated = profile.distance_unit != null || withContext(CoreDispatcher) {
+            val unit = settings.legacyDistanceUnit() ?: localeDistanceUnit()
+            engine.send(Event.SetProfile.from(profile).effectiveFrom(v.today()).copy(distanceUnit = unit))
         }.let { sent ->
             ledger.report(sent)
             v = sent.view
             sent.accepted
         }
-        if (applied) settings.dropLegacyDistanceUnit()
+        if (stated && LEGACY_DISTANCE_UNIT_KEY in settings) settings.dropLegacyDistanceUnit()
     }
     // A set-up user without a plan gets one unless they removed it; a re-run then
     // sees the program and cannot fire twice.
@@ -117,8 +120,8 @@ internal const val KEY_ONBOARDING_DONE = "onboarding_done"
 
 /** Settings-store key of the distance unit older builds kept there ("System",
  *  "Km" or "Mi"); the unit is the profile's now ([Profile.distance_unit]).
- *  [AppSettings.migrate] pins an in-use install's unset one to its locale's;
- *  [bootTurn] moves it into an existing profile, the guided setup into a new one. */
+ *  [bootTurn] moves it into a profile that states no unit, the guided setup into a
+ *  new one. */
 internal const val LEGACY_DISTANCE_UNIT_KEY = "distance_unit_override"
 
 /** The legacy distance unit ([LEGACY_DISTANCE_UNIT_KEY]): "System" reads as the

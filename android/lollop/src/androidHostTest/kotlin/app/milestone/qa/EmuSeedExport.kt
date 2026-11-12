@@ -5,7 +5,8 @@ import java.io.File
 
 /**
  * Writes the 5-year [LongHistorySeed] history as the app's own event-log ndjson
- * to `args[0]`, plus `<args[0]>.facts` (event/set/run counts, today, size) the
+ * to `args[0]`, plus `<args[0]>.facts` (event/set/run counts, today, size, and
+ * the km of the run History's record shows, pinned by `LongHistoryUiTest`) the
  * script checks the device against. `scripts/emulator-scenarios.sh` pushes it
  * onto a device (startup time + heap of a 5-year log on a real Android runtime):
  *
@@ -20,6 +21,7 @@ fun main(args: Array<String>) {
     }
     File("$out.facts").writeText(
         "events=${history.events.size}\nsets=${history.sets.size}\nruns=${history.runs.size}\n" +
-            "today_epoch_day=${history.today}\nbytes=${out.length()}\n",
+            "today_epoch_day=${history.today}\nbytes=${out.length()}\n" +
+            "longest_run_km=${history.longestRun.km}\n",
     )
 }

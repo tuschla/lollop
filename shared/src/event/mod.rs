@@ -85,7 +85,7 @@ pub struct RunMeta {
     /// history changes); with neither known the sent `hr_pct_max` stands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_hr_bpm: Option<f64>,
-    /// The device's UTC offset, seconds east, when the run was logged. The
+    /// The device's UTC offset, seconds east, at the run's `observed_at`. The
     /// bpm conversion reads the run's local day with it, so a later
     /// time-zone change never re-converts the run. `None` (omitted from the
     /// wire) = the clock's current offset. An amend keeps its row's offset

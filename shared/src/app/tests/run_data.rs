@@ -287,7 +287,7 @@ fn downgrade_re_resolves_the_easy_band() {
     // line keeps km.
     let (_, eased, _) = eased_on_its_day(
         Profile {
-            distance_unit: DistanceUnit::Mi,
+            distance_unit: Some(DistanceUnit::Mi),
             ..tempo_racer_profile()
         },
         "Tempo run",

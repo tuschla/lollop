@@ -346,7 +346,7 @@ fn bsi_surveillance_reads_measured_not_stated_mileage() {
         bsi.summary
     );
     let miles = Profile {
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..model.profile().cloned().expect("a profile")
     };
     app.update(Event::SetProfile(miles), &mut model)

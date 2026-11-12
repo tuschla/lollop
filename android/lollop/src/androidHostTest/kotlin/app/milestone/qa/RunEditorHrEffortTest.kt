@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import app.milestone.AppClock
 import app.milestone.Event
 import app.milestone.JvmDefaultsRule
 import app.milestone.EventDispatcher
@@ -56,7 +57,12 @@ class RunEditorHrEffortTest {
         rule.onNode(hasText(k) and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
 
     /** [hrMaxKnown]: the core's [ViewModel.hr_max_known] (an age or a measured max). */
-    private fun show(hrMaxKnown: Boolean, initial: RunResultView? = null, onSave: (Event) -> Unit) {
+    private fun show(
+        hrMaxKnown: Boolean,
+        initial: RunResultView? = null,
+        initialObservedAt: Long? = null,
+        onSave: (Event) -> Unit,
+    ) {
         java.util.Locale.setDefault(java.util.Locale.US)
         EventDispatcher.model.value = ViewModel(hr_max_known = hrMaxKnown)
         // Hosted the way the Log sheet hosts it: a bounded column with the pinned
@@ -65,7 +71,7 @@ class RunEditorHrEffortTest {
             MilestoneTheme {
                 Column(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {
-                        LogRunEditor(initial = initial, hrMaxKnown = hrMaxKnown, onSave = onSave)
+                        LogRunEditor(initial = initial, initialObservedAt = initialObservedAt, hrMaxKnown = hrMaxKnown, onSave = onSave)
                     }
                 }
             }
@@ -127,6 +133,27 @@ class RunEditorHrEffortTest {
         val run = sent as Event.LogRun
         assertEquals("no HR typed → no HR sample", 0.0, run.hrPctMax, 1e-9)
         assertEquals(null, run.avgHrBpm)
+    }
+
+    @Test
+    fun aBackDatedRunIsStampedWithTheOffsetOfItsOwnInstant() {
+        val berlin = java.util.TimeZone.getTimeZone("Europe/Berlin")
+        java.util.TimeZone.setDefault(berlin)
+        fun offsetAt(sec: Long) = berlin.getOffset(sec * 1000).toLong() / 1000
+        val now = AppClock.nowSec()
+        // Mid-January or mid-July 2025, whichever is on the other side of a DST switch from now.
+        val observedAt = listOf(1_736_942_400L, 1_752_580_800L).first { offsetAt(it) != offsetAt(now) }
+        var sent: Event? = null
+        show(hrMaxKnown = true, initialObservedAt = observedAt) { sent = it }
+        key("5")
+        rule.onNode(hasContentDescription(str(R.string.log_field_duration))).performScrollTo().performClick()
+        listOf("3", "0", "0", "0").forEach { key(it) }
+        rule.tapEditorPrimary()
+        rule.waitForIdle()
+
+        val run = sent as Event.LogRun
+        assertEquals(observedAt, run.observedAt)
+        assertEquals(offsetAt(observedAt), run.utcOffsetSec)
     }
 
     @Test

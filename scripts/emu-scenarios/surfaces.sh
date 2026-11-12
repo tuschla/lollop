@@ -271,7 +271,7 @@ tilelock_case() {
   local d="tilelock-$1" r="" p s bouncer="" want="$3"
   home
   lock_with_pin
-  adb_ shell cmd statusbar expand-settings
+  qs_open "$d"
   wait_for 5 _tile_seen "$d"; shot "$d"
   r="$(tile_node "$d" "$2")" || r="$(ocr_find "$d" "${2%% *}")" || r=""
   if [[ -n "$r" ]]; then
@@ -777,15 +777,16 @@ alarm_past() { local a; a="$(rem_alarm)"; [[ -n "$a" && "$a" != "$1"* ]]; }
 # rem_fire NAME DAY [MODE]: background the app and move the clock to DAY
 # 07:44:20 (the reminder is set for 07:45), then wait (max 5 min) until the
 # alarm has gone off: it then points past DAY 07:45. MODE `keep` leaves app and
-# clock alone; `locked` sets a PIN and turns the screen off before the wait (a
-# reminder seen in the shade shows only as an icon on the API 37 lock screen).
+# clock alone; `locked` snoozes other packages' notifications (snooze_others),
+# sets a PIN and turns the screen off before the wait (a reminder seen in the
+# shade shows only as an icon on the API 37 lock screen).
 # Saves the alarm dumps and the notification (logs/rem-NAME-*); 1 when the
 # alarm was not set for DAY 07:45 or never went off (REM_ALARM says which).
 rem_fire() {
   local a b t0
   case "${3:-}" in
     keep) ;;
-    locked) home; pin_clock "$2" 07:44:20; sh_ locksettings set-pin $REM_PIN >/dev/null; adb_ shell input keyevent 26; wait_for 5 screen_off ;;
+    locked) home; snooze_others; pin_clock "$2" 07:44:20; sh_ locksettings set-pin $REM_PIN >/dev/null; adb_ shell input keyevent 26; wait_for 5 screen_off ;;
     *) home; pin_clock "$2" 07:44:20 ;;
   esac
   wait_for 10 alarm_at "$2 07:45"
@@ -920,6 +921,8 @@ sc_reminder() {
   w="$(rem_text "$(snap_field title)" "$(snap_run_detail)" "${STR[reminder_action_start_run]}")"; IFS=$'\t' read -r t l a <<<"$w"
   rem_case run "$RUN_DAY" "$w" locked
   mark reminder-lock
+  # The tracker shows its map (what `screen` reads as track) once it has a fix.
+  start_feeder rem-lock
   rem_lock "$a" "$t" track
   # Pre-start: Start offered, no Stop (the locate preview may run its service).
   expect $S "run: the action lands on the tracker before the start (not recording)" \
@@ -929,6 +932,7 @@ sc_reminder() {
   expect $S "run: the action takes the reminder down" "notification after the action: $n; logs/rem-run-acted-notif.txt" test "$n" = null
   # A locating tracker keeps the screen against an open intent: leave it first.
   adb_ shell input keyevent 4; wait_screen today 5
+  stop_feeder
 
   # A moved session takes a posted reminder down.
   mark reminder-move

@@ -65,7 +65,7 @@ fn in_unit(mut events: Vec<Event>, unit: DistanceUnit) -> Vec<Event> {
             }))
             .expect("a profile that sets only the unit")
         });
-    profile.distance_unit = unit;
+    profile.distance_unit = Some(unit);
     events.push(Event::SetProfile(profile));
     events
 }

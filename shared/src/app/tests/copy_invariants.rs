@@ -787,7 +787,7 @@ fn archetypes(end: i64) -> Vec<(&'static str, Profile)> {
     // An imperial profile: pounds and miles.
     let lb = |p: Profile| Profile {
         weight_lb: true,
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..p
     };
     vec![
@@ -1014,7 +1014,7 @@ fn collect(app: &Engine, model: &Model, scenario: &str, stale: bool, out: &mut H
     let mi = vm
         .profile
         .as_ref()
-        .is_some_and(|p| p.distance_unit == DistanceUnit::Mi);
+        .is_some_and(|p| p.distance_unit == Some(DistanceUnit::Mi));
     let json = serde_json::to_value(&vm).expect("view serializes");
     if stale {
         today_on_stale(&vm, &json, scenario, out);
@@ -1145,7 +1145,7 @@ fn sweep_empty() -> Hits {
         if lb {
             let p = Profile {
                 weight_lb: true,
-                distance_unit: DistanceUnit::Mi,
+                distance_unit: Some(DistanceUnit::Mi),
                 ..model.profile().cloned().expect("a profile")
             };
             let _ = app.update(Event::SetProfile(p), &mut model);
@@ -1212,7 +1212,7 @@ fn sweep_long_history() -> Hits {
     }
     let p = Profile {
         weight_lb: true,
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..model.profile().cloned().expect("big history has a profile")
     };
     let _ = app.update(Event::SetProfile(p), &mut model);

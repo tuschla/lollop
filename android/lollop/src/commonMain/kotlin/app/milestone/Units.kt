@@ -12,9 +12,11 @@ val DistanceUnit.distanceLabel: String
 
 val DistanceUnit.paceSuffix: String get() = "/$distanceLabel"
 
-/** The unit every distance reads in: the profile's; before a profile exists, the
+/** The unit every distance reads in: the profile's (km while it states none, as
+ *  the core renders it until [bootTurn] states one); before a profile exists, the
  *  device locale's ([localeDistanceUnit]). */
-internal fun ViewModel?.distanceUnit(): DistanceUnit = this?.profile?.distance_unit ?: localeDistanceUnit()
+internal fun ViewModel?.distanceUnit(): DistanceUnit =
+    this?.profile?.let { it.distance_unit ?: DistanceUnit.Km } ?: localeDistanceUnit()
 
 /** Countries that conventionally use miles for road/running distance. */
 private val MILE_COUNTRIES = setOf("US", "GB", "LR", "MM")

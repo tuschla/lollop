@@ -59,6 +59,7 @@ import app.milestone.segmentKm
 import app.milestone.todayEpochDay
 import app.milestone.utcOffsetSec
 import java.io.File
+import kotlin.concurrent.thread
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -604,7 +605,7 @@ class RestoreRoundtripTest {
         rule.waitForState { model.profile?.weight_lb == false && model.profile?.distance_unit == DistanceUnit.Km }
         val after = checkNotNull(model.profile)
         assertEquals(model.today_epoch_day, after.effective_from_epoch_day)
-        assertEquals(beforeProfile, after.copy(effective_from_epoch_day = null, edited_at = null))
+        assertEquals(beforeProfile.copy(effective_from_epoch_day = null, edited_at = null), after.copy(effective_from_epoch_day = null, edited_at = null))
         assertEquals(before.program, model.program)
         assertEquals(before.week_plan, model.week_plan)
         assertEquals(before.lifts, model.lifts)
@@ -870,6 +871,79 @@ class RestoreRoundtripTest {
         ActiveRunStore.flush()
         assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertFalse(File(ctx.filesDir, AppFileNames.ACTIVE_RUN).exists())
+    }
+
+    /** After an update Android may reopen the app's screen just as the user opens
+     *  it, and then close the first screen: the first one ran the once-per-process
+     *  boot check, so the offer it raised must move to the second screen, shown
+     *  once while both exist, and Resume must save the run once. */
+    @Test
+    fun aResumeOfferOutlivesTheScreenThatRaisedIt() {
+        TestClock.offsetMillis = 0
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
+        val now = System.currentTimeMillis() / 1000
+        val pts = synthRun(seed = 41, startSec = now - 600, n = 120)
+        ActiveRunStore.begin()
+        pts.forEach { ActiveRunStore.append(it, segmentStart = false) }
+        ActiveRunStore.flush()
+        val title = hasText(str(R.string.main_resume_run_title))
+
+        val first = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup() }
+        rule.assertCountEventually(title, 1)
+        restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup() }
+        rule.waitUntil(30_000) { rule.countOf(hasText(str(R.string.main_dest_history))) == 2 }
+        rule.waitForIdle()
+        assertEquals("one offer while both screens exist", 1, rule.countOf(title))
+        first.pause().stop().destroy()
+        rule.assertCountEventually(title, 1)
+
+        rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
+        rule.waitForNode(hasText(str(R.string.track_btn_stop)))
+        assertEquals(0, rule.countOf(title))
+        rule.stopToFinishReview()
+        rule.saveRunAndAwait()
+        assertEquals(1, logCount("LogRunTrack"))
+        rule.waitForState { model.runs.size == 1 }
+        assertEquals(pts.last().observedAt, model.runs.single().observed_at)
+    }
+
+    /** The boot check reads the interrupted run off the main thread. A screen
+     *  closed during that read (its boot effect cancelled) still leaves the offer,
+     *  which the next screen shows; Discard then drops the run's file. */
+    @Test
+    fun aResumeOfferReadWhileItsScreenClosesShowsInTheNextScreen() {
+        TestClock.offsetMillis = 0
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
+        val now = System.currentTimeMillis() / 1000
+        val pts = synthRun(seed = 42, startSec = now - 600, n = 120)
+        // The run's file as a pipe: the boot check's read waits until it is written.
+        val sidecar = File(ctx.filesDir, AppFileNames.ACTIVE_RUN)
+        assertEquals(0, ProcessBuilder("mkfifo", sidecar.path).start().waitFor())
+        val title = hasText(str(R.string.main_resume_run_title))
+
+        val first = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup() }
+        rule.waitUntil(30_000) { AppRuntime.bootHandled }
+        first.pause().stop().destroy()
+        val writer = thread(isDaemon = true) {
+            sidecar.bufferedWriter().use { w ->
+                pts.forEach { p ->
+                    w.write("""{"lat":${p.lat},"lon":${p.lon},"observed_at":${p.observedAt},"accuracy_m":${p.accuracyM}}""")
+                    w.newLine()
+                }
+            }
+        }
+        writer.join(30_000)
+        assertFalse("the boot check never read the run's file", writer.isAlive)
+
+        restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup() }
+        rule.assertCountEventually(title, 1)
+        rule.onNode(hasText(str(R.string.main_discard)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.assertCountEventually(title, 0)
+        ActiveRunStore.flush()
+        assertFalse("Discard drops the run's file", sidecar.exists())
+        assertTrue(RunSession.points.value.isEmpty())
+        assertEquals(0, logCount("LogRunTrack"))
     }
 
     /** The save path after a recovery sends the same run the core would have got

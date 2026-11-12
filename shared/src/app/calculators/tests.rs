@@ -42,7 +42,7 @@ fn profile_with_run_days(days: u8, km: f64) -> Profile {
 /// The weekly report of `model` with its profile switched to miles.
 fn miles_report(mut model: Model) -> Vec<GuidanceView> {
     for p in &mut model.profile_history {
-        p.distance_unit = DistanceUnit::Mi;
+        p.distance_unit = Some(DistanceUnit::Mi);
     }
     build_weekly_report(&ViewCtx::new(&model), &[])
 }

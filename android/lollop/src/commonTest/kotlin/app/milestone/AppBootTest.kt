@@ -59,6 +59,9 @@ class AppBootTest : PlatformTest() {
     private val ledger = Ledger()
     private val day = 20_000L to 3_600L
 
+    /** A profile as this build writes it: it states its distance unit. */
+    private val stated = Profile(distance_unit = DistanceUnit.Km)
+
     @AfterTest
     fun removeLog() {
         for (suffix in listOf("") + AppFileNames.LOG_SUFFIXES) AppFiles.delete(AppFiles.sibling(log, suffix))
@@ -99,7 +102,7 @@ class AppBootTest : PlatformTest() {
 
     @Test
     fun aProfileWithoutAPlanGetsOneFromToday() = runTest {
-        val core = FakeCore(profile = Profile())
+        val core = FakeCore(profile = stated)
         val turn = assertNotNull(boot(core))
         assertEquals(listOf("SetToday", "GeneratePlan"), core.variants())
         assertEquals(Event.GeneratePlan(19_999L).toJson().toString(), core.applied.last(), "the plan starts on the plan day")
@@ -108,20 +111,38 @@ class AppBootTest : PlatformTest() {
     }
 
     @Test
-    fun anOlderBuildsDistanceUnitMovesIntoTheProfileOnce() = runTest {
+    fun anOlderBuildsDistanceUnitMovesIntoAProfileThatStatesNoneOnce() = runTest {
         settings.edit { putString(LEGACY_DISTANCE_UNIT_KEY, "Mi") }
         val core = FakeCore(profile = Profile())
         val turn = assertNotNull(boot(core))
         assertEquals(listOf("SetToday", "SetProfile", "GeneratePlan"), core.variants())
         assertEquals(DistanceUnit.Mi, turn.view.profile?.distance_unit, "the profile carries the unit")
         assertFalse(settings.contains(LEGACY_DISTANCE_UNIT_KEY), "the setting is spent")
+        // The next launch replays the edit and sends no second one.
+        val relaunch = FakeCore()
+        assertNotNull(boot(relaunch))
+        assertEquals(listOf("SetProfile", "GeneratePlan", "SetToday"), relaunch.variants(), "the replayed edit and plan, then the clock")
+    }
+
+    /** An older build's log without its setting (a backup restored on another
+     *  phone, or a unit left to follow the phone) reads in the locale's unit, as that
+     *  build showed it. */
+    @Test
+    fun aProfileThatStatesNoUnitTakesTheLocalesWithoutAnOlderBuildsSetting() = runTest {
+        val core = FakeCore(profile = Profile())
+        val turn = assertNotNull(boot(core))
+        assertEquals(listOf("SetToday", "SetProfile", "GeneratePlan"), core.variants())
+        assertEquals(localeDistanceUnit(), turn.view.profile?.distance_unit)
     }
 
     @Test
-    fun withoutAnOlderBuildsDistanceUnitNothingIsSent() = runTest {
-        val core = FakeCore(profile = Profile())
-        assertNotNull(boot(core))
+    fun aProfileThatStatesAUnitKeepsItOverAnOlderBuildsSetting() = runTest {
+        settings.edit { putString(LEGACY_DISTANCE_UNIT_KEY, "Mi") }
+        val core = FakeCore(profile = stated)
+        val turn = assertNotNull(boot(core))
         assertEquals(listOf("SetToday", "GeneratePlan"), core.variants())
+        assertEquals(DistanceUnit.Km, turn.view.profile?.distance_unit)
+        assertFalse(settings.contains(LEGACY_DISTANCE_UNIT_KEY), "the setting is spent")
     }
 
     @Test
@@ -137,7 +158,7 @@ class AppBootTest : PlatformTest() {
     fun aRemovedPlanStaysRemovedAcrossRelaunches() = runTest {
         AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
         repeat(2) { launch ->
-            val core = FakeCore(profile = Profile())
+            val core = FakeCore(profile = stated)
             val view = assertNotNull(boot(core)).view
             assertNull(view.program, "launch $launch: no plan generated over the removal")
             assertTrue(view.plan_removed)
@@ -149,7 +170,7 @@ class AppBootTest : PlatformTest() {
     fun aLegacyMarkerWhoseLogLostTheClearPlanLogsTheRemoval() = runTest {
         AppFiles.writeLinesSynced(log, listOf(Event.SetToday(19_000).toJson().toString()))
         store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
-        val core = FakeCore(profile = Profile())
+        val core = FakeCore(profile = stated)
         val view = assertNotNull(boot(core)).view
         assertNull(view.program, "no plan generated over the removal")
         assertTrue(view.plan_removed)
@@ -158,7 +179,7 @@ class AppBootTest : PlatformTest() {
         assertFalse(KEY_PLAN_CLEARED in store, "the pref is read once")
 
         // The next launch has only the log.
-        val relaunch = FakeCore(profile = Profile())
+        val relaunch = FakeCore(profile = stated)
         assertNull(assertNotNull(boot(relaunch)).view.program)
         assertEquals(listOf("SetToday", "ClearPlan", "SetToday"), relaunch.variants())
     }
@@ -167,7 +188,7 @@ class AppBootTest : PlatformTest() {
     fun aLegacyMarkerOverALoggedRemovalIsDropped() = runTest {
         AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
         store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
-        val core = FakeCore(profile = Profile())
+        val core = FakeCore(profile = stated)
         assertNull(assertNotNull(boot(core)).view.program)
         assertEquals(listOf("ClearPlan", "SetToday"), core.variants(), "no second ClearPlan")
         assertFalse(KEY_PLAN_CLEARED in store)
@@ -176,13 +197,13 @@ class AppBootTest : PlatformTest() {
     @Test
     fun aStaleLegacyMarkerIsDropped() = runTest {
         store.edit { putBoolean(KEY_PLAN_CLEARED, true) }
-        val core = FakeCore(profile = Profile(), programAtStart = true)
+        val core = FakeCore(profile = stated, programAtStart = true)
         assertNotNull(assertNotNull(boot(core)).view.program, "the surviving program stays")
         assertEquals(listOf("SetToday"), core.variants(), "a ClearPlan never landed: none is sent now")
         assertFalse(KEY_PLAN_CLEARED in store)
 
         store.edit { putBoolean(KEY_PLAN_CLEARED, false) }
-        val unmarked = FakeCore(profile = Profile())
+        val unmarked = FakeCore(profile = stated)
         assertNotNull(assertNotNull(boot(unmarked)).view.program, "a false marker removes nothing")
         assertEquals(listOf("SetToday", "GeneratePlan"), unmarked.variants())
         assertFalse(KEY_PLAN_CLEARED in store)

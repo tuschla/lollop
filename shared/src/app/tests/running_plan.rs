@@ -199,7 +199,7 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
     let shown_km = (km * 10.0).round() / 10.0;
     assert_eq!(item.run_head_km, Some(shown_km));
     let miles = Profile {
-        distance_unit: DistanceUnit::Mi,
+        distance_unit: Some(DistanceUnit::Mi),
         ..model.profile().cloned().expect("a profile")
     };
     let _ = app.update(Event::SetProfile(miles), &mut model);
@@ -263,7 +263,7 @@ fn a_unit_only_profile_edit_moves_no_plan_fact() {
     };
     let keys_before = keys(&model);
     let edit = |unit: DistanceUnit, at: i64| Profile {
-        distance_unit: unit,
+        distance_unit: Some(unit),
         effective_from_epoch_day: Some(today),
         edited_at: Some(today * DAY_SEC + at * 3_600),
         ..model.profile().cloned().expect("a profile")

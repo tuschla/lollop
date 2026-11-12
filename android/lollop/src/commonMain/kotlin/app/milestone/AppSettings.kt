@@ -105,23 +105,19 @@ object AppSettings {
      * already in use (an event log):
      * - version 1: from before Paper became the default (no saved theme), it keeps
      *   what it rendered, Rose with its saved (or the old default-off) accent;
-     * - version 2: a distance unit left to follow the phone ([LEGACY_DISTANCE_UNIT_KEY]
-     *   unset) is pinned to the locale's, so [bootTurn] moves the unit the app
-     *   showed into the profile.
+     * - version 2 moves nothing: a distance unit left to follow the phone is the
+     *   locale's, which [bootTurn] gives a profile that states no unit.
      */
     internal fun migrate(ctx: PlatformContext) {
         val prefs = prefs(ctx)
         val from = prefs.getInt(VERSION_KEY, 0)
         if (from >= VERSION) return
-        val inUse = ctx.hasEventLog()
-        val legacyTheme = from < 1 && inUse && !prefs.contains(THEME.key)
-        val pinUnit = from < 2 && inUse && !prefs.contains(LEGACY_DISTANCE_UNIT_KEY)
+        val legacyTheme = from < 1 && ctx.hasEventLog() && !prefs.contains(THEME.key)
         prefs.edit {
             if (legacyTheme) {
                 putString(THEME.key, AppTheme.Rose.name)
                 putBoolean(DYNAMIC.key, prefs.getBoolean(DYNAMIC.key, false))
             }
-            if (pinUnit) putString(LEGACY_DISTANCE_UNIT_KEY, localeDistanceUnit().name)
             putInt(VERSION_KEY, VERSION)
         }
     }

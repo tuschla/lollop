@@ -383,7 +383,7 @@ sealed interface Event {
          */
         @SerialName("avg_hr_bpm") @EncodeDefault(EncodeDefault.Mode.NEVER) val avgHrBpm: Double? = null,
         /**
-         * The device's UTC offset, seconds east, when the run was logged. The
+         * The device's UTC offset, seconds east, at the run's `observed_at`. The
          * bpm conversion reads the run's local day with it, so a later
          * time-zone change never re-converts the run. `None` (omitted from the
          * wire) = the clock's current offset. An amend keeps its row's offset
@@ -435,7 +435,7 @@ sealed interface Event {
          */
         @SerialName("avg_hr_bpm") @EncodeDefault(EncodeDefault.Mode.NEVER) val avgHrBpm: Double? = null,
         /**
-         * The device's UTC offset, seconds east, when the run was logged. The
+         * The device's UTC offset, seconds east, at the run's `observed_at`. The
          * bpm conversion reads the run's local day with it, so a later
          * time-zone change never re-converts the run. `None` (omitted from the
          * wire) = the clock's current offset. An amend keeps its row's offset
@@ -548,7 +548,7 @@ sealed interface Event {
          */
         @SerialName("avg_hr_bpm") @EncodeDefault(EncodeDefault.Mode.NEVER) val avgHrBpm: Double? = null,
         /**
-         * The device's UTC offset, seconds east, when the run was logged. The
+         * The device's UTC offset, seconds east, at the run's `observed_at`. The
          * bpm conversion reads the run's local day with it, so a later
          * time-zone change never re-converts the run. `None` (omitted from the
          * wire) = the clock's current offset. An amend keeps its row's offset
@@ -670,9 +670,11 @@ sealed interface Event {
         /**
          * The unit distances and paces are rendered in (`DistanceUnit`). Like
          * `weight_lb` it changes text only: plan, history and every numeric
-         * field stay km.
+         * field stay km. `None` = unstated: a profile line from before the
+         * choice (older builds kept the unit on the phone), rendered in km
+         * (`Profile::display_distance_unit`); the shell states one at boot.
          */
-        @SerialName("distance_unit") @EncodeDefault(EncodeDefault.Mode.NEVER) val distanceUnit: DistanceUnit = DistanceUnit.Km,
+        @SerialName("distance_unit") @EncodeDefault(EncodeDefault.Mode.NEVER) val distanceUnit: DistanceUnit? = null,
         /**
          * Resistance-training modality: `Weights` (default) or `Calisthenics`.
          * A calisthenics profile routes lift days through the leverage-ladder
@@ -1928,9 +1930,11 @@ data class Profile(
     /**
      * The unit distances and paces are rendered in (`DistanceUnit`). Like
      * `weight_lb` it changes text only: plan, history and every numeric
-     * field stay km.
+     * field stay km. `None` = unstated: a profile line from before the
+     * choice (older builds kept the unit on the phone), rendered in km
+     * (`Profile::display_distance_unit`); the shell states one at boot.
      */
-    val distance_unit: DistanceUnit = DistanceUnit.Km,
+    val distance_unit: DistanceUnit? = null,
     /**
      * Resistance-training modality: `Weights` (default) or `Calisthenics`.
      * A calisthenics profile routes lift days through the leverage-ladder
@@ -2189,8 +2193,8 @@ enum class Environment {
 
 /**
  * The distance unit every core-rendered distance and pace reads in: `Km`
- * (default, so a profile line from before the choice replays metric) or
- * `Mi`. Display-only, like `Profile::weight_lb`: numeric fields stay km.
+ * (default) or `Mi`. Display-only, like `Profile::weight_lb`: numeric fields
+ * stay km.
  */
 @Serializable
 enum class DistanceUnit {
