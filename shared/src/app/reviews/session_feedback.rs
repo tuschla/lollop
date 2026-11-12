@@ -353,7 +353,7 @@ fn execution_input(
         c.today_session.is_some_and(|t| {
             t.epoch_day > d.epoch_day
                 && t.items.iter().any(|it| {
-                    !it.is_run() && crate::exercise::same_movement(&it.exercise, &o.exercise)
+                    it.is_lift() && crate::exercise::same_movement(&it.exercise, &o.exercise)
                 })
         })
     };

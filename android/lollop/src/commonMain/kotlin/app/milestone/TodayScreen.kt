@@ -1180,8 +1180,6 @@ private fun NextSessionCard(
     val discipline = ns.session_type.discipline
     // Only today's live/adjusted session is actionable; a future NEXT SESSION stays informational.
     val actionable = isToday && ns.actionable
-    val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, ns.session_type) }
-    val isRun = { item: PrescriptionView -> isRunItem(item, ns.session_type) }
     val adjustment = ns.adjustment?.takeIf { ns.status == SessionStatus.Adjusted && !adjustmentAbove }
     val hasEvidence = ns.items.isNotEmpty() || coachStatus.isNotEmpty() || adjustment != null
     var expanded by rememberSaveable(ns.epoch_day, ns.title) { mutableStateOf(false) }
@@ -1271,7 +1269,7 @@ private fun NextSessionCard(
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 coachStatus.forEach { PanelAdjustment(it) }
                 adjustment?.takeIf { !it.safety_critical }?.let { PanelAdjustment(it, showSummary = false) }
-                SessionItemsEvidence(ns.items, isRun, isCheck)
+                SessionItemsEvidence(ns.items)
             }
         }
         if (ns.items.isEmpty()) {
@@ -1292,8 +1290,6 @@ private fun NextSessionCard(
             val unplaced = ladders.filter { it.current_rung == null }.map { it.ladder }.toSet()
             SessionItemList(
                 items = ns.items,
-                isRun = isRun,
-                isCheck = isCheck,
                 actionable = actionable,
                 reopenable = actionable,
                 runActionLabel = stringResource(runActionLabel),
@@ -1305,7 +1301,7 @@ private fun NextSessionCard(
                 onReopen = onReopen,
                 unplaced = { item -> item.calis?.let { it.ladder in unplaced && it.harder?.available == true } == true },
                 onSetRung = onSetRung,
-                guide = { item -> firstSessionGuide(item, isRun(item), isCheck(item), showGuide) },
+                guide = { item -> firstSessionGuide(item, showGuide) },
             )
         }
     }
@@ -1357,8 +1353,8 @@ internal fun PrescriptionView.firstWeightReps(): Int? {
  * a weight. The reps-left target is said once, in the spelled-out line.
  */
 @Composable
-private fun firstSessionGuide(item: PrescriptionView, isRun: Boolean, isCheck: Boolean, showGuide: Boolean): List<String> {
-    if (isRun || isCheck || item.timed_hold || !showGuide) return emptyList()
+private fun firstSessionGuide(item: PrescriptionView, showGuide: Boolean): List<String> {
+    if (item.kind != ItemKind.Lift || item.timed_hold || !showGuide) return emptyList()
     if (item.sets <= 0 || item.reps_low <= 0) return emptyList()
     val rir = item.target_rpe?.let(::prescribedRir) ?: return emptyList()
     val reps = if (item.reps_high > item.reps_low) "${item.reps_low}\u2013${item.reps_high}" else "${item.reps_low}"
@@ -1456,7 +1452,7 @@ private fun SessionDoneCard(
                 val skipped = row.status.isSkipped
                 val summary = sessionDoneRunLine(row, distanceUnit) ?: row.summary
                 val line = settledLabel(row.status, summary, painArea)
-                val desc = if (row.met && !skipped) {
+                val desc = if (row.status == ItemStatus.Done) {
                     stringResource(Res.string.main_session_done_met_cd, row.exercise, summary)
                 } else {
                     stringResource(Res.string.ui_label_value, row.exercise, line)

@@ -116,7 +116,6 @@ The other seams (`expect` in commonMain, actual per platform):
 | `appLocale`, `localizedDayFormatter`, `weekdayName`, `formatMediumDate`, `relativeDayLabel` | java.time + ICU best patterns, ICU `RelativeDateTimeFormatter` | `NSDateFormatter` (`dateFormatFromTemplate`, Gregorian, UTC wall clock), `NSRelativeDateTimeFormatter`; app locale = first English preferred language, else English + device region, `@numbers=latn` |
 | `is24HourClock` | `DateFormat.is24HourFormat` | the locale's `j` hour pattern has no `a` |
 | `KeyValueStore`, `PlatformContext` | `SharedPreferences`, `Context` | `NSUserDefaults(suiteName)`, one process-wide context |
-| `toRadians` | `Math.toRadians` | multiply by π/180 |
 | `platformCoreEngine` (read through `AppRuntime.engine`) | `Core` | `DurableCore(NativeCore)` |
 | `AppPath`, `AppFiles` (the app's files) | `java.io.File`: `appendText`, a buffered read, `FileOutputStream` + `fd.sync()`, `renameTo` | POSIX `open`/`read`/`write`/`rename`; the rewrite is flushed with `fcntl(F_FULLFSYNC)` (plain `fsync` leaves it in the drive cache on Apple hardware), `fsync` where that's unsupported |
 | `eventLogPath`, `isDebuggable` | `filesDir/event-log.ndjson`, `FLAG_DEBUGGABLE` | `Application Support/event-log.ndjson`, `Platform.isDebugBinary` |
@@ -206,13 +205,13 @@ cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/in
 
 CI (`.github/workflows/ios.yml`) checks the header with `--verify`.
 
-Kotlin/Native links Apple targets only on a macOS host; on Linux the link
-tasks are skipped (`kotlin.native.ignoreDisabledTargets=true`). Compiling iOS
-klibs works on Linux as long as the module has no cinterop: `:lollop`'s
-`compileKotlinIos*` run in CI (`lollop-ios` job in `ci.yml`), while the iOS
-compiles of `:core-bridge` and `:lollop-ios` are skipped on Linux because of
-the cinterop. The engine can't get a `linuxX64` target of its own: `:lollop`'s
-commonMain depends on Compose UI, which publishes no Linux native artifacts.
+Kotlin/Native compiles and links Apple targets only on a macOS host; on Linux
+those tasks are skipped (`kotlin.native.ignoreDisabledTargets=true`), including
+`:lollop`'s `compileKotlinIos*`, because `:lollop` depends on `:core-bridge`,
+whose cinterop can't be cross-compiled. Every iOS compile and test therefore
+runs in `ios.yml`'s macOS job. The engine can't get a `linuxX64` target of its
+own: `:lollop`'s commonMain depends on Compose UI, which publishes no Linux
+native artifacts.
 xtool (https://github.com/xtool-org/xtool) builds Swift packages for iOS on
 Linux, but it can't run the Kotlin/Native compiler for Apple targets, so it
 can't build this app.

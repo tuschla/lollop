@@ -377,7 +377,11 @@ fn completed_lift_day_emits_feedback_without_a_review() {
     assert!(model.review.is_none(), "no SubmitReview was sent");
     let done = vm.session_done.expect("today's session summarized");
     assert_eq!(done.epoch_day, POS_MON);
-    assert!(done.items.iter().all(|i| i.met), "{:#?}", done.items);
+    assert!(
+        done.items.iter().all(|i| i.status == ItemStatus::Done),
+        "{:#?}",
+        done.items
+    );
     let fb = vm.feedback.expect("feedback derived from the logged sets");
     assert!(!fb.evidence.safety_critical);
     assert!(

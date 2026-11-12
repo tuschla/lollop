@@ -386,14 +386,7 @@ fn assert_week_shrinks_only_at_the_known_steps(weekly_sets: u8) {
     let split = crate::running::LONG_RUN_SHARE_SPLIT_KM;
     let share_change = crate::running::LONG_RUN_SHARE_MAX - crate::running::LONG_RUN_SHARE_MIN;
     let mut bad = Vec::new();
-    for goal in [
-        G::General,
-        G::C25k,
-        G::FiveK,
-        G::TenK,
-        G::HalfMarathon,
-        G::Marathon,
-    ] {
+    for goal in unit_variants::<G>() {
         for days in 2..=7u8 {
             for vdot in paces {
                 let anchors = crate::plan::Anchors {

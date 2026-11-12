@@ -167,7 +167,7 @@ class RunDayGroupingTest {
     fun historyShowsNoProgressChartUntilARunHasADistance() {
         val nowSec = System.currentTimeMillis() / 1000
         val unmeasurable = RunResultView(
-            distance_km = 0.0, duration_min = 30.0, entry_id = 1, gps_unmeasurable = true,
+            distance_km = 0.0, duration_min = 30.0, entry_id = 1,
             started_at = nowSec - 5400, observed_at = nowSec - 3600,
             summary = "GPS signal too poor to measure this run",
         )

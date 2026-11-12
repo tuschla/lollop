@@ -95,7 +95,7 @@ pub(super) struct LoggedRun {
     pub(super) hr_pinned: bool,
     /// The run's tag, rating, typed bpm and logged UTC offset as the event
     /// stated them, with the bpm only when plausible
-    /// (`run_targets::plausible_avg_hr_bpm`) and an amend keeping the
+    /// (`running::plausible_avg_hr_bpm`) and an amend keeping the
     /// original row's offset. The run card shows the typed bpm rather than the
     /// derived percentage; the %HRmax conversion reads the run's local day on
     /// the logged offset (`None`, a legacy row: the clock's current offset).

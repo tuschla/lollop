@@ -791,7 +791,7 @@ fn a_lift_finished_at_the_cue_load_reads_done() {
         .iter()
         .find(|i| i.exercise == it.exercise)
         .expect("its line");
-    assert!(line.met, "{line:?}");
+    assert_eq!(line.status, ItemStatus::Done, "{line:?}");
 }
 
 #[test]

@@ -143,7 +143,7 @@ class SurfaceStateMachineTest {
                 ns == null -> {}
                 r < 55 -> {
                     val items = if (rng.nextInt(3) == 0) ns.items.take(rng.nextInt(1, ns.items.size + 1)) else ns.items
-                    v = QaHarness.logPlanItems(d, ns.session_type, items, firstId = d * 1_000) { m, item ->
+                    v = QaHarness.logPlanItems(d, items, firstId = d * 1_000) { m, item ->
                         checkCoreModel(m, d, "after logging ${item.exercise}")
                     } ?: v
                     note("  trained ${items.size}/${ns.items.size}")
@@ -191,7 +191,7 @@ class SurfaceStateMachineTest {
         if (tile == TileFace.StartRun || reminder?.kind == WidgetDayKind.Run) {
             assertNotNull("$at: Start run with no session today", today)
             assertEquals("$at: Start run on a ${today!!.session_type} day", SessionDiscipline.Run, today.session_type.discipline)
-            assertTrue("$at: Start run with no open run", today.items.any { isRunItem(it, today.session_type) && !it.done })
+            assertTrue("$at: Start run with no open run", today.items.any { it.kind == ItemKind.Run && !it.done })
         }
     }
 
@@ -262,7 +262,7 @@ class SurfaceStateMachineTest {
                 when (s.kind) {
                     K.Run -> PrescriptionView(
                         run_head = "8 km", run_head_km = 8.0,
-                        run_target = RunTargetView(pace_label = "5:40–6:00 /km"), done = done,
+                        run_target = RunTargetView(pace_label = "5:40–6:00 /km"), done = done, kind = ItemKind.Run,
                     )
                     else -> PrescriptionView(
                         exercise = LIFTS[i], sets = 3, face_lead = "3 × 5 @ 100 kg", done = done, sets_done = if (done) 3 else 0,

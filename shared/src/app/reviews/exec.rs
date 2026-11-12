@@ -7,7 +7,8 @@ use std::fmt::Write as _;
 use crate::app::format::{fmt_km_or_mi, round_tenths};
 use crate::app::plan_views::{PlanItem, PlanRow};
 use crate::app::view_types::{
-    ItemSetView, ItemStatus, PlanIntensity, PrescriptionView, SessionDoneItemView, SessionDoneView,
+    ItemKind, ItemSetView, ItemStatus, PlanIntensity, PrescriptionView, SessionDoneItemView,
+    SessionDoneView,
 };
 use crate::event::{Decouple, IntervalExec};
 use crate::evidence::claims;
@@ -136,7 +137,7 @@ pub(in crate::app) fn derive_session_exec(week: &[PlanRow], today: i64) -> Optio
     let lifts: Vec<LiftOutcome> = day
         .items
         .iter()
-        .filter(|it| !it.is_run() && !it.status.is_skipped())
+        .filter(|it| it.is_lift() && !it.status.is_skipped())
         .map(|it| LiftOutcome {
             day: Some(day.epoch_day),
             ..lift_outcome(it)
@@ -175,20 +176,25 @@ pub(in crate::app) fn build_session_done(
     let items = day
         .items
         .iter()
-        .map(|it| {
-            if it.is_run() {
+        .map(|it| match it.kind {
+            ItemKind::Run => {
                 let (planned_km, planned_min) = crate::app::plan_views::run_planned(it);
                 SessionDoneItemView {
                     exercise: "Run".to_string(),
                     summary: format!("{:.1} km · {:.0} min", it.run_logged_km, it.run_logged_min),
-                    met: it.status == ItemStatus::Done,
                     status: it.status,
                     run_km: Some(it.run_logged_km),
                     run_min: Some(it.run_logged_min),
                     run_planned_km: planned_km,
                     run_planned_min: planned_min,
                 }
-            } else {
+            }
+            ItemKind::ReturnCheck => SessionDoneItemView {
+                exercise: "Return check".to_string(),
+                status: it.status,
+                ..SessionDoneItemView::default()
+            },
+            ItemKind::Lift => {
                 let o = lift_outcome(it);
                 let mut summary = format!("{} of {} sets", o.sets_done, o.sets_planned);
                 if let Some(best) = top_set(it) {
@@ -202,7 +208,6 @@ pub(in crate::app) fn build_session_done(
                 SessionDoneItemView {
                     exercise: it.exercise.clone(),
                     summary,
-                    met: it.status == ItemStatus::Done,
                     status: it.status,
                     ..SessionDoneItemView::default()
                 }

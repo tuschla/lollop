@@ -53,7 +53,3 @@ internal fun sendUndoable(
         postUndoable(text, undoLabel, undo)
     }
 }
-
-/** The `hr_pct_max` a run was logged with: a bpm entry sends 0 and lets the core
- *  derive the percentage, so re-sending the derived figure would read as typed. */
-internal fun loggedHrPctMax(v: RunResultView): Double = if (v.avg_hr_bpm != null) 0.0 else v.hr_pct_max

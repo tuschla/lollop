@@ -13,6 +13,7 @@ import app.milestone.DurableCore
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
+import app.milestone.ItemKind
 import app.milestone.LiftGoal
 import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
@@ -21,13 +22,10 @@ import app.milestone.RunSession
 import app.milestone.REPO_ROOT
 import app.milestone.RecentRace
 import app.milestone.SendResult
-import app.milestone.SessionType
 import app.milestone.TestClock
 import app.milestone.TestSink
 import app.milestone.ViewModel
 import app.milestone.eventLogPath
-import app.milestone.isReturnCheckItem
-import app.milestone.isRunItem
 import app.milestone.northFix
 import app.milestone.setupPrefs
 import app.milestone.straightTrack
@@ -169,14 +167,13 @@ object QaHarness {
     fun fixture(name: String): ByteArray = File(REPO_ROOT, "shared/tests/fixtures/$name").readBytes()
 
     /**
-     * Log [items] of a [sessionType] plan session to the real core, dated midday on
-     * [day], with entry ids after [firstId]: a `LogRun` per run item and each lift's
-     * sets at its top reps (and hold), skipping a return check. [onModel] sees the
-     * model after each send. Null when nothing was logged.
+     * Log [items] of a plan session to the real core, dated midday on [day], with
+     * entry ids after [firstId]: a `LogRun` per run item and each lift's sets at its
+     * top reps (and hold), skipping a return check. [onModel] sees the model after
+     * each send. Null when nothing was logged.
      */
     fun logPlanItems(
         day: Long,
-        sessionType: SessionType,
         items: List<PrescriptionView>,
         firstId: Long,
         onModel: (ViewModel, PrescriptionView) -> Unit = { _, _ -> },
@@ -185,10 +182,10 @@ object QaHarness {
         var id = firstId
         val at = day * 86_400L + 43_200L
         for (item in items) {
-            if (isRunItem(item, sessionType)) {
+            if (item.kind == ItemKind.Run) {
                 v = Core.send(Event.LogRun(distanceKm = item.run_head_km ?: 6.0, durationMin = 40.0, hrPctMax = 0.7, observedAt = at, entryId = ++id))
                     .view.also { onModel(it, item) }
-            } else if (!isReturnCheckItem(item, sessionType)) {
+            } else if (item.kind == ItemKind.Lift) {
                 repeat(item.sets.coerceAtLeast(1)) {
                     v = Core.send(
                         Event.LogSet(

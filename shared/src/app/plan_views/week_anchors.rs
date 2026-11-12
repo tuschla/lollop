@@ -71,7 +71,7 @@ pub(super) fn plan_week_anchors(
         ),
         // Pace anchor: a fresh recent race (≤8 wk) on the day being
         // prescribed.
-        run_vdot: crate::app::run_targets::pace_anchor_vdot(day_profile, through.saturating_add(1)),
+        run_vdot: day_profile.pace_anchor_vdot(through.saturating_add(1)),
         // Race-date periodization dates the week; the cross-cycle volume
         // carry reads whole calendar weeks before it (RUN-VOLUME-001).
         week_start_epoch_day: Some(monday),

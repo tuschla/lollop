@@ -143,7 +143,7 @@ pub(super) fn reduce_percent_intensity(intensity: &mut PlanIntensity, frac: f64)
 /// fold leaves the item untouched. The single numeric fold shared by the hero
 /// and every judged week row.
 pub(in crate::app) fn fold_item_numbers(it: &mut PlanItem, fold: AdjustFold, weight_lb: bool) {
-    if it.is_run() {
+    if !it.is_lift() {
         if fold.vol_frac > 0.0 {
             cut_run_volume(it, fold.vol_frac);
         }
@@ -217,7 +217,7 @@ fn cut_run_volume(it: &mut PlanItem, frac: f64) {
             Some(_) => format!(
                 "{}{}",
                 it.intensity_label,
-                crate::app::run_targets::structure_suffix(it)
+                super::run_targets::structure_suffix(it)
             ),
             None => it.intensity_label.clone(),
         };

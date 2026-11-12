@@ -19,7 +19,9 @@ use crate::app::plan_views::item_render::{
 use crate::app::plan_views::plan_item::{PlanItem, PlanRow, RunAmount};
 use crate::app::readiness::readiness_picture;
 use crate::app::review_deloads::review_deloads;
-use crate::app::view_types::{EvidenceTagView, PlanIntensity, PrescriptionView, SessionStatus};
+use crate::app::view_types::{
+    EvidenceTagView, ItemKind, PlanIntensity, PrescriptionView, SessionStatus,
+};
 use crate::day::{is_undated, local_day};
 use crate::event::SessionReview;
 use crate::evidence::{ClaimId, claims};
@@ -27,6 +29,7 @@ use crate::plates::load_grid_step_kg;
 use crate::profile::Profile;
 use crate::schema::{
     Adjustment, AdjustmentCall, AdjustmentKind, DeloadTrigger, PainRegion, ReadinessSignal,
+    SessionType,
 };
 
 /// The claim behind the head-cold run cap: one short easy run of 10–20 min at
@@ -299,7 +302,11 @@ pub(super) fn annotate_adjustments(
                 // ready-upd-003 (IOC 2022): the first session after a fever or
                 // chest illness is a short, easy self-test, not the planned work.
                 let logged = ns.items.iter().any(|it| it.has_work());
-                ns.items = vec![return_check_item(r, logged)];
+                let kind = match ns.session_type {
+                    SessionType::Lift(_) => ItemKind::ReturnCheck,
+                    _ => ItemKind::Run,
+                };
+                ns.items = vec![return_check_item(r, kind, logged)];
                 stopped = vec![false];
                 applied = Some(r);
                 break;
@@ -322,7 +329,7 @@ pub(super) fn annotate_adjustments(
     for (idx, it) in ns.items.iter_mut().enumerate() {
         if stopped.get(idx).copied().unwrap_or(false) {
             it.done = true;
-        } else if !it.is_run() {
+        } else if it.is_lift() {
             it.done = it.sets_done >= it.sets.max(1) || it.ended_early;
         }
     }
@@ -371,7 +378,7 @@ impl EffortPass {
         let mut eased = vec![0u8; items.len()];
         let mut clamped = vec![false; items.len()];
         for (i, it) in items.iter_mut().enumerate() {
-            if it.is_run() {
+            if !it.is_lift() {
                 continue;
             }
             let rir_target = matches!(
@@ -398,7 +405,7 @@ impl EffortPass {
 fn note_load_cut(items: &mut [PlanItem], pct: f32, weight_lb: bool) -> bool {
     let mut any_changed = false;
     for it in items.iter_mut() {
-        if !it.is_run() && it.load_kg.is_some() {
+        if it.is_lift() && it.load_kg.is_some() {
             it.adjusted_note = format!("{pct:.0}% less weight today");
             resync_intensity(it, weight_lb);
             any_changed = true;
@@ -418,7 +425,7 @@ fn note_deload(
 ) -> bool {
     let easy_runs = deload_defers_hard_running(r);
     for it in items.iter_mut() {
-        if it.is_run() {
+        if !it.is_lift() {
             if easy_runs {
                 cap_run_item_easy(it, r, "lighter week: easy running only");
             }
@@ -442,7 +449,7 @@ fn note_deload(
 fn note_rpe_cap(items: &mut [PlanItem], eased: &[u8]) -> bool {
     let mut any_changed = false;
     for (it, &d) in items.iter_mut().zip(eased) {
-        if d > 0 && !it.is_run() {
+        if d > 0 && it.is_lift() {
             if it.adjusted_note.is_empty() {
                 it.adjusted_note = format!("stop {} earlier than planned", reps_word(d));
             }
@@ -466,7 +473,7 @@ fn apply_progression_hold(
     let run_rec = run_side_rec(r);
     let mut any_changed = false;
     for (i, it) in items.iter_mut().enumerate() {
-        if it.is_run() {
+        if !it.is_lift() {
             if trigger != ReadinessSignal::Soreness {
                 cap_run_item_easy(it, &run_rec, "easy today: no hard running");
                 any_changed = true;
@@ -493,7 +500,7 @@ fn apply_one_level_downgrade(
     let runs = downgrade_eases_runs(r);
     let mut any_changed = false;
     for (i, it) in items.iter_mut().enumerate() {
-        if it.is_run() {
+        if !it.is_lift() {
             if runs {
                 cap_run_item_easy(it, r, "one step easier today");
                 any_changed = true;
@@ -537,11 +544,11 @@ fn apply_safety_easy_day(items: &mut [PlanItem], r: &AdjustmentCall, weight_lb: 
         _ => "easy today: protect the sore tendon",
     };
     for it in items.iter_mut() {
-        if it.is_run() && head_cold(r) {
+        if !it.is_lift() && head_cold(r) {
             // A head cold never keeps a long or hard run: every run becomes
             // one short easy run, or rest.
             cap_run_for_head_cold(it);
-        } else if it.is_run() {
+        } else if !it.is_lift() {
             cap_run_item_easy(it, r, note);
         } else {
             let label = if it.timed_hold {
@@ -560,7 +567,7 @@ fn apply_safety_easy_day(items: &mut [PlanItem], r: &AdjustmentCall, weight_lb: 
 /// is left.
 fn note_volume_cut(items: &mut [PlanItem], pct: f32) -> bool {
     for it in items.iter_mut() {
-        if !it.is_run() && it.adjusted_note.is_empty() {
+        if it.is_lift() && it.adjusted_note.is_empty() {
             it.adjusted_note = format!("{pct:.0}% fewer sets today");
         }
     }
@@ -615,7 +622,7 @@ fn apply_modify_and_monitor(
         format!("eased for {location} tendon pain")
     };
     for (i, it) in items.iter_mut().enumerate() {
-        if it.is_run() {
+        if !it.is_lift() {
             cap_run_item_easy(it, r, "tendon pain: keep it easy and pain-free");
         } else if region.is_some_and(|reg| crate::autoreg::item_spared_by_pain(reg, &it.exercise)) {
             if effort.eased[i] > 0 || effort.clamped[i] {
@@ -800,7 +807,7 @@ fn stop_item_for_pain(it: &mut PlanItem, location: &str, r: &AdjustmentCall) {
     it.load_kg = None;
     it.intensity = PlanIntensity::Prose;
     it.intensity_label = "Skip today, or swap for a movement that doesn't hurt".into();
-    if it.is_run() {
+    if !it.is_lift() {
         let line = format!("Run: skip today ({location} pain)");
         set_run_summary(it, None, None, &line, &line);
     } else {
@@ -819,8 +826,9 @@ fn stop_item_for_pain(it: &mut PlanItem, location: &str, r: &AdjustmentCall) {
 
 /// The one-item post-illness return check (ready-upd-003, ILLNESS-RTT-001):
 /// [`RETURN_DOSE_MIN`] minutes at [`RETURN_DOSE_EFFORT_PCT`] of usual effort,
-/// with the stop list. `done` once anything was logged today.
-fn return_check_item(r: &AdjustmentCall, done: bool) -> PlanItem {
+/// with the stop list, logged as `kind`: a return check in a lifting session,
+/// else a run. `done` once anything was logged today.
+fn return_check_item(r: &AdjustmentCall, kind: ItemKind, done: bool) -> PlanItem {
     let (pct_lo, pct_hi) = RETURN_DOSE_EFFORT_PCT;
     let summary = return_check_headline();
     PlanItem::from(PrescriptionView {
@@ -829,6 +837,7 @@ fn return_check_item(r: &AdjustmentCall, done: bool) -> PlanItem {
         intensity_label: format!("{pct_lo}–{pct_hi}% of your usual effort"),
         adjusted_note: format!("{RETURN_CHECK_STOP} Check in again tomorrow morning."),
         return_check: true,
+        kind,
         evidence: EvidenceTagView::of(r),
         why: why_from(None, r),
         done,

@@ -17,6 +17,7 @@ mod item_render;
 mod plan_item;
 mod plan_week;
 mod program_summary;
+mod run_targets;
 mod week_anchors;
 mod week_moves;
 
@@ -27,10 +28,14 @@ pub(super) use consistency::build_consistency;
 pub(super) use first_set::{ItemCue, apply_first_set_autoreg};
 pub(super) use flatten_run::vdot_band_name;
 pub(super) use item_render::run_planned;
-pub(super) use plan_item::{HrAnchor, PlanItem, PlanRow, TargetAnchor};
+pub(super) use plan_item::{PlanItem, PlanRow};
 pub(super) use plan_week::{PlanViews, build_plan_views};
 
 #[cfg(test)]
 pub(super) use flatten::{flatten_prescription, plan_session_title};
 #[cfg(test)]
 pub(super) use item_render::EASY_RUN_LABEL;
+#[cfg(test)]
+pub(super) use plan_item::HrAnchor;
+#[cfg(test)]
+pub(super) use run_targets::{TargetBand, band_for, resolve_target};

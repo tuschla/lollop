@@ -1159,7 +1159,6 @@ fn op_contexts_are_the_snake_case_names_the_shell_reads() {
             "draft_facts",
             "run_track",
             "thin_track",
-            "imported_hr_pct",
             "relog_event"
         ]
     );
@@ -1247,20 +1246,4 @@ fn thin_track_answers_the_kept_fixes_and_their_segment_starts() {
     let bad = pure(Op::ThinTrack, br#"{"fixes":-1,"max_points":4}"#);
     assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
     assert_eq!(bad["error"]["context"], "thin_track", "{bad}");
-}
-
-#[test]
-fn imported_hr_pct_answers_the_share_of_a_measured_hr_max() {
-    let hr = pure(
-        Op::ImportedHrPct,
-        br#"{"avg_hr_bpm":152.0,"measured_hr_max":190.0}"#,
-    );
-    assert!((hr.as_f64().unwrap() - 80.0).abs() < 1e-9, "{hr}");
-    assert_eq!(
-        pure(Op::ImportedHrPct, br#"{"avg_hr_bpm":152.0}"#),
-        json!(0.0)
-    );
-    let bad = pure(Op::ImportedHrPct, br#"{"avg_hr_bpm":"fast"}"#);
-    assert_eq!(bad["error"]["kind"], "bad_input", "{bad}");
-    assert_eq!(bad["error"]["context"], "imported_hr_pct", "{bad}");
 }

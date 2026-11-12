@@ -3,17 +3,15 @@ package app.milestone.widget
 import app.milestone.DayMark
 import app.milestone.DistanceUnit
 import app.milestone.HoldReason
+import app.milestone.ItemKind
 import app.milestone.PlanWithheld
 import app.milestone.PrescriptionView
 import app.milestone.SessionDiscipline
 import app.milestone.SessionPlanView
 import app.milestone.SessionStatus
-import app.milestone.SessionType
 import app.milestone.TodayState
 import app.milestone.ViewModel
 import app.milestone.actionable
-import app.milestone.isReturnCheckItem
-import app.milestone.isRunItem
 import app.milestone.mark
 import app.milestone.runFaceHead
 import app.milestone.today
@@ -172,7 +170,7 @@ internal fun widgetSnapshotOf(
         ahead = ahead,
     )
     val isRun = session.session_type.discipline == SessionDiscipline.Run
-    val items = session.items.map { widgetItemOf(it, session.session_type, distanceUnit) }
+    val items = session.items.map { widgetItemOf(it, distanceUnit) }
     return base.copy(
         kind = if (isRun) WidgetDayKind.Run else WidgetDayKind.Lift,
         title = session.title,
@@ -195,24 +193,23 @@ private fun aheadDays(model: ViewModel, ns: SessionPlanView, today: Long, unit: 
                 SessionDiscipline.Lift -> WidgetDayKind.Lift
                 SessionDiscipline.Rest -> return@mapNotNull null
             }
-            WidgetAheadDay(s.epoch_day, kind, s.title, s.items.map { widgetItemOf(it, s.session_type, unit) })
+            WidgetAheadDay(s.epoch_day, kind, s.title, s.items.map { widgetItemOf(it, unit) })
         }
 
-private fun widgetItemOf(item: PrescriptionView, sessionType: SessionType, unit: DistanceUnit): WidgetItem {
-    val check = isReturnCheckItem(item, sessionType)
-    val run = isRunItem(item, sessionType)
+private fun widgetItemOf(item: PrescriptionView, unit: DistanceUnit): WidgetItem {
+    val run = item.kind == ItemKind.Run
     val runHead = if (run) runFaceHead(item, unit) else null
     return WidgetItem(
-        kind = when {
-            check -> WidgetItemKind.Check
-            run -> WidgetItemKind.Run
-            else -> WidgetItemKind.Lift
+        kind = when (item.kind) {
+            ItemKind.ReturnCheck -> WidgetItemKind.Check
+            ItemKind.Run -> WidgetItemKind.Run
+            ItemKind.Lift -> WidgetItemKind.Lift
         },
-        name = if (check || run) "" else item.exercise,
-        detail = when {
-            check -> ""
-            run -> runHead ?: item.face_lead
-            else -> item.face_lead
+        name = if (item.kind == ItemKind.Lift) item.exercise else "",
+        detail = when (item.kind) {
+            ItemKind.ReturnCheck -> ""
+            ItemKind.Run -> runHead ?: item.face_lead
+            ItemKind.Lift -> item.face_lead
         },
         done = item.done,
         // Only beside a volume head: a run's full summary already states its pace.

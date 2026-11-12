@@ -330,7 +330,7 @@ class SessionReminderTest {
     fun snapshotCarriesPlannedDaysAheadAndItsZone() {
         val day = today
         val lift = PrescriptionView(exercise = "Back squat", face_lead = "3 × 5 @ 100 kg")
-        val run = PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"))
+        val run = PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"), kind = ItemKind.Run)
         val week = listOf(
             SessionPlanView(day, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift)),
             SessionPlanView(day + 1, "", SessionType.Rest, SessionStatus.Rest),
@@ -586,7 +586,7 @@ class SessionReminderTest {
             Core.send(QaHarness.calisthenicsProfile())
             val first = checkNotNull(Core.send(Event.GeneratePlan(sun)).view.next_session)
             assertEquals("a session on the setup Sunday", sun, first.epoch_day)
-            val sunday = checkNotNull(QaHarness.logPlanItems(sun, first.session_type, first.items, firstId = sun * 1_000))
+            val sunday = checkNotNull(QaHarness.logPlanItems(sun, first.items, firstId = sun * 1_000))
             val next = checkNotNull(sunday.next_session) { "Sunday's model names a next session" }
             val snapshot = widgetSnapshotOf(sunday, DistanceUnit.Km, "UTC")
 

@@ -153,7 +153,7 @@ impl WeekRuns {
             .unwrap_or_else(|| week_monday(cur_week).saturating_add(6));
         let threshold_slow_pace = model
             .profile()
-            .and_then(|p| crate::app::run_targets::pace_anchor_vdot(p, pace_day))
+            .and_then(|p| p.pace_anchor_vdot(pace_day))
             .and_then(|v| running::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Threshold))
             .map(|(_, slow)| slow);
         let hard_runs: Vec<i64> = runs

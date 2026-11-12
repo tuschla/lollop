@@ -56,6 +56,11 @@ private fun runEditEvent(
     else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt = observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
+/** The `hr_pct_max` a run was logged with: a bpm entry sends 0 and lets the core
+ *  derive the percentage ([runEditEvent]), so re-sending the derived figure would
+ *  read as typed. */
+private fun loggedHrPctMax(v: RunResultView): Double = if (v.avg_hr_bpm != null) 0.0 else v.hr_pct_max
+
 private enum class RunField { Distance, Duration, HeartRate }
 
 private const val RunDistanceMaxKm = 100.0
@@ -67,10 +72,10 @@ internal fun runDistanceMax(unit: DistanceUnit): Double =
 
 private const val RunDurationMaxMin = 600.0
 
-/** Average heart-rate entry bounds: a floor shared by bpm and % of max, and the
- *  bpm ceiling; % of max tops out at the core's ceiling. */
-private const val RunHrMin = 40.0
-private const val RunAvgHrMaxBpm = 230.0
+/** The % of max entry floor; bpm entries take the core's average-HR gate
+ *  ([CoreConstants.AVG_HR_MIN_BPM]–[CoreConstants.AVG_HR_MAX_BPM]) and % of max tops
+ *  out at the core's ceiling. */
+private const val RunHrPctMin = 40.0
 
 /**
  * Manual run entry for runs recorded without GPS tracking.
@@ -148,8 +153,8 @@ fun LogRunEditor(
         mutableStateOf((loggedBpm ?: loggedPct)?.let { fmtLosslessPrefill(it) } ?: "")
     }
     val hrParsed = hrText.toDoubleOrNull()
-    val hrMax = if (bpmMode) RunAvgHrMaxBpm else CoreConstants.HR_PCT_MAX_CEILING
-    val hrValid = hrText.isBlank() || (hrParsed != null && hrParsed in RunHrMin..hrMax)
+    val hrRange = if (bpmMode) CoreConstants.AVG_HR_MIN_BPM..CoreConstants.AVG_HR_MAX_BPM else RunHrPctMin..CoreConstants.HR_PCT_MAX_CEILING
+    val hrValid = hrText.isBlank() || (hrParsed != null && hrParsed in hrRange)
     var sessionRpe by rememberSaveable { mutableStateOf(initial?.session_rpe) }
     var observedAt by rememberSaveable {
         mutableStateOf(
@@ -273,7 +278,7 @@ fun LogRunEditor(
                     hrText,
                     active = keypadOpen && active == RunField.HeartRate,
                     invalid = hrText.isNotBlank() && !hrValid,
-                    min = RunHrMin, max = hrMax, decimals = 0,
+                    min = hrRange.start, max = hrRange.endInclusive, decimals = 0,
                     adjustments = listOf(-5.0, 5.0),
                     onActivate = { active = RunField.HeartRate; fresh = true; keypadOpen = true },
                     onText = { hrText = it; fresh = false; dirty = true },

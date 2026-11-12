@@ -3,13 +3,13 @@
 //! replacement are built by the same code; and back, the event that re-logs
 //! a stored row ([`relog_event`], the shell's Undo).
 
+use crate::app::format::round_tenths;
 use crate::app::model::{
     EndedMarker, LoggedActivity, LoggedRun, LoggedSet, Model, PlanRequest, RaceQuery,
     RetractedInput, SessionMove, profile_at,
 };
 use crate::app::profile_age::{PROFILE_EPOCH_DAY_RANGE, derive_age_gate, derive_birthday_age};
 use crate::app::run_metrics::{in_spike_window, spike_km};
-use crate::app::run_targets;
 use crate::app::{HrZoneInputView, HypertrophyInputView, ProteinInputView};
 use crate::day::is_undated;
 use crate::event::entry::{EntryRef, LoggedEntry, find_entry};
@@ -493,7 +493,7 @@ fn logged_run(f: RunFields) -> LoggedRun {
         observed_at: f.observed_at,
         entry_id: f.entry_id,
         meta: RunMeta {
-            avg_hr_bpm: run_targets::plausible_avg_hr_bpm(f.meta.avg_hr_bpm),
+            avg_hr_bpm: crate::running::plausible_avg_hr_bpm(f.meta.avg_hr_bpm),
             ..f.meta
         },
     }
@@ -517,19 +517,22 @@ fn store_run(model: &mut Model, mut run: LoggedRun, replaced: Option<&LoggedRun>
 }
 
 /// A run's stored %HRmax: a plausible typed bpm converted against the HRmax
-/// of the profile in force at the run's instant (`profile_at`, on the clock
-/// the row was logged under), else the wire figure. A pure function of the
-/// row and the profile history, never of log order.
+/// ([`Profile::hr_max_anchor`]: measured, else the Tanaka age estimate) of the
+/// profile in force at the run's instant (`profile_at`, on the clock the row
+/// was logged under), rounded to 0.1 %; else the wire figure. A pure function
+/// of the row and the profile history, never of log order.
 pub(super) fn derived_hr_pct_max(model: &Model, run: &LoggedRun) -> f64 {
-    if run.meta.avg_hr_bpm.is_none() {
+    let Some(bpm) = run.meta.avg_hr_bpm else {
         return run.wire_hr_pct_max;
-    }
+    };
     let offset = run
         .meta
         .utc_offset_sec
         .unwrap_or(model.today_utc_offset_sec);
-    let profile = profile_at(model, run.observed_at, offset);
-    run_targets::logged_hr_pct_max(run.wire_hr_pct_max, run.meta.avg_hr_bpm, profile.as_deref())
+    match profile_at(model, run.observed_at, offset).and_then(|p| p.hr_max_anchor()) {
+        Some((max, _)) => round_tenths(bpm / max * 100.0),
+        None => run.wire_hr_pct_max,
+    }
 }
 
 /// Re-derive every typed-bpm run's %HRmax ([`derived_hr_pct_max`]) after the

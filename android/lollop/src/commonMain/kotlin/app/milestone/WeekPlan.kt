@@ -546,9 +546,7 @@ private fun WeekStrip(
                     }
                 }
                 SessionMoveNotes(s)
-                val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, s.session_type) }
-                val isRun = { item: PrescriptionView -> isRunItem(item, s.session_type) }
-                if (evidenceOpen) SessionItemsEvidence(s.items, isRun, isCheck)
+                if (evidenceOpen) SessionItemsEvidence(s.items)
                 if (s.items.isEmpty()) {
                     Text(
                         when (s.status) {
@@ -569,8 +567,6 @@ private fun WeekStrip(
                     // including once the whole day reads done and leaves the hero.
                     SessionItemList(
                         items = s.items,
-                        isRun = isRun,
-                        isCheck = isCheck,
                         actionable = actions != null && s.epoch_day < today && s.status == SessionStatus.Missed,
                         reopenable = actions != null && s.epoch_day <= today,
                         runActionLabel = stringResource(Res.string.main_log_run_title),

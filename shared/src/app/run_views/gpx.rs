@@ -13,11 +13,8 @@ use crate::profile::DistanceUnit;
 /// The fixes the export writes for the logged run `(entry_id, observed_at)`
 /// (the identity `find_entry` matches on; the last such run when a legacy id
 /// repeats), handed to `f` with their segment starts and the run's distance;
-/// `None` when the run is unknown or has no track. For a run with a route
-/// (`has_gpx`, >= 2 QC'd fixes) they are the QC'd route the shell maps and
-/// shares; for a GPS run QC left unmeasurable (`gps_unmeasurable`) the
-/// recorded fixes, so the shell's Undo of its delete re-logs it exactly as
-/// recorded (the same fixes fail QC the same way again).
+/// `None` when the run is unknown or has no route (`has_gpx`: fewer than 2
+/// fixes pass QC). They are the QC'd route the shell maps and shares.
 fn with_exported_fixes<R>(
     model: &Model,
     entry_id: u64,
@@ -33,11 +30,7 @@ fn with_exported_fixes<R>(
         return None;
     }
     let q = run_qc_keyed(run, fingerprint(run));
-    Some(if q.track.len() >= 2 {
-        f(&q.track, &q.seg_starts, q.distance_km)
-    } else {
-        f(&run.track, &run.track_segment_starts, q.distance_km)
-    })
+    (q.track.len() >= 2).then(|| f(&q.track, &q.seg_starts, q.distance_km))
 }
 
 /// The GPX document of the run's exported fixes ([`with_exported_fixes`]);

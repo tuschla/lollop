@@ -68,6 +68,18 @@ pub const RESTING_HR_MIN_BPM: f64 = 25.0;
 /// Highest plausible resting HR, bpm.
 pub const RESTING_HR_MAX_BPM: f64 = 120.0;
 
+/// A logged average heart rate when it is plausible, finite and
+/// [`AVG_HR_MIN_BPM`]–[`AVG_HR_MAX_BPM`], else `None`. The one gate for both
+/// a run's stored bpm and its %HRmax conversion.
+pub fn plausible_avg_hr_bpm(avg_hr_bpm: Option<f64>) -> Option<f64> {
+    avg_hr_bpm.filter(|b| b.is_finite() && (AVG_HR_MIN_BPM..=AVG_HR_MAX_BPM).contains(b))
+}
+
+/// Lowest average heart rate a logged run keeps, bpm.
+pub const AVG_HR_MIN_BPM: f64 = 30.0;
+/// Highest average heart rate a logged run keeps, bpm.
+pub const AVG_HR_MAX_BPM: f64 = 250.0;
+
 /// The highest average heart rate a logged run states, % of HRmax.
 pub const HR_PCT_MAX_CEILING: f64 = 100.0;
 

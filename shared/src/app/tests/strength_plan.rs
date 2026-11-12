@@ -650,16 +650,8 @@ fn the_weights_plan_never_prescribes_failure_or_a_max_attempt() {
             .collect()
     };
     let mut checked = 0;
-    for goal in [
-        LiftGoal::MaxStrength,
-        LiftGoal::Power,
-        LiftGoal::Hypertrophy,
-    ] {
-        for cadence in [
-            ProgressionCadence::EverySession,
-            ProgressionCadence::WeekToWeek,
-            ProgressionCadence::MonthToMonth,
-        ] {
+    for goal in unit_variants::<LiftGoal>() {
+        for cadence in unit_variants::<ProgressionCadence>() {
             for meet in [None, Some(20_400 + 30)] {
                 let profile = Profile {
                     lift_goal: goal,

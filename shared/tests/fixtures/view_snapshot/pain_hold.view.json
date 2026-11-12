@@ -295,7 +295,6 @@
   "runs": [
     {
       "zone": "Z1",
-      "pace": "6:00/km",
       "distance_km": 6.0,
       "duration_min": 36.0,
       "hr_pct_max": 78.7,
@@ -2179,6 +2178,7 @@
     "items": [
       {
         "summary": "Back Squat: 5×3 · pick a weight for ~3 reps left · light and pain-free; change the movement if it hurts",
+        "kind": "lift",
         "exercise": "Back Squat",
         "sets": 5,
         "reps_low": 3,
@@ -2245,6 +2245,7 @@
       },
       {
         "summary": "Deadlift: 3×5 · pick a weight for ~4 reps left · light and pain-free; change the movement if it hurts",
+        "kind": "lift",
         "exercise": "Deadlift",
         "sets": 3,
         "reps_low": 5,
@@ -2298,6 +2299,7 @@
       },
       {
         "summary": "Bench press: 3×5 · ~4 reps left",
+        "kind": "lift",
         "exercise": "Bench press",
         "sets": 3,
         "reps_low": 5,
@@ -2351,6 +2353,7 @@
       },
       {
         "summary": "Cable row: 3×5 · ~4 reps left",
+        "kind": "lift",
         "exercise": "Cable row",
         "sets": 3,
         "reps_low": 5,
@@ -2439,6 +2442,7 @@
       "items": [
         {
           "summary": "Back Squat: 5×3 · pick a weight for ~3 reps left · light and pain-free; change the movement if it hurts",
+          "kind": "lift",
           "exercise": "Back Squat",
           "sets": 5,
           "reps_low": 3,
@@ -2505,6 +2509,7 @@
         },
         {
           "summary": "Deadlift: 3×5 · pick a weight for ~4 reps left · light and pain-free; change the movement if it hurts",
+          "kind": "lift",
           "exercise": "Deadlift",
           "sets": 3,
           "reps_low": 5,
@@ -2558,6 +2563,7 @@
         },
         {
           "summary": "Bench press: 3×5 · ~4 reps left",
+          "kind": "lift",
           "exercise": "Bench press",
           "sets": 3,
           "reps_low": 5,
@@ -2611,6 +2617,7 @@
         },
         {
           "summary": "Cable row: 3×5 · ~4 reps left",
+          "kind": "lift",
           "exercise": "Cable row",
           "sets": 3,
           "reps_low": 5,
@@ -2705,6 +2712,7 @@
               "end": 21
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -2788,6 +2796,7 @@
       "items": [
         {
           "summary": "Back Squat: 6×5 @ 107.5 kg · ~3 reps left",
+          "kind": "lift",
           "exercise": "Back Squat",
           "sets": 6,
           "reps_low": 5,
@@ -2858,6 +2867,7 @@
         },
         {
           "summary": "Deadlift: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Deadlift",
           "sets": 3,
           "reps_low": 5,
@@ -2911,6 +2921,7 @@
         },
         {
           "summary": "Bench press: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Bench press",
           "sets": 3,
           "reps_low": 5,
@@ -2964,6 +2975,7 @@
         },
         {
           "summary": "Cable row: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Cable row",
           "sets": 3,
           "reps_low": 5,
@@ -3051,6 +3063,7 @@
               "end": 19
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -3165,6 +3178,7 @@
               "end": 21
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -3255,6 +3269,7 @@
               "end": 21
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -3338,6 +3353,7 @@
       "items": [
         {
           "summary": "Back Squat: 5×3 @ 102.5 kg · ~3 reps left",
+          "kind": "lift",
           "exercise": "Back Squat",
           "sets": 5,
           "reps_low": 3,
@@ -3407,6 +3423,7 @@
         },
         {
           "summary": "Deadlift: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Deadlift",
           "sets": 3,
           "reps_low": 5,
@@ -3460,6 +3477,7 @@
         },
         {
           "summary": "Bench press: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Bench press",
           "sets": 3,
           "reps_low": 5,
@@ -3513,6 +3531,7 @@
         },
         {
           "summary": "Cable row: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Cable row",
           "sets": 3,
           "reps_low": 5,
@@ -3593,6 +3612,7 @@
       "items": [
         {
           "summary": "Back Squat: 6×5 @ 97.5 kg · ~3 reps left",
+          "kind": "lift",
           "exercise": "Back Squat",
           "sets": 6,
           "reps_low": 5,
@@ -3663,6 +3683,7 @@
         },
         {
           "summary": "Deadlift: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Deadlift",
           "sets": 3,
           "reps_low": 5,
@@ -3716,6 +3737,7 @@
         },
         {
           "summary": "Bench press: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Bench press",
           "sets": 3,
           "reps_low": 5,
@@ -3769,6 +3791,7 @@
         },
         {
           "summary": "Cable row: 3×5 · ~3 reps left",
+          "kind": "lift",
           "exercise": "Cable row",
           "sets": 3,
           "reps_low": 5,
@@ -3843,6 +3866,7 @@
               "end": 21
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -3946,6 +3970,7 @@
               "end": 21
             }
           ],
+          "kind": "run",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,

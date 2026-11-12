@@ -516,17 +516,6 @@ fn evenly_spaced_hr_samples_match_the_plain_mean() {
 }
 
 #[test]
-fn the_heart_rate_is_a_share_of_a_measured_hr_max_only_capped_at_100() {
-    assert!((imported_hr_pct_max(Some(152.0), Some(190.0)) - 80.0).abs() < 1e-9);
-    // No measured HRmax: no figure (never the Tanaka estimate).
-    assert_eq!(imported_hr_pct_max(Some(152.0), None), 0.0);
-    assert_eq!(imported_hr_pct_max(Some(152.0), Some(0.0)), 0.0);
-    assert_eq!(imported_hr_pct_max(Some(152.0), Some(-190.0)), 0.0);
-    assert_eq!(imported_hr_pct_max(Some(152.0), Some(140.0)), 100.0);
-    assert_eq!(imported_hr_pct_max(None, Some(190.0)), 0.0);
-}
-
-#[test]
 fn a_named_non_running_sport_is_recognised_and_anything_else_stays_importable() {
     for bike in [
         "Biking",

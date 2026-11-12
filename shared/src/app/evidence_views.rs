@@ -27,7 +27,7 @@ pub(in crate::app) struct CallCtx<'a> {
 }
 
 pub(in crate::app) fn lift_work_logged(items: &[PlanItem]) -> bool {
-    items.iter().any(|it| !it.is_run() && it.has_work())
+    items.iter().any(|it| it.is_lift() && it.has_work())
 }
 
 /// Flatten one evidence-wrapped adjustment into a shell-facing row: the call,
@@ -329,7 +329,7 @@ fn describe_rec(r: &AdjustmentCall, ctx: &CallCtx) -> String {
 fn eased_lifts(items: &[PlanItem], region: Option<crate::schema::PainRegion>) -> Option<String> {
     let names: Vec<&str> = items
         .iter()
-        .filter(|it| !it.is_run())
+        .filter(|it| it.is_lift())
         .filter(|it| region.is_none_or(|reg| !autoreg::item_spared_by_pain(reg, &it.exercise)))
         .map(|it| it.exercise.as_str())
         .collect();

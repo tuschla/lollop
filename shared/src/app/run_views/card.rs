@@ -190,13 +190,11 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
 
     let view = RunResultView {
         zone: shown_zone,
-        pace: pace.clone(),
         distance_km,
         duration_min,
         hr_pct_max,
         hr_label: hr_card_label(r.meta.avg_hr_bpm, hr_pct_max, shown_zone),
         avg_hr_bpm: r.meta.avg_hr_bpm,
-        utc_offset_sec: r.meta.utc_offset_sec,
         spike_flag: spike.value,
         spike_note: spike_note.to_string(),
         split,
@@ -219,7 +217,6 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
         // on demand through the bridge's `ExportGpx` op ([`export_run_gpx`])
         // only for the one run it inspects.
         has_gpx: track.len() >= 2,
-        gps_unmeasurable: false,
         observed_at: r.observed_at,
         entry_id: r.entry_id,
         spike_has_baseline: has_baseline,
@@ -248,7 +245,6 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
 fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
     RunResultView {
         zone: None,
-        pace: "-".to_string(),
         distance_km: 0.0,
         duration_min: 0.0,
         hr_pct_max,
@@ -262,14 +258,12 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         // empty evidence tag rather than citing a claim that was not used.
         evidence: EvidenceTagView::default(),
         has_gpx: false,
-        gps_unmeasurable: true,
         observed_at: r.observed_at,
         entry_id: r.entry_id,
         splits: Vec::new(),
         spike_has_baseline: is_ratio_base_km(r.longest_recent_km),
         hr_label: hr_card_label(r.meta.avg_hr_bpm, hr_pct_max, None),
         avg_hr_bpm: r.meta.avg_hr_bpm,
-        utc_offset_sec: r.meta.utc_offset_sec,
         session_rpe: r.meta.session_rpe,
         srpe_load_au: None,
         best_effort_labels: Vec::new(),

@@ -76,10 +76,9 @@ pub struct TrackFigures {
     pub duration_min: f64,
 }
 
-/// A logged run's route fixes, one list per recording segment: the fixes the
-/// GPX export writes (the QC'd route, or for a run QC left unmeasurable its
-/// recorded fixes), for the shell's map, trim and Undo. Empty for a run with
-/// no track or an unknown run.
+/// A logged run's route fixes, one list per recording segment: the QC'd route
+/// the GPX export writes, for the shell's map and trim. Empty for a run with
+/// no route or an unknown run.
 #[derive(Debug, Serialize, Wire)]
 pub struct RunTrack {
     pub segments: Vec<Vec<crate::gps::GpsPoint>>,
@@ -112,16 +111,6 @@ pub struct TrackThinning {
 pub struct ThinnedTrack {
     pub kept: Vec<u32>,
     pub segment_starts: Vec<u32>,
-}
-
-/// An imported run's heart rate as the import logs it: the file's average
-/// (`ImportedRun::avg_hr_bpm`) and the athlete's measured HRmax, if any.
-#[derive(Debug, Deserialize, Wire)]
-pub struct ImportedHr {
-    #[serde(default)]
-    pub avg_hr_bpm: Option<f64>,
-    #[serde(default)]
-    pub measured_hr_max: Option<f64>,
 }
 
 /// A profile the shell is still editing (guided setup, Profile): the answers

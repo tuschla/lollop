@@ -337,17 +337,6 @@ fn time_weighted_hr(all: &[RawFix]) -> Option<f64> {
     Some(samples.iter().sum::<f64>() / samples.len() as f64)
 }
 
-/// An imported run's `hr_pct_max`: the file's average heart rate
-/// ([`ImportedRun::avg_hr_bpm`]) against a MEASURED HRmax, capped at 100 %
-/// (a stale low HRmax never states more). Never against an estimate: without
-/// samples or a measured HRmax it is 0.0, "no HR", as a live save sends.
-pub fn imported_hr_pct_max(avg_hr_bpm: Option<f64>, measured_hr_max: Option<f64>) -> f64 {
-    match (avg_hr_bpm, measured_hr_max) {
-        (Some(avg), Some(max)) if max > 0.0 => (avg / max * 100.0).min(100.0),
-        _ => 0.0,
-    }
-}
-
 /// Implied ground speed (m/s) from `a` to `b`, or `None` when `b` isn't
 /// stamped after `a`.
 fn speed_mps(a: &RawFix, b: &RawFix) -> Option<f64> {

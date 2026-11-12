@@ -351,12 +351,6 @@ impl CoreBridge {
                 query::<sig::DraftFacts>(input, |draft| Ok(crate::app::draft_facts(draft)))
             }
             Op::ThinTrack => query::<sig::ThinTrack>(input, |track| Ok(thin_track(&track))),
-            Op::ImportedHrPct => query::<sig::ImportedHrPct>(input, |hr| {
-                Ok(crate::import::imported_hr_pct_max(
-                    hr.avg_hr_bpm,
-                    hr.measured_hr_max,
-                ))
-            }),
             Op::RelogEvent => {
                 let row = guarded(op, || input.json::<sig::RelogEvent>())?;
                 self.on_core(op, move |session| {

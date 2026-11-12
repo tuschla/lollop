@@ -253,13 +253,7 @@ impl Gen {
                             ResistanceModality::Calisthenics => ResistanceModality::Weights,
                         }
                     }
-                    2 => {
-                        self.profile.lift_goal = self.rng.pick(&[
-                            LiftGoal::MaxStrength,
-                            LiftGoal::Hypertrophy,
-                            LiftGoal::Power,
-                        ])
-                    }
+                    2 => self.profile.lift_goal = self.rng.pick(&unit_variants::<LiftGoal>()),
                     _ => self.profile.advanced = !self.profile.advanced,
                 }
                 self.profile.effective_from_epoch_day = Some(self.today);

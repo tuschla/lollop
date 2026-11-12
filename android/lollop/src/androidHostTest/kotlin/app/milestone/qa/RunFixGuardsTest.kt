@@ -36,6 +36,7 @@ import app.milestone.spokenRunDistance
 import kotlinx.serialization.json.jsonArray
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -44,16 +45,15 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Run tracking and recovery guards: the tracker's Finish review shows the CORE's
  * figures for the track Save sends, never
  * the live Kotlin counters; a crash-recovered run resumed from the boot prompt keeps
  * its pause boundaries, and recovery thinning keeps every segment's first fix; a GPS
- * run QC left unmeasurable can still be undone after a delete, because its detail
- * sheet fetches its recorded fixes. Also: a pause breaks the segment even when no
- * fix passes the live accuracy gate while paused.
+ * run QC left unmeasurable comes back with its recorded fixes when its delete is
+ * undone. Also: a pause breaks the segment even when no fix passes the live accuracy
+ * gate while paused.
  */
 @RunWith(RobolectricTestRunner::class)
 class RunFixGuardsTest {
@@ -188,21 +188,9 @@ class RunFixGuardsTest {
         val run = Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), run))
         rule.launchApp()
-        assertTrue(model.runs.single().gps_unmeasurable)
-        // The recorded fixes load off the main thread ([app.milestone.runTrackFetch]),
-        // and Delete offers Undo only once they have: wait for that fetch and the
-        // recomposition it lands in.
-        val fetched = AtomicBoolean(false)
-        val fetch = app.milestone.runTrackFetch
-        app.milestone.runTrackFetch = { id, at -> fetch(id, at).also { fetched.set(true) } }
-        try {
-            HistoryFocus.request(run.entryId, run.observedAt)
-            rule.waitForNode(hasTestTag("run-delete"))
-            rule.waitUntil(15_000) { fetched.get() }
-            rule.waitForIdle()
-        } finally {
-            app.milestone.runTrackFetch = fetch
-        }
+        assertFalse("QC left no route", model.runs.single().has_gpx)
+        HistoryFocus.request(run.entryId, run.observedAt)
+        rule.waitForNode(hasTestTag("run-delete"))
         rule.onNodeWithTag("run-delete").performScrollTo().performClick()
         val confirm = hasText(str(R.string.main_delete)) and hasClickAction() and hasAnyAncestor(isDialog())
         rule.waitForNode(confirm)
@@ -214,7 +202,7 @@ class RunFixGuardsTest {
         rule.waitForState { model.runs.isNotEmpty() }
         val back = model.runs.single()
         assertEquals(run.entryId, back.entry_id)
-        assertTrue("still the unmeasurable GPS run", back.gps_unmeasurable)
+        assertFalse("still the unmeasurable GPS run", back.has_gpx)
         val relogged = journeyLog().filter { it.variant == "LogRunTrack" }
         assertEquals("seeded + undone", 2, relogged.size)
         val fixes = relogged.last().payload["points"]!!.jsonArray

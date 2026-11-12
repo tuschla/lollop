@@ -155,7 +155,7 @@ pub struct Profile {
     pub bodyweight_kg: Option<f64>,
     /// Age in years (optional). Read by the under-18 gate (`ingest`), the
     /// Tanaka HRmax behind run targets and logged-run %HRmax
-    /// (`run_targets::hr_max_anchor`) when no measured max is set, the HR-zone
+    /// (`Profile::hr_max_anchor`) when no measured max is set, the HR-zone
     /// calculator's age input, and the conservative deload cadence
     /// (`individualization::conservative_deload`). `None` = unstated: no Tanaka estimate,
     /// adult rules. With a `birth_epoch_day` the core owns this value: it is
@@ -168,7 +168,7 @@ pub struct Profile {
     /// age at all.
     pub birth_epoch_day: Option<i64>,
     /// Resting HR, bpm (optional). Sets the Karvonen ceiling of run heart-rate
-    /// targets (`run_targets::hr_rest_anchor`) and prefills the HR-zone
+    /// targets (`Profile::resting_hr_anchor`) and prefills the HR-zone
     /// calculator's Karvonen input. `None` = unstated.
     pub resting_hr_bpm: Option<f64>,
     /// Measured maximum HR, bpm (optional). When plausible it replaces the
@@ -263,6 +263,55 @@ impl Profile {
             self.layoff_returned_epoch_day
                 .or(self.effective_from_epoch_day),
         )
+    }
+
+    /// The pace-anchor VDOT the plan sizes and renders against on a day
+    /// (`plan::Anchors::run_vdot`): the recent race, when it is fresh enough to
+    /// train off (not Stale per [`running::race_input_freshness`], i.e. ≤8
+    /// weeks, running-041 / RUN-RETEST-001). An undated race has no provable
+    /// freshness, and a race run before a layoff the athlete is returning from
+    /// (`weeks_off`) measures fitness they no longer have, so neither anchors
+    /// paces; nor does a future-dated or stale one. `None` without a usable race.
+    pub fn pace_anchor_vdot(&self, today_epoch_day: i64) -> Option<f64> {
+        let race = self.recent_race.as_ref()?;
+        if !race.distance_km.is_finite() || race.distance_km <= 0.0 || race.time_sec == 0 {
+            return None;
+        }
+        let day = race.epoch_day?;
+        let age = today_epoch_day.checked_sub(day)?;
+        if age < 0 {
+            return None;
+        }
+        let weeks = u8::try_from(age / 7).unwrap_or(u8::MAX);
+        if running::race_input_freshness(weeks).value == running::RaceInputFreshness::Stale {
+            return None;
+        }
+        if let Some(Some(returned)) = self.declared_layoff_return()
+            && day < returned
+        {
+            return None;
+        }
+        let vdot = crate::load::vdot(race.distance_km * 1000.0, f64::from(race.time_sec));
+        (vdot.is_finite() && vdot > 0.0).then_some(vdot)
+    }
+
+    /// The HRmax heart-rate figures are read against: a plausible measured max
+    /// ([`running::plausible_measured_hr_max`], the same gate the HR-zone
+    /// calculator applies), else the Tanaka age estimate for an age in
+    /// [`running::tanaka_age_in_range`] (RUN-HRMAX-001). Returns `(bpm, measured)`.
+    pub fn hr_max_anchor(&self) -> Option<(f64, bool)> {
+        if let Some(m) = running::plausible_measured_hr_max(self.measured_hr_max) {
+            return Some((m, true));
+        }
+        self.age_years
+            .filter(|a| running::tanaka_age_in_range(*a))
+            .map(|a| (running::hr_max_tanaka(a), false))
+    }
+
+    /// A plausible resting HR for the Karvonen %HRR ceiling (RUN-KARVONEN-001).
+    pub fn resting_hr_anchor(&self) -> Option<f64> {
+        self.resting_hr_bpm
+            .filter(|r| running::plausible_resting_hr(*r))
     }
 
     /// Resistance is trained on bodyweight leverage ladders (the modality

@@ -506,7 +506,7 @@ pub(in crate::app) fn remaining_sets_call_spent(r: &AdjustmentCall, today: &Plan
     };
     !matches!(adjustment.base(), Adjustment::IncreaseLoadPct(_))
         && today.items.iter().any(|it| {
-            it.done && !it.is_run() && crate::exercise::same_movement(&it.exercise, exercise)
+            it.done && it.is_lift() && crate::exercise::same_movement(&it.exercise, exercise)
         })
 }
 

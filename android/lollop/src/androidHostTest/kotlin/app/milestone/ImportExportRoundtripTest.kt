@@ -158,7 +158,7 @@ class ImportExportRoundtripTest {
         planRunImport(
             files = files.map { (name, bytes) -> ParsedRunFile(name, runCatching { parseRunFile(bytes, Core::parseRunFile) }) },
             existingObservedAt = existing,
-            build = { importedRunEvent(it, null) },
+            build = ::importedRunEvent,
         )
 
     private fun reasonsByFile(plan: RunImportPlan) = plan.failures.associate { it.fileName to it.reason }
@@ -184,7 +184,7 @@ class ImportExportRoundtripTest {
         assertEquals("one <trkseg> per recording segment", 3, segmentCount(gpx))
 
         val parsed = parseRunFile(gpx.toByteArray(), Core::parseRunFile).single()
-        val reimported = importedRunEvent(parsed, null)
+        val reimported = importedRunEvent(parsed)
         assertEquals("the imported run is stamped at the same last fix", original.observed_at, reimported.observedAt)
 
         val restored = freshInstallCore(QaHarness.strengthProfile()).let { send(reimported) }.runs.single()
@@ -193,9 +193,21 @@ class ImportExportRoundtripTest {
         val restoredGpx = gpxOf(restored)
         assertEquals("pauses survive the round trip", 3, segmentCount(restoredGpx))
         val again = freshInstallCore(QaHarness.strengthProfile())
-            .let { send(importedRunEvent(parseRunFile(restoredGpx.toByteArray(), Core::parseRunFile).single(), null)) }
+            .let { send(importedRunEvent(parseRunFile(restoredGpx.toByteArray(), Core::parseRunFile).single())) }
             .runs.single()
         assertSameRun("second round trip", restored, again)
+    }
+
+    /** A file's average heart rate reads against the profile as a manual run's bpm
+     *  does: with no measured HRmax, the age estimate (Tanaka, 208 − 0.7 × 40 = 180). */
+    @Test
+    fun anImportedRunsHeartRateIsReadAgainstTheProfileLikeAManualRunsBpm() {
+        val (points, _) = synthRun(seed = 13, startSec = QaHarness.daysAgoAtMidday(2), n = 900)
+        val gpx = gpxDocument(GpxTrack(listOf(points)), hr = { 162 })
+        bootCore(QaHarness.strengthProfile().copy(ageYears = 40.0))
+        val run = send(importedRunEvent(parseRunFile(gpx.toByteArray(), Core::parseRunFile).single())).runs.single()
+        assertEquals("162 bpm of 180", 90.0, run.hr_pct_max, 1e-9)
+        assertEquals(162.0, run.avg_hr_bpm)
     }
 
     @Test
@@ -350,7 +362,7 @@ class ImportExportRoundtripTest {
         val trueKm = pts.zipWithNext { a, b -> segmentKm(a, b) }.sum()
         val bytes = gpxDocument(GpxTrack(listOf(pts))).toByteArray()
         assertTrue("a multi-MB file", bytes.size > 2_000_000)
-        val ev = importedRunEvent(parseRunFile(bytes, Core::parseRunFile).single(), null)
+        val ev = importedRunEvent(parseRunFile(bytes, Core::parseRunFile).single())
         assertTrue("decimated to the save cap: ${ev.points.size}", ev.points.size <= CoreConstants.TRACK_DECIMATION_CAP + 2)
         assertEquals("endpoints kept", pts.first().observedAt, ev.points.first().observedAt)
         assertEquals(pts.last().observedAt, ev.observedAt)

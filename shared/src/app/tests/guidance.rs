@@ -385,44 +385,19 @@ fn build_guidance_never_panics_across_the_profile_domain() {
             })
             .collect()
     }
-    use ProgressionCadence as Pc;
     let mut profiles = vec![base_profile()];
-    profiles = cross(
-        profiles,
-        &[Pc::EverySession, Pc::WeekToWeek, Pc::MonthToMonth],
-        |p, v| p.progression_cadence = v,
-    );
-    profiles = cross(
-        profiles,
-        &[
-            LiftGoal::MaxStrength,
-            LiftGoal::Power,
-            LiftGoal::Hypertrophy,
-        ],
-        |p, v| p.lift_goal = v,
-    );
-    profiles = cross(
-        profiles,
-        &[
-            GoalDistance::General,
-            GoalDistance::C25k,
-            GoalDistance::FiveK,
-            GoalDistance::TenK,
-            GoalDistance::HalfMarathon,
-            GoalDistance::Marathon,
-        ],
-        |p, v| p.goal_distance = v,
-    );
-    profiles = cross(
-        profiles,
-        &[
-            ConcurrentGoal::Strength,
-            ConcurrentGoal::Power,
-            ConcurrentGoal::Hypertrophy,
-            ConcurrentGoal::EndurancePriority,
-        ],
-        |p, v| p.concurrent_goal = v,
-    );
+    profiles = cross(profiles, &unit_variants::<ProgressionCadence>(), |p, v| {
+        p.progression_cadence = v
+    });
+    profiles = cross(profiles, &unit_variants::<LiftGoal>(), |p, v| {
+        p.lift_goal = v
+    });
+    profiles = cross(profiles, &unit_variants::<GoalDistance>(), |p, v| {
+        p.goal_distance = v
+    });
+    profiles = cross(profiles, &unit_variants::<ConcurrentGoal>(), |p, v| {
+        p.concurrent_goal = v
+    });
     profiles = cross(profiles, &[0u8, 1, 30], |p, v| p.weekly_sets = v);
     profiles = cross(profiles, &[0u8, 1, 7], |p, v| p.running_days_per_week = v);
     profiles = cross(profiles, &[0.0, 0.1, 150.0], |p, v| {
@@ -523,11 +498,7 @@ fn peak_block_run_cap_is_a_reference_card_not_profile_guidance() {
     // The plan never builds a peak lifting block, so the CAP-2 card
     // is never shown as profile guidance; it stays in the reference library.
     let app = Engine;
-    for goal in [
-        LiftGoal::MaxStrength,
-        LiftGoal::Power,
-        LiftGoal::Hypertrophy,
-    ] {
+    for goal in unit_variants::<LiftGoal>() {
         let mut model = Model::default();
         let mut p = sample_profile();
         p.lift_goal = goal;

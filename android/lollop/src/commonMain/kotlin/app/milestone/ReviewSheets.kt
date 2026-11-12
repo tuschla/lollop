@@ -166,14 +166,13 @@ private fun HalfPercentField(label: StringResource, value: Double, onPick: (Doub
 }
 
 /** Whether today's session review asks the run details: today's plan has a run,
- *  or a run is logged today. */
+ *  or a run started today ([runLocalDay]). */
 internal fun reviewAsksRun(model: ViewModel, zone: TimeZone = TimeZone.currentSystemDefault()): Boolean {
     val today = model.today()
     val plannedRun = model.week_plan.firstOrNull { it.epoch_day == today }?.let { s ->
-        s.session_type.discipline == SessionDiscipline.Run ||
-            s.items.any { it.exercise.isEmpty() && !isReturnCheckItem(it, s.session_type) }
+        s.session_type.discipline == SessionDiscipline.Run || s.items.any { it.kind == ItemKind.Run }
     } == true
-    return plannedRun || model.runs.any { localEpochDay(it.observed_at, zone) == today }
+    return plannedRun || model.runs.any { runLocalDay(it, zone) == today }
 }
 
 /** The "How long?" band edges for the overtraining signs, in weeks: the

@@ -1176,52 +1176,25 @@ fn bpm_model() -> (Engine, Model) {
 }
 
 #[test]
-fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
-    // Undo re-sends the run from its view: the entered bpm must survive, so
-    // the card stays "152 bpm · Z2" and never turns into "HR 82% · Z2".
+fn undo_of_a_deleted_bpm_run_keeps_its_bpm_card() {
+    // The entered bpm survives delete + Undo, so the card stays
+    // "152 bpm · Z2" and never turns into "HR 82% · Z2".
     let (app, mut model) = bpm_model();
+    let at = 100 * DAY_SEC;
     let _ = app.update(
         with_run_meta(
-            log_run(8.0, 48.0, 0.0, 0.0, 100 * DAY_SEC, 7),
+            log_run(8.0, 48.0, 0.0, 0.0, at, 7),
             None,
             Some(5),
             Some(152.0),
         ),
         &mut model,
     );
-    let before = app.view(&model).runs[0].clone();
-    assert_eq!(before.avg_hr_bpm, Some(152.0));
-    assert!(
-        before.hr_label.starts_with("152 bpm"),
-        "{}",
-        before.hr_label
-    );
-    let _ = app.update(
-        Event::DeleteEntry {
-            kind: EntryKind::Run,
-            entry_id: 7,
-            observed_at_fallback: 0,
-        },
-        &mut model,
-    );
-    assert!(app.view(&model).runs.is_empty());
-    let _ = app.update(
-        with_run_meta(
-            log_run(
-                before.distance_km,
-                before.duration_min,
-                before.hr_pct_max,
-                0.0,
-                before.observed_at,
-                before.entry_id,
-            ),
-            before.workout_type,
-            before.session_rpe,
-            before.avg_hr_bpm,
-        ),
-        &mut model,
-    );
-    assert_eq!(app.view(&model).runs[0], before);
+    let card = app.view(&model).runs.swap_remove(0);
+    assert_eq!(card.avg_hr_bpm, Some(152.0));
+    assert!(card.hr_label.starts_with("152 bpm"), "{}", card.hr_label);
+    let diff = undo_diff(&mut model, EntryKind::Run, 7, at);
+    assert!(diff.is_none(), "{}", diff.unwrap_or_default());
 }
 
 #[test]

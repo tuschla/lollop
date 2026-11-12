@@ -4,7 +4,7 @@ use crate::app::evidence_views::why_from;
 use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths};
 use crate::app::plan_views::plan_item::{PlanItem, RunAmount};
 use crate::app::view_types::{
-    EvidenceTagView, PlanIntensity, PrescriptionView, RunStructureView, RunWalkStepView,
+    EvidenceTagView, ItemKind, PlanIntensity, PrescriptionView, RunStructureView, RunWalkStepView,
 };
 use crate::profile::DistanceUnit;
 use crate::schema::{RunIntensity, RunVolume, Rx, RxBasis, ThreeZone, VdotBand};
@@ -141,6 +141,7 @@ pub(super) fn flatten_run_prescription(
     let summary = format!("{head} · {label}");
     PlanItem {
         view: PrescriptionView {
+            kind: ItemKind::Run,
             summary,
             intensity_label: label,
             rep_volume: rep_volume.unwrap_or_default(),

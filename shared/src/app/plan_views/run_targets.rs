@@ -9,9 +9,9 @@
 
 use std::fmt::Write as _;
 
-use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min, round_tenths};
+use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min};
 use crate::app::model::{Model, profile_for_day};
-use crate::app::plan_views::{HrAnchor, PlanItem, TargetAnchor};
+use crate::app::plan_views::plan_item::{HrAnchor, PlanItem, TargetAnchor};
 use crate::app::view_types::{EvidenceTagView, RunTargetView};
 use crate::evidence::claims;
 use crate::profile::{DistanceUnit, Profile};
@@ -21,82 +21,9 @@ use crate::schema::{
 };
 use crate::{load, running};
 
-/// The pace-anchor VDOT the plan sizes and renders against on a day
-/// (`plan::Anchors::run_vdot`): the profile's recent race, when it is fresh
-/// enough to train off (not Stale per `running::race_input_freshness`, i.e.
-/// ≤8 weeks, running-041 / RUN-RETEST-001). An undated race has no provable
-/// freshness, and a race run before a layoff the athlete is returning from
-/// (`weeks_off`) measures fitness they no longer have, so neither anchors
-/// paces; nor does a future-dated or stale one. `None` without a usable race.
-pub(super) fn pace_anchor_vdot(profile: &Profile, today_epoch_day: i64) -> Option<f64> {
-    let race = profile.recent_race.as_ref()?;
-    if !race.distance_km.is_finite() || race.distance_km <= 0.0 || race.time_sec == 0 {
-        return None;
-    }
-    let day = race.epoch_day?;
-    let age = today_epoch_day.checked_sub(day)?;
-    if age < 0 {
-        return None;
-    }
-    let weeks = u8::try_from(age / 7).unwrap_or(u8::MAX);
-    if running::race_input_freshness(weeks).value == running::RaceInputFreshness::Stale {
-        return None;
-    }
-    if let Some(Some(returned)) = profile.declared_layoff_return()
-        && day < returned
-    {
-        return None;
-    }
-    let vdot = load::vdot(race.distance_km * 1000.0, f64::from(race.time_sec));
-    (vdot.is_finite() && vdot > 0.0).then_some(vdot)
-}
-
-/// HRmax for target bpm: a plausible measured max
-/// ([`running::plausible_measured_hr_max`], the same gate the HR-zone calculator
-/// applies), else the Tanaka age estimate for an age in
-/// [`running::tanaka_age_in_range`] (RUN-HRMAX-001). Returns `(bpm, measured)`.
-pub(super) fn hr_max_anchor(profile: &Profile) -> Option<(f64, bool)> {
-    if let Some(m) = running::plausible_measured_hr_max(profile.measured_hr_max) {
-        return Some((m, true));
-    }
-    profile
-        .age_years
-        .filter(|a| running::tanaka_age_in_range(*a))
-        .map(|a| (running::hr_max_tanaka(a), false))
-}
-
-/// A logged average heart rate in bpm when it is plausible (30–250), else
-/// `None`. The one gate for both the stored bpm and its %HRmax conversion.
-pub(super) fn plausible_avg_hr_bpm(avg_hr_bpm: Option<f64>) -> Option<f64> {
-    avg_hr_bpm.filter(|b| b.is_finite() && (30.0..=250.0).contains(b))
-}
-
-/// The `hr_pct_max` a logged run stores. A plausible average heart rate
-/// in bpm ([`plausible_avg_hr_bpm`]) is converted against [`hr_max_anchor`]
-/// (measured HRmax, else the Tanaka age estimate), rounded to 0.1 %; without a
-/// bpm figure or an HRmax to divide by, the sent `hr_pct_max` stands unchanged.
-pub(super) fn logged_hr_pct_max(
-    hr_pct_max: f64,
-    avg_hr_bpm: Option<f64>,
-    profile: Option<&Profile>,
-) -> f64 {
-    let bpm = plausible_avg_hr_bpm(avg_hr_bpm);
-    match (bpm, profile.and_then(hr_max_anchor)) {
-        (Some(b), Some((max, _))) => round_tenths(b / max * 100.0),
-        _ => hr_pct_max,
-    }
-}
-
-/// A plausible resting HR for the Karvonen %HRR ceiling (RUN-KARVONEN-001).
-fn hr_rest_anchor(profile: &Profile) -> Option<f64> {
-    profile
-        .resting_hr_bpm
-        .filter(|r| running::plausible_resting_hr(*r))
-}
-
 /// The training band a run prescription is executed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TargetBand {
+pub(in crate::app) enum TargetBand {
     Recovery,
     Easy,
     LongRun,
@@ -191,7 +118,7 @@ fn item_workout_type(
 /// band directly, a %HRmax band through the running-007 table (E ≤79, M 80–85,
 /// T 88–92, I ≥97 %HRmax), a ceiling-only band (no floor) being Recovery
 /// (running-014 states only ceilings).
-pub(super) fn band_for(
+pub(in crate::app) fn band_for(
     kind: Option<RunSessionType>,
     intensity: &RunIntensity,
 ) -> Option<TargetBand> {
@@ -312,21 +239,21 @@ fn band_hr_pct(
     Some((Some(lo), Some(hi), None))
 }
 
-pub(super) fn hr_anchor(profile: Option<&Profile>) -> HrAnchor {
+fn hr_anchor(profile: Option<&Profile>) -> HrAnchor {
     let Some(p) = profile else {
         return HrAnchor::default();
     };
-    let (max_bpm, measured) = hr_max_anchor(p).unwrap_or((0.0, false));
+    let (max_bpm, measured) = p.hr_max_anchor().unwrap_or((0.0, false));
     HrAnchor {
         max_bpm,
         measured,
-        rest_bpm: hr_rest_anchor(p).unwrap_or(0.0),
+        rest_bpm: p.resting_hr_anchor().unwrap_or(0.0),
     }
 }
 
 /// Resolve the numeric target for one band. `vdot` provides the paces; `hr`
 /// the bpm; the effort cue is always present. The pace label reads in `unit`.
-pub(super) fn resolve_target(
+pub(in crate::app) fn resolve_target(
     band: TargetBand,
     intensity: &RunIntensity,
     vdot: Option<f64>,
@@ -440,7 +367,7 @@ fn base_label(original: &str, band: TargetBand, intensity: &RunIntensity) -> Str
 /// [`RunStructureView`] (zero = absent). The volume stays the summary's first
 /// `·` segment (the downgrade path reads it), so every structure note goes
 /// after the target.
-pub(in crate::app) fn structure_suffix(it: &PlanItem) -> String {
+pub(super) fn structure_suffix(it: &PlanItem) -> String {
     let Some(s) = it.run_structure.as_ref() else {
         return String::new();
     };

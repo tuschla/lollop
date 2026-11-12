@@ -12,8 +12,7 @@
 //! follows the app's stated convention and says so.
 
 use super::*;
-use crate::app::plan_views::HrAnchor;
-use crate::app::run_targets::{TargetBand, band_for, resolve_target};
+use crate::app::plan_views::{HrAnchor, TargetBand, band_for, resolve_target};
 
 mod oracle {
     /// KB extracted/07-data-harvesting.md:158 — Tanaka 2001: `208 − 0.7·age`.

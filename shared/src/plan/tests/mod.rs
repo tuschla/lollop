@@ -11,6 +11,7 @@ use crate::schema::{
     DupDay, Goal, LadderId, LiftIntensity, LiftPrescription, LiftSessionType, Prescription,
     RunSessionType, SessionType,
 };
+use crate::test_support::unit_variants;
 use std::collections::BTreeSet;
 
 use common::*;
@@ -30,11 +31,7 @@ fn a_gate_blocks_synthesis() {
 
 #[test]
 fn every_prescription_carries_evidence_for_each_goal() {
-    for goal in [
-        LiftGoal::MaxStrength,
-        LiftGoal::Power,
-        LiftGoal::Hypertrophy,
-    ] {
+    for goal in unit_variants::<LiftGoal>() {
         let mut p = base_profile();
         p.lift_goal = goal;
         let prog =

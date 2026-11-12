@@ -125,7 +125,7 @@ class TodayLogicTest : PlatformTest() {
         val adj = AdjustmentView(summary = "Return check after illness: …", citation = "Schwellnus 2022", safety_critical = true)
         val check = SessionPlanView(
             status = SessionStatus.Adjusted,
-            items = listOf(PrescriptionView(summary = "Return check: 10–20 min easy", return_check = true)),
+            items = listOf(PrescriptionView(summary = "Return check: 10–20 min easy", return_check = true, kind = ItemKind.ReturnCheck)),
             adjustment = adj,
             adjustment_on_item = true,
         )
@@ -170,9 +170,13 @@ class TodayLogicTest : PlatformTest() {
         assertFalse(reviewAsksRun(liftDay, zone), "a lift-only day skips the run questions")
         val ranToo = liftDay.copy(runs = listOf(RunResultView(observed_at = day * 86_400L + 3_600L)))
         assertTrue(reviewAsksRun(ranToo, zone), "a run logged today brings them back")
+        val fromYesterday = RunResultView(started_at = day * 86_400L - 600L, observed_at = day * 86_400L + 1_200L)
+        assertFalse(reviewAsksRun(liftDay.copy(runs = listOf(fromYesterday)), zone), "a run started before midnight is yesterday's")
+        val intoTomorrow = RunResultView(started_at = (day + 1) * 86_400L - 600L, observed_at = (day + 1) * 86_400L + 1_200L)
+        assertTrue(reviewAsksRun(liftDay.copy(runs = listOf(intoTomorrow)), zone), "a run started before midnight is today's")
         val runDay = ViewModel(
             today_epoch_day = day,
-            week_plan = listOf(SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, items = listOf(PrescriptionView()))),
+            week_plan = listOf(SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, items = listOf(PrescriptionView(kind = ItemKind.Run)))),
         )
         assertTrue(reviewAsksRun(runDay, zone), "a planned run asks them")
     }

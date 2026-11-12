@@ -304,7 +304,7 @@ internal object LongHistorySeed {
         val (points, _, routeKm) = route(rng, start, km, paceSecPerKm, fixEverySec, null)
         val gpx = gpxDocument(GpxTrack(listOf(points)), hr = { 140 + rng.int(0, 15) })
         val run = parseRunFile(gpx.toByteArray(), Core::parseRunFile).single()
-        val ev = importedRunEvent(run, measuredHrMax = 190.0).copy(entryId = start * 1000 + 9)
+        val ev = importedRunEvent(run).copy(entryId = start * 1000 + 9)
         return ev to SeededRun(ev.observedAt, ev.entryId, RunSource.Imported, routeKm, points.last().observedAt - start, null, null)
     }
 

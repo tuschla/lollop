@@ -14,7 +14,7 @@ use crate::profile::DistanceUnit;
 use crate::schema::{AdjustmentCall, RunVolume};
 
 pub(super) fn refresh_lift_summary(it: &mut PlanItem, weight_lb: bool) {
-    if it.is_run() {
+    if !it.is_lift() {
         return;
     }
     // A timed-hold calisthenics item has no reps (reps_low == 0): render the hold
@@ -449,7 +449,7 @@ pub(super) fn cap_run_item_easy(it: &mut PlanItem, r: &AdjustmentCall, note: &st
 /// and re-render its face.
 pub(super) fn set_easy_run_face(it: &mut PlanItem) {
     it.intensity_label = EASY_RUN_LABEL.into();
-    crate::app::run_targets::downgrade_run_target_to_easy(it);
+    super::run_targets::downgrade_run_target_to_easy(it);
     let label = it.intensity_label.clone();
     let vol = it.run_volume;
     set_run_summary(

@@ -153,15 +153,12 @@ ops! {
     /// them. Reads no core state.
     DraftFacts(json draft: envelope::ProfileDraft) -> json envelope::DraftFacts,
     /// A logged run in; the fixes the GPX export writes, one list per
-    /// recording segment (none for a run with no track or an unknown run).
+    /// recording segment (none for a run with no route or an unknown run).
     RunTrack(json run: envelope::RunRef) -> json envelope::RunTrack,
     /// A recorded track's fix count, cap and segment starts in; the fixes a
     /// save or a crash recovery keeps and the segment starts among them.
     /// Reads no core state.
     ThinTrack(json track: envelope::TrackThinning) -> json envelope::ThinnedTrack,
-    /// An imported run's heart rate in; its `hr_pct_max` (0.0 without samples
-    /// or a measured HRmax). Reads no core state.
-    ImportedHrPct(json hr: envelope::ImportedHr) -> json f64,
     /// A logged row in, read before the delete or edit it undoes; the event
     /// that puts it back as it is now: for a delete the logging event (a GPS
     /// run with its recorded track), for an edit the amend that restores it.

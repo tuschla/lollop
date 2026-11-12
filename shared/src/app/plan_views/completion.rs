@@ -159,7 +159,7 @@ pub(in crate::app) fn apply_last_sets(
     weight_lb: bool,
 ) {
     for it in items.iter_mut() {
-        if it.is_run() || it.added_kg.is_some() || it.timed_hold {
+        if !it.is_lift() || it.added_kg.is_some() || it.timed_hold {
             continue;
         }
         let Some((set_day, i)) = last_top_set(
@@ -307,7 +307,7 @@ fn apply_hold_caps(
     // Saturating: a corrupt log's SetToday near i64::MIN must not overflow.
     let from = before_day.saturating_sub(crate::app::anchors::WINDOW_DAYS);
     for it in items.iter_mut() {
-        if it.is_run() || it.timed_hold || it.reps_low == 0 {
+        if !it.is_lift() || it.timed_hold || it.reps_low == 0 {
             continue;
         }
         let reps = u32::from(it.reps_low);
@@ -446,7 +446,7 @@ impl PrescriptionView {
     /// Whether any work is logged against the item: a run, or a set of its
     /// movement.
     pub(in crate::app) fn has_work(&self) -> bool {
-        if self.is_run() {
+        if !self.is_lift() {
             self.ran()
         } else {
             self.sets_done > 0 || !self.logged_sets.is_empty()
@@ -457,7 +457,7 @@ impl PrescriptionView {
 /// One item's status from its completion fields. `pain`: a pain report
 /// stopped it.
 fn item_status(it: &PlanItem, pain: bool) -> ItemStatus {
-    if it.is_run() {
+    if !it.is_lift() {
         let ran = it.ran();
         return if pain && !ran {
             ItemStatus::SkippedPain
@@ -527,7 +527,7 @@ fn most_work_logged(items: &[PlanItem]) -> bool {
         if matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain) {
             continue;
         }
-        if it.is_run() {
+        if !it.is_lift() {
             if !matches!(it.status, ItemStatus::Done | ItemStatus::DoneLighter) {
                 return false;
             }
@@ -648,7 +648,7 @@ pub(super) fn flatten_session(
         .collect();
     // Every run item reads as numbers a runner can follow (pace from race
     // fitness, bpm from HRmax, effort cue), resolved from the anchors.
-    crate::app::run_targets::apply_run_targets(&mut items, s, anchors, model, epoch_day);
+    super::run_targets::apply_run_targets(&mut items, s, anchors, model, epoch_day);
     // Each lift item carries the athlete's last same-movement top set from a
     // day before the judged work, and an effort-prescribed item a starting
     // weight.
@@ -676,7 +676,7 @@ pub(super) fn flatten_session(
     let judged = epoch_day >= start && epoch_day <= today && judge_day <= today;
     if judged {
         for (rx, it) in s.prescriptions.iter().zip(items.iter_mut()) {
-            if it.is_run() {
+            if !it.is_lift() {
                 judge_run_item(it, rx, judge, ctx);
             } else {
                 judge_lift_item(it, judge, ctx);

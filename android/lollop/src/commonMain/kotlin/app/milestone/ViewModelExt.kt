@@ -71,17 +71,6 @@ private fun <T> evidencePriority(safety: (T) -> Boolean, grade: (T) -> EvidenceG
 internal fun planDateLabel(epochDay: Long): String =
     localizedDayFormatter("EEEMMMd").format(LocalDate.fromEpochDays(epochDay))
 
-/** The post-illness "Return check" ([PrescriptionView.return_check]) shown as
- *  its own card in a lifting session: neither a run to track nor sets to count;
- *  any logged session today completes it. In a run session it stays a run. */
-internal fun isReturnCheckItem(item: PrescriptionView, sessionType: SessionType): Boolean =
-    item.return_check && sessionType.discipline == SessionDiscipline.Lift
-
-/** A plan item tracked or logged as a run: any item of a run session, or an
- *  item with no exercise; never the return check. */
-internal fun isRunItem(item: PrescriptionView, sessionType: SessionType): Boolean =
-    !isReturnCheckItem(item, sessionType) && (sessionType.discipline == SessionDiscipline.Run || item.exercise.isEmpty())
-
 /** Today's epoch-day for every plan gate: the core's clock echoed on the view
  *  (SetToday) rather than the wall clock, so a session that crosses midnight
  *  while foregrounded rolls over in lockstep with the core instead of stranding

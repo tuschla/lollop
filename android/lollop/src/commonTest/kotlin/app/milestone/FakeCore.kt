@@ -136,8 +136,6 @@ internal class FakeCore(
 
     override fun thinTrack(track: ByteArray): ByteArray? = null
 
-    override fun importedHrPct(hr: ByteArray): ByteArray? = null
-
     override fun relogEvent(row: ByteArray): ByteArray? = null
 
     private fun payload(line: String): JsonObject = coreJson.parseToJsonElement(line).jsonObject.values.single().jsonObject

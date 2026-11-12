@@ -1,13 +1,13 @@
 package app.milestone
 
+import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Degrees to radians, as `java.lang.Math.toRadians` (whose rounding differs by
- *  JDK: older Android runtimes divide by 180 then multiply by π). */
-internal expect fun toRadians(degrees: Double): Double
+/** Degrees to radians, as the core's `f64::to_radians`: one multiply by π/180. */
+internal fun toRadians(degrees: Double): Double = degrees * (PI / 180.0)
 
 /** Great-circle metres between two fixes (haversine on the core's
  *  [CoreConstants.EARTH_RADIUS_M], so live, route and of-record distances agree): the

@@ -43,6 +43,10 @@ constants! {
     crate::running::TANAKA_AGE_MIN_YEARS as Float;
     /// Oldest age the Tanaka HRmax estimate covers, years.
     crate::running::TANAKA_AGE_MAX_YEARS as Float;
+    /// Lowest average heart rate a logged run keeps, bpm.
+    crate::running::AVG_HR_MIN_BPM as Float;
+    /// Highest average heart rate a logged run keeps, bpm.
+    crate::running::AVG_HR_MAX_BPM as Float;
     /// The highest average heart rate a logged run states, % of HRmax.
     crate::running::HR_PCT_MAX_CEILING as Float;
     /// Fewest lift days a week a chosen count is held to.

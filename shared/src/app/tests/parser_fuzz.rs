@@ -961,13 +961,14 @@ fn a_far_future_fix_the_importer_accepted_exports_a_time_it_can_read_back() {
     gpx_values_sane(&doc).unwrap();
 }
 
-/// A FIT-like 1 Hz track: coordinates are semicircle conversions, the values
-/// the FIT importer and a phone GNSS hand the core.
+/// A FIT-like 1 Hz track at a running pace (about 2.3 m/s): coordinates are
+/// semicircle conversions, the values the FIT importer and a phone GNSS hand
+/// the core.
 fn semicircle_track(n: usize, t0: i64) -> Vec<GpsPoint> {
     let deg = |s: i32| f64::from(s) * (180.0 / 2_147_483_648.0);
     (0..n)
         .map(|i| {
-            let lat = deg(semi(47.37) + 1737 * i as i32);
+            let lat = deg(semi(47.37) + 250 * i as i32);
             let lon = deg(semi(8.54) + (i as f64 * 0.3).sin().mul_add(800.0, 0.0) as i32);
             pt(lat, lon, t0 + i as i64, 4.0)
         })
@@ -977,7 +978,7 @@ fn semicircle_track(n: usize, t0: i64) -> Vec<GpsPoint> {
 #[test]
 fn a_logged_track_survives_the_event_wire_bit_for_bit() {
     // `gps::export_gpx` promises its shortest-decimal coordinates rebuild the
-    // route bit for bit (Undo, re-import). The shell re-sends those digits as
+    // route bit for bit (re-import). The shell re-sends those digits as
     // JSON numbers (kotlinx writes the shortest decimal; its parser is exact),
     // so the core's Event decode must read them back to the same f64.
     let pts = semicircle_track(400, 1_750_000_000);

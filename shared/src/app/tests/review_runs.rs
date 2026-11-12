@@ -343,11 +343,10 @@ fn finish_preview_equals_saved_card_on_random_tracks() {
 }
 
 #[test]
-fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
-    // Undo of a deleted GPS run re-logs the EXPORTED (QC'd) route, not the raw
-    // fixes (`DurableCore.runGpx` → `restoreEventFor`). With the
-    // standing-fix reinsertion the QC must still be idempotent or Undo moves
-    // distance / moving time.
+fn qc_is_idempotent_so_a_reimported_route_keeps_its_figures() {
+    // A run's exported GPX is its QC'd route; re-importing it runs the QC on
+    // those fixes again. With the standing-fix reinsertion the QC must still
+    // be idempotent or the re-imported run moves distance / moving time.
     let mut rng = XorShift(0x0DD0_1DE0_9999_0001);
     for i in 0..2000 {
         let (pts, starts) = random_track(&mut rng);

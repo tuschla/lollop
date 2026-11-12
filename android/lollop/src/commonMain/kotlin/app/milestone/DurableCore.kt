@@ -124,14 +124,6 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
             bridge.thinTrack(coreJson.encodeToString(TrackThinning.serializer(), track).encodeToByteArray())
         }
 
-    /** An imported run's `hr_pct_max` (`ImportedHrPct` op,
-     *  `import::imported_hr_pct_max`); null when the core can't answer. Reads no
-     *  core state, so it runs on the calling thread. */
-    fun importedHrPct(hr: ImportedHr): Double? =
-        decodeQuery("imported heart rate", Double.serializer()) {
-            bridge.importedHrPct(coreJson.encodeToString(ImportedHr.serializer(), hr).encodeToByteArray())
-        }
-
     private inline fun <T> decodeQuery(what: String, serializer: KSerializer<T>, call: () -> ByteArray?): T? {
         val json = answer(what, call) ?: return null
         return try {

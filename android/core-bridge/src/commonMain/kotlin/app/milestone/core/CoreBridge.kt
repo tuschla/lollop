@@ -91,7 +91,7 @@ interface CoreBridge {
 
     /**
      * A logged run in; the fixes the GPX export writes, one list per
-     * recording segment (none for a run with no track or an unknown run).
+     * recording segment (none for a run with no route or an unknown run).
      *
      * Takes `RunRef` JSON; answers `RunTrack` JSON.
      */
@@ -105,14 +105,6 @@ interface CoreBridge {
      * Takes `TrackThinning` JSON; answers `ThinnedTrack` JSON.
      */
     fun thinTrack(track: ByteArray): ByteArray?
-
-    /**
-     * An imported run's heart rate in; its `hr_pct_max` (0.0 without samples
-     * or a measured HRmax). Reads no core state.
-     *
-     * Takes `ImportedHr` JSON; answers `Double` JSON.
-     */
-    fun importedHrPct(hr: ByteArray): ByteArray?
 
     /**
      * A logged row in, read before the delete or edit it undoes; the event
@@ -148,8 +140,7 @@ abstract class CoreCalls : CoreBridge {
     final override fun draftFacts(draft: ByteArray): ByteArray? = call(9, draft)
     final override fun runTrack(run: ByteArray): ByteArray? = call(10, run)
     final override fun thinTrack(track: ByteArray): ByteArray? = call(11, track)
-    final override fun importedHrPct(hr: ByteArray): ByteArray? = call(12, hr)
-    final override fun relogEvent(row: ByteArray): ByteArray? = call(13, row)
+    final override fun relogEvent(row: ByteArray): ByteArray? = call(12, row)
 
     private companion object {
         val NO_INPUT = ByteArray(0)

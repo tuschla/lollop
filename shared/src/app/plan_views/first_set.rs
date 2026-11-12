@@ -60,7 +60,7 @@ pub(in crate::app) fn apply_first_set_autoreg(
     let mut cues: Vec<ItemCue> = Vec::new();
     let mut applied: Option<AdjustmentView> = None;
     for it in ns.items.iter_mut() {
-        if it.is_run() || it.timed_hold {
+        if !it.is_lift() || it.timed_hold {
             continue;
         }
         if let Some(Some(region)) = pain_modify

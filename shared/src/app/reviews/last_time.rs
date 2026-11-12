@@ -28,7 +28,7 @@ pub(in crate::app) fn annotate_last_time(
         // Effort-prescribed items already show their last top set as the
         // `anchored_on` line ("Last: 60 kg × 8"); never repeat it in the basis.
         let last_on_face = it.anchored_on_single_set && it.last_set.is_some();
-        if it.is_run() || it.timed_hold || last_on_face {
+        if !it.is_lift() || it.timed_hold || last_on_face {
             continue;
         }
         // Same selection rule as the plan's "Last:" line, on the raw local day.

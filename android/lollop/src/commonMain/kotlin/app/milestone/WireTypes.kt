@@ -37,6 +37,10 @@ object CoreConstants {
     const val TANAKA_AGE_MIN_YEARS: Double = 5.0
     /** Oldest age the Tanaka HRmax estimate covers, years. */
     const val TANAKA_AGE_MAX_YEARS: Double = 100.0
+    /** Lowest average heart rate a logged run keeps, bpm. */
+    const val AVG_HR_MIN_BPM: Double = 30.0
+    /** Highest average heart rate a logged run keeps, bpm. */
+    const val AVG_HR_MAX_BPM: Double = 250.0
     /** The highest average heart rate a logged run states, % of HRmax. */
     const val HR_PCT_MAX_CEILING: Double = 100.0
     /** Fewest lift days a week a chosen count is held to. */
@@ -621,7 +625,7 @@ sealed interface Event {
         /**
          * Age in years (optional). Read by the under-18 gate (`ingest`), the
          * Tanaka HRmax behind run targets and logged-run %HRmax
-         * (`run_targets::hr_max_anchor`) when no measured max is set, the HR-zone
+         * (`Profile::hr_max_anchor`) when no measured max is set, the HR-zone
          * calculator's age input, and the conservative deload cadence
          * (`individualization::conservative_deload`). `None` = unstated: no Tanaka estimate,
          * adult rules. With a `birth_epoch_day` the core owns this value: it is
@@ -632,7 +636,7 @@ sealed interface Event {
         @SerialName("age_years") @EncodeDefault(EncodeDefault.Mode.NEVER) val ageYears: Double? = null,
         /**
          * Resting HR, bpm (optional). Sets the Karvonen ceiling of run heart-rate
-         * targets (`run_targets::hr_rest_anchor`) and prefills the HR-zone
+         * targets (`Profile::resting_hr_anchor`) and prefills the HR-zone
          * calculator's Karvonen input. `None` = unstated.
          */
         @SerialName("resting_hr_bpm") @EncodeDefault(EncodeDefault.Mode.NEVER) val restingHrBpm: Double? = null,
@@ -1873,7 +1877,7 @@ data class Profile(
     /**
      * Age in years (optional). Read by the under-18 gate (`ingest`), the
      * Tanaka HRmax behind run targets and logged-run %HRmax
-     * (`run_targets::hr_max_anchor`) when no measured max is set, the HR-zone
+     * (`Profile::hr_max_anchor`) when no measured max is set, the HR-zone
      * calculator's age input, and the conservative deload cadence
      * (`individualization::conservative_deload`). `None` = unstated: no Tanaka estimate,
      * adult rules. With a `birth_epoch_day` the core owns this value: it is
@@ -1890,7 +1894,7 @@ data class Profile(
     val birth_epoch_day: Long? = null,
     /**
      * Resting HR, bpm (optional). Sets the Karvonen ceiling of run heart-rate
-     * targets (`run_targets::hr_rest_anchor`) and prefills the HR-zone
+     * targets (`Profile::resting_hr_anchor`) and prefills the HR-zone
      * calculator's Karvonen input. `None` = unstated.
      */
     val resting_hr_bpm: Double? = null,
@@ -3087,8 +3091,6 @@ data class RunResultView(
      * contradict the effort; see `hr_label`).
      */
     @Serializable(with = ThreeZoneOrNoneSerializer::class) val zone: ThreeZone? = null,
-    /** Pace as `m:ss/km`. */
-    val pace: String = "",
     /**
      * Measured distance in km (0.0 for a GPS run with no usable fixes). Lets a
      * shell render the run's structured fields without re-parsing `summary`.
@@ -3113,19 +3115,11 @@ data class RunResultView(
      */
     val hr_label: String = "",
     /**
-     * The average heart rate the athlete entered, bpm, exactly as stored
-     * (`hr_pct_max` is then derived from it). `None` when not entered. A shell
-     * re-logging the run (delete → undo) sends it back as `avg_hr_bpm` so the
-     * restored run is identical.
+     * The average heart rate the athlete entered or the imported file stated,
+     * bpm, exactly as stored (`hr_pct_max` is then derived from it); the run
+     * editor prefills it. `None` when not stated.
      */
     val avg_hr_bpm: Double? = null,
-    /**
-     * The device's UTC offset the run was logged under (the row's stamped
-     * `utc_offset_sec`; `None` for a legacy row). A shell re-logging the run
-     * (delete → undo) sends it back so the restored %HRmax is identical.
-     * Omitted when `None`.
-     */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val utc_offset_sec: Long? = null,
     /** True when this run's distance spikes >10% over the recent longest. */
     val spike_flag: Boolean = false,
     /**
@@ -3173,12 +3167,6 @@ data class RunResultView(
      * GPX document itself is fetched on demand through the `ExportGpx` bridge op.
      */
     val has_gpx: Boolean = false,
-    /**
-     * A GPS run whose fixes all fail the QC gates: no route (`has_gpx` false),
-     * but `ExportGpx` answers its recorded fixes so an undone delete re-logs it
-     * as tracked. Omitted when false.
-     */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val gps_unmeasurable: Boolean = false,
     /**
      * When the run was logged, unix seconds; 0 when undated. A shell dates the
      * history card from this; the core does no formatting (it holds no clock).
@@ -3309,10 +3297,7 @@ enum class SplitVerdict {
  */
 @Serializable
 data class IntervalVerdictView(
-    /**
-     * `"interval"` (variability index ≥ threshold) or `"steady"`. Wire string
-     * the shell matches on, never re-derives the threshold.
-     */
+    /** Intervals (variability index at or above the threshold) or steady. */
     val kind: PaceVariability = PaceVariability.Interval,
     /** Short chip label, e.g. `"INTERVAL · VI 1.7"` / `"STEADY · VI 1.0"`. */
     val label: String = "",
@@ -4151,6 +4136,8 @@ data class PrescriptionView(
     val summary: String = "",
     /** The glossary terms `summary` uses. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val glossary: List<GlossarySpan> = emptyList(),
+    /** How the item is logged: sets of a lift, a run, or the return check. */
+    val kind: ItemKind = ItemKind.Lift,
     val exercise: String = "",
     val sets: Int = 0,
     val reps_low: Int = 0,
@@ -4364,6 +4351,33 @@ data class PrescriptionView(
 ) {
     val evidence: EvidenceTagView
         get() = EvidenceTagView(grade, citation, confidence, safety_critical, contested)
+}
+
+/** How a plan item is logged (wire: snake_case). */
+@Serializable
+enum class ItemKind {
+    /** Sets of a lift or a calisthenics movement. */
+    @SerialName("lift")
+    Lift,
+    /** A run, tracked or logged. */
+    @SerialName("run")
+    Run,
+    /**
+     * The post-illness return check standing in for a lifting session
+     * (`return_check`): anything logged that day completes it. In any other
+     * session the return check is a run.
+     */
+    @SerialName("return_check")
+    ReturnCheck,
+    ;
+
+    /** The wire string. */
+    val wire: String
+        get() = when (this) {
+            Lift -> "lift"
+            Run -> "run"
+            ReturnCheck -> "return_check"
+        }
 }
 
 /**
@@ -4857,11 +4871,6 @@ data class SessionDoneItemView(
      * numeric `run_*` fields in the user's unit instead.
      */
     val summary: String = "",
-    /**
-     * The item met its plan: every planned set at the target reps and load,
-     * or the run its done threshold. Equals `status == "done"`.
-     */
-    val met: Boolean = false,
     /**
      * The item's status on the hero, so Session Done reads the same verdict
      * ("done", "done_short", "done_lighter", "stopped_pain", …); a run under
@@ -5438,10 +5447,9 @@ data class DraftFacts(
 )
 
 /**
- * A logged run's route fixes, one list per recording segment: the fixes the
- * GPX export writes (the QC'd route, or for a run QC left unmeasurable its
- * recorded fixes), for the shell's map, trim and Undo. Empty for a run with
- * no track or an unknown run.
+ * A logged run's route fixes, one list per recording segment: the QC'd route
+ * the GPX export writes, for the shell's map and trim. Empty for a run with
+ * no route or an unknown run.
  */
 @Serializable
 data class RunTrack(
@@ -5468,16 +5476,6 @@ data class TrackThinning(
 data class ThinnedTrack(
     val kept: List<Int> = emptyList(),
     val segment_starts: List<Int> = emptyList(),
-)
-
-/**
- * An imported run's heart rate as the import logs it: the file's average
- * (`ImportedRun::avg_hr_bpm`) and the athlete's measured HRmax, if any.
- */
-@Serializable
-data class ImportedHr(
-    @SerialName("avg_hr_bpm") val avgHrBpm: Double? = null,
-    @SerialName("measured_hr_max") val measuredHrMax: Double? = null,
 )
 
 /**

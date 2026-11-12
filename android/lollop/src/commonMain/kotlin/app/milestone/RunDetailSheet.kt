@@ -73,8 +73,8 @@ internal fun runStartCaption(startedAt: Long): String {
 }
 
 /** A run's route, shared by its detail and trim sheets: its segments of fixes (map,
- *  Undo, the trim map), whether the track can be trimmed (≥2 fixes over a nonzero
- *  span) and, when it can, the timed track the trim slider and readout work on. */
+ *  the trim map), whether the track can be trimmed (≥2 fixes over a nonzero span)
+ *  and, when it can, the timed track the trim slider and readout work on. */
 internal data class RunRoute(
     val segments: List<List<GpsPoint>>,
     val trimmable: Boolean,
@@ -89,24 +89,23 @@ internal var runTrackFetch: (entryId: Long, observedAt: Long) -> List<List<GpsPo
 /**
  * The run's route fixes ([DurableCore.runTrack]), fetched ON DEMAND (off the main
  * thread) for the one run being inspected, keyed on the fields that change the
- * route, so rating or tagging never re-runs the fetch. Null while loading. A GPS run
- * QC left unmeasurable has no route, but its recorded fixes are fetched too, for Undo
- * only (never mapped, shared or trimmed). Hoisted above the detail and trim sheets:
- * neither opens before it has loaded, so their height never changes while they slide
- * in. (Material3 1.4's sheet drops a height change that lands as its open animation
- * ends and rests at the old height, its bottom rows below the screen.)
+ * route, so rating or tagging never re-runs the fetch. Null while loading. Hoisted
+ * above the detail and trim sheets: neither opens before it has loaded, so their
+ * height never changes while they slide in. (Material3 1.4's sheet drops a height
+ * change that lands as its open animation ends and rests at the old height, its
+ * bottom rows below the screen.)
  */
 @Composable
 internal fun rememberRunRoute(run: RunResultView): RunRoute? {
     val route: RunRoute? by produceState<RunRoute?>(
         null,
-        run.entry_id, run.observed_at, run.has_gpx, run.gps_unmeasurable, run.distance_km, run.duration_min,
+        run.entry_id, run.observed_at, run.has_gpx, run.distance_km, run.duration_min,
     ) {
-        value = if (run.has_gpx || run.gps_unmeasurable) {
+        value = if (run.has_gpx) {
             withContext(Dispatchers.IO) {
                 val segs = runTrackFetch(run.entry_id, run.observed_at)
                 val flat = segs.flatten()
-                val trimmable = run.has_gpx && flat.size >= 2 && flat.last().observedAt > flat.first().observedAt
+                val trimmable = flat.size >= 2 && flat.last().observedAt > flat.first().observedAt
                 RunRoute(segs, trimmable, if (trimmable) timedTrackFromSegments(segs) else emptyList())
             }
         } else {

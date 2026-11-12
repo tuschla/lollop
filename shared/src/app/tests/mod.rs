@@ -44,7 +44,7 @@ use crate::schema::{
     SessionType, ThreeZone, VdotBand, WorkoutType,
 };
 use crate::strength::{self, LiftGoal};
-use crate::test_support::{M_PER_DEG, SplitMix};
+use crate::test_support::{M_PER_DEG, SplitMix, unit_variants};
 use crate::{hypertrophy, load};
 
 mod activity_log;

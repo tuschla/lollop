@@ -105,7 +105,7 @@ class ImportParserFuzzTest {
         }
         assertEquals("$what: starts sorted, unique, inside", ev.segmentStarts.sorted().distinct(), ev.segmentStarts)
         assertTrue("$what: starts in range ${ev.segmentStarts}", ev.segmentStarts.all { it in 1 until pts.size })
-        assertTrue("$what: hr%", ev.hrPctMax.isFinite() && ev.hrPctMax in 0.0..100.0)
+        assertTrue("$what: avg bpm ${ev.avgHrBpm}", ev.avgHrBpm?.let { it.isFinite() && it >= 0.0 } != false)
         assertTrue("$what: stamp", ev.observedAt > 0)
         Json.parseToJsonElement(ev.toJson().toString())
         val figures = Core.savedFigures(ev)
@@ -118,7 +118,7 @@ class ImportParserFuzzTest {
         val out = bounded(what) { runCatching { parse(bytes) } }
             .getOrElse { e -> throw AssertionError("$what: unexpected ${e::class.java.name}: ${e.message}", e) }
         if (out is Out.Runs) {
-            for ((i, run) in out.runs.withIndex()) assertSaneEvent("$what run $i", importedRunEvent(run, measuredHrMax = 190.0))
+            for ((i, run) in out.runs.withIndex()) assertSaneEvent("$what run $i", importedRunEvent(run))
         }
         assertEquals("$what: same input, same answer", out, bounded("$what (2nd)") { parse(bytes) })
         return out
@@ -351,13 +351,13 @@ class ImportParserFuzzTest {
             "fit" to fit(pts),
             "gpx" to gpx(listOf(pts), hdop = false).toByteArray(),
             "tcx" to tcx(listOf("Running" to listOf(pts))).toByteArray(),
-        ).mapValues { (k, bytes) -> importedRunEvent((check(k, bytes) as Out.Runs).runs.single(), measuredHrMax = 190.0) }
+        ).mapValues { (k, bytes) -> importedRunEvent((check(k, bytes) as Out.Runs).runs.single()) }
         val figs = events.mapValues { (k, ev) -> checkNotNull(Core.savedFigures(ev)) { k } }
         val ref = figs.getValue("gpx")
         for ((k, f) in figs) {
             assertEquals("$k moving time", ref.duration_min, f.duration_min, 1e-9)
             assertEquals("$k distance", ref.distance_km, f.distance_km, ref.distance_km * 1e-4)
-            assertEquals("$k hr%", events.getValue("gpx").hrPctMax, events.getValue(k).hrPctMax, 1e-9)
+            assertEquals("$k avg bpm", events.getValue("gpx").avgHrBpm!!, events.getValue(k).avgHrBpm!!, 1e-9)
             assertEquals("$k stamp", events.getValue("gpx").observedAt, events.getValue(k).observedAt)
         }
     }
@@ -391,11 +391,11 @@ class ImportParserFuzzTest {
         val pts = run(300).map { it.copy(t = it.t + 251_652_300_800L) } // year 10000
         val doc = gpx(listOf(pts))
         assertTrue("java.time names the year with its sign", doc.contains("<time>+10000-"))
-        val ev = importedRunEvent((check("year 10000", doc.toByteArray()) as Out.Runs).runs.single(), null)
+        val ev = importedRunEvent((check("year 10000", doc.toByteArray()) as Out.Runs).runs.single())
         assertTrue("the core accepts the run", Core.send(ev).accepted)
         val export = Core.runGpx(ev.entryId, ev.observedAt)
         assertTrue("exported", export.contains("<trkpt"))
-        val back = importedRunEvent((check("its export", export.toByteArray()) as Out.Runs).runs.single(), null)
+        val back = importedRunEvent((check("its export", export.toByteArray()) as Out.Runs).runs.single())
         assertEquals(ev.points.map { it.observedAt }, back.points.map { it.observedAt })
         assertEquals(ev.observedAt, back.observedAt)
     }

@@ -771,9 +771,6 @@ pub struct SessionDoneItemView {
     /// "8.2 km · 46 min". A run's distance is in km: render a run from the
     /// numeric `run_*` fields in the user's unit instead.
     pub summary: String,
-    /// The item met its plan: every planned set at the target reps and load,
-    /// or the run its done threshold. Equals `status == "done"`.
-    pub met: bool,
     /// The item's status on the hero, so Session Done reads the same verdict
     /// ("done", "done_short", "done_lighter", "stopped_pain", …); a run under
     /// its done threshold but past half its plan is `done_lighter`.
@@ -1101,6 +1098,9 @@ pub struct PrescriptionView {
     /// The glossary terms `summary` uses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub glossary: Vec<GlossarySpan>,
+    /// How the item is logged: sets of a lift, a run, or the return check.
+    #[serde(default)]
+    pub kind: ItemKind,
     pub exercise: String,
     pub sets: u8,
     pub reps_low: u8,
@@ -1272,10 +1272,28 @@ pub struct PrescriptionView {
 }
 
 impl PrescriptionView {
-    /// A run item is the one with no exercise name.
     pub fn is_run(&self) -> bool {
-        self.exercise.is_empty()
+        self.kind == ItemKind::Run
     }
+
+    pub fn is_lift(&self) -> bool {
+        self.kind == ItemKind::Lift
+    }
+}
+
+/// How a plan item is logged (wire: snake_case).
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    /// Sets of a lift or a calisthenics movement.
+    #[default]
+    Lift,
+    /// A run, tracked or logged.
+    Run,
+    /// The post-illness return check standing in for a lifting session
+    /// (`return_check`): anything logged that day completes it. In any other
+    /// session the return check is a run.
+    ReturnCheck,
 }
 
 /// Numeric structure of a prescribed run, every field 0/empty when it
@@ -1763,8 +1781,7 @@ pub enum SplitVerdict {
 /// differently, with the same evidence chrome as any other recommendation.
 #[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct IntervalVerdictView {
-    /// `"interval"` (variability index ≥ threshold) or `"steady"`. Wire string
-    /// the shell matches on, never re-derives the threshold.
+    /// Intervals (variability index at or above the threshold) or steady.
     pub kind: PaceVariability,
     /// Short chip label, e.g. `"INTERVAL · VI 1.7"` / `"STEADY · VI 1.0"`.
     pub label: String,
@@ -1816,8 +1833,6 @@ pub struct RunResultView {
     /// contradict the effort; see `hr_label`).
     #[serde(with = "zone_or_dash")]
     pub zone: Option<ThreeZone>,
-    /// Pace as `m:ss/km`.
-    pub pace: String,
     /// Measured distance in km (0.0 for a GPS run with no usable fixes). Lets a
     /// shell render the run's structured fields without re-parsing `summary`.
     pub distance_km: f64,
@@ -1836,17 +1851,10 @@ pub struct RunResultView {
     /// is `"-"`. Empty when the run has no heart-rate figure.
     #[serde(default)]
     pub hr_label: String,
-    /// The average heart rate the athlete entered, bpm, exactly as stored
-    /// (`hr_pct_max` is then derived from it). `None` when not entered. A shell
-    /// re-logging the run (delete → undo) sends it back as `avg_hr_bpm` so the
-    /// restored run is identical.
+    /// The average heart rate the athlete entered or the imported file stated,
+    /// bpm, exactly as stored (`hr_pct_max` is then derived from it); the run
+    /// editor prefills it. `None` when not stated.
     pub avg_hr_bpm: Option<f64>,
-    /// The device's UTC offset the run was logged under (the row's stamped
-    /// `utc_offset_sec`; `None` for a legacy row). A shell re-logging the run
-    /// (delete → undo) sends it back so the restored %HRmax is identical.
-    /// Omitted when `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub utc_offset_sec: Option<i64>,
     /// True when this run's distance spikes >10% over the recent longest.
     pub spike_flag: bool,
     /// Why the spike gate fired, phrased honestly (empty when it did not). A
@@ -1878,11 +1886,6 @@ pub struct RunResultView {
     /// GPX document itself is fetched on demand through the `ExportGpx` bridge op.
     #[serde(default)]
     pub has_gpx: bool,
-    /// A GPS run whose fixes all fail the QC gates: no route (`has_gpx` false),
-    /// but `ExportGpx` answers its recorded fixes so an undone delete re-logs it
-    /// as tracked. Omitted when false.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub gps_unmeasurable: bool,
     /// When the run was logged, unix seconds; 0 when undated. A shell dates the
     /// history card from this; the core does no formatting (it holds no clock).
     pub observed_at: i64,

@@ -444,6 +444,45 @@ fn review_bpm_run_uses_the_age_of_its_own_day_across_birthdays() {
     assert_eq!(hr_of(&app, &model, 2), 90.0, "40th birthday");
 }
 
+/// An imported GPS run carries the file's average bpm with `hr_pct_max` 0, and
+/// the core reads it like a typed one: against the Tanaka age estimate when
+/// no HRmax is measured, with the profile in force on the run's day, and
+/// again when that profile changes.
+#[test]
+fn an_imported_runs_bpm_is_read_against_the_profile_of_its_day() {
+    let at = (D0 + 5) * DAY_SEC + 12 * 3600;
+    let log = vec![
+        set_today_ev(D0 + 10),
+        profile(Some(D0), None, None, Some(40.0)),
+        gps_run(
+            equator_track(at - 1800, &[(5000.0, 3.0)], 5),
+            at,
+            1,
+            Some(162.0),
+        ),
+    ];
+    let (app, mut model) = replay(&log);
+    assert_eq!(hr_of(&app, &model, 1), 90.0, "162 bpm at Tanaka(40) = 180");
+    let later = [
+        profile(Some(D0 + 8), None, Some(200.0), Some(40.0)),
+        profile(Some(D0 + 3), None, Some(190.0), Some(40.0)),
+    ];
+    app.update(later[0].clone(), &mut model)
+        .expect_only_render();
+    assert_eq!(
+        hr_of(&app, &model, 1),
+        90.0,
+        "an HRmax measured after the run"
+    );
+    app.update(later[1].clone(), &mut model)
+        .expect_only_render();
+    assert_eq!(
+        hr_of(&app, &model, 1),
+        85.3,
+        "162 of the 190 measured before it"
+    );
+}
+
 /// A bpm run's %HRmax is converted on the clock it was
 /// LOGGED under (the wire `utc_offset_sec` the shell stamps, kept as
 /// `LoggedRun::logged_utc_offset_sec`), so travelling across time zones never

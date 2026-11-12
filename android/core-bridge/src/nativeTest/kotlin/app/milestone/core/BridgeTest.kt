@@ -174,12 +174,10 @@ class BridgeTest {
     }
 
     @Test
-    fun theRecordersThinningAndAnImportsHeartRateAreTheCores() {
+    fun theRecordersThinningIsTheCores() {
         val thin = json(core.thinTrack("""{"fixes":10,"max_points":4,"segment_starts":[5]}""".encodeToByteArray())).jsonObject
         assertEquals(listOf(0, 3, 5, 6, 9), thin["kept"]!!.jsonArray.map { it.jsonPrimitive.int })
         assertEquals(listOf(2), thin["segment_starts"]!!.jsonArray.map { it.jsonPrimitive.int })
-        val hr = json(core.importedHrPct("""{"avg_hr_bpm":152.0,"measured_hr_max":140.0}""".encodeToByteArray()))
-        assertEquals(100.0, hr.jsonPrimitive.double, "capped at 100 %")
         assertEquals("bad_input", json(core.thinTrack("{".encodeToByteArray())).errorKind())
     }
 

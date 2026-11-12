@@ -435,11 +435,10 @@ private val SlotCheckSize = 14.dp
 @Composable
 internal fun PlanItemCompletion(
     item: PrescriptionView,
-    isRun: Boolean,
     onEndExercise: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-        if (isRun) {
+        if (item.kind == ItemKind.Run) {
             val logged = runProgressText(currentResources(), item, rememberDistanceUnit())
             if (logged.isNotBlank()) {
                 Text(
@@ -570,13 +569,12 @@ private fun FaceLine(text: String, color: Color = OnBgMuted) {
 @Composable
 private fun PlanItemFace(
     item: PrescriptionView,
-    isRun: Boolean,
     runHead: String?,
     weightUnit: WeightUnit,
     lastOnFace: String?,
 ) {
     val lines = buildList<String> {
-        if (isRun) {
+        if (item.kind == ItemKind.Run) {
             val t = item.run_target
             if (t != null && runHead != null) {
                 val pace = t.pace_label
@@ -660,32 +658,33 @@ private fun CalisControls(
     }
 }
 
-private fun planItemTag(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
-    isCheck -> "plan-item:check"
-    isRun -> "plan-item:run"
-    else -> "plan-item:${item.exercise}"
+private fun planItemTag(item: PrescriptionView): String = when (item.kind) {
+    ItemKind.ReturnCheck -> "plan-item:check"
+    ItemKind.Run -> "plan-item:run"
+    ItemKind.Lift -> "plan-item:${item.exercise}"
 }
 
 @Composable
-private fun planItemName(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
-    isCheck -> stringResource(Res.string.plan_check_title)
-    isRun -> stringResource(Res.string.main_run)
-    else -> item.exercise
+private fun planItemName(item: PrescriptionView): String = when (item.kind) {
+    ItemKind.ReturnCheck -> stringResource(Res.string.plan_check_title)
+    ItemKind.Run -> stringResource(Res.string.main_run)
+    ItemKind.Lift -> item.exercise
 }
 
 /** The note a plan item states on its face rather than behind the session "?":
  *  the return check's stop list and a target-less run's note are safety copy. */
-private fun noteOnFace(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String? =
-    item.adjusted_note.takeIf { it.isNotBlank() && (isCheck || (isRun && item.run_target == null)) }
+private fun noteOnFace(item: PrescriptionView): String? = item.adjusted_note.takeIf {
+    it.isNotBlank() && (item.kind == ItemKind.ReturnCheck || (item.kind == ItemKind.Run && item.run_target == null))
+}
 
 /** The label of the action that logs [item]: "Log set k of N" for a lift, the
  *  caller's run label ("Track run" / "Log run") for a run, none for the return
  *  check (any session logged today completes it). */
 @Composable
-internal fun planItemActionLabel(item: PrescriptionView, isRun: Boolean, isCheck: Boolean, runActionLabel: String): String? = when {
-    isCheck -> null
-    isRun -> runActionLabel
-    else -> stringResource(Res.string.plan_log_set_n_of_n, nextSetNumber(item), plannedSetCount(item))
+internal fun planItemActionLabel(item: PrescriptionView, runActionLabel: String): String? = when (item.kind) {
+    ItemKind.ReturnCheck -> null
+    ItemKind.Run -> runActionLabel
+    ItemKind.Lift -> stringResource(Res.string.plan_log_set_n_of_n, nextSetNumber(item), plannedSetCount(item))
 }
 
 @Composable
@@ -704,8 +703,6 @@ private fun PlanActionPill(label: String, subject: String, onClick: () -> Unit) 
 @Composable
 internal fun SessionItemList(
     items: List<PrescriptionView>,
-    isRun: (PrescriptionView) -> Boolean,
-    isCheck: (PrescriptionView) -> Boolean,
     actionable: Boolean,
     reopenable: Boolean,
     runActionLabel: String,
@@ -726,13 +723,11 @@ internal fun SessionItemList(
         if (item === current) {
             OpenPlanItemCard(
                 item = item,
-                isRun = isRun(item),
                 onLog = { onLog(item) },
                 onTrack = onRun,
                 onEndExercise = { onEndExercise(item) },
                 runActionLabel = runActionLabel,
                 weightUnit = weightUnit,
-                isCheck = isCheck(item),
                 unplaced = unplaced(item),
                 onSetRung = onSetRung,
                 guide = guide(item),
@@ -740,20 +735,16 @@ internal fun SessionItemList(
         } else {
             PlanItemRow(
                 item = item,
-                isRun = isRun(item),
-                isCheck = isCheck(item),
-                actionLabel = if (actionable) planItemActionLabel(item, isRun(item), isCheck(item), runActionLabel) else null,
-                onClick = { if (isRun(item)) onRun() else onLog(item) },
+                actionLabel = if (actionable) planItemActionLabel(item, runActionLabel) else null,
+                onClick = { if (item.kind == ItemKind.Run) onRun() else onLog(item) },
             )
         }
     }
     doneItems.forEach { item ->
         DonePlanItemRow(
             item = item,
-            isRun = isRun(item),
             reopenable = reopenable,
             onReopen = { onReopen(item) },
-            isCheck = isCheck(item),
             painArea = painArea,
         )
     }
@@ -763,11 +754,10 @@ internal fun SessionItemList(
  *  name over the prescription, the do-this numbers ([PlanItemFace]), the set
  *  slots with "Skip/End exercise" and the one filled "Log set k of N" (or "Track
  *  run") action. Its evidence sits in the session's "?" panel. The return check
- *  ([isCheck]) has no Log action: any session logged today completes it. */
+ *  has no Log action: any session logged today completes it. */
 @Composable
 internal fun OpenPlanItemCard(
     item: PrescriptionView,
-    isRun: Boolean,
     onLog: () -> Unit,
     onTrack: () -> Unit,
     onEndExercise: () -> Unit,
@@ -776,7 +766,6 @@ internal fun OpenPlanItemCard(
     runActionLabel: String,
     // The profile's weight display unit (plates_per_side is already in it).
     weightUnit: WeightUnit = WeightUnit.Kg,
-    isCheck: Boolean = false,
     // Calisthenics: the athlete has no placement on this item's ladder yet.
     unplaced: Boolean = false,
     // Calisthenics Easier/Harder: null hides the chips (past days).
@@ -788,6 +777,8 @@ internal fun OpenPlanItemCard(
 ) {
     val status = LocalStatusColors.current
     val distanceUnit = rememberDistanceUnit()
+    val isRun = item.kind == ItemKind.Run
+    val isCheck = item.kind == ItemKind.ReturnCheck
     val runHead = if (isRun) runFaceHead(item, distanceUnit) else null
     val summary = runHead ?: item.summary
     // Lifts and calisthenics: a bold exercise line over a regular prescription
@@ -801,16 +792,16 @@ internal fun OpenPlanItemCard(
         }
     }
     val lastOnFace = if (isRun || isCheck) null else lastLine(item)
-    val note = noteOnFace(item, isRun, isCheck)
-    val subject = planItemName(item, isRun, isCheck)
-    val actionLabel = planItemActionLabel(item, isRun, isCheck, runActionLabel)
+    val note = noteOnFace(item)
+    val subject = planItemName(item)
+    val actionLabel = planItemActionLabel(item, runActionLabel)
     // A run with nothing logged has no completion footer: no "Not logged yet"
     // restating what its Track / Log run action already says.
     val runUnlogged = isRun && runProgressText(currentResources(), item, distanceUnit).isBlank()
     // A safety cap states its reason in place of a bare SAFETY badge.
     val safetyReason = safetyReasonText(item)
     val shape = RoundedCornerShape(Space.Card.dp)
-    Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
+    Box(modifier = Modifier.testTag(planItemTag(item))) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -833,7 +824,7 @@ internal fun OpenPlanItemCard(
                 Text(summary, color = OnBgBody, style = Type.BodyBold)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, lastOnFace)
+                if (!isCheck) PlanItemFace(item, runHead, weightUnit, lastOnFace)
                 safetyReason?.let { FaceLine(it, color = OnBgBody) }
                 note?.let { FaceLine(it) }
                 guide.forEach { FaceLine(it) }
@@ -841,7 +832,7 @@ internal fun OpenPlanItemCard(
             }
             when {
                 isCheck -> FaceLine(stringResource(Res.string.plan_check_any_session))
-                !runUnlogged -> PlanItemCompletion(item, isRun, onEndExercise)
+                !runUnlogged -> PlanItemCompletion(item, onEndExercise)
             }
             if (actionLabel != null) {
                 PlanActionPill(actionLabel, subject, onClick = if (isRun) onTrack else onLog)
@@ -859,25 +850,25 @@ internal fun OpenPlanItemCard(
 @Composable
 internal fun PlanItemRow(
     item: PrescriptionView,
-    isRun: Boolean,
-    isCheck: Boolean,
     actionLabel: String?,
     onClick: () -> Unit,
 ) {
     val status = LocalStatusColors.current
     val distanceUnit = rememberDistanceUnit()
-    val name = planItemName(item, isRun, isCheck)
+    val isRun = item.kind == ItemKind.Run
+    val isCheck = item.kind == ItemKind.ReturnCheck
+    val name = planItemName(item)
     val detail = when {
         isCheck -> null
         isRun -> runFaceHead(item, distanceUnit) ?: item.face_lead
         else -> item.face_lead
     }?.takeIf { it.isNotBlank() && it != name }
-    val note = noteOnFace(item, isRun, isCheck)
+    val note = noteOnFace(item)
     val runLogged = if (isRun) runProgressText(currentResources(), item, distanceUnit) else ""
     val safetyReason = safetyReasonText(item)
     val cd = actionLabel?.let { stringResource(Res.string.main_action_subject, it, name) }
     val shape = RoundedCornerShape(Space.Card.dp)
-    Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
+    Box(modifier = Modifier.testTag(planItemTag(item))) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -916,9 +907,9 @@ internal fun PlanItemRow(
 /** The per-item line of an evidence block (load anchor, adjustment note) the
  *  item's face does not already state; null when there is none. */
 @Composable
-private fun itemEvidenceDetail(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String? {
-    val lastOnFace = if (isRun || isCheck) null else lastLine(item)
-    val note = noteOnFace(item, isRun, isCheck)
+private fun itemEvidenceDetail(item: PrescriptionView): String? {
+    val lastOnFace = if (item.kind == ItemKind.Lift) lastLine(item) else null
+    val note = noteOnFace(item)
     return listOfNotNull(
         item.anchored_on.takeIf { it.isNotBlank() && it != lastOnFace },
         item.adjusted_note.takeIf { it.isNotBlank() && note == null },
@@ -934,8 +925,6 @@ private fun itemEvidenceDetail(item: PrescriptionView, isRun: Boolean, isCheck: 
 @Composable
 internal fun SessionItemsEvidence(
     items: List<PrescriptionView>,
-    isRun: (PrescriptionView) -> Boolean,
-    isCheck: (PrescriptionView) -> Boolean,
 ) {
     val groups = remember(items) {
         items.groupBy {
@@ -948,11 +937,11 @@ internal fun SessionItemsEvidence(
             val shared = remember(group) { sharedBasisSentences(group.map { it.why.basis }) }
             Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                 group.forEach { item ->
-                    val name = planItemName(item, isRun(item), isCheck(item))
+                    val name = planItemName(item)
                     val own = item.why.basis.filterNot { it in shared }.joinToString(" ")
                     val line = listOfNotNull(
                         own.ifBlank { null },
-                        itemEvidenceDetail(item, isRun(item), isCheck(item)),
+                        itemEvidenceDetail(item),
                     ).joinToString(" \u00b7 ")
                     Text(
                         if (line.isBlank()) name else stringResource(Res.string.ui_label_value, name, line),
@@ -986,14 +975,14 @@ internal fun sharedBasisSentences(bases: List<List<String>>): List<String> {
 @Composable
 internal fun DonePlanItemRow(
     item: PrescriptionView,
-    isRun: Boolean,
     reopenable: Boolean,
     onReopen: () -> Unit,
-    isCheck: Boolean,
     // The reported body area ("Left knee"), when known.
     painArea: String?,
 ) {
-    val tag = planItemTag(item, isRun, isCheck)
+    val isRun = item.kind == ItemKind.Run
+    val isCheck = item.kind == ItemKind.ReturnCheck
+    val tag = planItemTag(item)
     val stopped = !isCheck && item.status == ItemStatus.StoppedPain
     val skipped = !isCheck && item.status.isSkipped
     val progress = when {
@@ -1006,7 +995,7 @@ internal fun DonePlanItemRow(
         !skipped && item.ended_early -> stringResource(Res.string.plan_ended_early, item.sets_done, plannedSetCount(item))
         else -> settledLabel(item.status, progress, painArea)
     }
-    val title = planItemName(item, isRun, isCheck)
+    val title = planItemName(item)
     Row(
         modifier = Modifier
             .testTag(tag)

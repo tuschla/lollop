@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::app::today_surface::GUIDED_LIFT_DAYS;
-use crate::app::view_types::{HeadlineKind, SessionStatus, TodayState};
+use crate::app::view_types::{HeadlineKind, ItemKind, SessionStatus, TodayState};
 
 fn state(app: &Engine, model: &Model) -> TodayState {
     app.view(model).today_surface.state
@@ -152,6 +152,51 @@ fn a_return_check_item_owns_its_sessions_adjustment() {
     let ns = app.view(&model).next_session.expect("today's session");
     assert!(ns.adjustment.is_some());
     assert!(!ns.adjustment_on_item);
+}
+
+#[test]
+fn a_lifting_days_return_check_is_its_own_kind_and_reads_as_one_once_done() {
+    // Recovered from a flu on a lifting day: the return check is neither a run
+    // nor sets. Once a set is logged the session is done, and its summary names
+    // the return check, never "Run · 0.0 km".
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
+    let lift = app
+        .view(&model)
+        .next_session
+        .expect("today's session")
+        .items[0]
+        .exercise
+        .clone();
+    for event in [
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: POS_MON * DAY_SEC + HOUR,
+            ..input(ReadinessSignal::Illness, 2.0)
+        }),
+        Event::ResolveHold {
+            signal: ReadinessSignal::Illness,
+            observed_at: POS_MON * DAY_SEC + 2 * HOUR,
+        },
+    ] {
+        app.update(event, &mut model).expect_only_render();
+    }
+    let ns = app.view(&model).next_session.expect("today's session");
+    assert!(ns.items[0].return_check);
+    assert_eq!(ns.items[0].kind, ItemKind::ReturnCheck);
+
+    app.update(
+        log_set(&lift, 60.0, 5, 6.0, POS_MON * DAY_SEC + 3 * HOUR),
+        &mut model,
+    )
+    .expect_only_render();
+    let done = app
+        .view(&model)
+        .session_done
+        .expect("today's session is done");
+    assert_eq!(done.items.len(), 1);
+    let row = &done.items[0];
+    assert_eq!(row.exercise, "Return check");
+    assert_eq!(row.status, ItemStatus::Done);
+    assert_eq!((row.run_km, row.run_min), (None, None), "{row:?}");
 }
 
 #[test]

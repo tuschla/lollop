@@ -18,7 +18,7 @@ class OpenRoutingTest {
     private fun lift(name: String) = PrescriptionView(exercise = name, sets = 3, face_lead = "3 × 5")
 
     private fun runItem() =
-        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"))
+        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label = "5:40–6:00 /km"), kind = ItemKind.Run)
 
     private fun liftSession(vararg items: PrescriptionView, status: SessionStatus = SessionStatus.Next, epochDay: Long = day) =
         SessionPlanView(epoch_day = epochDay, title = "Lower", session_type = SessionType.LiftMaxEffort, status = status, items = items.toList())
@@ -35,7 +35,7 @@ class OpenRoutingTest {
         val finished = liftDay.copy(next_session = liftSession(squat, epochDay = day + 2), week_plan = listOf(liftSession(squatDone, bench)))
         assertEquals("Bench Press", logSetTarget(finished))
         assertNull(logSetTarget(liftDay.copy(next_session = liftSession(squat, epochDay = day + 1), week_plan = emptyList())))
-        val run = SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, status = SessionStatus.Next, items = listOf(PrescriptionView()))
+        val run = SessionPlanView(epoch_day = day, session_type = SessionType.RunEasy, status = SessionStatus.Next, items = listOf(runItem()))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day, next_session = run, week_plan = listOf(run))))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day)))
         assertNull(logSetTarget(liftDay.copy(hold_reason = HoldReason.Pain)))

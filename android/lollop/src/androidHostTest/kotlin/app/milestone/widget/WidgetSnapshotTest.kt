@@ -8,6 +8,7 @@ import app.milestone.DayMark
 import app.milestone.DistanceUnit
 import app.milestone.HealthScreen
 import app.milestone.HoldReason
+import app.milestone.ItemKind
 import app.milestone.ItemStatus
 import app.milestone.OpenDest
 import app.milestone.PlanWithheld
@@ -217,7 +218,7 @@ class WidgetSnapshotTest {
         val today = SessionPlanView(day, "Lower body", SessionType.LiftMaxEffort, SessionStatus.Done, listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
         val next = SessionPlanView(day + 2, "Upper body", SessionType.LiftMaxEffort, SessionStatus.Next, listOf(lift("Bench", "")))
         val m = model(next, week = listOf(today, next), state = TodayState.Done)
-            .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = ItemStatus.Done))))
+            .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", status = ItemStatus.Done))))
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Lift, snap.kind)
         assertTrue(snap.sessionDone)
@@ -232,7 +233,7 @@ class WidgetSnapshotTest {
 
     @Test
     fun runDayOffersStartRunLikeTheTile() {
-        val ns = SessionPlanView(day, "Easy run", SessionType.RunEasy, SessionStatus.Next, listOf(PrescriptionView(face_lead = "8 km easy")))
+        val ns = SessionPlanView(day, "Easy run", SessionType.RunEasy, SessionStatus.Next, listOf(PrescriptionView(face_lead = "8 km easy", kind = ItemKind.Run)))
         val snap = widgetSnapshotOf(model(ns), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Run, snap.kind)
         assertTrue(snap.trackable)
@@ -247,13 +248,13 @@ class WidgetSnapshotTest {
         // leads with the run's volume head; a detail that is only the head is one.
         assertNull(f.hero)
         fun heroOf(p: PrescriptionView) = widgetFace(widgetSnapshotOf(model(ns.copy(items = listOf(p))), DistanceUnit.Km), day, res).hero
-        assertNull(heroOf(PrescriptionView(face_lead = "8 km easy", run_head = "8 km")))
-        assertEquals(WidgetHero("6 × 800 m", null, figure = true), heroOf(PrescriptionView(face_lead = "6 × 800 m", run_head = "6 × 800 m")))
-        assertNull("a digit-led line the core marks as no head", heroOf(PrescriptionView(face_lead = "45 min")))
+        assertNull(heroOf(PrescriptionView(face_lead = "8 km easy", run_head = "8 km", kind = ItemKind.Run)))
+        assertEquals(WidgetHero("6 × 800 m", null, figure = true), heroOf(PrescriptionView(face_lead = "6 × 800 m", run_head = "6 × 800 m", kind = ItemKind.Run)))
+        assertNull("a digit-led line the core marks as no head", heroOf(PrescriptionView(face_lead = "45 min", kind = ItemKind.Run)))
         // A recording run in this process: the tile's Recording action.
         assertEquals(str(R.string.tile_run_recording), widgetFace(snap, day, res, recording = true).actions.first().label)
         // Once the run is logged, no Track run.
-        val logged = widgetSnapshotOf(model(ns.copy(items = listOf(PrescriptionView(face_lead = "8 km easy", done = true)))), DistanceUnit.Km)
+        val logged = widgetSnapshotOf(model(ns.copy(items = listOf(PrescriptionView(face_lead = "8 km easy", done = true, kind = ItemKind.Run)))), DistanceUnit.Km)
         assertFalse(logged.trackable)
         assertEquals(listOf(OpenDest.Log), widgetFace(logged, day, res).actions.map { it.dest })
         // A future run day (not today) is never trackable from the widget.

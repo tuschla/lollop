@@ -45,7 +45,7 @@ class RunImportTest {
     private fun read(bytes: ByteArray) = runCatching { parseRunFile(bytes, Core::parseRunFile) }
 
     private fun plan(files: List<ParsedRunFile>, existing: Set<Long> = emptySet()) =
-        planRunImport(files, existing) { run -> importedRunEvent(run, measuredHrMax = null) }
+        planRunImport(files, existing, ::importedRunEvent)
 
     @Test
     fun eachSkippedFileIsNamedWithItsReasonAndNeverBlocksTheOthers() {

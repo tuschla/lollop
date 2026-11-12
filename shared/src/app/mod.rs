@@ -69,7 +69,6 @@ mod readiness;
 mod review_deloads;
 mod reviews;
 mod run_metrics;
-mod run_targets;
 mod run_views;
 mod set_index;
 mod text_parts;
@@ -290,9 +289,7 @@ impl App for Engine {
             program,
             plan_removed: model.plan_removed,
             hr_max,
-            hr_max_known: model
-                .profile()
-                .is_some_and(|p| run_targets::hr_max_anchor(p).is_some()),
+            hr_max_known: model.profile().is_some_and(|p| p.hr_max_anchor().is_some()),
             protein_figures,
             hr_zone_bands,
             hypertrophy_figures,

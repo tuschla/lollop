@@ -448,8 +448,8 @@ fn workout_type_tag_round_trips_and_is_back_compat() {
         "the view echoes the user's tag for history display"
     );
 
-    // The bare variant name is the wire form the Kotlin shell mirrors by
-    // `WorkoutType.name`: pin it so a rename fails here, not silently on-device.
+    // The bare variant name is the wire form stored log lines carry: pin it so
+    // a rename fails here, not on an old log replayed on-device.
     assert_eq!(
         serde_json::to_string(&WorkoutType::LongRun).unwrap(),
         "\"LongRun\""

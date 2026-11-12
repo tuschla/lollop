@@ -29,7 +29,6 @@ use super::*;
 use crate::event::entry::activity_is_valid;
 use crate::log::compact_event_log;
 use crate::schema::{LadderId, PainDetail, PainKind, PainTrend};
-use crate::test_support::unit_variants;
 
 /// A Monday-ish epoch day in late 2025; every sequence starts near it.
 const BASE_DAY: i64 = 20_400;
@@ -156,6 +155,12 @@ struct Gen {
 static LADDERS: LazyLock<Vec<LadderId>> = LazyLock::new(unit_variants);
 static WORKOUTS: LazyLock<Vec<WorkoutType>> = LazyLock::new(unit_variants);
 static ACTIVITY_KINDS: LazyLock<Vec<ActivityKind>> = LazyLock::new(unit_variants);
+static CADENCES: LazyLock<Vec<ProgressionCadence>> = LazyLock::new(unit_variants);
+static LIFT_GOALS: LazyLock<Vec<LiftGoal>> = LazyLock::new(unit_variants);
+static GOAL_DISTANCES: LazyLock<Vec<GoalDistance>> = LazyLock::new(unit_variants);
+static CONCURRENT_GOALS: LazyLock<Vec<ConcurrentGoal>> = LazyLock::new(unit_variants);
+static ENVIRONMENTS: LazyLock<Vec<Environment>> = LazyLock::new(unit_variants);
+static DISTANCE_UNITS: LazyLock<Vec<DistanceUnit>> = LazyLock::new(unit_variants);
 
 /// Names the shell's exercise picker offers (plus a retired catalog label).
 const SHELL_EXERCISES: [&str; 12] = [
@@ -1250,30 +1255,10 @@ impl Gen {
         let km = if running { self.f(5.0, 80.0, 0.1) } else { 0.0 };
         let mut p = Profile {
             resistance_modality: modality,
-            progression_cadence: self.rng.pick(&[
-                ProgressionCadence::EverySession,
-                ProgressionCadence::WeekToWeek,
-                ProgressionCadence::MonthToMonth,
-            ]),
-            lift_goal: self.rng.pick(&[
-                LiftGoal::MaxStrength,
-                LiftGoal::Power,
-                LiftGoal::Hypertrophy,
-            ]),
-            goal_distance: self.rng.pick(&[
-                GoalDistance::General,
-                GoalDistance::C25k,
-                GoalDistance::FiveK,
-                GoalDistance::TenK,
-                GoalDistance::HalfMarathon,
-                GoalDistance::Marathon,
-            ]),
-            concurrent_goal: self.rng.pick(&[
-                ConcurrentGoal::Strength,
-                ConcurrentGoal::Power,
-                ConcurrentGoal::Hypertrophy,
-                ConcurrentGoal::EndurancePriority,
-            ]),
+            progression_cadence: self.rng.pick(&CADENCES),
+            lift_goal: self.rng.pick(&LIFT_GOALS),
+            goal_distance: self.rng.pick(&GOAL_DISTANCES),
+            concurrent_goal: self.rng.pick(&CONCURRENT_GOALS),
             weekly_sets: self.u8w(6, 24),
             running_days_per_week: if running { self.u8w(1, 6) } else { 0 },
             running_km_per_week: km,
@@ -1282,14 +1267,7 @@ impl Gen {
             female: self.rng.opt(0.8, |r| r.chance(0.5)),
             high_load_block: self.rng.chance(0.1),
             health,
-            environment: self.rng.opt(0.2, |r| {
-                r.pick(&[
-                    Environment::Heat,
-                    Environment::Altitude,
-                    Environment::Cold,
-                    Environment::Neutral,
-                ])
-            }),
+            environment: self.rng.opt(0.2, |r| r.pick(&ENVIRONMENTS)),
             env_temp_c: self.opt_f(0.15, -10.0, 40.0),
             env_altitude_m: self.opt_f(0.1, 0.0, 3500.0),
             weeks_off: self.opt_f(0.1, 1.0, 30.0),
@@ -1299,7 +1277,7 @@ impl Gen {
             resting_hr_bpm: self.opt_f(0.4, 40.0, 80.0),
             measured_hr_max: self.opt_f(0.3, 160.0, 210.0),
             weight_lb: self.rng.chance(0.2),
-            distance_unit: DistanceUnit::Km,
+            distance_unit: self.rng.pick(&DISTANCE_UNITS),
             // The Android shell always dates an edit with the core's today
             // (`ProfileDraft.toEvent(model.today())`); an undated edit is a
             // legacy or hand-edited log.
@@ -2075,7 +2053,7 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
             before
                 .runs
                 .iter()
-                .filter(|r| !r.has_gpx && !r.gps_unmeasurable)
+                .filter(|r| !r.has_gpx && r.distance_km > 0.0)
                 .map(Row::Run),
         );
         if rows.is_empty() {
@@ -2776,14 +2754,14 @@ fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
     );
     let row = Engine.view(&model).runs[0].clone();
     assert!(
-        row.has_gpx && row.pace.contains("/km"),
+        row.has_gpx && row.summary.contains("/km"),
         "fixture: a paced route: {}",
         row.summary
     );
     gpx_names_the_track(&model, &row).unwrap_or_else(|m| panic!("{m}"));
     let diff = undo_diff(&mut model, EntryKind::Run, 41, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
-    assert_eq!(Engine.view(&model).runs[0].pace, row.pace);
+    assert_eq!(Engine.view(&model).runs[0].summary, row.summary);
     undo_delete_case(0x8983_8f5b_2a87_82d5, true).unwrap_or_else(|m| panic!("{m}"));
 }
 
@@ -2806,7 +2784,7 @@ fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
         &mut model,
     );
     let row = Engine.view(&model).runs[0].clone();
-    assert!(row.gps_unmeasurable && !row.has_gpx, "{}", row.summary);
+    assert!(!row.has_gpx && row.distance_km == 0.0, "{}", row.summary);
     let diff = undo_diff(&mut model, EntryKind::Run, 31, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
     undo_delete_case(0x1b7c_7ac2_de61_f20e, false).unwrap_or_else(|m| panic!("{m}"));

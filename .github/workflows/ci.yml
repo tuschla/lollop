@@ -61,23 +61,6 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon :lollop:testAndroidHostTest
 
-  lollop-ios:
-    name: Shared module iOS compile (Linux)
-    # Kotlin compiles the iOS klibs of :lollop's commonMain + iosMain on Linux;
-    # only the framework link needs macOS. Catches common code that doesn't build
-    # for iOS. No Rust: the module's iOS side doesn't link the core.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: ./.github/actions/setup
-        with:
-          konan: "true"
-
-      - name: Compile :lollop for iosArm64 + iosSimulatorArm64
-        working-directory: android
-        run: ./gradlew --no-daemon :lollop:compileKotlinIosArm64 :lollop:compileKotlinIosSimulatorArm64
-
   release-r8:
     name: Release APK + R8 keep check
     runs-on: ubuntu-latest

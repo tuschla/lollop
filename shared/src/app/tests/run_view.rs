@@ -13,7 +13,11 @@ fn logging_a_run_classifies_zone_and_pace() {
 
     let vm = app.view(&model);
     assert_eq!(vm.runs.len(), 1);
-    assert_eq!(vm.runs[0].pace, "5:00/km");
+    assert!(
+        vm.runs[0].summary.contains("@ 5:00/km"),
+        "{}",
+        vm.runs[0].summary
+    );
     assert!(!vm.runs[0].spike_flag);
     assert_eq!(vm.runs[0].zone, Some(ThreeZone::Z1));
 }
@@ -67,7 +71,8 @@ fn zero_duration_run_reports_unknown_pace_not_zero() {
     app.update(log_run(5.0, 0.0, 70.0, 6.0, 0, 0), &mut model)
         .expect_only_render();
 
-    assert_eq!(app.view(&model).runs[0].pace, "-");
+    let summary = &app.view(&model).runs[0].summary;
+    assert!(summary.contains("@ - ("), "{summary}");
 }
 
 #[test]
@@ -82,7 +87,8 @@ fn pace_rounds_to_the_nearest_second_and_zero_pads() {
     app.update(log_run(10.0, 40.95, 70.0, 12.0, 0, 0), &mut model)
         .expect_only_render();
 
-    assert_eq!(app.view(&model).runs[0].pace, "4:06/km");
+    let summary = &app.view(&model).runs[0].summary;
+    assert!(summary.contains("@ 4:06/km"), "{summary}");
     assert_eq!(fmt_mss(59.6), "1:00");
     assert_eq!(fmt_mss(245.4), "4:05");
     assert_eq!(fmt_mss(f64::NAN), "0:00");
@@ -135,7 +141,11 @@ fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
         "got {}",
         vm.runs[0].summary
     );
-    assert_ne!(vm.runs[0].pace, "-");
+    assert!(
+        !vm.runs[0].summary.contains("@ -"),
+        "{}",
+        vm.runs[0].summary
+    );
     assert!(!vm.runs[0].spike_flag);
     // The ~0.5 MB GPX string never rides the list payload. The run
     // advertises an exportable route via `has_gpx`, and the shell
@@ -179,22 +189,14 @@ fn gps_run_of_only_noise_fixes_offers_no_route() {
 
     let vm = app.view(&model);
     assert_eq!(vm.runs.len(), 1);
-    assert_eq!(vm.runs[0].pace, "-");
     // No exportable route for a noise-only track: the flag the shell gates the
-    // map and share on is false. The on-demand document carries the recorded
-    // fixes instead, for Undo of a delete only (`gps_unmeasurable`), so the
-    // run comes back as recorded.
+    // map and share on is false, and there is no document to fetch.
     assert!(
         !vm.runs[0].has_gpx,
         "has_gpx should be false for a noise-only track"
     );
-    assert!(vm.runs[0].gps_unmeasurable);
     let gpx = export_run_gpx(&model, 9_115_001, 9_115_001);
-    assert_eq!(
-        gpx.matches("<trkpt ").count(),
-        2,
-        "the recorded fixes export for Undo, got {gpx}"
-    );
+    assert!(gpx.is_empty(), "no route, no document: {gpx}");
     // An unmeasurable track must say so, not render a "0.0km" entry, and must
     // not trip the distance-spike gate against a phantom zero baseline.
     assert!(
@@ -251,7 +253,7 @@ fn amending_a_tracked_run_rebuilds_its_card() {
     .expect_only_render();
     let amended = &app.view(&model).runs[0];
     assert_eq!(amended.distance_km, 5.0);
-    assert_eq!(amended.pace, "6:00/km");
+    assert!(amended.summary.contains("@ 6:00/km"), "{}", amended.summary);
 }
 
 #[test]
@@ -323,7 +325,8 @@ fn run_view_differentiates_interval_from_steady_same_average() {
     // ~200 m hard reps (~6.7 m/s) each followed by a ~22 m jog (~0.74 m/s).
     let iv = card([0.0000, 0.0018, 0.0020, 0.0038, 0.0040]);
 
-    assert_eq!(sv.pace, iv.pace, "same-average precondition broke");
+    let pace = |r: &RunResultView| fmt_mss(r.duration_min * 60.0 / r.distance_km);
+    assert_eq!(pace(&sv), pace(&iv), "same-average precondition broke");
 
     let s = sv.interval.expect("steady interval verdict");
     let i = iv.interval.expect("interval verdict");
@@ -449,14 +452,4 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
         "no boundary → segment 2 dropped as a teleport: {}",
         naive_run.distance_km,
     );
-}
-
-#[test]
-fn a_run_card_shows_its_own_logged_offset() {
-    // The card echoes the logged offset: the same run logged under two
-    // offsets shows each its own.
-    for offset in [3_600, -18_000] {
-        let (app, model) = replay(&[stamped(tracked_run(700_101, 1_000), offset)]);
-        assert_eq!(app.view(&model).runs[0].utc_offset_sec, Some(offset));
-    }
 }
