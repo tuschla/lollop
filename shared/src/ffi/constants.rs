@@ -53,6 +53,8 @@ constants! {
     crate::profile::LIFT_DAYS_MIN as Int;
     /// Most lift days a week a chosen count is held to.
     crate::profile::LIFT_DAYS_MAX as Int;
+    /// Fastest pace a stated recent race may claim, seconds per km.
+    crate::profile::RECENT_RACE_MIN_SEC_PER_KM as Float;
     /// Lift days a lifting-only profile that chose none trains.
     crate::profile::LIFT_ONLY_DEFAULT_LIFT_DAYS as Int;
     /// Lift days a lifting-and-running profile that chose none trains.
@@ -99,6 +101,12 @@ constants! {
     /// Velocity-loss fraction ending a hypertrophy set, the highest goal threshold
     /// (AUTOREG-VL-001).
     crate::strength::VL_STOP_HYPERTROPHY_FRAC as Float;
+    /// RPE of a set taken to failure (0 reps left); each rep left is one RPE
+    /// lower (strength-007).
+    crate::strength::RPE_RIR_ANCHOR as Float;
+    /// Reps left at or above which a rating is open-ended: the "4+ reps left"
+    /// cell of the logging scale.
+    crate::strength::OPEN_ENDED_RIR as Float;
     /// Wellness composite z-score at or below which one day eases the session
     /// (autoreg-030).
     crate::autoreg::WELLNESS_SINGLE_DAY_Z as Float;

@@ -106,10 +106,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
         sheetMode = mode
         sheetOpen = true
     }
-    // The tracker where the platform records runs; elsewhere (null) a run is logged
-    // by hand (the run editor), so no entry leads to a tracker that isn't there.
-    val canTrack = session.tracker != null
-    val trackRun: (() -> Unit)? = if (canTrack) ({ session.showTracker = true }) else null
+    val trackRun = { session.showTracker = true }
 
     // Crash-recovery consent, ahead of the full-screen returns below so neither
     // the setup nor a tracker restored after process death can hide it.
@@ -131,7 +128,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
             session.model,
             sheetBusy = logGuard.busy,
             trackerPinned = !RunSession.tracking.value && (RunSession.armed.value || RunSession.locating.value),
-            canTrack = canTrack,
         )
         session.showTracker = next.showTracker
         selected = next.selected
@@ -186,7 +182,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
         return
     }
 
-    if (session.showTracker && canTrack) {
+    if (session.showTracker) {
         // The tracking screen replaces this whole scaffold, so it receives the
         // live model and re-pins the SafetyBanner itself (chrome §5: the banner is
         // on EVERY screen, never scrollable or dismissable). onEvent keeps the
@@ -406,7 +402,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
                             onEvent = EventDispatcher::send,
                             onTrackRun = trackRun,
                             onLogSet = { openSheet(LogMode.Set) },
-                            onLogRun = { openSheet(LogMode.Run) },
                         )
                         Dest.Profile -> ProfileDestination(
                             ctx = ctx,
@@ -448,7 +443,6 @@ private fun CoachScaffoldBody(session: CoachSession) {
                                 sheetMode = it
                             },
                             onEvent = EventDispatcher::send,
-                            // No tracker: the chooser leaves its "Track run" row out.
                             onTrackRun = trackRun,
                             onDismiss = dismissSheet,
                             planPrefill = planPrefill,

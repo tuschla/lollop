@@ -1253,7 +1253,7 @@ impl Gen {
             None
         };
         let km = if running { self.f(5.0, 80.0, 0.1) } else { 0.0 };
-        let mut p = Profile {
+        Event::SetProfile(Profile {
             resistance_modality: modality,
             progression_cadence: self.rng.pick(&CADENCES),
             lift_goal: self.rng.pick(&LIFT_GOALS),
@@ -1323,13 +1323,7 @@ impl Gen {
                 .to_owned()
             }),
             runner_strength: self.rng.chance(0.2),
-        };
-        // Imperial with the pounds draw, so the RNG stream (and every pinned
-        // seed) stays as it was.
-        if p.weight_lb {
-            p.distance_unit = DistanceUnit::Mi;
-        }
-        Event::SetProfile(p)
+        })
     }
 
     fn calculator(&mut self) -> Event {

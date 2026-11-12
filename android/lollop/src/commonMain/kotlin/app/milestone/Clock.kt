@@ -37,11 +37,11 @@ internal fun nextLocalMidnightMillis(nowMillis: Long, zone: TimeZone = TimeZone.
 internal fun planDayObservedAt(epochDay: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
     LocalDate.fromEpochDays(epochDay).atTime(12, 0).toInstant(zone).epochSeconds
 
-/** The device's current UTC offset in SECONDS east of UTC, so the core can
- *  bucket a logged session's UTC `observed_at` into the correct local day. Uses
- *  the offset at "now" (DST-correct for the current instant). */
-internal fun utcOffsetSec(): Long =
-    TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochMilliseconds(AppClock.nowMillis())).totalSeconds.toLong()
+/** The device's UTC offset in SECONDS east of UTC at the unix second [atEpochSec]
+ *  (now by default; DST-correct for that instant), so the core can bucket a logged
+ *  session's UTC `observed_at` into the correct local day. */
+internal fun utcOffsetSec(atEpochSec: Long = AppClock.nowSec()): Long =
+    TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochSeconds(atEpochSec)).totalSeconds.toLong()
 
 /**
  * Friendly log date for a history card from a unix-seconds stamp, in whole local

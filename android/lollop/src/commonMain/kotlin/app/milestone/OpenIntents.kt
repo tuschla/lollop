@@ -91,8 +91,6 @@ internal data class OpenNav(
  * since it is the only place to cancel that service. A tracker over a recording run
  * steps aside like Back does (the run keeps recording; the in-app chip leads back).
  * `track` always opens the tracker; during a hold it shows the safety banner itself.
- * Without a tracker ([canTrack] false: the platform records no runs) `track` opens
- * the run editor on Today instead, under the same rules as the other destinations.
  * The guided setup is handled by the caller: while it shows, it stays.
  */
 internal fun routeOpen(
@@ -101,16 +99,16 @@ internal fun routeOpen(
     model: ViewModel,
     sheetBusy: Boolean,
     trackerPinned: Boolean,
-    canTrack: Boolean = true,
 ): OpenNav {
-    if (dest == OpenDest.Track && canTrack) return nav.copy(showTracker = true)
-    if (nav.showTracker && trackerPinned) return nav
     val today = nav.copy(showTracker = false, selected = Dest.Today)
-    if (nav.sheetOpen && sheetBusy) return today
+    if (dest != OpenDest.Track) {
+        if (nav.showTracker && trackerPinned) return nav
+        if (nav.sheetOpen && sheetBusy) return today
+    }
     return when (dest) {
+        OpenDest.Track -> nav.copy(showTracker = true)
         OpenDest.Log -> today.copy(sheetOpen = true, sheetMode = LogMode.Chooser, sheetPlanExercise = null, sheetPlanDay = null)
         OpenDest.LogSet -> today.copy(sheetOpen = true, sheetMode = LogMode.Set, sheetPlanExercise = logSetTarget(model), sheetPlanDay = null)
-        OpenDest.Track -> today.copy(sheetOpen = true, sheetMode = LogMode.Run, sheetPlanExercise = null, sheetPlanDay = null)
         OpenDest.Today -> today.copy(sheetOpen = false, sheetMode = LogMode.Chooser, sheetPlanExercise = null, sheetPlanDay = null)
     }
 }

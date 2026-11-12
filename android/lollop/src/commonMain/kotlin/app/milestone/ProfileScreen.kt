@@ -429,8 +429,8 @@ private val PACE_BUCKET_MINUTE_OPTIONS = listOf(1, 2, 3, 4, 5, 6, 8, 10)
  *  Android 16+ with Live Updates turned off for the app, a notice says why the run
  *  and rest timer have no status bar chip and links to the system switch. */
 private fun LazyListScope.TrainingAlertsSection(ctx: PlatformContext, model: ViewModel) {
-    val showLifting = model.profile == null || model.showLifting()
-    val showRunning = model.profile == null || model.showRunning()
+    val showLifting = model.showLifting()
+    val showRunning = model.showRunning()
     if (!showLifting && !showRunning) return
     item(key = "training_alerts") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {

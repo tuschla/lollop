@@ -2,7 +2,7 @@
 //! the effort wording, the plates and the run amounts.
 
 use crate::app::evidence_views::why_from;
-use crate::app::format::{fmt_km_or_mi, fmt_weight, round_tenths};
+use crate::app::format::{fmt_km_or_mi, fmt_reps, fmt_weight, round_tenths};
 use crate::app::plan_views::flatten_run::fmt_run_km;
 use crate::app::plan_views::plan_item::{PlanItem, RunAmount};
 use crate::app::view_types::{
@@ -155,10 +155,10 @@ pub(super) fn set_run_summary(
 /// "~2 reps left" for a single reps-in-reserve target on a card face (0 = "to
 /// your last good rep", never "0 reps left").
 pub(super) fn reps_left(n: i64) -> String {
-    match n {
-        n if n <= 0 => "to your last good rep".to_string(),
-        1 => "~1 rep left".to_string(),
-        n => format!("~{n} reps left"),
+    if n <= 0 {
+        "to your last good rep".to_string()
+    } else {
+        format!("~{} left", fmt_reps(n))
     }
 }
 

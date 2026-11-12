@@ -35,6 +35,7 @@
 //! - view build time stays bounded as the history grows.
 
 use super::*;
+use crate::app::view_types::ItemKind;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
@@ -242,21 +243,9 @@ fn first_load(ex: &str) -> f64 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
-    Lift,
-    Calisthenics,
-    Run,
-}
-
-fn kind(it: &PrescriptionView) -> ItemKind {
-    if it.is_run() {
-        ItemKind::Run
-    } else if it.calis.is_some() {
-        ItemKind::Calisthenics
-    } else {
-        ItemKind::Lift
-    }
+/// A loaded lift, not a calisthenics movement.
+fn is_loaded_lift(it: &PrescriptionView) -> bool {
+    it.is_lift() && it.calis.is_none()
 }
 
 /// Main-set distance of a run item, km: the plain distance head, else an
@@ -543,8 +532,10 @@ impl Sim {
         let lb = self.profile.weight_lb;
         let mut hour = self.rng.range(6.5, 19.0);
         for it in ns.items.iter().filter(|i| !i.done) {
-            match kind(it) {
-                ItemKind::Run => {
+            match it.kind {
+                // The return check standing in for a lifting session is done
+                // with a short easy run.
+                ItemKind::Run | ItemKind::ReturnCheck => {
                     let f = if lighter {
                         0.7
                     } else if over {
@@ -555,8 +546,8 @@ impl Sim {
                     self.log_run_km(item_km(it) * f, hour, backdate);
                     hour += 1.0;
                 }
-                kind => {
-                    let calis = kind == ItemKind::Calisthenics;
+                ItemKind::Lift => {
+                    let calis = it.calis.is_some();
                     let base = if calis {
                         it.added_kg.unwrap_or(0.0)
                     } else {
@@ -586,7 +577,7 @@ impl Sim {
                     } else {
                         it.sets.max(1)
                     };
-                    let strong = kind == ItemKind::Lift && !it.timed_hold && kg > 0.0;
+                    let strong = !calis && !it.timed_hold && kg > 0.0;
                     for s in 0..n {
                         let target = it.target_rpe.unwrap_or(8.0);
                         let noise = [-0.5, 0.0, 0.0, 0.5][self.rng.int(0, 3) as usize];
@@ -1566,7 +1557,7 @@ impl Sim {
             .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
         {
             let through = (row.epoch_day - 1).min(self.today);
-            for it in row.items.iter().filter(|i| kind(i) == ItemKind::Lift) {
+            for it in row.items.iter().filter(|i| is_loaded_lift(i)) {
                 // STR-INTENT-001 / HYP-FAIL-SAFE-001: never below 1 RIR.
                 if it.target_rpe.is_some_and(|r| r > 9.0 + 1e-9) {
                     bad.push(format!("{}: target RPE {:?}", it.summary, it.target_rpe));
@@ -1709,7 +1700,7 @@ impl Sim {
                 _ => 0.70,
             };
             for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today) {
-                for it in row.items.iter().filter(|i| kind(i) == ItemKind::Lift) {
+                for it in row.items.iter().filter(|i| is_loaded_lift(i)) {
                     let ex = it.exercise.to_lowercase();
                     let Some(&(ratio, pre_e)) = re.pre_lifts.get(&ex) else {
                         continue;

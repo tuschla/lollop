@@ -1,8 +1,8 @@
 //! The feedback card: the latest run's spike and split, the single resolved
 //! message (safety gate first) and its coaching copy.
 
-use crate::app::evidence_views::{reps_word, why_from};
-use crate::app::format::{fmt_km_or_mi, fmt_weight, is_ratio_base_km, weekday_name};
+use crate::app::evidence_views::why_from;
+use crate::app::format::{fmt_km_or_mi, fmt_reps, fmt_weight, is_ratio_base_km, weekday_name};
 use crate::app::model::Model;
 use crate::app::reviews::exec::{
     DerivedExec, Exec, ExecInput, LiftEval, LiftOutcome, RunOutcome, Trigger, eval_of,
@@ -548,10 +548,10 @@ fn short_detail(o: &LiftOutcome, w: &dyn Fn(f64) -> String) -> String {
     let did = o
         .load_kg
         .filter(|_| o.top_reps > 0)
-        .map(|kg| format!("{} reps at {}", o.top_reps, w(kg)));
+        .map(|kg| format!("{} at {}", fmt_reps(o.top_reps.into()), w(kg)));
     let planned = (o.reps_target > 0).then(|| match o.planned_kg {
         Some(kg) => format!("{} at {}", o.reps_target, w(kg)),
-        None => format!("{} reps", o.reps_target),
+        None => fmt_reps(o.reps_target.into()),
     });
     let differs = u32::from(o.reps_target) != o.top_reps
         || matches!((o.load_kg, o.planned_kg), (Some(a), Some(b)) if w(a) != w(b));
@@ -569,7 +569,7 @@ pub(super) fn reserve(n: u8) -> String {
     if n == 0 {
         "no reps left".to_string()
     } else {
-        format!("{} left", reps_word(n))
+        format!("{} left", fmt_reps(n.into()))
     }
 }
 

@@ -3,8 +3,9 @@
 
 use crate::app::evidence_views::{
     CallCtx, RETURN_CHECK_STOP, RETURN_DOSE_EFFORT_PCT, RETURN_DOSE_MIN, deload_cut_clauses,
-    lift_work_logged, reps_word, return_check_headline, to_view_in, why_from,
+    lift_work_logged, return_check_headline, to_view_in, why_from,
 };
+use crate::app::format::fmt_reps;
 use crate::app::logged_days::LoggedDays;
 use crate::app::model::{Model, profile_for_day};
 use crate::app::plan_views::adjust_fold::{
@@ -451,7 +452,7 @@ fn note_rpe_cap(items: &mut [PlanItem], eased: &[u8]) -> bool {
     for (it, &d) in items.iter_mut().zip(eased) {
         if d > 0 && it.is_lift() {
             if it.adjusted_note.is_empty() {
-                it.adjusted_note = format!("stop {} earlier than planned", reps_word(d));
+                it.adjusted_note = format!("stop {} earlier than planned", fmt_reps(d.into()));
             }
             any_changed = true;
         }
@@ -517,7 +518,7 @@ fn apply_one_level_downgrade(
                 }
             }
             LiftDowngrade::OneLevel => {
-                let earlier = reps_word(eased.max(1));
+                let earlier = fmt_reps(eased.max(1).into());
                 it.adjusted_note = if it.load_kg.is_some() {
                     format!(
                         "one step easier: −{:.0}% weight, stop {earlier} earlier",
@@ -691,7 +692,7 @@ fn holds_load(r: &AdjustmentCall) -> bool {
 /// A held lift's note: no weight added, and how much earlier to stop.
 fn hold_note(eased: u8) -> String {
     if eased > 0 {
-        format!("no weight added, stop {} earlier", reps_word(eased))
+        format!("no weight added, stop {} earlier", fmt_reps(eased.into()))
     } else {
         "no weight added".into()
     }

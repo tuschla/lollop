@@ -1,6 +1,7 @@
 //! In-session autoregulation from an item's first logged work set.
 
-use crate::app::evidence_views::{reps_word, to_view};
+use crate::app::evidence_views::to_view;
+use crate::app::format::fmt_reps;
 use crate::app::plan_views::adjust_fold::{
     fold_completion_adjustments, reduce_percent_intensity, safety_easy,
 };
@@ -217,7 +218,7 @@ fn item_cues(it: &mut PlanItem, cx: &FirstSetCtx) -> Vec<ItemCue> {
         ));
     }
     if cap > 0 && cap_item_effort(it, cap, weight_lb) {
-        notes.push(format!("stop {} earlier", reps_word(cap)));
+        notes.push(format!("stop {} earlier", fmt_reps(cap.into())));
     }
     if add > 0.0 {
         notes.push(format!("first set felt easy: you can add about {add:.0}%"));

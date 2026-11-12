@@ -2,13 +2,12 @@
 //! wrote ([`BasisRx`]) against the face the day ends up showing: after every
 //! fold, hold and in-session cue moved the numbers.
 
-use crate::app::evidence_views::reps_word;
-use crate::app::format::fmt_weight;
+use crate::app::format::{fmt_reps, fmt_weight};
 use crate::app::plan_views::item_render::{sets_reps_lead, shown_rir, with_reps_left};
 use crate::app::plan_views::plan_item::{BasisPiece, BasisRx, PlanItem};
 
 fn at_least(n: i64) -> String {
-    format!("at least {} left", reps_word(n.clamp(0, 255) as u8))
+    format!("at least {} left", fmt_reps(n.clamp(0, 255)))
 }
 
 fn could_lift(times: i64) -> String {

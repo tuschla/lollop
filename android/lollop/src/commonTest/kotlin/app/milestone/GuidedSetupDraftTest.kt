@@ -594,10 +594,10 @@ class GuidedSetupDraftTest : PlatformTest() {
 
     @Test
     fun aSubFourMinuteMileIsAPlausibleRecentRace() {
-        // The core keeps any time_sec / distance_km >= 120 (app::ingest).
+        val floor = CoreConstants.RECENT_RACE_MIN_SEC_PER_KM.toInt()
         assertTrue(plausibleRaceTime(RaceDistance.Mile.km, 3 * 60 + 58))
-        assertTrue(plausibleRaceTime(1.0, 120))
-        assertFalse(plausibleRaceTime(1.0, 119))
+        assertTrue(plausibleRaceTime(1.0, floor))
+        assertFalse(plausibleRaceTime(1.0, floor - 1))
     }
 
     @Test

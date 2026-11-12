@@ -21,7 +21,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 
-internal actual fun platformRunTracker(): RunTracker? = ServiceRunTracker
+internal actual fun platformRunTracker(): RunTracker = ServiceRunTracker
 
 private object ServiceRunTracker : RunTracker {
     override fun hasLocationPermission(ctx: Context): Boolean = hasFineLocation(ctx)

@@ -49,9 +49,8 @@ internal class CoachSession(
     val markOnboardingDone: () -> Unit,
     /** A pending [OpenDest] from an open intent or URL; [CoachScaffold] applies and clears it. */
     val openRequest: OpenRequests,
-    /** The platform's run recorder, or null where the app has none:
-     *  then every tracker entry is hidden and runs are logged by hand. */
-    val tracker: RunTracker?,
+    /** The platform's run recorder. */
+    val tracker: RunTracker,
 ) {
     var loaded by loadedState
     var model by modelState
@@ -176,9 +175,7 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
                 UiMessages.post(UiMessage(res.getQuantityString(Res.plurals.main_restored_entries, restored, restored)))
             }
             val tracker = session.tracker
-            if (tracker != null && !RunSession.tracking.value && RunSession.points.value.isEmpty() &&
-                tracker.hasInterruptedRun(ctx)
-            ) {
+            if (!RunSession.tracking.value && RunSession.points.value.isEmpty() && tracker.hasInterruptedRun(ctx)) {
                 val recovered = withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
                 if (resumable(recovered, wallClockMillis() / 1000)) {
                     session.recoveredRun = recovered
@@ -225,7 +222,7 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
  * while the app was gone), holds the run for the tracker, which asks for the grant
  * and restarts recording once it is given. Composed at the very top of [CoachScaffold],
  * ahead of its full-screen setup/tracker returns, so a tracker screen restored
- * after process death can never hide it. Only offered where a [RunTracker] exists.
+ * after process death can never hide it.
  */
 @Composable
 internal fun ResumeRunDialog(session: CoachSession) {
@@ -234,7 +231,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
     // dialog leaving composition.
     val scope = rememberCoroutineScope()
     val tracker = session.tracker
-    if (!session.showResumePrompt || tracker == null) return
+    if (!session.showResumePrompt) return
     // A run started since boot owns the sidecar now (Start truncated the
     // interrupted one): resuming would replace its live track and discarding would
     // delete its crash-recovery file, so both just drop the stale offer.

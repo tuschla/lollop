@@ -3,11 +3,10 @@ package app.milestone
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 
-/** The sides the profile trains, as the core's plan reads them ([ViewModel.trains]).
- *  Callers OR in `profile == null` wherever a not-yet-set-up user should
- *  still see everything (the chooser, Profile's calculators, history segment). */
-internal fun ViewModel.showLifting(): Boolean = trains?.lifts == true
-internal fun ViewModel.showRunning(): Boolean = trains?.runs == true
+/** The sides the profile trains, as the core's plan reads them ([ViewModel.trains]);
+ *  both before setup, so a not-yet-set-up user still sees everything. */
+internal fun ViewModel.showLifting(): Boolean = trains?.lifts != false
+internal fun ViewModel.showRunning(): Boolean = trains?.runs != false
 
 /** The session can still be trained today: the hero, possibly adjusted (not blocked). */
 internal val SessionPlanView.actionable: Boolean get() = status == SessionStatus.Next || status == SessionStatus.Adjusted
@@ -74,7 +73,7 @@ internal fun planDateLabel(epochDay: Long): String =
 /** Today's epoch-day for every plan gate: the core's clock echoed on the view
  *  (SetToday) rather than the wall clock, so a session that crosses midnight
  *  while foregrounded rolls over in lockstep with the core instead of stranding
- *  its Log buttons. Falls back to the device clock on an old core. */
+ *  its Log buttons. Falls back to the device clock before the boot's SetToday. */
 internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
 
 /** Today's session still to train: the hero dated today, with items, not blocked. */

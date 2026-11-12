@@ -124,7 +124,6 @@ import kotlin.math.abs
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import org.jetbrains.compose.resources.painterResource
-import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -141,9 +140,7 @@ internal class TodayActions(
     val onLogPlanItem: (PrescriptionView) -> Unit,
     val onLogPastItem: (PrescriptionView, Long) -> Unit,
     val onLogPastRun: (Long) -> Unit,
-    // Null where the platform has no tracker: a planned run's action then opens
-    // the run editor.
-    val onTrackRun: (() -> Unit)?,
+    val onTrackRun: () -> Unit,
 )
 
 /**
@@ -189,9 +186,8 @@ internal fun TodayDestination(
 
     val trend = remember(model.lifts, model.next_session, model.week_plan) { e1rmTrend(model) }
 
-    // Modality gating: the e1RM trend is a lifting signal. A not-yet-set-up
-    // user (profile == null) still sees it.
-    val showLifting = model.profile == null || model.showLifting()
+    // Modality gating: the e1RM trend is a lifting signal.
+    val showLifting = model.showLifting()
     val weightUnit = model.weightUnit()
     val hold = remember(model.today_headline, model.adjustments) { holdEvidence(model) }
     // The area an active pain report names: an exercise it stopped reads
@@ -802,8 +798,7 @@ private fun TodayHeroCard(
                 ladders = model.calisthenics_ladders,
                 showGuide = model.today_surface.show_guide,
                 onLogItem = actions.onLogPlanItem,
-                onTrackRun = actions.onTrackRun ?: { actions.onOpenSheet(LogMode.Run) },
-                runActionLabel = if (actions.onTrackRun != null) Res.string.main_plan_item_track else Res.string.main_log_run_title,
+                onTrackRun = actions.onTrackRun,
                 onEndExercise = { endExerciseWithUndo(res, it, today, onEvent) },
                 onReopen = { reopenExercise(it, today, onEvent) },
                 onSetRung = { ladder, rung -> onEvent(Event.SetCalisthenicsRung(ladder, rung, AppClock.nowSec())) },
@@ -1166,7 +1161,6 @@ private fun NextSessionCard(
     showGuide: Boolean,
     onLogItem: (PrescriptionView) -> Unit,
     onTrackRun: () -> Unit,
-    runActionLabel: StringResource,
     onEndExercise: (PrescriptionView) -> Unit,
     onReopen: (PrescriptionView) -> Unit,
     onSetRung: (LadderId, Int) -> Unit,
@@ -1292,7 +1286,7 @@ private fun NextSessionCard(
                 items = ns.items,
                 actionable = actionable,
                 reopenable = actionable,
-                runActionLabel = stringResource(runActionLabel),
+                runActionLabel = stringResource(Res.string.main_plan_item_track),
                 weightUnit = weightUnit,
                 painArea = painArea,
                 onLog = onLogItem,
@@ -1328,11 +1322,11 @@ private fun RestPill(run: RestRun) {
     )
 }
 
-/** The prescribed reps-in-reserve as a whole number (RIR = 10 − RPE), or null
- *  for an open-ended ("4+") or half-point target the guide can't state plainly. */
+/** The prescribed reps-in-reserve as a whole number, or null for an open-ended
+ *  ("4+") or half-point target the guide can't state plainly. */
 internal fun prescribedRir(rpe: Double): Int? {
-    val rir = 10.0 - rpe
-    return if (rir >= 0.0 && rir < 4.0 && rir % 1.0 == 0.0) rir.toInt() else null
+    val rir = repsLeft(rpe)
+    return if (!isOpenEnded(rir) && rir % 1.0 == 0.0) rir.toInt() else null
 }
 
 /** For an item with no load to start from (never logged, no prescribed or

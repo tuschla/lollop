@@ -54,7 +54,14 @@ internal fun todaySetsFor(
 }
 
 /** Reps left in reserve at effort [rpe] on the RIR-based scale. */
-internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
+internal fun repsLeft(rpe: Double): Double = (CoreConstants.RPE_RIR_ANCHOR - rpe).coerceAtLeast(0.0)
+
+/** The RIR-based RPE of [repsLeft] reps left, the inverse of [repsLeft]. */
+internal fun rpeOfRepsLeft(repsLeft: Double): Double = CoreConstants.RPE_RIR_ANCHOR - repsLeft
+
+/** Whether [repsLeft] is the open-ended top cell of the scale ("4+"): a lower
+ *  bound the core never reads as an exact reserve. */
+internal fun isOpenEnded(repsLeft: Double): Boolean = repsLeft >= CoreConstants.OPEN_ENDED_RIR
 
 /** What the set loop's pinned primary action does. */
 internal enum class LoopPrimary { Save, LogPlannedSet, LogOffPlanSet, LogBlank, LogExtraSet, Next, FinishSession }
@@ -459,7 +466,7 @@ internal fun repsLeftText(res: PlatformResources, rpe: Double, short: Boolean = 
     val rir = repsLeft(rpe)
     val n = rir.toInt()
     return when {
-        rir >= 4.0 -> res.getString(if (short) Res.string.history_set_left_4plus else Res.string.log_reps_left_4plus)
+        isOpenEnded(rir) -> res.getString(if (short) Res.string.history_set_left_4plus else Res.string.log_reps_left_4plus)
         rir % 1.0 == 0.0 -> res.getQuantityString(if (short) Res.plurals.history_set_left else Res.plurals.log_reps_left, n, n)
         else -> res.getString(if (short) Res.string.history_set_left_range else Res.string.log_reps_left_range, n, n + 1)
     }

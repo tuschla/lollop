@@ -43,7 +43,7 @@ pub fn pct_1rm_at_effective_reps(effective_reps: f64) -> f64 {
 /// Zourdos RPE↔RIR anchor: RPE 10 = 0 RIR, each RIR = −1 RPE (File 02
 /// strength-007). Single source for both directions of the mapping so they
 /// cannot desync.
-const RPE_RIR_ANCHOR: f64 = 10.0;
+pub const RPE_RIR_ANCHOR: f64 = 10.0;
 
 /// Reps in reserve from RPE via the Zourdos anchor: RPE 10 = 0 RIR, each RIR
 /// = −1 RPE (File 02 strength-007; registry AUTOREG-RIR-001). Clamped at 0.

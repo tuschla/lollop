@@ -47,6 +47,8 @@ object CoreConstants {
     const val LIFT_DAYS_MIN: Int = 2
     /** Most lift days a week a chosen count is held to. */
     const val LIFT_DAYS_MAX: Int = 5
+    /** Fastest pace a stated recent race may claim, seconds per km. */
+    const val RECENT_RACE_MIN_SEC_PER_KM: Double = 120.0
     /** Lift days a lifting-only profile that chose none trains. */
     const val LIFT_ONLY_DEFAULT_LIFT_DAYS: Int = 3
     /** Lift days a lifting-and-running profile that chose none trains. */
@@ -97,6 +99,16 @@ object CoreConstants {
      *  (AUTOREG-VL-001).
      */
     const val VL_STOP_HYPERTROPHY_FRAC: Double = 0.4
+    /**
+     * RPE of a set taken to failure (0 reps left); each rep left is one RPE
+     *  lower (strength-007).
+     */
+    const val RPE_RIR_ANCHOR: Double = 10.0
+    /**
+     * Reps left at or above which a rating is open-ended: the "4+ reps left"
+     *  cell of the logging scale.
+     */
+    const val OPEN_ENDED_RIR: Double = 4.0
     /**
      * Wellness composite z-score at or below which one day eases the session
      *  (autoreg-030).

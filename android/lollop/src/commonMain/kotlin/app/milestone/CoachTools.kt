@@ -121,10 +121,9 @@ internal enum class CoachTool(val titleRes: StringResource) {
  */
 @Composable
 internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
-    val calcAll = model.profile == null
     val minor = model.underEighteen()
-    val showRace = calcAll || model.showRunning()
-    val showVolume = calcAll || (model.showLifting() && !minor)
+    val showRace = model.showRunning()
+    val showVolume = model.showLifting() && !minor
     CoachToolList {
         if (showRace) {
             CoachToolRow(
@@ -197,7 +196,7 @@ internal fun ViewModel.underEighteen(): Boolean = profile?.health?.youth == true
 
 /** Whether [CalculatorsCard] has any row: every adult gets Protein, an
  *  under-18 profile only the running tools. */
-internal fun ViewModel.hasCalculators(): Boolean = profile == null || !underEighteen() || showRunning()
+internal fun ViewModel.hasCalculators(): Boolean = !underEighteen() || showRunning()
 
 /** The calculators as one card of rows, a compact tool list rather than a grid
  *  of half-empty tiles. */

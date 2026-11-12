@@ -210,6 +210,27 @@ class ImportExportRoundtripTest {
         assertEquals(162.0, run.avg_hr_bpm)
     }
 
+    /** An imported run is stamped with the device's UTC offset at its instant, so a
+     *  later time-zone change never moves it to another local day's profile. The run
+     *  ends at 01:00 on day D at UTC+2 (23:00 the day before in UTC); a measured HRmax
+     *  of 200 holds from D, the age estimate (180) before it. */
+    @Test
+    fun aTimeZoneChangeDoesNotMoveAnImportedRunsHeartRate() {
+        val day = todayEpochDay() - 2
+        val end = day * 86_400L - 3_600L
+        val (points, _) = synthRun(seed = 14, startSec = end - 899 * 3, n = 900)
+        val gpx = gpxDocument(GpxTrack(listOf(points)), hr = { 162 })
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Etc/GMT-2"))
+        val aged = QaHarness.strengthProfile().copy(ageYears = 40.0, effectiveFromEpochDay = day - 10)
+        bootCore(aged, aged.copy(measuredHrMax = 200.0, effectiveFromEpochDay = day))
+        val run = send(importedRunEvent(parseRunFile(gpx.toByteArray(), Core::parseRunFile).single())).runs.single()
+        assertEquals("the run's local day is D at UTC+2: 162 bpm of 200", 81.0, run.hr_pct_max, 1e-9)
+
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        val moved = send(Event.SetToday(todayEpochDay(), utcOffsetSec())).runs.single()
+        assertEquals("the stamped offset keeps day D", 81.0, moved.hr_pct_max, 1e-9)
+    }
+
     @Test
     fun aRunsOwnGpxImportedNextToItIsTheSameRunNotASecond() {
         val (points, _) = synthRun(seed = 12, startSec = QaHarness.daysAgoAtMidday(1), n = 900)

@@ -78,11 +78,11 @@ internal fun parseRunFile(bytes: ByteArray, parse: (ByteArray) -> ImportVerdict?
 /**
  * The [Event.LogRunTrack] for an imported [run]: the core's gated, decimated fixes,
  * sent as a live-tracked save sends its own, so distance, pace, splits and zone all
- * derive in-core, stamped when the run happened. The file's average heart rate goes
- * as bpm with `hr_pct_max` 0.0, as the run editor sends a bpm entry: the core
- * converts it against the profile in force on the run's date. Every run gets its
- * own entry id, so the runs of one multi-activity file, built in a tight loop, never
- * share one.
+ * derive in-core, stamped when the run happened with the device's UTC offset at that
+ * instant. The file's average heart rate goes as bpm with `hr_pct_max` 0.0, as the
+ * run editor sends a bpm entry: the core converts it against the profile in force on
+ * the run's date. Every run gets its own entry id, so the runs of one multi-activity
+ * file, built in a tight loop, never share one.
  */
 internal fun importedRunEvent(run: ImportedRun): Event.LogRunTrack = Event.LogRunTrack(
     points = run.points,
@@ -92,6 +92,7 @@ internal fun importedRunEvent(run: ImportedRun): Event.LogRunTrack = Event.LogRu
     workoutType = null,
     segmentStarts = run.segment_starts,
     avgHrBpm = run.avg_hr_bpm,
+    utcOffsetSec = utcOffsetSec(run.observed_at),
 )
 
 /** One picked/shared file, already read and parsed: its display [name] and the

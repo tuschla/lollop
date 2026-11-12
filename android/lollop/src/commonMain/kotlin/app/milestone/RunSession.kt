@@ -538,14 +538,16 @@ object RunSession {
 
         fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack = synchronized(this) {
             val (track, starts) = decimated(CoreConstants.TRACK_DECIMATION_CAP)
+            val observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec()
             Event.LogRunTrack(
                 points = track,
                 hrPctMax = 0.0,
-                observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec(),
+                observedAt = observedAt,
                 entryId = entryId,
                 workoutType = workoutType,
                 segmentStarts = starts,
                 sessionRpe = sessionRpe,
+                utcOffsetSec = utcOffsetSec(observedAt),
             )
         }
 

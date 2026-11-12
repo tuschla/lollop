@@ -104,8 +104,7 @@ fun RunTrackingScreen(
     onLogRunManually: () -> Unit,
 ) {
     val ctx = currentPlatformContext()
-    // Non-null: every tracker entry is hidden where the platform has no tracker.
-    val tracker = remember { checkNotNull(platformRunTracker()) }
+    val tracker = remember { platformRunTracker() }
     val scope = rememberCoroutineScope()
 
     // Follow mode keeps the map centred on the latest fix. A manual drag drops it

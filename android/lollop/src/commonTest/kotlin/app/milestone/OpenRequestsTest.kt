@@ -64,13 +64,15 @@ class OpenRequestsTest {
     }
 
     @Test
-    fun withoutATrackerTrackOpensTheRunEditor() {
+    fun trackAlwaysOpensTheRunTracker() {
         val model = ViewModel()
-        val run = today.copy(sheetOpen = true, sheetMode = LogMode.Run)
-        assertEquals(run, routeOpen(OpenDest.Track, today, model, sheetBusy = false, trackerPinned = false, canTrack = false))
         val history = today.copy(selected = Dest.History)
-        assertEquals(run, routeOpen(OpenDest.Track, history, model, sheetBusy = false, trackerPinned = false, canTrack = false))
-        val editing = today.copy(sheetOpen = true, sheetMode = LogMode.Set)
-        assertEquals(editing, routeOpen(OpenDest.Track, editing, model, sheetBusy = true, trackerPinned = false, canTrack = false), "a set loop stays")
+        assertEquals(history.copy(showTracker = true), routeOpen(OpenDest.Track, history, model, sheetBusy = false, trackerPinned = false))
+        val setLoop = today.copy(sheetOpen = true, sheetMode = LogMode.Set)
+        assertEquals(
+            setLoop.copy(showTracker = true),
+            routeOpen(OpenDest.Track, setLoop, model, sheetBusy = true, trackerPinned = false),
+            "the tracker opens over a set loop, which stays underneath",
+        )
     }
 }

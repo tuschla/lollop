@@ -632,6 +632,8 @@ pub const LIFT_DAYS_MAX: u8 = 5;
 pub const LIFT_ONLY_DEFAULT_LIFT_DAYS: u8 = 3;
 /// Lift days a lifting-and-running profile that chose none trains.
 pub const HYBRID_DEFAULT_LIFT_DAYS: u8 = 2;
+/// Fastest pace a stated recent race may claim, seconds per km (2:00/km).
+pub const RECENT_RACE_MIN_SEC_PER_KM: f64 = 120.0;
 
 fn goal_table_run_days(profile: &Profile) -> usize {
     let gwp = running::goal_week_plan(profile.goal_distance, profile.advanced).value;

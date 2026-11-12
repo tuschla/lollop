@@ -1,6 +1,7 @@
 //! Evidence presentation: `Recommended<T>` → `AdjustmentView`, the grade
 //! definitions, claim statements, the "why" sheet, and grade notes.
 
+use crate::app::format::fmt_reps;
 use crate::app::plan_views::PlanItem;
 use crate::app::view_types::{AdjustmentView, EvidenceTagView, GradeDefView, WhyView};
 use crate::autoreg;
@@ -109,14 +110,6 @@ fn applied_rule(r: &AdjustmentCall) -> Option<&'static str> {
 /// on; dropped once a work set is logged today.
 const FIRST_SET_CLAUSE: &str =
     " Log your first work set: if it feels as expected, the rest of the session stays as planned.";
-
-pub(super) fn reps_word(n: u8) -> String {
-    if n == 1 {
-        "1 rep".into()
-    } else {
-        format!("{n} reps")
-    }
-}
 
 /// A deload's cuts in plain words ("50% fewer sets, 10% less weight"), leaving
 /// out a zero cut; `None` when both are zero.
@@ -313,7 +306,7 @@ fn describe_rec(r: &AdjustmentCall, ctx: &CallCtx) -> String {
             ),
             (Adjustment::CapRpe(d), _) => format!(
                 "{exercise}: stop {} earlier than planned on the remaining sets.",
-                reps_word(*d)
+                fmt_reps(i64::from(*d))
             ),
             (Adjustment::IncreaseLoadPct(p), _) => format!(
                 "{exercise}: today's top set beat your recent best. You can add about {p:.0}% next time."
@@ -532,7 +525,7 @@ pub(super) fn describe(a: &Adjustment) -> String {
         Adjustment::CapRpe(d) => {
             format!(
                 "Stop {} earlier than planned on every set today",
-                reps_word(*d)
+                fmt_reps(i64::from(*d))
             )
         }
         Adjustment::DowngradeSession => "An easier session today".into(),

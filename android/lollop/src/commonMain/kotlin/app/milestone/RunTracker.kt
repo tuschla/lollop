@@ -8,8 +8,7 @@ import androidx.compose.runtime.Composable
  * to. Fixes and the recording state machine are common ([RunRecorder] into
  * [RunSession], the crash-safe [ActiveRunStore] file); this only drives the
  * platform. Android: the RunTrackingService foreground service; iOS: CoreLocation
- * (RunTracker.ios.kt). [platformRunTracker] is null where the platform has no
- * tracker; every tracker entry is hidden then.
+ * (RunTracker.ios.kt).
  */
 internal interface RunTracker {
     /** A precise location grant. Coarse-only is not enough for GPS tracking. */
@@ -105,5 +104,5 @@ internal interface RunServiceGrants {
     fun requestBatteryUnrestricted(ctx: PlatformContext)
 }
 
-/** This platform's run tracker, or null where GPS run recording isn't available. */
-internal expect fun platformRunTracker(): RunTracker?
+/** This platform's run tracker. */
+internal expect fun platformRunTracker(): RunTracker

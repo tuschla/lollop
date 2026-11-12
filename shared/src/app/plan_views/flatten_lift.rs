@@ -1,7 +1,7 @@
 //! Flattening a `Prescription::Lift` arm.
 
 use crate::app::evidence_views::{grade_note_str, why_from};
-use crate::app::format::{fmt_rounded, fmt_weight};
+use crate::app::format::{fmt_reps, fmt_rounded, fmt_weight};
 use crate::app::plan_views::adjust_fold::reduce_percent_intensity;
 use crate::app::plan_views::basis::planned_text;
 use crate::app::plan_views::item_render::{
@@ -414,8 +414,8 @@ fn rep_range_arm(
         (Some(kg), Some(w)) if (kg - w.weight_kg).abs() < 0.01 => loaded(
             kg,
             format!(
-                ": same weight as last time, aim for {} reps per set. ",
-                l.reps
+                ": same weight as last time, aim for {} per set. ",
+                fmt_reps(l.reps.into())
             ),
         ),
         (Some(kg), _) if drop_cut && !rederived_under_cut => loaded(

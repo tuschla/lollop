@@ -450,8 +450,8 @@ internal fun raceTimeDisplay(digits: String): String = hmsDisplay(digits.ifEmpty
 
 /** Running paces (min per km) a recent finish time must imply to be believed, so
  *  a typo like "25" (25 seconds) for a 5K is caught before it anchors every pace.
- *  The floor is the core's (app::ingest keeps time_sec / distance_km >= 120). */
-private val PLAUSIBLE_RACE_PACE_MIN_PER_KM = 2.0..20.0
+ *  The floor is the core's; the ceiling is the setup's own. */
+private val PLAUSIBLE_RACE_PACE_MIN_PER_KM = CoreConstants.RECENT_RACE_MIN_SEC_PER_KM / 60.0..20.0
 
 internal fun plausibleRaceTime(distanceKm: Double, sec: Int): Boolean =
     (sec / 60.0 / distanceKm) in PLAUSIBLE_RACE_PACE_MIN_PER_KM

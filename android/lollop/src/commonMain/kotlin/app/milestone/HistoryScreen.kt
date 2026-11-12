@@ -135,11 +135,8 @@ internal fun buildMonthNav(
 internal fun HistoryDestination(
     model: ViewModel,
     onEvent: (Event) -> Unit = {},
-    // Opens the run tracker; null where the platform records no runs (iOS for now):
-    // the Runs empty state then offers "Log run" ([onLogRun]) instead.
-    onTrackRun: (() -> Unit)? = {},
+    onTrackRun: () -> Unit = {},
     onLogSet: () -> Unit = {},
-    onLogRun: () -> Unit = {},
 ) {
     // The segment tracks whichever type was logged most recently (newest
     // observed_at), falling back to Lifts when empty. A factual shell-side
@@ -161,8 +158,8 @@ internal fun HistoryDestination(
     val liftsPresent = model.lifts.isNotEmpty()
     val runsPresent = model.runs.isNotEmpty()
     val hasAny = liftsPresent || runsPresent
-    val showLifting = model.showLifting()
-    val showRunning = model.showRunning()
+    val showLifting = model.trains?.lifts == true
+    val showRunning = model.trains?.runs == true
     val weightUnit = model.weightUnit()
     val distanceUnit = rememberDistanceUnit()
     // Re-emits once a minute so "2 hours ago" labels and the rolling-7-day window refresh.
@@ -436,8 +433,8 @@ internal fun HistoryDestination(
             item(key = "runs-empty") {
                 HistoryEmptyState(
                     text = stringResource(Res.string.history_runs_empty),
-                    primaryLabel = stringResource(if (onTrackRun != null) Res.string.history_track_run else Res.string.main_log_run_title),
-                    onPrimary = onTrackRun ?: onLogRun,
+                    primaryLabel = stringResource(Res.string.history_track_run),
+                    onPrimary = onTrackRun,
                     secondaryLabel = stringResource(Res.string.history_import_runs_long),
                     onSecondary = launchImport,
                 )

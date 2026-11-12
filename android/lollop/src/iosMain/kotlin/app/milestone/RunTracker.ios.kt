@@ -31,7 +31,7 @@ import platform.darwin.dispatch_after
 import platform.darwin.dispatch_get_main_queue
 import platform.darwin.dispatch_time
 
-internal actual fun platformRunTracker(): RunTracker? = IosRunTracker
+internal actual fun platformRunTracker(): RunTracker = IosRunTracker
 
 /** The run's Live Activity buttons: Pause/Resume call [setPaused] (through
  *  `LollopSurfaces` in the `Lollop` framework). Main thread only. */

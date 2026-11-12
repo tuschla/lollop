@@ -541,10 +541,13 @@ fn the_first_set_clause_stays_spent_once_the_session_is_finished() {
     assert!(!has_clause(&vm), "{:?}", vm.adjustments);
 }
 
-#[test]
-fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
-    // "Came up short on <lift> on <day>: k of n sets (did instead of
-    // planned)", gone once that lift's next session is today.
+/// Monday's first anchored lift left short: `(sets + 1) / 2` sets at the
+/// weight and reps `done` picks from the planned item, every other lift of
+/// the day done as planned. Returns the item, the next day it is planned
+/// again and a day off between the two.
+fn short_monday_lift(
+    done: impl Fn(&PrescriptionView) -> (f64, u32),
+) -> (Engine, Model, PrescriptionView, i64, i64) {
     let (app, mut model) = planned_strength_model(true);
     let week = app.view(&model).week_plan;
     let lift_days: Vec<&SessionPlanView> = week
@@ -559,16 +562,14 @@ fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
         .find(|i| i.load_kg.is_some())
         .expect("an anchored lift")
         .clone();
-    let load = it.load_kg.unwrap();
-    let lighter = load - 5.0;
-    let reps = u32::from(it.reps_low);
+    let (kg, reps) = done(&it);
     let sets = i64::from(it.sets);
     for k in 0..(sets + 1) / 2 {
         log(
             &app,
             &mut model,
             &it.exercise,
-            set(lighter, reps, 0.0, MON * DAY_SEC + 3_600 + 300 * k),
+            set(kg, reps, 0.0, MON * DAY_SEC + 3_600 + 300 * k),
         );
     }
     // Every other exercise of the day done as planned, so the day is done.
@@ -596,27 +597,49 @@ fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
     let off_day = (MON + 1..next)
         .find(|d| !lift_days.iter().any(|s| s.epoch_day == *d))
         .expect("a day between the two lift days");
-    let feedback_on = |model: &mut Model, day: i64| {
-        set_today(&app, model, day);
-        app.view(model)
-            .feedback
-            .map(|f| f.message)
-            .unwrap_or_default()
-    };
-    let msg = feedback_on(&mut model, off_day);
+    (app, model, it, next, off_day)
+}
+
+fn feedback_on(app: &Engine, model: &mut Model, day: i64) -> String {
+    set_today(app, model, day);
+    app.view(model)
+        .feedback
+        .map(|f| f.message)
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
+    // "Came up short on <lift> on <day>: k of n sets (did instead of
+    // planned)", gone once that lift's next session is today.
+    let (app, mut model, it, next, off_day) =
+        short_monday_lift(|it| (it.load_kg.unwrap() - 5.0, u32::from(it.reps_low)));
+    let load = it.load_kg.unwrap();
+    let msg = feedback_on(&app, &mut model, off_day);
     let lb = |kg: f64| fmt_weight(kg, false);
     let expected = format!(
-        "Came up short on {} on Monday: {} of {} sets ({reps} reps at {} instead of {} at {})",
+        "Came up short on {} on Monday: {} of {} sets ({} reps at {} instead of {} at {})",
         it.exercise,
-        (sets + 1) / 2,
+        it.sets.div_ceil(2),
         it.sets,
-        lb(lighter),
+        it.reps_low,
+        lb(load - 5.0),
         it.reps_low,
         lb(load)
     );
     assert!(msg.starts_with(&expected), "{msg}\nexpected: {expected}");
-    let msg = feedback_on(&mut model, next);
+    let msg = feedback_on(&app, &mut model, next);
     assert!(!msg.contains("Came up short"), "{msg}");
+}
+
+#[test]
+fn a_short_lift_note_counts_a_single_as_one_rep() {
+    let (app, mut model, it, _, off_day) = short_monday_lift(|it| (it.load_kg.unwrap(), 1));
+    assert!(it.reps_low > 1, "the plan asks for more than a single");
+    let kg = fmt_weight(it.load_kg.unwrap(), false);
+    let msg = feedback_on(&app, &mut model, off_day);
+    let expected = format!("(1 rep at {kg} instead of {} at {kg})", it.reps_low);
+    assert!(msg.contains(&expected), "{msg}\nexpected: {expected}");
 }
 
 #[test]

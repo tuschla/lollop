@@ -5,7 +5,7 @@ use crate::day::local_day;
 use crate::plates::LB_PER_KG;
 use crate::profile::DistanceUnit;
 use crate::running::{self, GoalDistance};
-use crate::schema::Goal;
+use crate::schema::{Goal, VdotBand};
 
 /// Render an inclusive integer range, collapsing to a single value when the
 /// bounds coincide (e.g. `(3, 3) -> "3"`, `(6, 9) -> "6–9"`). Keeps guidance
@@ -15,6 +15,26 @@ pub(super) fn fmt_u8_range((lo, hi): (u8, u8)) -> String {
         lo.to_string()
     } else {
         format!("{lo}–{hi}")
+    }
+}
+
+/// A rep count: "1 rep", "3 reps".
+pub(super) fn fmt_reps(n: i64) -> String {
+    if n == 1 {
+        "1 rep".into()
+    } else {
+        format!("{n} reps")
+    }
+}
+
+/// A Daniels training band's name ("Threshold").
+pub(super) fn vdot_band_name(b: VdotBand) -> &'static str {
+    match b {
+        VdotBand::Easy => "Easy",
+        VdotBand::Marathon => "Marathon",
+        VdotBand::Threshold => "Threshold",
+        VdotBand::Interval => "Interval",
+        VdotBand::Repetition => "Repetition",
     }
 }
 

@@ -882,8 +882,8 @@ fun LogSetEditor(
 }
 
 /** The effort scale, in reps left: 4+ / 3 / 2 / 1 / 0, stored as the RIR-based
- *  RPE the core reads (10 − reps left; 4 or more = 6). */
-private val RepsLeftValues = listOf(6.0, 7.0, 8.0, 9.0, 10.0)
+ *  RPE the core reads ([rpeOfRepsLeft]; the open-ended cell as its lowest reserve). */
+private val RepsLeftValues = (CoreConstants.OPEN_ENDED_RIR.toInt() downTo 0).map { rpeOfRepsLeft(it.toDouble()) }
 
 /** Keeps a field group composed (its state and scroll position survive) while it
  *  takes no room, draws nothing and is hidden from TalkBack until [shown]. */
@@ -899,7 +899,7 @@ private fun Modifier.shownOnly(shown: Boolean): Modifier =
 
 private fun repsLeftFigure(rpe: Double): String {
     val rir = repsLeft(rpe)
-    return if (rir >= 4.0) "4+" else "${rir.toInt()}"
+    return if (isOpenEnded(rir)) "${CoreConstants.OPEN_ENDED_RIR.toInt()}+" else "${rir.toInt()}"
 }
 
 /** The effort scale as one row of cells, reps left ("4+" … "0"), filled when
@@ -915,9 +915,10 @@ private fun EffortScaleRow(current: Double?, onPick: (Double?) -> Unit) {
     ) {
         RepsLeftValues.forEach { v ->
             val selected = current == v
-            val cd = when (v) {
-                6.0 -> stringResource(Res.string.log_effort_cd_4plus)
-                9.0 -> stringResource(Res.string.log_effort_cd_1)
+            val rir = repsLeft(v)
+            val cd = when {
+                isOpenEnded(rir) -> stringResource(Res.string.log_effort_cd_4plus)
+                rir == 1.0 -> stringResource(Res.string.log_effort_cd_1)
                 else -> stringResource(Res.string.log_effort_cd, repsLeftFigure(v))
             }
             Box(

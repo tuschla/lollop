@@ -16,7 +16,7 @@ use crate::event::entry::{EntryRef, LoggedEntry, find_entry};
 use crate::event::rules::{PlanStep, end_marker_key, readiness_removal};
 use crate::event::{EntryKind, Event, RunMeta, SessionReview};
 use crate::hypertrophy;
-use crate::profile::Profile;
+use crate::profile::{LIFT_DAYS_MAX, LIFT_DAYS_MIN, Profile, RECENT_RACE_MIN_SEC_PER_KM};
 #[cfg(any(ffi_surface, test))]
 use crate::{gps::GpsPoint, sanitize::Sanitize};
 
@@ -422,16 +422,19 @@ fn located<T: LoggedEntry>(rows: &[T], target: Option<EntryRef>) -> Option<usize
 /// corrupt or hand-edited event can neither poison plan math nor surface an
 /// impossible value. Anything implausible becomes "unstated" (`None`), which
 /// every consumer already handles as the conservative default:
-/// - `lift_days_per_week`: 2..=5, else `None`;
+/// - `lift_days_per_week`: [`LIFT_DAYS_MIN`]..=[`LIFT_DAYS_MAX`], else `None`;
 /// - `training_weekdays`: only the seven weekday bits; an empty mask → `None`;
 /// - race / meet / layoff-return / birth dates: inside [`PROFILE_EPOCH_DAY_RANGE`];
 /// - `recent_race`: distance 0.4–100 km, positive time no faster than
-///   2:00/km, an in-range date (an out-of-range date alone is dropped);
+///   [`RECENT_RACE_MIN_SEC_PER_KM`], an in-range date (an out-of-range date
+///   alone is dropped);
 /// - `stated_longest_recent_km`: 0–200 km;
 /// - `specialization_muscle`: must resolve to a tracked muscle and is stored
 ///   as its canonical key.
 pub(super) fn sanitize_planning_fields(p: &mut Profile) {
-    p.lift_days_per_week = p.lift_days_per_week.filter(|d| (2..=5).contains(d));
+    p.lift_days_per_week = p
+        .lift_days_per_week
+        .filter(|d| (LIFT_DAYS_MIN..=LIFT_DAYS_MAX).contains(d));
     p.training_weekdays = p.chosen_weekdays();
     let date_ok = |d: &i64| PROFILE_EPOCH_DAY_RANGE.contains(d);
     p.goal_race_epoch_day = p.goal_race_epoch_day.filter(date_ok);
@@ -441,7 +444,7 @@ pub(super) fn sanitize_planning_fields(p: &mut Profile) {
     p.recent_race = p.recent_race.take().and_then(|mut r| {
         let plausible = (0.4..=100.0).contains(&r.distance_km)
             && r.time_sec > 0
-            && r.time_sec as f64 / r.distance_km >= 120.0;
+            && r.time_sec as f64 / r.distance_km >= RECENT_RACE_MIN_SEC_PER_KM;
         r.epoch_day = r.epoch_day.filter(date_ok);
         plausible.then_some(r)
     });

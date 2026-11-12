@@ -79,10 +79,7 @@ internal fun LogSheetContent(
     model: ViewModel,
     onMode: (LogMode) -> Unit,
     onEvent: (Event) -> Unit,
-    // Opens the run tracker; null where the platform records no runs (iOS for now):
-    // the chooser then leaves "Track run" out and today's planned run opens the run
-    // editor instead.
-    onTrackRun: (() -> Unit)?,
+    onTrackRun: () -> Unit,
     onDismiss: () -> Unit,
     // Coach prescription to prefill the Set editor from (NEW mode only); null
     // opens blank. `onPlanPrefill` records which exercise the "Today's plan"
@@ -140,11 +137,10 @@ internal fun LogSheetContent(
         when (mode) {
             LogMode.Chooser -> {
                 // Modality-gate the lift/run entries so a run-only profile isn't
-                // offered "Log set" (and vice-versa). A not-yet-set-up user
-                // (profile == null) still sees everything. Pain / check-ins /
-                // review / raw signal are modality-agnostic and always shown.
-                val liftVisible = model.profile == null || model.showLifting()
-                val runVisible = model.profile == null || model.showRunning()
+                // offered "Log set" (and vice-versa). Pain / check-ins / review /
+                // raw signal are modality-agnostic and always shown.
+                val liftVisible = model.showLifting()
+                val runVisible = model.showRunning()
                 // "Today's plan" fast-path: the highlighted way to start today's
                 // prescribed session (the hero carries no start action). Only a
                 // trainable session dated today, with items, reaches here; once
@@ -161,11 +157,8 @@ internal fun LogSheetContent(
                         Res.drawable.ic_content_run,
                         LogRowTone.Plan,
                     ) {
-                        if (onTrackRun != null) {
-                            onTrackRun(); onDismiss()
-                        } else {
-                            onMode(LogMode.Run)
-                        }
+                        onTrackRun()
+                        onDismiss()
                     }
                 } else if (lift != null && (lift.first === ns || (liftVisible && !model.train_blocked))) {
                     val (session, item) = lift
@@ -179,7 +172,7 @@ internal fun LogSheetContent(
                         onMode(LogMode.Set)
                     }
                 }
-                if (runVisible && onTrackRun != null) {
+                if (runVisible) {
                     // One of the most-used actions: first plain row, never below
                     // the fold. Location-pin icon tells it apart from Log run.
                     LogOptionRow(

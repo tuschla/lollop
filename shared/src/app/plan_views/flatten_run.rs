@@ -1,13 +1,13 @@
 //! Flattening a `Prescription::Run` arm and its tracker structure.
 
 use crate::app::evidence_views::why_from;
-use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths};
+use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths, vdot_band_name};
 use crate::app::plan_views::plan_item::{PlanItem, RunAmount};
 use crate::app::view_types::{
     EvidenceTagView, ItemKind, PlanIntensity, PrescriptionView, RunStructureView, RunWalkStepView,
 };
 use crate::profile::DistanceUnit;
-use crate::schema::{RunIntensity, RunVolume, Rx, RxBasis, ThreeZone, VdotBand};
+use crate::schema::{RunIntensity, RunVolume, Rx, RxBasis, ThreeZone};
 
 /// Render a prescribed run distance: whole km as "8 km", a sub-km step as one
 /// decimal ("6.5 km", "4.3 km"), matching the plan's 0.5 km / 0.1 km
@@ -232,16 +232,5 @@ fn run_safety_reason(r: &crate::schema::RunPrescription, rx: &Rx, unit: Distance
             format!("Capped at {d}: at most {spike_pct:.0}% over {l}")
         }
         (Some(l), _) => format!("Kept short and easy: at most {spike_pct:.0}% over {l}"),
-    }
-}
-
-/// A Daniels training band's name ("Threshold").
-pub(in crate::app) fn vdot_band_name(b: VdotBand) -> &'static str {
-    match b {
-        VdotBand::Easy => "Easy",
-        VdotBand::Marathon => "Marathon",
-        VdotBand::Threshold => "Threshold",
-        VdotBand::Interval => "Interval",
-        VdotBand::Repetition => "Repetition",
     }
 }

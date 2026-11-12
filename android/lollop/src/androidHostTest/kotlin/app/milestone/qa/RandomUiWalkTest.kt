@@ -347,7 +347,7 @@ class RandomUiWalkTest : UiProbeTest() {
         val lifts = groupLiftSessions(m.lifts, zone)
         val hasAny = m.lifts.isNotEmpty() || m.runs.isNotEmpty()
         if (listPane != null && !hasAny) fail("History splits into two panes with nothing logged")
-        val showSegment = (m.showLifting() || m.lifts.isNotEmpty()) && (m.showRunning() || m.runs.isNotEmpty())
+        val showSegment = (m.trains?.lifts == true || m.lifts.isNotEmpty()) && (m.trains?.runs == true || m.runs.isNotEmpty())
         val records = m.run_progress?.let { it.longest_run_km > 0.0 || it.best_efforts.isNotEmpty() } == true
         fun months(stamps: List<Long>): Int {
             var prev: String? = null

@@ -1,7 +1,6 @@
-use crate::app::format::fmt_pct_range;
+use crate::app::format::{fmt_pct_range, vdot_band_name};
 use crate::app::guidance::{push_guidance, push_guidance_basis};
 use crate::app::model::{HrZoneInputView, Model};
-use crate::app::plan_views;
 use crate::app::view_types::{GuidanceView, HrMaxView, HrZoneBandView};
 use crate::evidence::claims;
 use crate::schema::{Recommended, VdotBand};
@@ -219,7 +218,7 @@ fn push_band_rows(
         let pct_range = fmt_pct_range(lo_pct, hi_pct);
         bands.push(HrZoneBandView {
             kind: band,
-            name: plan_views::vdot_band_name(band).to_string(),
+            name: vdot_band_name(band).to_string(),
             pct_low: lo_pct.round(),
             pct_high: hi_pct.round(),
             bpm_low: bpm_lo,
@@ -232,10 +231,7 @@ fn push_band_rows(
         push_guidance_basis(
             rows,
             "Heart-rate zones",
-            format!(
-                "{}: {pct_range}% of HRmax{hr_seg}",
-                plan_views::vdot_band_name(band)
-            ),
+            format!("{}: {pct_range}% of HRmax{hr_seg}", vdot_band_name(band)),
             Some(format!(
                 "This zone is {vo2_seg} of VO2max (maximum oxygen uptake), per the Daniels \
                  tables."
