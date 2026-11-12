@@ -191,6 +191,11 @@
     <string name="main_setup_prompt_body">lollop plans your week from your setup answers.</string>
     <string name="main_setup_prompt_cta">Start guided setup</string>
 
+    <!-- Week strip: a day's discipline under its weekday -->
+    <string name="main_week_discipline_lift">Lift</string>
+    <string name="main_week_discipline_run">Run</string>
+    <string name="main_week_discipline_rest">Rest</string>
+
     <!-- Week strip (accessibility) -->
     <string name="main_a11y_today_prefix">"Today, "</string>
     <!-- A day's status, spoken mid-phrase after its weekday and type ("Tuesday, Run, planned"). -->
@@ -625,6 +630,12 @@
     <string name="main_dark_mode_system">System</string>
     <string name="main_dark_mode_light">Light</string>
     <string name="main_dark_mode_dark">Dark</string>
+
+    <!-- Profile: the theme cards (names of the colour themes) -->
+    <string name="main_theme_rose">Rose</string>
+    <string name="main_theme_meadow">Meadow</string>
+    <string name="main_theme_iris">Iris</string>
+    <string name="main_theme_paper">Paper</string>
 
     <!-- History · Runs: merged progress chart, records, rated run, route actions -->
     <string name="history_progress_weeks">%1$d weeks</string>

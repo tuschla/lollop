@@ -131,29 +131,6 @@ internal fun plannedRunToday(model: ViewModel): PrescriptionView? {
     return ns.runItem
 }
 
-/** The run-type chip preselected on the Finish review for a followed plan's
- *  training band (view_types.rs RunTargetView.band); null for a free run. */
-internal fun workoutTypeForBand(band: String?): WorkoutType? = when (band) {
-    null, "" -> null
-    "recovery" -> WorkoutType.Recovery
-    "easy" -> WorkoutType.Easy
-    "threshold" -> WorkoutType.Tempo
-    "interval", "repetition", "hill effort" -> WorkoutType.Interval
-    else -> WorkoutType.Steady
-}
-
-/** The run-type chip preselected for a followed plan: the planned session's type
- *  when it names one of the chips (a long run's band is "easy", so the band alone
- *  would read Steady), else [workoutTypeForBand]. */
-internal fun workoutTypeForPlan(sessionType: SessionType?, band: String?): WorkoutType? = when (sessionType) {
-    SessionType.RunLongRun -> WorkoutType.LongRun
-    SessionType.RunRecovery -> WorkoutType.Recovery
-    SessionType.RunEasy -> WorkoutType.Easy
-    SessionType.RunTempo -> WorkoutType.Tempo
-    SessionType.RunInterval, SessionType.RunRepetition, SessionType.RunHills -> WorkoutType.Interval
-    else -> workoutTypeForBand(band)
-}
-
 /** The plan's targets as short lines: pace (in the profile's unit), heart rate,
  *  and the effort, each labelled like the Today run item ("Effort: 3–4 of 10").
  *  Empty when the item carries no targets. */

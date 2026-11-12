@@ -3,11 +3,11 @@ package app.milestone
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 
-/** Modality derivation from the echoed profile: a side is "shown" when it carries
- *  volume. Callers OR in `profile == null` wherever a not-yet-set-up user should
+/** The sides the profile trains, as the core's plan reads them ([ViewModel.trains]).
+ *  Callers OR in `profile == null` wherever a not-yet-set-up user should
  *  still see everything (the chooser, Profile's calculators, history segment). */
-internal fun ViewModel.showLifting(): Boolean = (profile?.weekly_sets ?: 0) > 0
-internal fun ViewModel.showRunning(): Boolean = (profile?.running_days_per_week ?: 0) > 0
+internal fun ViewModel.showLifting(): Boolean = trains?.lifts == true
+internal fun ViewModel.showRunning(): Boolean = trains?.runs == true
 
 /** The session can still be trained today: the hero, possibly adjusted (not blocked). */
 internal val SessionPlanView.actionable: Boolean get() = status == SessionStatus.Next || status == SessionStatus.Adjusted

@@ -44,6 +44,7 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
+import app.milestone.M_PER_DEG
 import app.milestone.OpenDest
 import app.milestone.R
 import app.milestone.RunSession
@@ -785,7 +786,7 @@ class AdaptiveLayoutTest {
         rule.waitForNode(hasText(str(R.string.track_btn_stop)), 15_000)
         // A fix after Resume extends the route on the live map.
         val last = RunSession.points.value.last()
-        RunSession.add(GpsPoint(last.lat + 0.00027, last.lon, last.observedAt + 10L, 5.0), 1_300L * 1_000_000_000L)
+        RunSession.add(GpsPoint(last.lat + 30.0 / M_PER_DEG, last.lon, last.observedAt + 10L, 5.0), 1_300L * 1_000_000_000L)
         rule.waitForIdle()
         rule.onNode(hasText(str(R.string.track_btn_stop)) and hasClickAction()).performClick()
         rule.waitForNode(hasText(str(R.string.track_finish_title)), 15_000)

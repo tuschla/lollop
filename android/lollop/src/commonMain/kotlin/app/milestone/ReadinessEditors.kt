@@ -161,9 +161,9 @@ fun ReadinessEditor(
                 color = OnBgMuted,
                 style = Type.Caption,
             )
-            // Picker order comes from the core's signal_groups metadata (ALL_SIGNALS
-            // order on the wire), so routine metrics, Soreness included, render
-            // together above the medical red-flag fence.
+            // Picker order comes from the core's signal_groups metadata (its
+            // summary order on the wire), so routine metrics, Soreness included,
+            // render together above the medical red-flag fence.
             val ordered = remember(signalGroups) { signalGroups.keys.toList() }
             val signalLabels = ordered.associateWith { stringResource(it.labelRes) }
             EnumRow(

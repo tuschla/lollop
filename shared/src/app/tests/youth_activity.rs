@@ -96,7 +96,7 @@ fn the_card_counts_runs_lift_spans_and_activities_within_the_week() {
     assert_eq!(y.evidence.grade, Some(EvidenceGrade::Strong));
     assert!(!y.evidence.safety_critical);
     assert_eq!(y.why.basis, targets.evidence().statement);
-    assert!(!y.why.grade_note.is_empty() && y.why.improves != "-");
+    assert!(!y.why.grade_note.is_empty() && y.why.improves.is_some());
     assert_eq!(
         vm.activities.len(),
         4,

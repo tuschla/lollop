@@ -10,6 +10,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.serialization.json.Json
@@ -129,9 +130,10 @@ class ImportParserFuzzTest {
         val rnd = Random(seed)
         var lat = 47.37
         var lon = 8.54
+        val mPerDegLon = M_PER_DEG * cos(Math.toRadians(lat))
         return List(n) { i ->
-            lat += 3.0 * (0.9 + 0.2 * rnd.nextDouble()) / 111_195.0
-            lon += sin(i * 0.05) * 1.5 / 75_000.0
+            lat += 3.0 * (0.9 + 0.2 * rnd.nextDouble()) / M_PER_DEG
+            lon += sin(i * 0.05) * 1.5 / mPerDegLon
             Fix(lat, lon, t0 + i, 120 + i % 40)
         }
     }

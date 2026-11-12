@@ -74,9 +74,7 @@ targets:
           export PATH="$HOME/.cargo/bin:/usr/bin:$PATH"
           unset SDKROOT
           cd "$SRCROOT/../android"
-          # Linking Compose into a framework needs more heap than gradle.properties gives.
-          ./gradlew "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" \
-            :lollop-ios:embedAndSignAppleFrameworkForXcode
+          ./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode
   # The app's one extension (each extension costs a free Apple Account an app ID):
   # the home and lock screen widget, the run's and the rest's Live Activities and
   # the Control Center control. Swift only; it reads what the app writes and

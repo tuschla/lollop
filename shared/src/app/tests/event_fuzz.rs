@@ -23,11 +23,13 @@
 //! failure names its seed.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::LazyLock;
 
 use super::*;
 use crate::event::entry::activity_is_valid;
 use crate::log::compact_event_log;
 use crate::schema::{LadderId, PainDetail, PainKind, PainTrend};
+use crate::test_support::unit_variants;
 
 /// A Monday-ish epoch day in late 2025; every sequence starts near it.
 const BASE_DAY: i64 = 20_400;
@@ -151,60 +153,9 @@ struct Gen {
     acts: Vec<(u64, i64)>,
 }
 
-const SIGNALS: [ReadinessSignal; 15] = [
-    ReadinessSignal::Rpe,
-    ReadinessSignal::EstimatedOneRm,
-    ReadinessSignal::BarVelocity,
-    ReadinessSignal::VelocityLoss,
-    ReadinessSignal::WellnessZ,
-    ReadinessSignal::HrvLnRmssd,
-    ReadinessSignal::HrvCv,
-    ReadinessSignal::AerobicDecoupling,
-    ReadinessSignal::RestingHr,
-    ReadinessSignal::Pain,
-    ReadinessSignal::Soreness,
-    ReadinessSignal::Illness,
-    ReadinessSignal::RedS,
-    ReadinessSignal::CardiacRedFlag,
-    ReadinessSignal::BoneStress,
-];
-
-const LADDERS: [LadderId; 15] = [
-    LadderId::HorizontalPush,
-    LadderId::Dip,
-    LadderId::VerticalPush,
-    LadderId::HorizontalPull,
-    LadderId::VerticalPull,
-    LadderId::Squat,
-    LadderId::Hinge,
-    LadderId::Core,
-    LadderId::Handstand,
-    LadderId::FrontLever,
-    LadderId::Planche,
-    LadderId::BackLever,
-    LadderId::MuscleUp,
-    LadderId::Jump,
-    LadderId::PlyoPush,
-];
-
-const WORKOUTS: [WorkoutType; 6] = [
-    WorkoutType::Steady,
-    WorkoutType::Interval,
-    WorkoutType::Tempo,
-    WorkoutType::LongRun,
-    WorkoutType::Recovery,
-    WorkoutType::Easy,
-];
-
-const ACTIVITY_KINDS: [ActivityKind; 7] = [
-    ActivityKind::Sport,
-    ActivityKind::Cycling,
-    ActivityKind::Swimming,
-    ActivityKind::Walking,
-    ActivityKind::Dance,
-    ActivityKind::Strength,
-    ActivityKind::Other,
-];
+static LADDERS: LazyLock<Vec<LadderId>> = LazyLock::new(unit_variants);
+static WORKOUTS: LazyLock<Vec<WorkoutType>> = LazyLock::new(unit_variants);
+static ACTIVITY_KINDS: LazyLock<Vec<ActivityKind>> = LazyLock::new(unit_variants);
 
 /// Names the shell's exercise picker offers (plus a retired catalog label).
 const SHELL_EXERCISES: [&str; 12] = [
@@ -498,7 +449,7 @@ impl Gen {
             K::Trim => self.trim(),
             K::Readiness => Event::SubmitReadiness(self.readiness()),
             K::RemoveReadiness => Event::RemoveReadiness {
-                signal: self.rng.pick(&SIGNALS),
+                signal: self.rng.pick(&ReadinessSignal::ALL),
                 observed_at: if self.rng.chance(0.8) { self.now() } else { 0 },
             },
             K::ResolveHold => Event::ResolveHold {
@@ -662,7 +613,7 @@ impl Gen {
         }
     }
 
-    fn run_extras(&mut self) -> (Option<WorkoutType>, Option<u8>, Option<f64>) {
+    fn run_extras(&mut self) -> RunMeta {
         let workout = self.rng.opt(0.5, |r| r.pick(&WORKOUTS));
         let rpe = if self.rng.chance(0.5) {
             Some(self.u8w(0, 10))
@@ -678,12 +629,17 @@ impl Gen {
         } else {
             None
         };
-        (workout, rpe, avg_hr)
+        RunMeta {
+            workout_type: workout,
+            session_rpe: rpe,
+            avg_hr_bpm: avg_hr,
+            utc_offset_sec: None,
+        }
     }
 
     /// The shell never sends both figures: a run typed in bpm goes out with
-    /// `hr_pct_max` 0 (`RunEditor.kt`'s bpm mode), which `restoreEventFor`
-    /// mirrors. Only the wild modes pair a percentage with a bpm.
+    /// `hr_pct_max` 0 (`RunEditor.kt`'s bpm mode). Only the wild modes pair a
+    /// percentage with a bpm.
     fn shell_hr_pct(&self, hr_pct_max: f64, avg_hr_bpm: Option<f64>) -> f64 {
         if avg_hr_bpm.is_some() && !self.wild() {
             0.0
@@ -715,7 +671,7 @@ impl Gen {
         } else {
             self.rng.int(55, 98) as f64
         };
-        let (workout_type, session_rpe, avg_hr_bpm) = self.run_extras();
+        let meta = self.run_extras();
         let ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
         let entry_id = self.log_id(&ids);
         let observed_at = self.stamp();
@@ -727,7 +683,7 @@ impl Gen {
         Event::LogRun {
             distance_km,
             duration_min,
-            hr_pct_max: self.shell_hr_pct(hr_pct_max, avg_hr_bpm),
+            hr_pct_max: self.shell_hr_pct(hr_pct_max, meta.avg_hr_bpm),
             longest_recent_km: if self.wild() {
                 self.f(0.0, 25.0, 0.1)
             } else {
@@ -735,10 +691,7 @@ impl Gen {
             },
             observed_at,
             entry_id,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
-            utc_offset_sec: None,
+            meta,
         }
     }
 
@@ -841,7 +794,7 @@ impl Gen {
             at: observed_at,
             span,
         });
-        let (workout_type, session_rpe, avg_hr_bpm) = self.run_extras();
+        let meta = self.run_extras();
         let hr_pct_max = if self.rng.chance(0.5) {
             0.0
         } else {
@@ -849,7 +802,7 @@ impl Gen {
         };
         Event::LogRunTrack {
             points,
-            hr_pct_max: self.shell_hr_pct(hr_pct_max, avg_hr_bpm),
+            hr_pct_max: self.shell_hr_pct(hr_pct_max, meta.avg_hr_bpm),
             longest_recent_km: if self.wild() {
                 self.f(0.0, 25.0, 0.1)
             } else {
@@ -858,10 +811,7 @@ impl Gen {
             segment_starts,
             observed_at,
             entry_id,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
-            utc_offset_sec: None,
+            meta,
         }
     }
 
@@ -921,10 +871,7 @@ impl Gen {
             segment_starts,
             observed_at,
             entry_id,
-            workout_type: None,
-            session_rpe: None,
-            avg_hr_bpm: None,
-            utc_offset_sec: None,
+            meta: RunMeta::default(),
         }
     }
 
@@ -1027,9 +974,7 @@ impl Gen {
             duration_min,
             hr_pct_max,
             longest_recent_km,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
+            meta,
             ..
         } = self.log_run()
         else {
@@ -1045,16 +990,18 @@ impl Gen {
             longest_recent_km,
             observed_at,
             observed_at_fallback,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
+            meta,
         }
     }
 
     fn amend_run_meta(&mut self) -> Event {
         let pool: Vec<(u64, i64)> = self.runs.iter().map(|r| (r.id, r.at)).collect();
         let (entry_id, observed_at_fallback) = self.target(&pool);
-        let (workout_type, session_rpe, _) = self.run_extras();
+        let RunMeta {
+            workout_type,
+            session_rpe,
+            ..
+        } = self.run_extras();
         Event::AmendRunMeta {
             entry_id,
             observed_at_fallback,
@@ -1093,7 +1040,7 @@ impl Gen {
     }
 
     fn readiness(&mut self) -> ReadinessInput {
-        let signal = self.rng.pick(&SIGNALS);
+        let signal = self.rng.pick(&ReadinessSignal::ALL);
         let value = match signal {
             ReadinessSignal::Pain => {
                 if self.rng.chance(0.15) {
@@ -1962,88 +1909,34 @@ fn fuzz_absurd_values_never_break_the_view() {
     );
 }
 
-/// `HistoryEntry.kt::restoreEventFor` for a set.
-fn restore_lift(v: &LiftResultView) -> Event {
-    Event::LogSet {
-        exercise: v.exercise.clone(),
-        weight_kg: v.weight_kg,
-        reps: v.reps,
-        rpe: v.rpe,
-        observed_at: v.observed_at,
-        entry_id: v.entry_id,
-        hold_sec: v.hold_sec,
-    }
-}
-
-/// `HistoryEntry.kt::loggedHrPctMax`: a bpm entry sends 0 and lets the core
-/// derive the percentage again.
-fn logged_hr_pct(v: &RunResultView) -> f64 {
-    if v.avg_hr_bpm.is_some() {
-        0.0
-    } else {
-        v.hr_pct_max
-    }
-}
-
-/// `HistoryEntry.kt::restoreEventFor` for a run: a hand-entered run as
-/// shown; a GPS run (a route, or a track QC left unmeasurable) rebuilt from
-/// the segments of the core's `RunTrack` op (`run_track_segments`, what
-/// `DurableCore.runTrack` fetches). `None` when fewer than two fixes come
-/// back, where the shell offers no Undo.
-fn restore_run(model: &Model, v: &RunResultView) -> Option<Event> {
-    if !v.has_gpx && !v.gps_unmeasurable {
-        return Some(Event::LogRun {
-            distance_km: v.distance_km,
-            duration_min: v.duration_min,
-            hr_pct_max: logged_hr_pct(v),
-            longest_recent_km: 0.0,
-            observed_at: v.observed_at,
-            entry_id: v.entry_id,
-            workout_type: v.workout_type,
-            session_rpe: v.session_rpe,
-            avg_hr_bpm: v.avg_hr_bpm,
-            utc_offset_sec: v.utc_offset_sec,
-        });
-    }
-    let mut points = Vec::new();
-    let mut segment_starts = Vec::new();
-    for seg in run_track_segments(model, v.entry_id, v.observed_at) {
-        if seg.is_empty() {
-            continue;
+/// Every `Event` variant in the wire registry is one the fuzzer draws: a new
+/// variant fails here until [`K`] generates it.
+#[test]
+fn the_fuzzer_draws_every_event_variant() {
+    use crate::wire::{Body, Registry, Wire};
+    let mut reg = Registry::default();
+    Event::shape(&mut reg);
+    let Some(Body::Enum { variants, .. }) = reg.get("Event").map(|t| &t.body) else {
+        panic!("Event is a wire enum")
+    };
+    let all: std::collections::BTreeSet<&str> = variants.iter().map(|v| v.name).collect();
+    let mut g = Gen::new(1, Mode::Shell);
+    let mut drawn = std::collections::BTreeSet::new();
+    for _ in 0..64 {
+        for (_, kind) in TABLE {
+            drawn.insert(match serde_json::to_value(g.event_of(kind)).unwrap() {
+                serde_json::Value::String(tag) => tag,
+                serde_json::Value::Object(map) => map.keys().next().unwrap().clone(),
+                other => panic!("not an externally tagged event: {other}"),
+            });
         }
-        if !points.is_empty() {
-            segment_starts.push(points.len() as u32);
-        }
-        points.extend(seg);
     }
-    (points.len() >= 2).then(|| Event::LogRunTrack {
-        points,
-        hr_pct_max: logged_hr_pct(v),
-        longest_recent_km: 0.0,
-        segment_starts,
-        observed_at: v.observed_at,
-        entry_id: v.entry_id,
-        workout_type: v.workout_type,
-        session_rpe: v.session_rpe,
-        avg_hr_bpm: v.avg_hr_bpm,
-        utc_offset_sec: v.utc_offset_sec,
-    })
-}
-
-/// `YouthActivity.kt::restoreActivityEvent`.
-fn restore_activity(a: &ActivityResultView) -> Event {
-    Event::LogActivity {
-        kind: a.kind,
-        minutes: a.minutes,
-        vigorous: a.vigorous,
-        strengthening: a.strengthening,
-        observed_at: a.observed_at,
-        entry_id: a.entry_id,
-    }
+    let missing: Vec<_> = all.iter().filter(|t| !drawn.contains(**t)).collect();
+    assert!(missing.is_empty(), "the fuzzer never draws {missing:?}");
 }
 
 /// The run's GPX document (the run sheet's Share, `export_run_gpx`) names the
-/// fixes its Undo re-logs ([`restore_run`]): one `<trkseg>` per recording
+/// fixes its route shows (`run_track_segments`): one `<trkseg>` per recording
 /// segment, and every `lat`/`lon` decimal reads back (correctly rounded, as
 /// any GPX reader parses it) to the same `f64`, bit for bit.
 fn gpx_names_the_track(model: &Model, v: &RunResultView) -> Result<(), String> {
@@ -2131,14 +2024,13 @@ impl Row<'_> {
 
 /// Up to three delete → Undo rounds on random History rows (GPS routes only
 /// when `gps`, otherwise sets, hand-entered runs, GPS runs QC left
-/// unmeasurable and activities), each Undo the shell's `restoreEventFor`
-/// event ([`undo_diff`]). A GPS run comes back from the core's own fixes
-/// ([`restore_run`]), so the live tracker's raw doubles survive the Undo,
-/// and a route's shared GPX must name those same fixes
-/// ([`gpx_names_the_track`]). Every float sum and tie the view shows is
-/// taken in log order (time, then `entry_id`), never storage order, so an
-/// Undo (the row re-pushed at the tail) must render the view EXACTLY: no
-/// float or text tolerance.
+/// unmeasurable and activities), each Undo the core's re-log event
+/// ([`undo_diff`]). A GPS run comes back with its recorded fixes, so the live
+/// tracker's raw doubles survive the Undo, and a route's shared GPX must name
+/// the fixes its route shows ([`gpx_names_the_track`]). Every float sum and
+/// tie the view shows is taken in log order (time, then `entry_id`), never
+/// storage order, so an Undo (the row re-pushed at the tail) must render the
+/// view EXACTLY: no float or text tolerance.
 fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
     for round in 0..3 {
@@ -2156,31 +2048,22 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
             break;
         }
         let row = rows.swap_remove(g.rng.below(rows.len() as u64) as usize);
-        let restore = match &row {
-            Row::Lift(v) => Some(restore_lift(v)),
-            Row::Run(v) => {
-                if v.has_gpx {
-                    gpx_names_the_track(&model, v).map_err(|e| format!("round {round}: {e}"))?;
-                }
-                restore_run(&model, v)
-            }
-            Row::Activity(a) => Some(restore_activity(a)),
-        };
-        let Some(restore) = restore else { continue };
+        if let Row::Run(v) = &row
+            && v.has_gpx
+        {
+            gpx_names_the_track(&model, v).map_err(|e| format!("round {round}: {e}"))?;
+        }
         let (id, at) = row.id();
-        if let Some(d) = undo_diff(&mut model, row.kind(), id, at, restore.clone()) {
-            return Err(format!(
-                "round {round}: {d} (undo event {})",
-                short(&restore)
-            ));
+        if let Some(d) = undo_diff(&mut model, row.kind(), id, at) {
+            return Err(format!("round {round}: {d}"));
         }
     }
     Ok(())
 }
 
-/// Edit a set or hand-entered run from History, then Undo it with the
-/// shell's `undoEditFor` amend: the edit must show, and the Undo must render
-/// the view from before.
+/// Edit a set or hand-entered run from History, then Undo it with the amend
+/// the core answers for the row before the edit ([`relogged`]): the edit must
+/// show, and the Undo must render the view from before.
 fn undo_edit_case(seed: u64) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
     let mut before = app.view(&model);
@@ -2206,7 +2089,7 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
                 at
             }
         };
-        let (edit, undo) = match &row {
+        let edit = match &row {
             Row::Lift(v) => {
                 let Event::LogSet {
                     exercise,
@@ -2225,7 +2108,7 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
                     (None, _) => (reps.max(1), None),
                 };
                 let observed_at = new_at(&mut g, v.observed_at);
-                let edit = Event::AmendSet {
+                Event::AmendSet {
                     entry_id: v.entry_id,
                     exercise,
                     weight_kg,
@@ -2234,34 +2117,21 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
                     observed_at,
                     observed_at_fallback: v.observed_at,
                     hold_sec,
-                };
-                let undo = Event::AmendSet {
-                    entry_id: v.entry_id,
-                    exercise: v.exercise.clone(),
-                    weight_kg: v.weight_kg,
-                    reps: v.reps,
-                    rpe: v.rpe,
-                    observed_at: v.observed_at,
-                    observed_at_fallback: observed_at,
-                    hold_sec: v.hold_sec,
-                };
-                (edit, undo)
+                }
             }
             Row::Run(v) => {
                 let Event::LogRun {
                     distance_km,
                     duration_min,
                     hr_pct_max,
-                    workout_type,
-                    session_rpe,
-                    avg_hr_bpm,
+                    meta,
                     ..
                 } = g.log_run()
                 else {
                     unreachable!()
                 };
                 let observed_at = new_at(&mut g, v.observed_at);
-                let edit = Event::AmendRun {
+                Event::AmendRun {
                     entry_id: v.entry_id,
                     distance_km,
                     duration_min,
@@ -2269,28 +2139,25 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
                     longest_recent_km: 0.0,
                     observed_at,
                     observed_at_fallback: v.observed_at,
-                    workout_type,
-                    session_rpe,
-                    avg_hr_bpm,
-                };
-                let undo = Event::AmendRun {
-                    entry_id: v.entry_id,
-                    distance_km: v.distance_km,
-                    duration_min: v.duration_min,
-                    hr_pct_max: logged_hr_pct(v),
-                    longest_recent_km: 0.0,
-                    observed_at: v.observed_at,
-                    observed_at_fallback: observed_at,
-                    workout_type: v.workout_type,
-                    session_rpe: v.session_rpe,
-                    avg_hr_bpm: v.avg_hr_bpm,
-                };
-                (edit, undo)
+                    meta,
+                }
             }
             Row::Activity(_) => unreachable!("activities have no edit"),
         };
         let kind = row.kind();
-        let (id, _) = row.id();
+        let (id, at) = row.id();
+        let amended_at = match &edit {
+            Event::AmendSet { observed_at, .. } | Event::AmendRun { observed_at, .. } => {
+                *observed_at
+            }
+            _ => unreachable!("an edit is an amend"),
+        };
+        let Some(undo) = relogged(&model, kind, id, at, Some(amended_at)) else {
+            return Err(format!(
+                "round {round}: no Undo for the edit {}",
+                short(&edit)
+            ));
+        };
         let before_json = vm_json(&before);
         let _ = app.update(edit.clone(), &mut model);
         let mid = app.view(&model);
@@ -2537,10 +2404,10 @@ fn bpm_run(at: i64) -> Event {
         longest_recent_km: 0.0,
         observed_at: at,
         entry_id: 1_760_000_000_001,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: Some(150.0),
-        utc_offset_sec: None,
+        meta: RunMeta {
+            avg_hr_bpm: Some(150.0),
+            ..RunMeta::default()
+        },
     }
 }
 
@@ -2589,9 +2456,7 @@ fn a_negative_hr_percentage_never_reaches_the_run_card() {
             longest_recent_km: 0.0,
             observed_at: at,
             observed_at_fallback: at,
-            workout_type: None,
-            session_rpe: None,
-            avg_hr_bpm: None,
+            meta: RunMeta::default(),
         },
         &mut model,
     );
@@ -2608,8 +2473,8 @@ fn a_negative_hr_percentage_never_reaches_the_run_card() {
     }
 }
 
-/// Delete a run row from History and send the shell's Undo; the row as
-/// shown (before, after).
+/// Delete a run row from History and send the core's Undo event
+/// ([`relogged`]); the row as shown (before, after).
 fn delete_and_undo_run(app: &Engine, model: &mut Model, id: u64) -> (RunResultView, RunResultView) {
     let row = |vm: ViewModel| {
         vm.runs
@@ -2618,7 +2483,7 @@ fn delete_and_undo_run(app: &Engine, model: &mut Model, id: u64) -> (RunResultVi
             .expect("run row")
     };
     let before = row(app.view(model));
-    let restore = restore_run(model, &before).expect("a hand-entered run restores");
+    let restore = relogged(model, EntryKind::Run, id, before.observed_at, None).expect("a run");
     let _ = app.update(delete_of(EntryKind::Run, id, before.observed_at), model);
     let _ = app.update(restore, model);
     (before, row(app.view(model)))
@@ -2882,8 +2747,10 @@ fn undo_of_a_deleted_set_keeps_the_lift_audit_name() {
         .find(|l| l.entry_id == 2)
         .expect("set 2")
         .clone();
+    // Read before the delete, as the shell does.
+    let restore = relogged(&model, EntryKind::Set, 2, row.observed_at, None).expect("set 2");
     let _ = app.update(delete_of(EntryKind::Set, 2, row.observed_at), &mut model);
-    let _ = app.update(restore_lift(&row), &mut model);
+    let _ = app.update(restore, &mut model);
     assert_eq!(
         audit(&before),
         audit(&app.view(&model)),
@@ -2893,10 +2760,10 @@ fn undo_of_a_deleted_set_keeps_the_lift_audit_name() {
 
 /// A live-recorded run (the tracker's raw doubles, here an uneven 3 s track
 /// at about 4:10/km) keeps its card, pace included, through delete + Undo:
-/// the shell re-logs the core's own fixes, and the run's shared GPX names
-/// those same fixes bit for bit. When Undo went through a GPX rounded to 7
-/// decimals, a fuzz-found track moved from "4:07/km" to "4:06/km"; that seed
-/// is replayed too.
+/// the core re-logs its own fixes, and the run's shared GPX names its route's
+/// fixes bit for bit. When Undo went through a GPX rounded to 7 decimals, a
+/// fuzz-found track moved from "4:07/km" to "4:06/km"; that seed is replayed
+/// too.
 #[test]
 fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
     let t0 = BASE_DAY * DAY_SEC + 8 * 3600;
@@ -2914,8 +2781,7 @@ fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
         row.summary
     );
     gpx_names_the_track(&model, &row).unwrap_or_else(|m| panic!("{m}"));
-    let restore = restore_run(&model, &row).expect("the route's fixes come back for Undo");
-    let diff = undo_diff(&mut model, EntryKind::Run, 41, at, restore);
+    let diff = undo_diff(&mut model, EntryKind::Run, 41, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
     assert_eq!(Engine.view(&model).runs[0].pace, row.pace);
     undo_delete_case(0x8983_8f5b_2a87_82d5, true).unwrap_or_else(|m| panic!("{m}"));
@@ -2923,8 +2789,8 @@ fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
 
 /// A GPS run whose fixes all fail QC ("GPS signal too poor") came back from
 /// Undo as a 0 km manual run, with another card (fuzz seed
-/// 0x1b7c7ac2de61f20e, replayed too). The core's `RunTrack` now hands out its
-/// recorded fixes, so the shell re-logs it as the same tracked run.
+/// 0x1b7c7ac2de61f20e, replayed too). The core re-logs its recorded fixes, so
+/// it comes back as the same tracked run.
 #[test]
 fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
@@ -2941,8 +2807,7 @@ fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
     );
     let row = Engine.view(&model).runs[0].clone();
     assert!(row.gps_unmeasurable && !row.has_gpx, "{}", row.summary);
-    let restore = restore_run(&model, &row).expect("the recorded fixes come back for Undo");
-    let diff = undo_diff(&mut model, EntryKind::Run, 31, at, restore);
+    let diff = undo_diff(&mut model, EntryKind::Run, 31, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
     undo_delete_case(0x1b7c_7ac2_de61_f20e, false).unwrap_or_else(|m| panic!("{m}"));
 }

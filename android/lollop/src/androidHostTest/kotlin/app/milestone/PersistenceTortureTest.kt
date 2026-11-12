@@ -435,7 +435,7 @@ class PersistenceTortureTest {
             },
         )
         QaHarness.freshProcess(engine)
-        val booter = thread(name = "boot") { engine.restore(ctx) }
+        val booter = thread(name = "boot") { engine.restore(ctx.eventLogPath()) }
         // Send the moment restore is compacting: the send must wait for the rewrite,
         // then append to the new file.
         assertTrue("restore never started", restoring.await(10, TimeUnit.SECONDS))
@@ -634,7 +634,7 @@ class PersistenceTortureTest {
         QaHarness.reboot(ctx)
         val before = logFile.readBytes()
         Core.detachLog()
-        Core.restore(ctx)
+        Core.restore(ctx.eventLogPath())
         assertTrue(Core.send(next).accepted)
         assertTrue("nothing appended to the detached log", before.contentEquals(logFile.readBytes()))
     }

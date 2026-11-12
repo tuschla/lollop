@@ -267,7 +267,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
 }
 
 // Storage-order ties (BUGS.md 2026-10-23: "storage-order sums and ties").
-// An Undo is `DeleteEntry` + the original `Log*` event again (`undo_diff`):
+// An Undo is `DeleteEntry` + the core's re-log event for the row (`undo_diff`):
 // the row comes back with its stamp and `entry_id`, at the END of storage.
 // Every view must read the same afterwards.
 
@@ -286,8 +286,10 @@ fn undo_of_one_of_two_tied_bests_keeps_the_mastery_praise() {
         &mut m,
     );
     let a_at = (DAY0 + 10) * DAY_SEC + 7 * 3600;
-    let a = with_entry_id(log_set("Back squat", 100.0, 5, 8.0, a_at), 10);
-    let _ = Engine.update(a.clone(), &mut m);
+    let _ = Engine.update(
+        with_entry_id(log_set("Back squat", 100.0, 5, 8.0, a_at), 10),
+        &mut m,
+    );
     let _ = Engine.update(
         with_entry_id(log_set("back squat", 100.0, 5, 8.0, a_at + 300), 11),
         &mut m,
@@ -297,7 +299,7 @@ fn undo_of_one_of_two_tied_bests_keeps_the_mastery_praise() {
         fb.contains("Back squat"),
         "fixture: the praise names the earlier set: {fb}"
     );
-    let diff = undo_diff(&mut m, EntryKind::Set, 10, a_at, a);
+    let diff = undo_diff(&mut m, EntryKind::Set, 10, a_at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
 }
 
@@ -331,10 +333,9 @@ fn undo_of_a_same_stamp_run_keeps_the_spike_gate() {
         &mut m,
     );
     let at = day * DAY_SEC + 3_600;
-    let short = log_run(5.0, 30.0, 70.0, 0.0, at, 7_350_020);
-    let _ = Engine.update(short.clone(), &mut m);
+    let _ = Engine.update(log_run(5.0, 30.0, 70.0, 0.0, at, 7_350_020), &mut m);
     let _ = Engine.update(log_run(14.0, 84.0, 70.0, 0.0, at, 7_350_021), &mut m);
-    let diff = undo_diff(&mut m, EntryKind::Run, 7_350_020, at, short);
+    let diff = undo_diff(&mut m, EntryKind::Run, 7_350_020, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
 }
 
@@ -354,8 +355,7 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
     let mut m = Model::default();
     set_today(&Engine, &mut m, DAY0 + 10);
     let _ = Engine.update(Event::SetProfile(base_profile()), &mut m);
-    let even_ev = log_run_track(even, 0.0, 0.0, at, 7_360_041);
-    let _ = Engine.update(even_ev.clone(), &mut m);
+    let _ = Engine.update(log_run_track(even, 0.0, 0.0, at, 7_360_041), &mut m);
     let _ = Engine.update(log_run_track(fade, 0.0, 0.0, at, 7_360_042), &mut m);
     let _ = Engine.update(
         Event::SubmitReview(SessionReview {
@@ -369,7 +369,7 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
         fb.contains("Second half 25% slower"),
         "fixture: the pacing cue shows: {fb}"
     );
-    let diff = undo_diff(&mut m, EntryKind::Run, 7_360_041, at, even_ev);
+    let diff = undo_diff(&mut m, EntryKind::Run, 7_360_041, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
 }
 
@@ -412,7 +412,7 @@ fn undo_of_a_tied_top_set_keeps_the_session_summary() {
                 id,
             );
             if n == 0 && k + 1 >= it.sets {
-                ties.push((id, t, ev.clone()));
+                ties.push((id, t));
             }
             let _ = Engine.update(ev, &mut m);
         }
@@ -422,8 +422,8 @@ fn undo_of_a_tied_top_set_keeps_the_session_summary() {
         done.contains("best "),
         "fixture: a done session with a top set: {done}"
     );
-    for (id, t, ev) in ties {
-        let diff = undo_diff(&mut m, EntryKind::Set, id, t, ev);
+    for (id, t) in ties {
+        let diff = undo_diff(&mut m, EntryKind::Set, id, t);
         assert!(diff.is_none(), "{}", diff.unwrap_or_default());
     }
 }
@@ -444,8 +444,10 @@ fn undo_of_a_same_second_weighted_set_keeps_the_system_load_line() {
         &mut m,
     );
     let at = (MON - 1) * DAY_SEC + 18 * 3600;
-    let first = with_entry_id(log_set("Full pull-up", 12.5, 5, 8.0, at), 21);
-    let _ = app.update(first.clone(), &mut m);
+    let _ = app.update(
+        with_entry_id(log_set("Full pull-up", 12.5, 5, 8.0, at), 21),
+        &mut m,
+    );
     let _ = app.update(
         with_entry_id(log_set("Full pull-up", 10.0, 5, 8.0, at), 22),
         &mut m,
@@ -456,6 +458,6 @@ fn undo_of_a_same_second_weighted_set_keeps_the_system_load_line() {
         line.contains("from your last weighted set"),
         "fixture: the system-load line shows: {line}"
     );
-    let diff = undo_diff(&mut m, EntryKind::Set, 21, at, first);
+    let diff = undo_diff(&mut m, EntryKind::Set, 21, at);
     assert!(diff.is_none(), "{}", diff.unwrap_or_default());
 }

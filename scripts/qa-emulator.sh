@@ -45,8 +45,8 @@ capture_screens() {
 # Today, keep the editor open for the next set, then back on Today the item shows
 # its first slot filled.
 log_set_flow() {
-  adb_ shell am force-stop "$APP_ID"
-  launch
+  stop_app
+  launch || return 1
   tap_node pre "$(fmt plan_log_set_n_of_n 1 '')" 30 || return 1
   wait_text eq "${STR[log_field_exercise]}" 10 || return 1
   shot set-loop
@@ -73,7 +73,7 @@ if [[ "${QA_SKIP_BUILD:-0}" != 1 ]]; then
   (cd "$REPO_ROOT/android" && ./gradlew --max-workers="$GRADLE_MAX_WORKERS" :app:assembleDebug) || die "debug build failed"
 fi
 install_apk "$APK" -r || die "install failed"
-seed_basic "$(date -d "$PIN_DAY -1 day" +%F)" 0 >"$OUT/logs/seed.ndjson"
+seed_basic "$(date -d "$PIN_DAY -1 day" +%F)" 0 >"$OUT/logs/seed.ndjson" || die "seed_basic failed"
 seed_app "$OUT/logs/seed.ndjson" || die "could not push the seed event log"
 capture_screens
 expect $S "per-set logging flow: the first slot is marked done" "shots/set-loop*.png shots/today-after-set.png" log_set_flow

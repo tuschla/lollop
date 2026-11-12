@@ -146,8 +146,13 @@ private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event)
                 TextAction(
                     stringResource(Res.string.main_delete),
                     onClick = {
-                        onEvent(Event.DeleteEntry(EntryKind.Activity, a.entry_id, observedAtFallback = a.observed_at))
-                        postUndoable(res.getString(Res.string.activity_removed), res.getString(Res.string.log_undo), listOf(restoreActivityEvent(a)))
+                        sendUndoable(
+                            onEvent,
+                            listOf(Event.DeleteEntry(EntryKind.Activity, a.entry_id, observedAtFallback = a.observed_at)),
+                            listOf(RelogQuery(EntryKind.Activity, a.entry_id, a.observed_at)),
+                            res.getString(Res.string.activity_removed),
+                            res.getString(Res.string.log_undo),
+                        )
                     },
                     description = stringResource(Res.string.activity_remove_cd, line),
                 )
@@ -164,18 +169,6 @@ internal fun activityEntryLine(res: PlatformResources, a: ActivityResultView, zo
     val line = res.getString(Res.string.activity_entry_line, day, res.getString(a.kind.labelRes), a.minutes.roundOrZero().toInt(), effort)
     return if (a.strengthening) res.getString(Res.string.activity_entry_line_strengthening, line) else line
 }
-
-/** The event that logs a removed activity again, for "Undo": the same entry_id,
- *  observed_at and fields the view shows. */
-internal fun restoreActivityEvent(a: ActivityResultView): Event.LogActivity =
-    Event.LogActivity(
-        kind = a.kind,
-        minutes = a.minutes,
-        vigorous = a.vigorous,
-        strengthening = a.strengthening,
-        observedAt = a.observed_at,
-        entryId = a.entry_id,
-    )
 
 /**
  * Log activity (other moderate-or-harder active time for the weekly card): what

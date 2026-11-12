@@ -103,6 +103,10 @@ import app.milestone.resources.main_plan_answers_sub
 import app.milestone.resources.main_plan_answers_title
 import app.milestone.resources.main_restoring_data
 import app.milestone.resources.main_section_how_coach_reads
+import app.milestone.resources.main_theme_iris
+import app.milestone.resources.main_theme_meadow
+import app.milestone.resources.main_theme_paper
+import app.milestone.resources.main_theme_rose
 import app.milestone.resources.main_unit_km
 import app.milestone.resources.main_unit_mi
 import app.milestone.resources.main_use_system_accent
@@ -118,6 +122,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -727,6 +732,15 @@ private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean
 
 private val ThemeSwatchGap = Space.Md.dp
 
+/** A theme's display name; its enum name is the stored key, never shown. */
+private val AppTheme.labelRes: StringResource
+    get() = when (this) {
+        AppTheme.Rose -> Res.string.main_theme_rose
+        AppTheme.Meadow -> Res.string.main_theme_meadow
+        AppTheme.Iris -> Res.string.main_theme_iris
+        AppTheme.Paper -> Res.string.main_theme_paper
+    }
+
 private val ThemeSwatchInset = Space.Md.dp
 
 /**
@@ -742,11 +756,12 @@ fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
         val measurer = rememberTextMeasurer()
         val density = LocalDensity.current
         val themes = AppTheme.entries
+        val names = themes.associateWith { stringResource(it.labelRes) }
         val labelRoomPx = with(density) {
             ((maxWidth - ThemeSwatchGap * (themes.size - 1)) / themes.size - ThemeSwatchInset * 2).toPx()
         }
-        val fits = themes.all {
-            measurer.measure(it.name, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
+        val fits = names.values.all {
+            measurer.measure(it, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
         }
         Column(
             modifier = Modifier.fillMaxWidth().selectableGroup(),
@@ -757,7 +772,7 @@ fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
                 ) {
-                    row.forEach { t -> ThemeSwatchCard(t, selected = t == current) { onSelect(t) } }
+                    row.forEach { t -> ThemeSwatchCard(t, names.getValue(t), selected = t == current) { onSelect(t) } }
                 }
             }
         }
@@ -775,7 +790,7 @@ fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
  * light card, and an OnAccent hairline on the selected accent fill.
  */
 @Composable
-private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.ThemeSwatchCard(theme: AppTheme, name: String, selected: Boolean, onClick: () -> Unit) {
     val pal = theme.light
     val plateShape = RoundedCornerShape(Space.Md.dp)
     val barShape = RoundedCornerShape(Space.Sm.dp)
@@ -810,7 +825,7 @@ private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick
         }
         // Wraps rather than clipping if a name still outgrows its card.
         Text(
-            theme.name,
+            name,
             color = choiceCellContent(selected),
             style = Type.Chip,
             textAlign = TextAlign.Center,

@@ -333,7 +333,7 @@ fn readiness_signal_wire_names_match_the_shell_contract() {
     // compile clean but silently drop every readiness submission for it -
     // including the medical-referral flags at the top of the safety ladder.
     // This locks the wire names so such a rename fails here instead.
-    for signal in crate::autoreg::ALL_SIGNALS {
+    for signal in ReadinessSignal::ALL {
         // Exhaustive: a new variant must name its wire form here.
         let wire = match signal {
             ReadinessSignal::Rpe => "Rpe",
@@ -418,8 +418,8 @@ fn workout_type_tag_round_trips_and_is_back_compat() {
         )
         .expect("pre-I16 LogRun (no workout_type) must still decode");
     match old_shape {
-        Event::LogRun { workout_type, .. } => {
-            assert_eq!(workout_type, None, "absent field defaults to None")
+        Event::LogRun { meta, .. } => {
+            assert_eq!(meta.workout_type, None, "absent field defaults to None")
         }
         other => panic!("expected LogRun, got {other:?}"),
     }
@@ -432,7 +432,10 @@ fn workout_type_tag_round_trips_and_is_back_compat() {
     assert!(matches!(
         tagged,
         Event::LogRun {
-            workout_type: Some(WorkoutType::Interval),
+            meta: RunMeta {
+                workout_type: Some(WorkoutType::Interval),
+                ..
+            },
             ..
         }
     ));

@@ -15,7 +15,6 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.core.content.IntentCompat
 import androidx.glance.ExperimentalGlanceApi
 import androidx.glance.appwidget.compose
 import androidx.test.core.app.ApplicationProvider
@@ -115,7 +114,7 @@ class LatinDigitSurfacesTest {
     /** A 20-minute GPX run at 6:00 /km ending [daysAgo] days before today. */
     private fun gpxRun(name: String, daysAgo: Int): android.net.Uri {
         val end = QaHarness.daysAgoAtMidday(daysAgo)
-        val fixes = (0..120).map { i -> GpsPoint(i * 27.8 / 111_195.0, 0.0, end - (120 - i) * 10L, 0.0) }
+        val fixes = (0..120).map { i -> GpsPoint(i * 27.8 / M_PER_DEG, 0.0, end - (120 - i) * 10L, 0.0) }
         val doc = gpxDocument(GpxTrack(listOf(fixes)))
         val f = File(app.cacheDir, "latin-digits/$name").apply { parentFile!!.mkdirs(); writeText(doc) }
         return android.net.Uri.fromFile(f)
@@ -155,8 +154,7 @@ class LatinDigitSurfacesTest {
             ),
         )
         shareCoachSummary(app, model)
-        val chooser = shadowOf(app).nextStartedActivity
-        val send = checkNotNull(IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java)) { "no share intent" }
+        val send = sharedIntent(shadowOf(app).nextStartedActivity)
         val text = send.getStringExtra(Intent.EXTRA_TEXT)!!
         assertTrue(text, text.contains("45 min") && text.contains("6/10"))
         assertLatinDigits("coach export", text)

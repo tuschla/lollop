@@ -61,4 +61,6 @@ pub use rules::{
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,
     increase_hold, reds_defer, reds_referral, rhr_neck_check_due, safety_tier_of,
 };
-pub use signals::{ALL_SIGNALS, SignalGroup, SignalState, signal_group, signal_states_in};
+pub use signals::{
+    SignalGroup, SignalState, signal_group, signal_states_in, signals_in_summary_order,
+};

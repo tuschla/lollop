@@ -5,7 +5,6 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
-import app.milestone.AndroidReminder
 import app.milestone.AppProcess
 import app.milestone.PlatformLog
 import app.milestone.keyValueStore
@@ -45,7 +44,6 @@ internal object AndroidWidgets : WidgetSurfacePort {
         val app = ctx.applicationContext
         val recordingChanged = previous != null && inputs.recording != previous.recording
         if (recordingChanged) requestTileRefresh(app)
-        if (inputs.recording && previous?.recording != true) AndroidReminder.onRecording(app)
         var redraw = recordingChanged || (previous != null && inputs.look != previous.look)
         if (inputs.model != null && !inputs.sameSnapshotAs(previous)) {
             try {
@@ -66,15 +64,11 @@ internal object AndroidWidgets : WidgetSurfacePort {
         AppProcess.scope.launch { redraw(app) }
     }
 
-    /**
-     * Store [snapshot]. A changed one redraws the Quick Settings tile, which shows
-     * the same day, and updates a shown session reminder
-     * ([AndroidReminder.onSnapshot]). True when it changed.
-     */
+    /** Store [snapshot]. A changed one redraws the Quick Settings tile, which shows
+     *  the same day. True when it changed. */
     fun store(ctx: Context, snapshot: WidgetSnapshot): Boolean {
         if (!WidgetSnapshotStore.write(ctx, snapshot)) return false
         requestTileRefresh(ctx)
-        AndroidReminder.onSnapshot(ctx, snapshot)
         return true
     }
 

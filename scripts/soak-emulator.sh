@@ -92,7 +92,7 @@ reset_app() {
   sh_ cmd alarm set-timezone "$TZ0" >/dev/null
   sh_ cmd alarm set-time "$(date +%s)000" >/dev/null
   [[ "$1" == seeded ]] || return 0
-  seed_basic "$(date -d yesterday +%F)" 3 >"$OUT/logs/seed.ndjson"
+  seed_basic "$(date -d yesterday +%F)" 3 >"$OUT/logs/seed.ndjson" || die "seed_basic failed"
   seed_app "$OUT/logs/seed.ndjson" || die "could not push the seed event log"
 }
 
@@ -121,15 +121,14 @@ monkey_pass() { # seed events state
   local seed="$1" events="$2" state="$3" dir="$OUT/monkey/seed-$1" t_start=$SECONDS relaunch=ok m
   mark "monkey-$seed"
   reset_app "$state"
-  if ! { launch && wait_for 20 app_up; }; then log "monkey $seed: app not up before the pass ($(focus))"; fi
+  launch || log "monkey $seed: app not up before the pass ($(focus))"
   monkey_run "$dir" "$seed" "$events" "$THROTTLE" "$CHUNK"
   monkey_checks monkey "seed $seed ($state)" "monkey/seed-$seed"
   shot "monkey-$seed-end"
   pull_log "$dir/event-log.ndjson"
   # Cold relaunch: replaying whatever the monkey logged must not crash the app.
-  adb_ shell am force-stop "$APP_ID"
-  launch
-  { wait_for 30 app_up && dump_ui >/dev/null && app_up; } || relaunch="FAILED (pid='$(app_pid)' focus='$(focus)')"
+  stop_app
+  { launch && dump_ui >/dev/null && app_up; } || relaunch="FAILED (pid='$(app_pid)' focus='$(focus)')"
   shot "monkey-$seed-relaunch"
   expect monkey "relaunch after monkey $seed" "$relaunch; replayed $(grep -c . "$dir/event-log.ndjson") logged events" test "$relaunch" = ok
   read -r -a m <<<"$MONKEY"
@@ -183,7 +182,7 @@ gps_run() {
   at "$LIGHT_FROM"; mark gps-traffic-light
   at "$LIGHT_TO"; mark gps-recording
   at "$BG_FROM"; mark gps-background; home
-  at "$BG_TO"; launch; mark gps-recording; wait_for 10 app_up; live after-foreground; shot gps-03-after-foreground
+  at "$BG_TO"; launch; mark gps-recording; live after-foreground; shot gps-03-after-foreground
   at "$SHADE_FROM"; mark gps-shade
   shade_open gps-04-shade; shot gps-04-shade
   adb_ shell cmd statusbar collapse
@@ -201,7 +200,7 @@ gps_run() {
   at "$POCKET_TO"
   adb_ shell dumpsys deviceidle unforce >/dev/null || log "deviceidle unforce failed"
   adb_ shell dumpsys battery reset
-  wake; launch; mark gps-recording; wait_for 10 app_up; live after-pocket-doze; shot gps-06-after-pocket
+  wake; launch; mark gps-recording; live after-pocket-doze; shot gps-06-after-pocket
   at "$NPAUSE_TAP"; mark gps-paused-notification
   expect gps "notification pause" "Pause action on '${STR[track_notif_recording_title]}'" \
     tap_shade gps-07-shade-pause eq "${STR[track_action_pause]}" "${STR[track_notif_recording_title]}"
@@ -210,7 +209,7 @@ gps_run() {
   at "$NRESUME_TAP"
   expect gps "notification resume" "Resume action on '${STR[track_notif_paused_title]}'" \
     tap_shade gps-07-shade-resume eq "${STR[track_action_resume]}" "${STR[track_notif_paused_title]}"
-  adb_ shell cmd statusbar collapse; mark gps-recording; launch; wait_for 10 app_up; live resumed-notification
+  adb_ shell cmd statusbar collapse; mark gps-recording; launch; live resumed-notification
   at "$((STOP_AT - 10))"; live before-stop
   at "$STOP_AT"; mark gps-finish
   pid1="$(app_pid)"

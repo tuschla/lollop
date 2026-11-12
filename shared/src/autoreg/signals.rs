@@ -22,7 +22,15 @@ use crate::strength::LiftGoal;
 /// stress) that shells must visually fence off from the routine `Metric`
 /// signals, the fence is data-driven from here, not a shell-side predicate.
 #[derive(
-    serde::Serialize, serde::Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::wire::Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SignalGroup {
@@ -42,24 +50,15 @@ pub fn signal_group(signal: ReadinessSignal) -> SignalGroup {
 }
 
 /// Every readiness signal in summary order: routine metrics first, then the
-/// red-flag block, so a shell can divide exactly where the group changes.
-pub const ALL_SIGNALS: [ReadinessSignal; 15] = [
-    ReadinessSignal::Rpe,
-    ReadinessSignal::EstimatedOneRm,
-    ReadinessSignal::BarVelocity,
-    ReadinessSignal::VelocityLoss,
-    ReadinessSignal::WellnessZ,
-    ReadinessSignal::HrvLnRmssd,
-    ReadinessSignal::HrvCv,
-    ReadinessSignal::AerobicDecoupling,
-    ReadinessSignal::RestingHr,
-    ReadinessSignal::Soreness,
-    ReadinessSignal::Pain,
-    ReadinessSignal::Illness,
-    ReadinessSignal::RedS,
-    ReadinessSignal::CardiacRedFlag,
-    ReadinessSignal::BoneStress,
-];
+/// red-flag block, so a shell can divide exactly where the group changes;
+/// within a group, declaration order.
+pub fn signals_in_summary_order() -> impl Iterator<Item = ReadinessSignal> {
+    SignalGroup::ALL.into_iter().flat_map(|group| {
+        ReadinessSignal::ALL
+            .into_iter()
+            .filter(move |&s| signal_group(s) == group)
+    })
+}
 
 /// One readiness signal's latest observation with a qualitative state judged
 /// by the SAME File 06/08 thresholds the adjustment rules use, never a
@@ -91,7 +90,7 @@ type Label = (Cow<'static, str>, Option<ClaimId>);
 const OUT_OF_DATE: &str = "out of date";
 
 /// Latest state of every signal that has at least one observation, in
-/// [`ALL_SIGNALS`] order, judged with the full rule context (individual
+/// [`signals_in_summary_order`], judged with the full rule context (individual
 /// resting-HR bands, the shell's today). Pure re-statement of the rule layer:
 /// each state string is decided by the same predicate/threshold that drives the
 /// matching adjustment, and cites the same claim. `lift_goal` selects the
@@ -110,9 +109,8 @@ pub fn signal_states_in(
     // gating lives solely in `derive_channel`; this is a pure membership check.
     stale: &[ReadinessInput],
 ) -> Vec<SignalState> {
-    ALL_SIGNALS
-        .iter()
-        .filter_map(|&signal| {
+    signals_in_summary_order()
+        .filter_map(|signal| {
             let input = displayed_input(inputs, signal)?;
             let v = input.value;
             let (state, claim) = signal_label(

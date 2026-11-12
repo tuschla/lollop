@@ -54,12 +54,12 @@ android/ (the Gradle build of the app, both platforms)
   │    │                   Live Activity frames (commonMain widget/IosSurfacePayload.kt) to Swift
   │    ├─ commonTest       engine, formatting, date, map and run recorder tests:
   │    │                   JVM and iOS simulator
-  │    ├─ iosTest          the iOS tracker and the surface payloads (simulator)
+  │    ├─ iosTest          the iOS tracker, the surface payloads and the engine on
+  │    │                   the real core (simulator)
   │    └─ androidHostTest  JVM + Robolectric suite
-  └─ lollop-ios/ the iOS framework `Lollop`: :lollop + :core-bridge + the
+  └─ lollop-ios/ the iOS framework `Lollop`: :lollop (with :core-bridge) + the
                  entry points LollopApp.start(), MainViewController() and
-                 LollopSurfaces (the Swift host of the widgets and activities);
-                 iosTest runs the engine on the real core
+                 LollopSurfaces (the Swift host of the widgets and activities)
 iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, extension, Info.plists, assets)
   ├─ project.yml            the identifiers once (LOLLOP_BUNDLE_ID app.milestone.lollop,
   │                         LOLLOP_APP_GROUP group.app.milestone.lollop; the
@@ -88,7 +88,7 @@ through a `CoreBridge`, appends the accepted ones to the event log, replays the
 log at boot (`restore`, with compaction and torn-tail repair in `EventLog`),
 rebuilds the core after a `panic_reset`, and keeps the last good view when a
 view fails. Android's engine is `object Core : DurableCore(JniCore)`; iOS's is
-`DurableCore(NativeCore)` (`platformCoreEngine` in `CoreEngine.ios.kt`). The
+`DurableCore(NativeCore)` (`platformCoreEngine` in `AppCore.ios.kt`). The
 event queue sends to it on `CoreDispatcher` (one dedicated thread,
 `newSingleThreadContext`).
 
@@ -128,7 +128,7 @@ The other seams (`expect` in commonMain, actual per platform):
 | `currentAppLocale`, `screenHeightDp`, `currentPlatformContext` | `appLocale(LocalConfiguration.locales)`, `Configuration.screenHeightDp`, `LocalContext` | `appLocale()`, the Compose view's height, the process context |
 | `localInstantSeconds` | `java.util.Calendar` (lenient across a DST gap) | `NSCalendar` (same rule) |
 | `shareCoachSummary` | `ACTION_SEND` chooser | `UIActivityViewController` (popover on iPad) |
-| `RouteLayer`, `FullScreenMapDialog` (RunMap.kt); `LiveMapSurface` via `newLiveMapSurface` (TrackerMap.kt) | osmdroid `MapView` with the android.graphics route renderer (RouteRenderer.android.kt); the full-screen map's dialog window with transparent bars | MKMapView in a `UIKitView`: OSM tiles through `OsmTileOverlay`/`OsmTileRenderer` (User-Agent = bundle identifier, 2 connections, a 128 MB disk cache that honours the server's cache headers, dark themes desaturate + invert each tile with Android's colour matrix, "© OpenStreetMap" caption); the route drawn in Compose over a passive map (`ComposeRoutePainter`, same `RouteLayout` as Android, the app owns the camera so tiles and route never part); the tracker's route as MKPolyline casing + accent lines, blip and start ring as annotations |
+| `RouteLayer`, `FullScreenMapDialog` (RunMap.kt); `LiveMapSurface` via `newLiveMapSurface` (TrackerMap.kt) | osmdroid `MapView` with the common Compose `RoutePainter` (RoutePainter.kt) as its overlay; the full-screen map's dialog window with transparent bars | MKMapView in a `UIKitView`: OSM tiles through `OsmTileOverlay`/`OsmTileRenderer` (User-Agent = bundle identifier, 2 connections, a 128 MB disk cache that honours the server's cache headers, dark themes desaturate + invert each tile with Android's colour matrix, "© OpenStreetMap" caption); the route drawn in Compose over a passive map (the same `RoutePainter` as Android, the app owns the camera so tiles and route never part); the tracker's route as MKPolyline casing + accent lines, blip and start ring as annotations |
 
 `commonTest` pins the formatting and date output to Android's (`FormattingTest`,
 `DateFormatsTest`) and drives the engine on a scripted core and a real log file
@@ -137,7 +137,7 @@ degraded log, stale view), and the maps' route framing, layout and dark tile
 filter (`RouteGeometryTest`, `MapTilesTest`, `FrameLongitudesTest`). It runs
 in the host tests and, in the `bridge-macos`
 CI job, in an iOS simulator, where the engine runs on the POSIX file seam.
-`:lollop-ios`'s `CoreEngineTest` runs the engine on the real Rust core in the
+`:lollop`'s iOS `CoreEngineTest` runs the engine on the real Rust core in the
 simulator (restart replay, torn tail, the core's compaction, a real
 `panic_reset`).
 
@@ -222,7 +222,7 @@ can't build this app.
 ```sh
 cd android
 ./gradlew :lollop-ios:linkReleaseFrameworkIosArm64   # Lollop.framework, device
-./gradlew :core-bridge:iosSimulatorArm64Test :lollop:iosSimulatorArm64Test :lollop-ios:iosSimulatorArm64Test
+./gradlew :core-bridge:iosSimulatorArm64Test :lollop:iosSimulatorArm64Test
 cd .. && brew install xcodegen && xcodegen generate --spec iosApp/project.yml
 open iosApp/lollop.xcodeproj                         # run the `lollop` scheme
 ```
@@ -384,7 +384,7 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 
 The activities start while the app is in front (the tracker, the set loop; the
 system hides an activity of the app in front) and are updated by the app only:
-a run's frames come from `RunActivity` (the tracker), a rest's from `RestAlarm`.
+a run's frames come from the tracker (`IosSurfaces.showRun`), a rest's from `RestAlarm`.
 An update is sent only for what the timer text can't show. Live Activities need
 iOS 16.2 and the user's Live Activities setting; widgets work from iOS 16.
 
@@ -399,7 +399,7 @@ Apple offers no other API (extensions).
 | JNI core, `Core.kt` (`DurableCore(JniCore)`) on the `core-jni` thread | `DurableCore(NativeCore)` over `android/core-bridge`'s C ABI binding, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
 | Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `AppFiles` seam (POSIX) |
-| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`RunActivity`). |
+| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`IosSurfaces.showRun`). |
 | Live Update notifications for run and rest (`LiveUpdates.kt`, promoted notifications) | Done: Live Activities with the Dynamic Island (see above) |
 | Rest-done alert, exact alarm (`RestAlarm.kt`) | Done: a time-interval local notification (`UNTimeIntervalNotificationTrigger`) and the in-app countdown; no exact-alarm notice. AlarmKit (iOS 26) would sound in silent mode. |
 | Session reminder, boot receiver (`SessionReminder.kt`) | Done: a dated calendar-trigger local notification (`UNCalendarNotificationTrigger`) per upcoming session day; iOS keeps them across reboots, no boot hook |

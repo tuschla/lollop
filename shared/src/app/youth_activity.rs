@@ -78,7 +78,7 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
             run_minutes += min;
         }
         strengthening[d] = true;
-        if r.session_rpe.is_some_and(|x| x >= VIGOROUS_RATING) {
+        if r.meta.session_rpe.is_some_and(|x| x >= VIGOROUS_RATING) {
             vigorous[d] = true;
         }
     }

@@ -1,8 +1,8 @@
 //! The bridge's wire payloads besides events and the view model: the error
 //! envelope every op can answer, the run reference of the GPX export and the
-//! route fixes, the track figures preview, the warm-up ramp's query, the
-//! recorder's track thinning and an imported run's heart rate
-//! (`shared::ffi`).
+//! route fixes, the row an Undo re-logs, the track figures preview, the
+//! warm-up ramp's query, the recorder's track thinning and an imported run's
+//! heart rate (`shared::ffi`).
 
 use std::borrow::Cow;
 use std::fmt;
@@ -54,6 +54,19 @@ pub struct ErrorEnvelope<'a> {
 pub struct RunRef {
     pub entry_id: u64,
     pub observed_at: i64,
+}
+
+/// The logged row an Undo puts back, by the `(entry_id, observed_at)` identity
+/// the delete/amend matcher uses.
+#[derive(Debug, Deserialize, Wire)]
+pub struct RelogQuery {
+    pub kind: crate::event::EntryKind,
+    pub entry_id: u64,
+    pub observed_at: i64,
+    /// An edit's Undo: the `observed_at` the edit saves the row under, which
+    /// the restoring amend names it by. `None`: a delete's Undo.
+    #[serde(default)]
+    pub amended_at: Option<i64>,
 }
 
 /// The distance and moving time a `LogRunTrack` will be saved with.

@@ -77,7 +77,7 @@ class UpgradeFixturesTest {
     }
 
     private fun bootCore(): SendResult {
-        Core.restore(ctx)
+        Core.restore(ctx.eventLogPath())
         return Core.send(fixtureToday)
     }
 

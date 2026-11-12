@@ -35,15 +35,12 @@ internal fun readCappedBytes(stream: InputStream, cap: Int = CoreConstants.MAX_R
  *  through the ContentResolver into the common pipeline ([launchRunImport]). */
 internal object RunImport {
 
-    /** This app's own FileProvider (its GPX shares), never an import source. The
-     *  manifest declares it as `${applicationId}.fileprovider`. */
-    private const val OWN_FILE_PROVIDER = "app.milestone.fileprovider"
-
     /** The file URIs an incoming VIEW / SEND / SEND_MULTIPLE intent carries, or empty
      *  for any other intent (launcher, notification deep link). Only other apps'
      *  `content://` URIs pass: the import reads with this app's permissions, so a
-     *  `file://` path or its own FileProvider would expose its private files. */
-    fun urisFrom(intent: Intent?): List<Uri> {
+     *  `file://` path or its own FileProvider ([fileProviderAuthority]) would expose
+     *  its private files. */
+    fun urisFrom(ctx: Context, intent: Intent?): List<Uri> {
         if (intent == null) return emptyList()
         val direct = when (intent.action) {
             Intent.ACTION_VIEW -> listOfNotNull(intent.data)
@@ -60,7 +57,8 @@ internal object RunImport {
             val clip = intent.clipData ?: return emptyList()
             (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
         }
-        return uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT && it.authority != OWN_FILE_PROVIDER }
+        val own = ctx.fileProviderAuthority()
+        return uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT && it.authority != own }
     }
 
     /** Import every file in [uris] as one batch ([launchRunImport]); the result reads

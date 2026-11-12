@@ -23,6 +23,10 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_KEPT_EXPORTS = 20
 
+/** This app's FileProvider (its GPX shares): the manifest declares it as
+ *  `${applicationId}.fileprovider`. */
+internal fun Context.fileProviderAuthority(): String = "$packageName.fileprovider"
+
 internal actual suspend fun shareGpx(ctx: Context, gpx: String, runStartEpochSec: Long) {
     val uri = withContext(Dispatchers.IO) { writeGpxToCache(ctx, gpx, runStartEpochSec) }
     val send = Intent(Intent.ACTION_SEND).apply {
@@ -48,7 +52,7 @@ private fun writeGpxToCache(ctx: Context, gpx: String, runStartEpochSec: Long): 
         ?.forEach { it.delete() }
     val file = File(dir, name)
     file.writeText(gpx)
-    return FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+    return FileProvider.getUriForFile(ctx, ctx.fileProviderAuthority(), file)
 }
 
 @Composable

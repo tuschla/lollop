@@ -12,20 +12,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.convert
-import kotlinx.cinterop.usePinned
-import platform.Foundation.NSFileManager
-import platform.Foundation.NSTemporaryDirectory
-import platform.Foundation.NSUUID
-import platform.posix.SEEK_END
-import platform.posix.SEEK_SET
-import platform.posix.fclose
-import platform.posix.fopen
-import platform.posix.fread
-import platform.posix.fseek
-import platform.posix.ftell
-import platform.posix.fwrite
 
 /**
  * The iOS engine as the app runs it: [DurableCore] over the Rust core's C ABI
@@ -33,21 +19,18 @@ import platform.posix.fwrite
  * process: the core emptied, a new engine, boot's restore.
  */
 class CoreEngineTest {
-    private val dir = NSTemporaryDirectory() + "lollop-engine-" + NSUUID().UUIDString
-    private val path = "$dir/log.ndjson"
-
-    init {
-        check(NSFileManager.defaultManager.createDirectoryAtPath(dir, withIntermediateDirectories = true, attributes = null, error = null))
-    }
+    private val dir = newTempDir()
+    private val log = fileIn(dir, AppFileNames.EVENT_LOG)
 
     @AfterTest
-    fun removeDir() {
-        NSFileManager.defaultManager.removeItemAtPath(dir, error = null)
+    fun removeLog() {
+        for (suffix in listOf("") + AppFileNames.LOG_SUFFIXES) AppFiles.delete(AppFiles.sibling(log, suffix))
+        AppFiles.delete(dir)
     }
 
     private fun boot(bridge: CoreBridge = NativeCore): DurableCore {
         NativeCore.reset()
-        return DurableCore(bridge).also { it.restoreFrom(AppPath(path)) }
+        return DurableCore(bridge).also { it.restore(log) }
     }
 
     private fun set(id: Long) = Event.LogSet("Back Squat", 100.0, 5, 8.0, observedAt = 1_725_904_800, entryId = id)
@@ -71,28 +54,13 @@ class CoreEngineTest {
 
     private fun liftIds(engine: DurableCore) = engine.currentView().lifts.map { it.entry_id }.toSet()
 
-    private fun write(text: String) {
-        val file = checkNotNull(fopen(path, "wb")) { "cannot open $path" }
-        try {
-            val bytes = text.encodeToByteArray()
-            if (bytes.isNotEmpty()) bytes.usePinned { fwrite(it.addressOf(0), 1u, bytes.size.convert(), file) }
-        } finally {
-            fclose(file)
-        }
-    }
+    private fun write(text: String) = AppFiles.writeText(log, text)
 
-    private fun read(): String {
-        val file = checkNotNull(fopen(path, "rb")) { "cannot open $path" }
-        try {
-            fseek(file, 0, SEEK_END)
-            val size = ftell(file).toInt()
-            fseek(file, 0, SEEK_SET)
-            val bytes = ByteArray(size)
-            if (size > 0) bytes.usePinned { fread(it.addressOf(0), 1u, size.convert(), file) }
-            return bytes.decodeToString()
-        } finally {
-            fclose(file)
-        }
+    private fun read(): String = AppFiles.openRead(log).use { f ->
+        val size = f.length().toInt()
+        val bytes = ByteArray(size)
+        if (size > 0) f.readFully(0, bytes, size)
+        bytes.decodeToString()
     }
 
     private fun lines() = read().lines().filter { it.isNotEmpty() }
@@ -116,7 +84,7 @@ class CoreEngineTest {
         assertTrue(engine.send(set(1)).persisted)
         write("$profile\n${wire(set(5))}\n")
         engine.resetForReboot()
-        engine.restoreFrom(AppPath(path))
+        engine.restore(log)
         assertEquals(setOf(5L), liftIds(engine), "only the replaced log's sets")
     }
 

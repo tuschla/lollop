@@ -59,6 +59,41 @@ pub enum ActivityKind {
     Other,
 }
 
+/// What a logged run states beside its figures: the user's tag and rating,
+/// the heart rate they typed and the clock it was logged on. Flattened into
+/// [`Event::LogRun`], [`Event::LogRunTrack`] and [`Event::AmendRun`] (its keys
+/// sit in the event's object) and stored as-is on the run row.
+#[derive(
+    Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Default, Sanitize,
+)]
+pub struct RunMeta {
+    /// User-declared run-intent label. USER DATA with no evidence of its
+    /// own: the weekly report's hard-session checks honor it as the
+    /// session's declared goal (running-012/023). `None` = untagged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workout_type: Option<WorkoutType>,
+    /// Whole-session effort on the CR-10 scale (0–10), rated ~30 min after
+    /// the run (LOAD-SRPE-001). `None` = unrated; values above 10 clamp to
+    /// 10 at ingest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[sanitize_with = "crate::sanitize::cr10"]
+    pub session_rpe: Option<u8>,
+    /// Average heart rate in bpm as the user's watch shows it (UXL-12). When
+    /// set and plausible, `update` converts it to `hr_pct_max` against the
+    /// measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001), of the
+    /// profile in force at the run's instant (re-derived when the profile
+    /// history changes); with neither known the sent `hr_pct_max` stands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_hr_bpm: Option<f64>,
+    /// The device's UTC offset, seconds east, when the run was logged. The
+    /// bpm conversion reads the run's local day with it, so a later
+    /// time-zone change never re-converts the run. `None` (omitted from the
+    /// wire) = the clock's current offset. An amend keeps its row's offset
+    /// and does not read its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_sec: Option<i64>,
+}
+
 #[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, PartialEq, Sanitize)]
 pub enum Event {
     /// Record one readiness observation, then recompute adjustments.
@@ -140,54 +175,35 @@ pub enum Event {
         #[serde(default)]
         observed_at: i64,
     },
-    /// Log one run (distance km, duration min, average % HRmax, and the
-    /// longest run in the last 30 days for spike detection).
+    /// Log one run (distance km, duration min, average % HRmax).
     LogRun {
         #[sanitize_with = "crate::sanitize::non_negative"]
         distance_km: f64,
         #[sanitize_with = "crate::sanitize::non_negative"]
         duration_min: f64,
         hr_pct_max: f64,
+        /// The longest run in the last 30 days, which an old build sent to
+        /// floor the run card's spike-chip baseline. Read, never written.
+        #[serde(default, skip_serializing)]
         #[sanitize_with = "crate::sanitize::non_negative"]
         longest_recent_km: f64,
         /// Log time, unix seconds; shell-supplied, 0 = undated.
         #[serde(default)]
         observed_at: i64,
-        /// User-declared run-intent label. USER DATA with no evidence of its
-        /// own: the weekly report's hard-session checks honor it as the
-        /// session's declared goal (running-012/023). `None` = untagged.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        workout_type: Option<WorkoutType>,
-        /// Whole-session effort on the CR-10 scale (0–10), rated ~30 min after
-        /// the run (LOAD-SRPE-001). `None` = unrated; values above 10 clamp to
-        /// 10 at ingest.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[sanitize_with = "crate::sanitize::cr10"]
-        session_rpe: Option<u8>,
-        /// Average heart rate in bpm as the user's watch shows it (UXL-12). When
-        /// set and plausible, `update` converts it to `hr_pct_max` against the
-        /// measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001), of the
-        /// profile in force at the run's instant (re-derived when the profile
-        /// history changes); with neither known the sent `hr_pct_max` stands.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        avg_hr_bpm: Option<f64>,
         /// Stable per-entry id; see [`Event::LogSet`].
         #[serde(default)]
         entry_id: u64,
-        /// The device's UTC offset, seconds east, when the run was logged. The
-        /// bpm conversion reads the run's local day with it, so a later
-        /// time-zone change never re-converts the run. `None` (omitted from the
-        /// wire) = the clock's current offset.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        utc_offset_sec: Option<i64>,
+        #[serde(flatten)]
+        meta: RunMeta,
     },
     /// Log one GPS-tracked run. Distance and duration are derived in-core from
     /// the fix track (haversine + time span); `hr_pct_max` comes from a paired
-    /// HR sensor (0.0 when none). `longest_recent_km` floors the run card's
-    /// spike-chip baseline; the spike gate derives its own from the logged runs.
+    /// HR sensor (0.0 when none).
     LogRunTrack {
         points: Vec<GpsPoint>,
         hr_pct_max: f64,
+        /// See [`Event::LogRun`].
+        #[serde(default, skip_serializing)]
         #[sanitize_with = "crate::sanitize::non_negative"]
         longest_recent_km: f64,
         /// Log time, unix seconds; shell-supplied, 0 = undated. The GPS fixes
@@ -198,23 +214,12 @@ pub enum Event {
         /// Stable per-entry id; see [`Event::LogSet`].
         #[serde(default)]
         entry_id: u64,
-        /// User-declared run-intent label; see [`Event::LogRun`].
-        #[serde(skip_serializing_if = "Option::is_none")]
-        workout_type: Option<WorkoutType>,
         /// Indices into `points` that begin a new recording segment: the shell's
         /// pause/relocation boundaries. Empty = one continuous segment.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         segment_starts: Vec<u32>,
-        /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[sanitize_with = "crate::sanitize::cr10"]
-        session_rpe: Option<u8>,
-        /// Average heart rate the athlete entered, bpm; see [`Event::LogRun`].
-        #[serde(skip_serializing_if = "Option::is_none")]
-        avg_hr_bpm: Option<f64>,
-        /// The device's UTC offset when the run was logged; see [`Event::LogRun`].
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        utc_offset_sec: Option<i64>,
+        #[serde(flatten)]
+        meta: RunMeta,
     },
     ClearRuns,
     /// Log one other activity (sport, cycling, a PE lesson…) of moderate or
@@ -285,22 +290,15 @@ pub enum Event {
         #[sanitize_with = "crate::sanitize::non_negative"]
         duration_min: f64,
         hr_pct_max: f64,
-        #[serde(default)]
+        /// See [`Event::LogRun`].
+        #[serde(default, skip_serializing)]
         #[sanitize_with = "crate::sanitize::non_negative"]
         longest_recent_km: f64,
         /// The NEW timestamp for the amended entry.
         #[serde(default)]
         observed_at: i64,
-        /// User-declared run-intent label; see [`Event::LogRun`].
-        #[serde(skip_serializing_if = "Option::is_none")]
-        workout_type: Option<WorkoutType>,
-        /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[sanitize_with = "crate::sanitize::cr10"]
-        session_rpe: Option<u8>,
-        /// Average heart rate in bpm, converted like [`Event::LogRun`]'s.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        avg_hr_bpm: Option<f64>,
+        #[serde(flatten)]
+        meta: RunMeta,
         /// The OLD `observed_at` of the row being amended; see [`Event::AmendSet`].
         #[serde(default)]
         observed_at_fallback: i64,

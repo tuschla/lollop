@@ -1,11 +1,13 @@
 //! The shells' `CoreBridge` (android/core-bridge) from the bridge's op table
-//! (`shared::ffi::ops`): one interface method per op, and the implementation
-//! over the two entry points both platforms provide (`call` for a byte
-//! buffer, `callLines` for lines), each taking the op's code.
+//! (`shared::ffi::ops`): one interface method per op, documented with the
+//! wire types it takes and answers, and the implementation over the two
+//! entry points both platforms provide (`call` for a byte buffer, `callLines`
+//! for lines), each taking the op's code.
 
 use std::fmt::Write;
 
 use shared::ffi::ops::{Op, Param};
+use shared::wire::{Registry, Shape};
 
 use crate::Output;
 
@@ -43,6 +45,27 @@ fn signature(op: Op) -> (String, String) {
     }
 }
 
+/// The op's doc, then the Kotlin wire types of its JSON input and answer.
+fn op_doc(op: Op, reg: &mut Registry) -> String {
+    let json =
+        |shape: Option<Shape>| shape.map(|s| format!("`{}` JSON", crate::kotlin::type_name(&s)));
+    let (input, answer) = op.payloads(reg);
+    let mut doc = op.doc().to_owned();
+    match (json(input), json(answer)) {
+        (Some(i), Some(a)) => {
+            let _ = write!(doc, "\nTakes {i}; answers {a}.");
+        }
+        (Some(i), None) => {
+            let _ = write!(doc, "\nTakes {i}.");
+        }
+        (None, Some(a)) => {
+            let _ = write!(doc, "\nAnswers {a}.");
+        }
+        (None, None) => {}
+    }
+    doc
+}
+
 fn kdoc(out: &mut String, indent: &str, doc: &str) {
     let _ = writeln!(out, "{indent}/**");
     for line in doc.lines() {
@@ -70,11 +93,12 @@ fn core_bridge() -> String {
          runs every op that reads it on its own thread, so any thread may call.",
     );
     out.push_str("interface CoreBridge {\n");
+    let mut reg = Registry::default();
     for (i, &op) in Op::ALL.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        kdoc(&mut out, "    ", op.doc());
+        kdoc(&mut out, "    ", &op_doc(op, &mut reg));
         let (params, _) = signature(op);
         let _ = writeln!(out, "    fun {}({params}): ByteArray?", method(op));
     }

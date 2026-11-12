@@ -472,8 +472,8 @@ fn readiness_summary_all_clear_rows_carry_no_fabricated_evidence() {
 fn signal_groups_metadata_fences_the_red_flag_block() {
     let app = Engine;
     let vm = app.view(&Model::default());
-    assert_eq!(vm.signal_groups.len(), crate::autoreg::ALL_SIGNALS.len());
-    for s in crate::autoreg::ALL_SIGNALS {
+    assert_eq!(vm.signal_groups.len(), ReadinessSignal::ALL.len());
+    for s in ReadinessSignal::ALL {
         assert_eq!(
             vm.signal_groups.iter().filter(|g| g.signal == s).count(),
             1,

@@ -22,10 +22,9 @@ const OVER_TWICE_DAILY: &str = "more than twice your average daily distance";
 const SHARE_CAP_FROM_64KM: &str = "The 25% limit applies from 64 km a week";
 
 fn run(km: f64, minutes: f64, hr_pct: f64, wt: Option<WorkoutType>, at: i64) -> LoggedRun {
-    LoggedRun {
-        workout_type: wt,
-        ..logged_run(km, minutes, hr_pct, at)
-    }
+    let mut r = logged_run(km, minutes, hr_pct, at);
+    r.meta.workout_type = wt;
+    r
 }
 
 fn profile_with_run_days(days: u8, km: f64) -> Profile {

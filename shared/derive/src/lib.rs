@@ -10,6 +10,8 @@
 //!   `#[review(session)]`, `#[review(weekly)]` or `#[review(stamp)]`.
 //! - `#[derive(Wire)]` implements `crate::wire::Wire`: the type's serde wire
 //!   shape as data, for `shared/wiregen` (see [`wire`]).
+//! - `#[derive(Variants)]` gives a unit-only enum `ALL`, every variant in
+//!   declaration order, so no hand-kept list can miss one.
 
 mod wire;
 
@@ -40,6 +42,36 @@ pub fn derive_wire(input: TokenStream) -> TokenStream {
     wire::wire_impl(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+#[proc_macro_derive(Variants)]
+pub fn derive_variants(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    variants_impl(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn variants_impl(input: &DeriveInput) -> syn::Result<Tokens> {
+    let name = &input.ident;
+    let vis = &input.vis;
+    let Data::Enum(e) = &input.data else {
+        return Err(syn::Error::new_spanned(name, "Variants needs an enum"));
+    };
+    let mut idents = Vec::new();
+    for v in &e.variants {
+        if !matches!(v.fields, Fields::Unit) {
+            return Err(syn::Error::new_spanned(v, "Variants needs unit variants"));
+        }
+        idents.push(&v.ident);
+    }
+    let count = idents.len();
+    Ok(quote! {
+        impl #name {
+            /// Every variant, in declaration order.
+            #vis const ALL: [Self; #count] = [#(Self::#idents),*];
+        }
+    })
 }
 
 fn sanitize_impl(input: &DeriveInput) -> syn::Result<Tokens> {

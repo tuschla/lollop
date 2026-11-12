@@ -1,9 +1,5 @@
 package app.milestone
 
-import app.milestone.resources.Res
-import app.milestone.resources.reminder_action_log_first_set
-import app.milestone.resources.reminder_action_log_next_set
-import app.milestone.resources.reminder_action_start_run
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import platform.UserNotifications.UNAuthorizationOptionAlert
@@ -40,10 +36,14 @@ internal const val NOTIF_KEY_ACTION_DEST = "action_dest"
 /** The session reminder's one action: start the session. */
 internal const val NOTIF_ACTION_START = "start"
 
-/** The reminder's categories, one per action label ([reminderActionLabel]). */
-internal const val CATEGORY_REMINDER_RUN = "session_reminder_run"
-internal const val CATEGORY_REMINDER_FIRST_SET = "session_reminder_first_set"
-internal const val CATEGORY_REMINDER_NEXT_SET = "session_reminder_next_set"
+/** The reminder's notification category, one per [ReminderAction]; the ids are
+ *  stored with notifications already scheduled, so they never change. */
+internal val ReminderAction.category: String
+    get() = when (this) {
+        ReminderAction.StartRun -> "session_reminder_run"
+        ReminderAction.LogFirstSet -> "session_reminder_first_set"
+        ReminderAction.LogNextSet -> "session_reminder_next_set"
+    }
 
 /** The rest-done alert's identifier ([RestAlarmPlatform]): one at a time, replaced by a new rest. */
 internal const val REST_DONE_ID = "rest_done"
@@ -125,25 +125,19 @@ internal fun installNotificationDelegate() {
     val center = notificationCenter
     center.delegate = delegate
     val res = PlatformContext.INSTANCE.appResources()
-    fun category(id: String, label: String) = UNNotificationCategory.categoryWithIdentifier(
-        id,
+    fun category(action: ReminderAction) = UNNotificationCategory.categoryWithIdentifier(
+        action.category,
         actions = listOf(
             // From the lock screen the session opens after unlock (Android:
             // setAuthenticationRequired).
             UNNotificationAction.actionWithIdentifier(
                 NOTIF_ACTION_START,
-                label,
+                res.getString(action.labelRes),
                 UNNotificationActionOptionForeground or UNNotificationActionOptionAuthenticationRequired,
             ),
         ),
         intentIdentifiers = emptyList<Any>(),
         options = 0uL,
     )
-    center.setNotificationCategories(
-        setOf(
-            category(CATEGORY_REMINDER_RUN, res.getString(Res.string.reminder_action_start_run)),
-            category(CATEGORY_REMINDER_FIRST_SET, res.getString(Res.string.reminder_action_log_first_set)),
-            category(CATEGORY_REMINDER_NEXT_SET, res.getString(Res.string.reminder_action_log_next_set)),
-        ),
-    )
+    center.setNotificationCategories(ReminderAction.entries.map(::category).toSet())
 }

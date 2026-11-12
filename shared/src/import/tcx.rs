@@ -6,9 +6,10 @@
 //! namespace prefix). Everything else (lap summaries, extensions, author,
 //! courses) is ignored. TCX names no accuracy, so every fix has none.
 
+use super::number::{kt_to_double, kt_trim};
+use super::raw::{RawFix, RawRun, hr_bpm};
 use super::time::parse_import_time_sec;
 use super::xml::{Event, Malformed, pull_tags};
-use super::{RawFix, RawRun, hr_bpm, kt_to_double, kt_trim};
 use crate::gps::MAX_FIX_GAP_SEC;
 
 /// One [`RawRun`] per `<Activity>` (a multi-sport day is several runs, not

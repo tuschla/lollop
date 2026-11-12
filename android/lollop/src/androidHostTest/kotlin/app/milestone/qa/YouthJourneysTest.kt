@@ -17,11 +17,11 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.HoldReason
 import app.milestone.R
+import app.milestone.sharedIntent
 import app.milestone.train_blocked
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -111,11 +111,7 @@ class YouthJourneysTest {
         rule.scrollTodayTo(hasText(str(R.string.coach_export_action)) and hasClickAction())
         rule.onNode(hasText(str(R.string.coach_export_action)) and hasClickAction()).performClick()
         rule.waitForIdle()
-        val chooser = shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedActivity
-        assertNotNull("the share sheet opened", chooser)
-        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
-        @Suppress("DEPRECATION")
-        val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+        val send = sharedIntent(shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedActivity)
         assertEquals(Intent.ACTION_SEND, send.action)
         assertEquals("text/plain", send.type)
         assertEquals(str(R.string.coach_export_subject), send.getStringExtra(Intent.EXTRA_TITLE))

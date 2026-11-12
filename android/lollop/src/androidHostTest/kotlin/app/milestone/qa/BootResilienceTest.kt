@@ -22,7 +22,6 @@ import app.milestone.DurableCore
 import app.milestone.EventDispatcher
 import app.milestone.EventLog
 import app.milestone.FakeCore
-import app.milestone.GpsPoint
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
@@ -30,6 +29,7 @@ import app.milestone.TestClock
 import app.milestone.core.CoreBridge
 import app.milestone.core.JniCore
 import app.milestone.exportDataTo
+import app.milestone.northFix
 import app.milestone.toJson
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -97,8 +97,6 @@ class BootResilienceTest {
         return out
     }
 
-    private fun fix(northM: Double, t: Long) = GpsPoint(52.52 + northM / 111_195.0, 13.405, t, 5.0)
-
     /** A live run's sidecar, then process death and a location revoke (the
      *  platform kills the process on revoke). */
     private fun interruptedRunWithLocationRevoked(): Int {
@@ -107,7 +105,7 @@ class BootResilienceTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val t0 = System.currentTimeMillis() / 1000 - 600
-        val pts = (0 until 60).map { fix(3.0 * it, t0 + it) }
+        val pts = (0 until 60).map { northFix(3.0 * it, t0 + it) }
         ActiveRunStore.begin()
         pts.forEach { p -> if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p, RunSession.isSegmentStart(p)) }
         RunSession.recordingStarted()

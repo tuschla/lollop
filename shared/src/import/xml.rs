@@ -114,7 +114,11 @@ pub(super) fn declares_dtd(text: &str) -> bool {
     let mut i = 0;
     while i < text.len() {
         let rest = &text[i..];
-        i = if let Some(c) = rest.chars().next().filter(|&c| super::kt_is_whitespace(c)) {
+        i = if let Some(c) = rest
+            .chars()
+            .next()
+            .filter(|&c| super::number::kt_is_whitespace(c))
+        {
             i + c.len_utf8()
         } else if let Some(pi) = rest.strip_prefix("<?") {
             match pi.find("?>") {

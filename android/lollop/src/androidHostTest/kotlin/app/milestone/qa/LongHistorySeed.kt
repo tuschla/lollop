@@ -8,6 +8,7 @@ import app.milestone.GpsPoint
 import app.milestone.GpxTrack
 import app.milestone.gpxDocument
 import app.milestone.LiftGoal
+import app.milestone.M_PER_DEG
 import app.milestone.PainDetail
 import app.milestone.PainKind
 import app.milestone.PainTrend
@@ -77,7 +78,6 @@ internal object LongHistorySeed {
 
     private const val HOME_LAT = 52.52
     private const val HOME_LON = 13.405
-    private const val M_PER_DEG_LAT = 111_195.0
 
     /** Longest run of the history: long enough in both km and mi to fold its splits. */
     const val LONGEST_KM = 34.2
@@ -342,8 +342,8 @@ internal object LongHistorySeed {
             val step = Math.min(speed * everySec, total - done)
             val dt = Math.max(1L, (step / speed).roundToLong())
             heading += rng.range(-0.25, 0.25)
-            val mLon = M_PER_DEG_LAT * cos(Math.toRadians(lat))
-            lat += step * cos(heading) / M_PER_DEG_LAT
+            val mLon = M_PER_DEG * cos(Math.toRadians(lat))
+            lat += step * cos(heading) / M_PER_DEG
             lon += step * sin(heading) / mLon
             t += dt
             done += step

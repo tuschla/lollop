@@ -83,7 +83,7 @@ mkdir -p "$OUT"/{seed,probe}
 # Easy run day); succeeds once Today's session is on screen.
 reset_app() {
   local f="${1:-$OUT/seed/basic.ndjson}"
-  [[ -n "${1:-}" ]] || seed_basic "$SEED_DAY" 2 >"$f"
+  [[ -n "${1:-}" ]] || seed_basic "$SEED_DAY" 2 >"$f" || return 1
   fresh_app "$RUN_DAY" "$f" && wait_text pre "${STR[main_todays_session]}" 40
 }
 ui_settled() { wait_for 10 app_up; settled dump_ui >/dev/null; }
@@ -92,22 +92,13 @@ ui_settled() { wait_for 10 app_up; settled dump_ui >/dev/null; }
 editor_chip() {
   local i l
   for i in 1 2 3 4 5; do
-    l="$(node_label re '^Today · ')"
+    l="$(node_label pre "${STR[log_today]} · ")"
     [[ -n "$l" ]] && { echo "$l"; return 0; }
     swipe_content
   done
   return 1
 }
 
-# dismiss_crash_dialog PID: after `am crash`, answer the crash dialog with "Close
-# app" and wait until the crashed process PID is gone. The dialog shows for a crash
-# within 2 min of the app's previous one (AppErrors MIN_CRASH_INTERVAL), and the
-# process lives until it is answered: its kill then finishes every activity it
-# hosts, a launch's new MainActivity included, so a launch must wait for it.
-dismiss_crash_dialog() {
-  if wait_text eq "Close app" 3; then tap_node eq "Close app"; fi
-  wait_for 10 pid_released "$1" || log "crashed process $1 still running"
-}
 resumed_and_recording() { [[ "$(sidecar_points)" -gt "$1" ]] && svc_fg; }
 
 set_locale() { sh_ cmd locale set-app-locales "$APP_ID" ${1:+--locales "$1"} >/dev/null; ui_settled; }
@@ -220,11 +211,11 @@ sc_time() {
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   adb_ shell settings put system time_12_24 24
   open_set_editor; chip="$(editor_chip)"; evidence time-01-24h-editor
-  expect $S "24 h setting: editor time chip" "'$chip'" eval '[[ "$chip" =~ ^Today\ ·\ [0-9]{2}:[0-9]{2}$ ]]'
+  expect $S "24 h setting: editor time chip" "'$chip'" eval '[[ "$chip" =~ ^"${STR[log_today]}"\ ·\ [0-9]{2}:[0-9]{2}$ ]]'
   close_editor
   adb_ shell settings put system time_12_24 12
   open_set_editor; chip="$(editor_chip)"; evidence time-02-12h-editor
-  expect $S "12 h setting: editor time chip" "'$chip'" eval '[[ "$chip" =~ ^Today\ ·\ [0-9]{1,2}:[0-9]{2}[^0-9]*[AP]M$ ]]'
+  expect $S "12 h setting: editor time chip" "'$chip'" eval '[[ "$chip" =~ ^"${STR[log_today]}"\ ·\ [0-9]{1,2}:[0-9]{2}[^0-9]*[AP]M$ ]]'
   close_editor
 
   mark time-clock-jump
@@ -368,9 +359,8 @@ sc_perms() {
   if ! start_run; then check FAIL $S "start tracked run" "tracker Start not reachable"; stop_feeder; return; fi
   sleep 20; n0="$(sidecar_points)"
   mark perms-revoke-location
-  adb_ shell pm revoke "$APP_ID" android.permission.ACCESS_FINE_LOCATION
-  adb_ shell pm revoke "$APP_ID" android.permission.ACCESS_COARSE_LOCATION
-  wait_for 8 app_gone && observe $S "revoking location kills the process (platform)" "pid gone"
+  stop_app revoke ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION &&
+    observe $S "revoking location kills the process (platform)" "pid gone"
   launch
   expect $S "relaunch after revoke offers to resume the run" "'${STR[main_resume_run_title]}' dialog" wait_text eq "${STR[main_resume_run_title]}" 20
   evidence perms-01-resume-prompt
@@ -397,8 +387,7 @@ sc_perms() {
   tap_nav "${STR[main_dest_today]}"
   if ! start_run; then check FAIL $S "start second run" "tracker Start not reachable"; stop_feeder; return; fi
   sleep 15; n0="$(sidecar_points)"
-  adb_ shell pm revoke "$APP_ID" android.permission.POST_NOTIFICATIONS
-  wait_for 8 app_gone && observe $S "revoking notifications kills the process (platform)" "pid gone"
+  stop_app revoke POST_NOTIFICATIONS && observe $S "revoking notifications kills the process (platform)" "pid gone"
   launch
   expect $S "relaunch after notification revoke offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
   tap_node eq "${STR[track_action_resume]}"; sleep 15
@@ -422,7 +411,7 @@ sc_power() {
   sh_ dumpsys power | grep -iE "battery ?saver|mSettingBatterySaver|low_power" >"$OUT/logs/power-state.txt"
   expect $S "battery saver on" "settings low_power=$(sh_ settings get global low_power); $(grep -m2 -i 'saver' "$OUT/logs/power-state.txt" | tr -s ' ' | tr '\n' ';')" \
     test "$(sh_ settings get global low_power)" = 1
-  adb_ shell am force-stop "$APP_ID"; launch
+  stop_app; launch
   expect $S "cold launch under battery saver renders Today" "Today hero within 30 s" wait_text pre "${STR[main_todays_session]}" 30
   evidence power-01-today
   start_feeder power
@@ -430,7 +419,7 @@ sc_power() {
     sleep 15; n0="$(sidecar_points)"
     # 45 s with the screen off.
     off="$(dev_now)"; adb_ shell input keyevent 223; sleep 45
-    on="$(dev_now)"; wake; launch; wait_for 10 app_up
+    on="$(dev_now)"; wake; launch
     n1="$(sidecar_points)"
     pull_sidecar "$OUT/logs/power-sidecar.ndjson"
     gap="$(python3 - "$OUT/logs/power-sidecar.ndjson" "$off" "$on" <<'PY'
@@ -463,9 +452,8 @@ sc_death() {
   mark death-editor-kill
   open_set_editor && editor_fill
   home
-  adb_ shell am kill "$APP_ID"
-  wait_for 5 app_gone
-  expect $S "am kill ends the backgrounded app's process" "pid '$(app_pid)'" app_gone
+  stop_app kill
+  expect $S "am kill ends the backgrounded app's process" "pid '$(app_pid)'" test -z "$(app_pid)"
   launch; wait_text eq "${STR[log_field_exercise]}" 15
   evidence death-01-editor-restored
   expect $S "set editor restored with its values after process death" "122.5 kg · 5 · 2 left" editor_has_values 122.5
@@ -475,9 +463,8 @@ sc_death() {
   l0="$(log_lines)"
   open_set_editor && editor_fill
   pid0="$(app_pid)"
-  adb_ shell am crash "$APP_ID"
-  dismiss_crash_dialog "$pid0"
-  launch; wait_for 15 app_up
+  stop_app crash
+  launch
   l1="$(log_lines)"
   evidence death-02-after-crash
   expect $S "relaunch after am crash mid-editor" "focus $(focus)" app_up
@@ -497,8 +484,7 @@ sc_death() {
 
   mark death-run-am-crash
   n0="$(sidecar_points)"; tc="$(dev_now)"; pid0="$(app_pid)"
-  adb_ shell am crash "$APP_ID"
-  dismiss_crash_dialog "$pid0"
+  stop_app crash
   launch
   expect $S "relaunch after am crash mid-run offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
   evidence death-03-resume-prompt
@@ -514,8 +500,7 @@ sc_death() {
   tap_nav "${STR[main_dest_today]}"
   if start_run; then
     sleep 15; n0="$(sidecar_points)"; pid0="$(app_pid)"
-    adb_ shell kill -9 "$pid0"
-    wait_for 10 pid_released "$pid0"
+    stop_app sigkill
     expect $S "SIGKILL mid-run (low-memory-killer stand-in) ends the process" "pid $pid0 → '$(app_pid)'" pid_released "$pid0"
     launch
     expect $S "relaunch after SIGKILL mid-run offers to resume" "'${STR[main_resume_run_title]}'" wait_text eq "${STR[main_resume_run_title]}" 20
@@ -646,8 +631,8 @@ sc_backup() {
   expect $S "export writes every logged event" "$(grep -c . "$OUT/logs/backup-exported.canon") exported vs $(grep -c . "$OUT/logs/backup-device.canon") on device" \
     cmp -s "$OUT/logs/backup-device.canon" "$OUT/logs/backup-exported.canon"
   mark backup-clear
-  adb_ shell am force-stop "$APP_ID"; adb_ shell pm clear "$APP_ID" >/dev/null
-  grant_perms; pin_clock "$RUN_DAY"; launch_up
+  stop_app clear
+  grant_perms; pin_clock "$RUN_DAY"; launch
   if wait_text eq "${STR[setup_skip]}" 15; then tap_node eq "${STR[setup_skip]}"; wait_gone eq "${STR[setup_skip]}" 10; fi
   expect $S "cleared app starts empty" "log lines $(log_lines)" test "$(log_lines)" -le 1
   import_backup "$f" clear
@@ -685,7 +670,7 @@ _displayed() { displayed_ms >/dev/null; }
 boot_long() {
   local tag="$1" i t0 t1 ms all="" hs="$OUT/logs/heap-${1// /_}.txt" hp="" M
   for i in 1 2 3; do
-    adb_ shell am force-stop "$APP_ID"; wait_for 5 app_gone
+    stop_app
     adb_ logcat -c -b main,system || log "logcat -c failed"
     if [[ $i -eq 1 ]]; then rm -f "$hs" "$hs.stop"; heap_sampler "$hs" & hp=$!; fi
     t0=$(date +%s%N)

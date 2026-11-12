@@ -49,18 +49,6 @@ fn lift(exercise: &str, kg: f64, day: i64) -> LoggedSet {
     }
 }
 
-/// Anchors prescribed from the history through local day `through`.
-fn anchors_through(sets: &[LoggedSet], ctx: AnchorCtx, through: i64) -> crate::plan::LiftAnchors {
-    build_plan_anchors(
-        SetIndex::new(sets)
-            .with_facts(sets)
-            .filter(|(s, _)| s.observed_at / DAY_SEC <= through),
-        ctx,
-        through,
-        0,
-    )
-}
-
 /// Squat 3×/wk (Mon/Wed/Fri) on days `0..days`.
 fn squat_block(days: i64) -> Vec<LoggedSet> {
     (0..days)

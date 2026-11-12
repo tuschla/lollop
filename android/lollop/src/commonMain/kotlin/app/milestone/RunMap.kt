@@ -73,9 +73,6 @@ private val ExpandVisual = 40.dp
 private val ExpandGlyph = 20.dp
 private val FitGlyph = 24.dp
 
-/** Opacity of a trimmed-off leg's dashed `OnBgFaint` stroke (spec §4). */
-internal const val TrimCutAlpha = 0.6f
-
 internal val DistanceUnit.metres: Double get() = if (this == DistanceUnit.Mi) CoreConstants.MILE_M else 1000.0
 
 /** The header and stats the full-screen route map shows over the map. */
@@ -324,8 +321,8 @@ private fun FullScreenRouteMap(
 }
 
 /**
- * The route over OSM map tiles ([tiles]) or on a plain canvas, drawn by the
- * platform's route renderer in the theme's colours. Framed into the area between
+ * The route over OSM map tiles ([tiles]) or on a plain canvas, drawn by
+ * [RoutePainter] in the theme's colours. Framed into the area between
  * [topPx] and [bottomPx] with [insetPx] all round on first layout, on every resize
  * and on each bump of [fitRequests]; [interactive] maps pan and pinch, a static one
  * ignores touches. [corner] is the radius of the card the layer fills (where the
@@ -470,8 +467,6 @@ internal fun MapOverlayButton(
 val RouteMapHeight = 220.dp
 
 val SheetCornerRadius = 26.dp
-
-const val MapChromeAlpha = 0.94f
 
 /** Medium motion, in ms: a content fade-in. */
 const val MotionMedium = 200

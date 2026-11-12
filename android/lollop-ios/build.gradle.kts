@@ -1,11 +1,10 @@
 // The iOS app's Kotlin: the `Lollop` framework the Xcode app (iosApp/) links. It
-// joins :lollop (the app, whose iOS code compiles without the core) and
-// :core-bridge (the Rust core over its C ABI). Its entry points install the core
-// engine (`LollopApp.start()`) and host the app's Compose UI
-// (`MainViewController()`). Dynamic, so the framework carries the Rust core and
-// the app only embeds it; Xcode's build phase runs
-// `:lollop-ios:embedAndSignAppleFrameworkForXcode`. Links on macOS only; see
-// ios/README.md.
+// packages :lollop (the app, with :core-bridge, the Rust core over its C ABI)
+// and the core itself. Its entry points install the core engine
+// (`LollopApp.start()`) and host the app's Compose UI (`MainViewController()`).
+// Dynamic, so the framework carries the Rust core and the app only embeds it;
+// Xcode's build phase runs `:lollop-ios:embedAndSignAppleFrameworkForXcode`.
+// Links on macOS only; see ios/README.md.
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     // MainViewController's content lambda is @Composable.
@@ -25,12 +24,8 @@ kotlin {
     sourceSets {
         iosMain.dependencies {
             implementation(project(":lollop"))
-            implementation(project(":core-bridge"))
             implementation(libs.compose.runtime)
             implementation(libs.compose.ui)
-        }
-        iosTest.dependencies {
-            implementation(kotlin("test"))
         }
     }
 }

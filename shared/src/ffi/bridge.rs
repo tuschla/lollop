@@ -24,12 +24,14 @@ use std::sync::{LazyLock, mpsc};
 
 use crux_core::bridge::{Bridge, BridgeError, JsonFfiFormat};
 use crux_core::{App, Command, Core};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-use super::ops::Op;
+use super::ops::{Op, Raw, Signature, sig};
 use crate::app::{Effect, Engine, Model, ViewModel};
 use crate::envelope::{
-    CoreError, ErrorEnvelope, ErrorKind, ImportedHr, ProfileDraft, RunRef, RunTrack, ThinnedTrack,
-    TrackFigures, TrackThinning, WarmUpQuery,
+    CoreError, ErrorEnvelope, ErrorKind, RelogQuery, RunRef, RunTrack, ThinnedTrack, TrackFigures,
+    TrackThinning,
 };
 use crate::event::Event;
 use crate::log::LineFacts;
@@ -137,9 +139,60 @@ impl<'a> Input<'a> {
     ) -> Result<&'a mut dyn Iterator<Item = Result<Cow<'a, str>, String>>, CoreError> {
         match self {
             Input::Lines(lines) => Ok(lines),
-            Input::Bytes(_) => Err(CoreError::bad_input(op, "takes lines, not bytes")),
+            Input::Bytes(_) => Err(CoreError::bad_input(op, "takes bytes, not lines")),
         }
     }
+
+    /// The op's JSON input.
+    fn json<S: Signature>(self) -> Result<S::In, CoreError>
+    where
+        S::In: DeserializeOwned,
+    {
+        serde_json::from_slice(&self.bytes(S::OP)?)
+            .map_err(|err| CoreError::bad_input(S::OP, err.to_string()))
+    }
+}
+
+/// `out` as the op's JSON answer.
+fn encode<S: Signature>(out: &S::Out) -> Result<Vec<u8>, CoreError>
+where
+    S::Out: Serialize,
+{
+    serde_json::to_vec(out).map_err(|err| CoreError::unserializable(S::OP, &err))
+}
+
+/// An op that reads no core state and takes JSON: `f` over its input, on the
+/// caller's thread, behind the firewall.
+fn query<S: Signature>(
+    input: Input<'_>,
+    f: impl FnOnce(S::In) -> Result<S::Out, CoreError>,
+) -> Result<Vec<u8>, CoreError>
+where
+    S::In: DeserializeOwned,
+    S::Out: Serialize + Sized,
+{
+    guarded(S::OP, || encode::<S>(&f(input.json::<S>()?)?))
+}
+
+/// An op that reads no core state and takes lines: `each` over every line as
+/// it is read (an unreadable line is the error's message), then `answer`
+/// over the results. A multi-year GPS log is never held decoded.
+fn lines_query<S: Signature<In = Raw>, T>(
+    input: Input<'_>,
+    each: impl Fn(&str) -> T,
+    answer: impl FnOnce(Vec<T>) -> S::Out,
+) -> Result<Vec<u8>, CoreError>
+where
+    S::Out: Serialize + Sized,
+{
+    let lines = input.lines(S::OP)?;
+    guarded(S::OP, || {
+        let items = lines
+            .map(|line| line.map(|line| each(&line)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|message| CoreError::bad_input(S::OP, message))?;
+        encode::<S>(&answer(items))
+    })
 }
 
 /// [`Engine`] over a model the session shares with the GPX export, which
@@ -200,26 +253,28 @@ impl Session {
         Ok(out)
     }
 
-    fn run_ref(op: Op, run: &[u8]) -> Result<RunRef, CoreError> {
-        serde_json::from_slice(run).map_err(|err| CoreError::bad_input(op, err.to_string()))
+    fn export_gpx(&self, run: &RunRef) -> Vec<u8> {
+        crate::app::export_run_gpx(&self.model.borrow(), run.entry_id, run.observed_at).into_bytes()
     }
 
-    fn export_gpx(&self, run: &[u8]) -> Result<Vec<u8>, CoreError> {
-        let run = Self::run_ref(Op::ExportGpx, run)?;
-        let gpx = crate::app::export_run_gpx(&self.model.borrow(), run.entry_id, run.observed_at);
-        Ok(gpx.into_bytes())
-    }
-
-    fn run_track(&self, run: &[u8]) -> Result<Vec<u8>, CoreError> {
-        let run = Self::run_ref(Op::RunTrack, run)?;
-        let track = RunTrack {
+    fn run_track(&self, run: &RunRef) -> RunTrack {
+        RunTrack {
             segments: crate::app::run_track_segments(
                 &self.model.borrow(),
                 run.entry_id,
                 run.observed_at,
             ),
-        };
-        serde_json::to_vec(&track).map_err(|err| CoreError::unserializable(Op::RunTrack, &err))
+        }
+    }
+
+    fn relog_event(&self, row: &RelogQuery) -> Option<Event> {
+        crate::app::relog_event(
+            &self.model.borrow(),
+            row.kind,
+            row.entry_id,
+            row.observed_at,
+            row.amended_at,
+        )
     }
 }
 
@@ -264,47 +319,49 @@ impl CoreBridge {
             Op::View => self.on_core(op, |session| session.view()),
             Op::ParseRunFile => {
                 let file = input.bytes(op)?;
-                guarded(op, || parse_run_file(&file))
+                guarded(op, || {
+                    encode::<sig::ParseRunFile>(&crate::import::import_run_file(&file))
+                })
             }
-            Op::TrackFigures => {
-                let event = input.bytes(op)?;
-                guarded(op, || track_figures(&event))
-            }
+            Op::TrackFigures => query::<sig::TrackFigures>(input, track_figures),
             Op::ExportGpx => {
-                let run = input.bytes(op)?.into_owned();
-                self.on_core(op, move |session| session.export_gpx(&run))
+                let run = guarded(op, || input.json::<sig::ExportGpx>())?;
+                self.on_core(op, move |session| Ok(session.export_gpx(&run)))
             }
             Op::RunTrack => {
-                let run = input.bytes(op)?.into_owned();
-                self.on_core(op, move |session| session.run_track(&run))
+                let run = guarded(op, || input.json::<sig::RunTrack>())?;
+                self.on_core(op, move |session| {
+                    encode::<sig::RunTrack>(&session.run_track(&run))
+                })
             }
-            Op::CompactLog => {
-                let lines = input.lines(op)?;
-                guarded(op, || compact_log(lines))
-            }
+            Op::CompactLog => lines_query::<sig::CompactLog, _>(input, LineFacts::parse, |facts| {
+                crate::log::compact_lines(&facts)
+            }),
             Op::Reset => self.on_core(op, |session| {
                 *session = Session::new();
                 Ok(Vec::new())
             }),
             Op::ExerciseKeys => {
-                let names = input.lines(op)?;
-                guarded(op, || exercise_keys(names))
+                lines_query::<sig::ExerciseKeys, _>(input, crate::names::exercise_key, |keys| keys)
             }
-            Op::WarmUpRamp => {
-                let query = input.bytes(op)?;
-                guarded(op, || warm_up_ramp(&query))
-            }
+            Op::WarmUpRamp => query::<sig::WarmUpRamp>(input, |q| {
+                Ok(crate::strength::warm_up_ramp(&q.exercise, q.work_kg, q.weight_lb).value)
+            }),
             Op::DraftFacts => {
-                let draft = input.bytes(op)?;
-                guarded(op, || draft_facts(&draft))
+                query::<sig::DraftFacts>(input, |draft| Ok(crate::app::draft_facts(draft)))
             }
-            Op::ThinTrack => {
-                let track = input.bytes(op)?;
-                guarded(op, || thin_track(&track))
-            }
-            Op::ImportedHrPct => {
-                let hr = input.bytes(op)?;
-                guarded(op, || imported_hr_pct(&hr))
+            Op::ThinTrack => query::<sig::ThinTrack>(input, |track| Ok(thin_track(&track))),
+            Op::ImportedHrPct => query::<sig::ImportedHrPct>(input, |hr| {
+                Ok(crate::import::imported_hr_pct_max(
+                    hr.avg_hr_bpm,
+                    hr.measured_hr_max,
+                ))
+            }),
+            Op::RelogEvent => {
+                let row = guarded(op, || input.json::<sig::RelogEvent>())?;
+                self.on_core(op, move |session| {
+                    encode::<sig::RelogEvent>(&session.relog_event(&row))
+                })
             }
         }
     }
@@ -354,99 +411,38 @@ pub(crate) fn call(code: u32, input: Input<'_>) -> Vec<u8> {
     BRIDGE.call(code, input)
 }
 
-fn parse_run_file(bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
-    serde_json::to_vec(&crate::import::import_run_file(bytes))
-        .map_err(|err| CoreError::unserializable(Op::ParseRunFile, &err))
-}
-
 /// The figures from [`crate::app::preview_track_figures`] (the same QC and
 /// derivation the saved run's card uses), so the tracker's Finish review shows
 /// exactly what History will list.
-fn track_figures(event: &[u8]) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::TrackFigures;
-    let event = serde_json::from_slice::<Event>(event)
-        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+fn track_figures(event: Event) -> Result<TrackFigures, CoreError> {
     let Event::LogRunTrack {
         points,
         segment_starts,
         ..
     } = event
     else {
-        return Err(CoreError::bad_input(OP, "not a LogRunTrack event"));
+        return Err(CoreError::bad_input(
+            Op::TrackFigures,
+            "not a LogRunTrack event",
+        ));
     };
     let (distance_km, duration_min) = crate::app::preview_track_figures(points, &segment_starts);
-    serde_json::to_vec(&TrackFigures {
+    Ok(TrackFigures {
         distance_km,
         duration_min,
     })
-    .map_err(|err| CoreError::unserializable(OP, &err))
 }
 
-/// [`crate::log::compact_lines`]: each line is parsed as it is read, so a
-/// multi-year GPS log is never held decoded.
-fn compact_log(
-    lines: &mut dyn Iterator<Item = Result<Cow<'_, str>, String>>,
-) -> Result<Vec<u8>, CoreError> {
-    let facts = lines
-        .map(|line| line.map(|line| LineFacts::parse(&line)))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|message| CoreError::bad_input(Op::CompactLog, message))?;
-    serde_json::to_vec(&crate::log::compact_lines(&facts))
-        .map_err(|err| CoreError::unserializable(Op::CompactLog, &err))
-}
-
-fn exercise_keys(
-    names: &mut dyn Iterator<Item = Result<Cow<'_, str>, String>>,
-) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::ExerciseKeys;
-    let keys = names
-        .map(|name| name.map(|name| crate::names::exercise_key(&name)))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|message| CoreError::bad_input(OP, message))?;
-    serde_json::to_vec(&keys).map_err(|err| CoreError::unserializable(OP, &err))
-}
-
-fn warm_up_ramp(query: &[u8]) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::WarmUpRamp;
-    let q = serde_json::from_slice::<WarmUpQuery>(query)
-        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
-    let steps = crate::strength::warm_up_ramp(&q.exercise, q.work_kg, q.weight_lb).value;
-    serde_json::to_vec(&steps).map_err(|err| CoreError::unserializable(OP, &err))
-}
-
-fn draft_facts(draft: &[u8]) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::DraftFacts;
-    let draft = serde_json::from_slice::<ProfileDraft>(draft)
-        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
-    serde_json::to_vec(&crate::app::draft_facts(draft))
-        .map_err(|err| CoreError::unserializable(OP, &err))
-}
-
-fn thin_track(track: &[u8]) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::ThinTrack;
-    let track = serde_json::from_slice::<TrackThinning>(track)
-        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
+fn thin_track(track: &TrackThinning) -> ThinnedTrack {
     let (kept, segment_starts) = crate::gps::thin_track(
         track.fixes as usize,
         track.max_points as usize,
         &track.segment_starts,
     );
-    serde_json::to_vec(&ThinnedTrack {
+    ThinnedTrack {
         kept: kept.into_iter().map(|k| k as u32).collect(),
         segment_starts,
-    })
-    .map_err(|err| CoreError::unserializable(OP, &err))
-}
-
-fn imported_hr_pct(hr: &[u8]) -> Result<Vec<u8>, CoreError> {
-    const OP: Op = Op::ImportedHrPct;
-    let hr = serde_json::from_slice::<ImportedHr>(hr)
-        .map_err(|err| CoreError::bad_input(OP, err.to_string()))?;
-    serde_json::to_vec(&crate::import::imported_hr_pct_max(
-        hr.avg_hr_bpm,
-        hr.measured_hr_max,
-    ))
-    .map_err(|err| CoreError::unserializable(OP, &err))
+    }
 }
 
 /// Panic while holding the core, exactly the case the firewall guards, for a

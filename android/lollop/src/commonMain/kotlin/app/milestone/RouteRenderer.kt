@@ -1,6 +1,5 @@
 package app.milestone
 
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.cos
@@ -17,10 +16,9 @@ import kotlin.math.tan
 // trim preview, finish review) on both platforms: the track ([RouteTrack]), its
 // Web-Mercator framing ([MercatorFit]) and where the drawn parts go in canvas pixels
 // ([RouteLayout]: kept window, progression chunks, thinned markers, label pills).
-// Each platform's [RoutePainter] draws a layout: Android onto an android.graphics
-// Canvas (the osmdroid overlay and the tile-less canvas), iOS in Compose (over the
-// MapKit tiles and on the tile-less canvas), so every surface places the same
-// routes, markers and labels.
+// [RoutePainter] draws a layout in Compose: over Android's osmdroid tiles (the
+// map's overlay), over iOS's MapKit tiles and on the tile-less canvas, so every
+// surface places the same routes, markers and labels.
 
 /** Start and finish closer than this (metres) are one spot: a loop. */
 internal const val LoopCoincidenceM = 30.0
@@ -37,7 +35,7 @@ internal const val MaxFrameZoom = 17.0
 private const val DenseMarkerUnits = 20
 private const val DenseMarkerStep = 5
 
-// dp sizes of the drawn route (multiplied by density by each painter).
+// dp sizes of the drawn route (multiplied by density by the painter).
 internal const val CasingWidthDp = 10f
 internal const val TrackWidthDp = 6f
 internal const val CutWidthDp = 6f
@@ -177,12 +175,6 @@ internal interface RouteTextMetrics {
     val ascent: Float
     /** Distance from the baseline to the bottom of the font's box. */
     val descent: Float
-}
-
-/** Draws a [RouteTrack] into a Compose [DrawScope] through [projector], keeping its
- *  labels inside [bounds]: the platform's route renderer behind the shared layout. */
-internal interface RoutePainter {
-    fun draw(scope: DrawScope, track: RouteTrack, projector: RouteProjector, bounds: RouteRect, options: RouteDrawOptions)
 }
 
 /**

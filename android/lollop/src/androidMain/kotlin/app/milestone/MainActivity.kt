@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
         // intent (a VIEW's URI grant possibly expired); neither may act again.
         val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) {
-            RunImport.importRuns(this, RunImport.urisFrom(intent))
+            RunImport.importRuns(this, RunImport.urisFrom(this, intent))
             openDestOf(intent)?.let { openRequest.value = it }
             cancelTappedNotification(this, intent)
         }
@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
         cancelTappedNotification(this, intent)
-        RunImport.importRuns(this, RunImport.urisFrom(intent))
+        RunImport.importRuns(this, RunImport.urisFrom(this, intent))
     }
 
     companion object {

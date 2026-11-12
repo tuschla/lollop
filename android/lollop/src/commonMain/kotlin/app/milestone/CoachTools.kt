@@ -130,7 +130,8 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
             CoachToolRow(
                 stringResource(CoachTool.Race.titleRes),
                 cta = stringResource(Res.string.main_tool_race_cta),
-                value = model.race_prediction?.let { listOf(it.predicted, it.goal_label).filter(String::isNotBlank).joinToString(" · ") },
+                // No prediction reads as the result card's placeholder.
+                value = model.race_prediction?.let { listOf(it.predicted ?: EmptyValuePlaceholder, it.goal_label).filter(String::isNotBlank).joinToString(" · ") },
             ) { onOpen(CoachTool.Race) }
         }
         if (showVolume) {

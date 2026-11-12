@@ -124,6 +124,33 @@ class ThisWeekCardTest {
         assertEquals(card.left + inset, days.minOf { it.left }, 2f)
     }
 
+    /** A day column names its discipline from the string resources, on its face and
+     *  in its spoken description, never from the enum's name. */
+    @Test
+    fun theStripNamesEachDisciplineFromItsStringResource() {
+        java.util.Locale.setDefault(java.util.Locale.US)
+        val monday = java.time.LocalDate.of(2026, 9, 21).toEpochDay()
+        val types = listOf(SessionType.LiftMaxEffort, SessionType.RunEasy, SessionType.Rest)
+        val week = types.mapIndexed { i, type ->
+            SessionPlanView(epoch_day = monday + i, title = "Day $i", session_type = type, status = SessionStatus.Planned)
+        }
+        rule.setContent {
+            MilestoneTheme {
+                ThisWeekCard(
+                    consistency = null, week = week, today = monday, weightUnit = WeightUnit.Kg, program = null,
+                    footnote = null, painArea = null, onRemovePlan = {}, actions = noActions,
+                    heroDay = monday, selectedDay = -1L, onSelectDay = {},
+                )
+            }
+        }
+        val labels = listOf(R.string.main_week_discipline_lift, R.string.main_week_discipline_run, R.string.main_week_discipline_rest)
+            .map { str(it) }
+        labels.zip(listOf("Monday", "Tuesday", "Wednesday")).forEach { (label, weekday) ->
+            rule.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+            rule.onNodeWithContentDescription("$weekday, $label, ", substring = true).assertIsDisplayed()
+        }
+    }
+
     /** A week row can read "missed" without the core's missed-session note (a hold
      *  is active, or the work was logged nearby); the repeating-week explanation
      *  still stays off the face. */

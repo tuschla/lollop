@@ -52,7 +52,7 @@ internal actual fun RouteLayer(
     bottomPx: Int,
     fitRequests: Int,
 ) {
-    val painter = rememberComposeRoutePainter()
+    val painter = rememberRoutePainter()
     if (tiles) {
         MapKitRouteLayer(track, painter, options, interactive, insetPx, corner, topPx, bottomPx, fitRequests, modifier)
     } else {

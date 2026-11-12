@@ -84,14 +84,14 @@ pub use view_types::{
     GradeDefView, GuidanceView, HrMaxView, IntervalVerdictView, LiftResultView, PrescriptionView,
     ProgramSummaryView, ProteinFigureView, RacePredictionView, ReadinessSignalView, RunResultView,
     RunSplitView, SessionPlanView, SignalGroupView, SplitVerdictView, TodayHeadlineView,
-    TrainingLoadView, ViewModel, WhyView, YouthActivityView,
+    TrainingLoadView, TrainsView, ViewModel, WhyView, YouthActivityView,
 };
 
-// The bridge (`crate::ffi`) answers its GPX export, track-figures and
+// The bridge (`crate::ffi`) answers its GPX export, track-figures, relog and
 // draft-facts ops with these; like the bridge, they are compiled only where it
 // exists (Android, or the `ffi` feature).
 #[cfg(any(ffi_surface, test))]
-pub(crate) use ingest::preview_track_figures;
+pub(crate) use ingest::{preview_track_figures, relog_event};
 #[cfg(any(ffi_surface, test))]
 pub(crate) use profile_age::draft_facts;
 #[cfg(any(ffi_surface, test))]
@@ -259,6 +259,7 @@ impl App for Engine {
             feedback,
             reference,
             profile: model.profile().cloned(),
+            trains: cx.plan_profile.as_ref().map(TrainsView::of),
             race_prediction,
             hypertrophy_plan,
             protein_targets,

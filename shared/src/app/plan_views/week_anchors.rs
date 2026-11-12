@@ -1,7 +1,9 @@
 //! The plan anchors of one plan week: the history through a day assembled into
 //! the [`crate::plan::Anchors`] that week is synthesized against.
 
-use crate::app::anchors::{AnchorCtx, build_plan_anchors, build_run_break, off_day_through};
+use crate::app::anchors::{
+    AnchorCtx, build_run_break, lift_anchors_through, off_day_through, sets_through,
+};
 use crate::app::calis_anchors::{build_calisthenics_anchors, calis_placements_through};
 use crate::app::logged_days::lift_deload_days;
 use crate::app::model::stated_since;
@@ -12,9 +14,8 @@ use crate::profile::Profile;
 /// The anchors of the plan week starting `monday` (the plan started on
 /// `plan_start`) for the day after `through`, prescribed with `day_profile`
 /// (the profile effective that day): the history attributed to session days
-/// `<= through` (undated rows always count), so the sets logged ON a day never
-/// move its own target; readiness inputs use the same cutoff and keep
-/// removals dated after it. `through` is also the decay/window reference.
+/// `<= through` ([`sets_through`]); readiness inputs use the same cutoff and
+/// keep removals dated after it. `through` is also the decay/window reference.
 /// `run_week_km` is `anchors::build_run_week_km` for `monday`.
 pub(super) fn plan_week_anchors(
     cx: &ViewCtx,
@@ -26,13 +27,6 @@ pub(super) fn plan_week_anchors(
 ) -> crate::plan::Anchors {
     let model = cx.model;
     let offset = model.today_utc_offset_sec;
-    let dated_sets = || {
-        cx.set_index
-            .with_facts(&model.sets)
-            .enumerate()
-            .filter(|(i, _)| cx.days.sets[*i].is_none_or(|d| d <= through))
-            .map(|(_, set)| set)
-    };
     let stated_longest_on = stated_since(model, day_profile, |q| q.stated_longest_recent_km);
     // An undeclared break from running (RUN-REENTRY-001), unless the weekly
     // distance was stated after it began (a current answer). A longest run
@@ -51,8 +45,10 @@ pub(super) fn plan_week_anchors(
         });
     let day_inputs = manual_inputs_on(model, through, through.saturating_add(1), offset);
     crate::plan::Anchors {
-        lift: build_plan_anchors(
-            dated_sets(),
+        lift: lift_anchors_through(
+            &model.sets,
+            &cx.set_index,
+            &cx.days.sets,
             AnchorCtx::for_profile(
                 Some(day_profile),
                 off_day_through(model, through, offset),
@@ -65,7 +61,8 @@ pub(super) fn plan_week_anchors(
         stated_longest_in_window: stated_longest_on
             .is_some_and(|d| through.saturating_sub(d) <= crate::running::SPIKE_WINDOW_DAYS),
         calisthenics: build_calisthenics_anchors(
-            dated_sets().map(|(s, facts)| (s, facts.calis_tier)),
+            sets_through(&model.sets, &cx.set_index, &cx.days.sets, through)
+                .map(|(s, facts)| (s, facts.calis_tier)),
             &calis_placements_through(model, through),
             &day_inputs,
             day_profile.lift_goal,

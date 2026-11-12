@@ -75,6 +75,10 @@ import org.jetbrains.compose.resources.stringResource
 /** Which logged type History shows: no "All" (an owner decision, 03-history). */
 private enum class HistoryFilter { Lifts, Runs }
 
+/** The sections above History's entry stream, one list item each, in single-pane
+ *  order. On a two-pane window all but [Segment] stand in the overview pane. */
+private enum class HistorySection { LastSevenDays, Heatmap, Segment, RunProgress, RunRecords }
+
 /** Precomputed History month scaffolding: [jumpTargets] maps each month
  *  label to its LazyColumn item index for the jump control; [headerBefore] maps a
  *  stream-entry index to the month header to emit before that card, so the stream
@@ -260,36 +264,30 @@ internal fun HistoryDestination(
     // The Runs stream, newest first by START (a run belongs to the day it started,
     // the day its title and date chip name), shared by the month headers and the cards.
     val runStream = remember(model.runs) { historyRunStream(model.runs) }
-    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords, zone, twoPane) {
+    val sections = buildList {
+        if (hasAny) {
+            add(HistorySection.LastSevenDays)
+            add(HistorySection.Heatmap)
+        }
+        if (showSegment) add(HistorySection.Segment)
+        if (showRunProgress) add(HistorySection.RunProgress)
+        if (showRunRecords) add(HistorySection.RunRecords)
+    }
+    val listSections = if (twoPane) sections.filter { it == HistorySection.Segment } else sections
+    val monthNav = remember(activeFilter, liftSessions, runStream, listSections, zone) {
         val stamps: List<Long> = when (activeFilter) {
             HistoryFilter.Runs -> runStream.map(::runDaySec)
             else -> liftSessions.map { it.firstObservedAt }
         }
-        // Non-month items emitted before the entry stream: the 7-day strip and the
-        // heatmap (whenever anything is logged), the segment row (when shown), the run
-        // progress chart and the records grid (Runs). The jump control rides on the
-        // first month header, so it adds no slot of its own.
-        var base = 0
-        if (hasAny && !twoPane) base += 2              // 7-day strip + 12-week heatmap
-        if (showSegment) base++                        // Lifts | Runs segment
-        if (showRunProgress && !twoPane) base++        // run progress chart
-        if (showRunRecords && !twoPane) base++         // run records
-        buildMonthNav(stamps, base, zone, monthFmt)
+        // The jump control rides on the first month header, so it adds no slot of its own.
+        buildMonthNav(stamps, listSections.size, zone, monthFmt)
     }
-    val overviewTop: LazyListScope.() -> Unit = {
-        // The rolling last 7 days of ALL activity, so it sits above the Lifts | Runs
-        // filter. Nothing logged: only the empty line below.
-        if (hasAny) {
-            item {
-                val nowSec = nowMillis / 1000
-                val windowStart = nowSec - 7L * 86400L
-                val weekLifts = model.lifts.filter { it.observed_at >= windowStart }
-                val weekRuns = model.runs.filter { it.observed_at >= windowStart }
-                // Count SESSIONS, not individual sets: a day of lifting is one
-                // session (group sets by local calendar day) + each run is its own
-                // session. `weekLifts` is a set list, so its raw size over-counts.
-                val sessionCount = weekLifts.map { localEpochDay(it.observed_at, zone) }.toSet().size + weekRuns.size
-                if (sessionCount == 0) {
+    val section: LazyListScope.(HistorySection) -> Unit = { s ->
+        when (s) {
+            // The rolling last 7 days of ALL activity, so it sits above the Lifts | Runs filter.
+            HistorySection.LastSevenDays -> item {
+                val week = lastSevenDays(model.lifts, model.runs, nowMillis / 1000, zone)
+                if (week.sessions == 0) {
                     // A quiet week is one line, never a row of zero tiles.
                     Text(stringResource(Res.string.history_last_7_days_empty), color = OnBgMuted, style = Type.Body)
                     return@item
@@ -297,15 +295,13 @@ internal fun HistoryDestination(
                 // Tonnage honours the weight-unit choice: metric tonnes ("t") for kg,
                 // thousands of pounds ("klb") for lb (a bare "lb" total runs to five/six
                 // digits over a week, so the k-scale keeps the tile readable).
-                val totalLiftKg = weekLifts.sumOf { it.tonnage_kg }
                 val tonnageValue = if (weightUnit == WeightUnit.Lb) {
-                    kgToLb(totalLiftKg) / 1000.0
+                    kgToLb(week.liftKg) / 1000.0
                 } else {
-                    totalLiftKg / 1000.0
+                    week.liftKg / 1000.0
                 }
                 val tonnageUnit = if (weightUnit == WeightUnit.Lb) stringResource(Res.string.main_unit_klb) else stringResource(Res.string.main_unit_t)
-                val runningKm = weekRuns.sumOf { it.distance_km }
-                val runningDistance = metersToDisplay(runningKm * 1000.0, distanceUnit)
+                val runningDistance = metersToDisplay(week.runKm * 1000.0, distanceUnit)
                 // A modality's tile shows when it is programmed or has logged data
                 // (logged data is never hidden); a zero reads "—", never "0.0".
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -316,16 +312,16 @@ internal fun HistoryDestination(
                         modifier = Modifier.height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
                     ) {
-                        StatTile("$sessionCount", null, pluralStringResource(Res.plurals.history_stat_sessions, sessionCount))
+                        StatTile("${week.sessions}", null, pluralStringResource(Res.plurals.history_stat_sessions, week.sessions))
                         if (showLifting || liftsPresent) {
-                            if (totalLiftKg > 0.0) {
+                            if (week.liftKg > 0.0) {
                                 StatTile(formatFixed(tonnageValue, 1), tonnageUnit, stringResource(Res.string.main_stat_tonnage), glossaryKey = "tonnage")
                             } else {
                                 StatTile(EmptyValuePlaceholder, null, stringResource(Res.string.main_stat_tonnage), glossaryKey = "tonnage")
                             }
                         }
                         if (showRunning || runsPresent) {
-                            if (runningKm > 0.0) {
+                            if (week.runKm > 0.0) {
                                 StatTile(formatFixed(runningDistance, 1), distanceUnit.distanceLabel, stringResource(Res.string.main_stat_running))
                             } else {
                                 StatTile(EmptyValuePlaceholder, null, stringResource(Res.string.main_stat_running))
@@ -334,7 +330,7 @@ internal fun HistoryDestination(
                     }
                 }
             }
-            item {
+            HistorySection.Heatmap -> item {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     SectionOverline(stringResource(Res.string.main_overline_last_12_weeks))
                     val days = remember(model.lifts, model.runs, zone) {
@@ -353,42 +349,36 @@ internal fun HistoryDestination(
                     }
                 }
             }
-        }
-    }
-    val segmentItem: LazyListScope.() -> Unit = {
-        // No counts in the segment labels (03-history).
-        if (showSegment) {
-            item {
+            // No counts in the segment labels (03-history).
+            HistorySection.Segment -> item {
                 TwoSegmentRow(
                     stringResource(Res.string.main_segment_lifts), stringResource(Res.string.main_segment_runs),
                     selectedIndex = if (filter == HistoryFilter.Lifts) 0 else 1,
                 ) { manualFilter = if (it == 0) HistoryFilter.Lifts else HistoryFilter.Runs }
             }
-        }
-    }
-    val runOverview: LazyListScope.() -> Unit = {
-        if (runProgress != null) {
-            item(key = "run-progress") {
-                // Garmin-style per-day distance: a factual aggregation over the
-                // heatmap's local-day bucketing.
-                val kmByDay = remember(model.runs, zone) { runKmByDay(model.runs, zone) }
-                RunProgressSection(
-                    progress = runProgress,
-                    kmByDay = kmByDay,
-                    todayLocalDay = todayLocalDay,
-                    unit = distanceUnit,
-                )
+            HistorySection.RunProgress -> runProgress?.let { progress ->
+                item(key = "run-progress") {
+                    // Garmin-style per-day distance: a factual aggregation over the
+                    // heatmap's local-day bucketing.
+                    val kmByDay = remember(model.runs, zone) { runKmByDay(model.runs, zone) }
+                    RunProgressSection(
+                        progress = progress,
+                        kmByDay = kmByDay,
+                        todayLocalDay = todayLocalDay,
+                        unit = distanceUnit,
+                    )
+                }
             }
-        }
-        if (showRunRecords) {
-            item(key = "run-records") {
-                RunRecordsSection(
-                    progress = runRecords,
-                    runs = model.runs,
-                    unit = distanceUnit,
-                    nowMillis = nowMillis,
-                    onOpenRun = { selectedKey = historyEntryKey(HistoryEntry.Run(it)) },
-                )
+            HistorySection.RunRecords -> runRecords?.let { records ->
+                item(key = "run-records") {
+                    RunRecordsSection(
+                        progress = records,
+                        runs = model.runs,
+                        unit = distanceUnit,
+                        nowMillis = nowMillis,
+                        onOpenRun = { selectedKey = historyEntryKey(HistoryEntry.Run(it)) },
+                    )
+                }
             }
         }
     }
@@ -465,7 +455,7 @@ internal fun HistoryDestination(
                     contentPadding = PaddingValues(start = Space.Screen.dp, end = Space.Md.dp, top = Space.Screen.dp, bottom = Space.Screen.dp),
                     verticalArrangement = spacing,
                 ) {
-                    segmentItem()
+                    listSections.forEach { section(it) }
                     entryItems()
                 }
             },
@@ -481,8 +471,7 @@ internal fun HistoryDestination(
                             contentPadding = PaddingValues(bottom = Space.Screen.dp),
                             verticalArrangement = spacing,
                         ) {
-                            overviewTop()
-                            runOverview()
+                            sections.filter { it != HistorySection.Segment }.forEach { section(it) }
                         }
                     }
                 }
@@ -496,9 +485,7 @@ internal fun HistoryDestination(
                 contentPadding = PaddingValues(horizontal = gutter, vertical = Space.Screen.dp),
                 verticalArrangement = spacing,
             ) {
-                overviewTop()
-                segmentItem()
-                runOverview()
+                listSections.forEach { section(it) }
                 entryItems()
             }
         }

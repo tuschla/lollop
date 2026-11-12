@@ -126,6 +126,41 @@ pub(super) fn lift_anchors_now(
     build_plan_anchors(set_index.with_facts(&model.sets), ctx, today, offset)
 }
 
+/// `sets` with their names' facts, kept when attributed to a session day
+/// `<= through` (`set_days`: [`LoggedDays`]' per-set day, aligned to `sets`;
+/// an undated row always counts): the history a plan day after `through` is
+/// prescribed from, so the sets logged ON a day never move its own target.
+pub(super) fn sets_through<'a>(
+    sets: &'a [LoggedSet],
+    set_index: &'a SetIndex,
+    set_days: &'a [Option<i64>],
+    through: i64,
+) -> impl Iterator<Item = (&'a LoggedSet, NameFacts)> + 'a {
+    set_index
+        .with_facts(sets)
+        .zip(set_days)
+        .filter(move |(_, day)| day.is_none_or(|d| d <= through))
+        .map(|(set, _)| set)
+}
+
+/// The lift anchors of a plan day after `through`: [`build_plan_anchors`]
+/// over [`sets_through`], with `through` the detraining and ramp reference.
+pub(super) fn lift_anchors_through(
+    sets: &[LoggedSet],
+    set_index: &SetIndex,
+    set_days: &[Option<i64>],
+    ctx: AnchorCtx,
+    through: i64,
+    offset: i64,
+) -> crate::plan::LiftAnchors {
+    build_plan_anchors(
+        sets_through(sets, set_index, set_days, through),
+        ctx,
+        through,
+        offset,
+    )
+}
+
 /// Sessions of a movement kept in the anchor window as of a day: the most
 /// recent `WINDOW_SESSIONS` sessions not older than the detraining horizon,
 /// plus any within `WINDOW_DAYS` (STRENGTH-8). The best estimate inside the
@@ -333,7 +368,7 @@ fn score_sessions(
 /// [`collect_movements`]; the windowed anchor: [`score_sessions`]; the one
 /// derate per movement, never stacked: [`score_movement`] / [`finish`], and
 /// [`last_working_derates`] for lifts without an anchor. `sets` (for a plan
-/// day, the history logged strictly before it) come with their names' facts
+/// day, [`sets_through`] the day before) come with their names' facts
 /// ([`SetIndex`]). `today_epoch_day` is the detraining and ramp reference; a
 /// set dated after it is ignored.
 pub(super) fn build_plan_anchors<'a>(

@@ -274,7 +274,6 @@ pub fn synthesize(pp: &PlanProfile, anchors: &Anchors, week_index: u32) -> Optio
                 .map(|(_, s)| s.region)
                 .collect::<Vec<_>>(),
         ),
-        names: main_lifts(&anchors.lift, pp.effective_lift_goal()),
     };
     let mut sessions = build_lift_sessions(&week, &placement.lifts);
     let lift_deload =
@@ -420,8 +419,6 @@ struct LiftWeek<'a> {
     block: BlockPosition,
     /// The placed lift days' regions, in weekday order.
     regions: WeekRegions,
-    /// The week's lifts: `main_lifts` for the effective lift goal.
-    names: Vec<String>,
 }
 
 impl LiftWeek<'_> {
@@ -467,8 +464,9 @@ fn build_lift_sessions(week: &LiftWeek, lifts: &[(u16, LiftSpec)]) -> Vec<Sessio
             .collect()
     } else {
         let compounds_only = lifts.len() == 2 || pp.runner_strength();
+        let week_names = main_lifts(&week.anchors.lift);
         days.map(|(day, spec)| {
-            let names = names_for_region(&week.names, spec.region, compounds_only);
+            let names = names_for_region(&week_names, spec.region, compounds_only);
             lift_session(
                 pp,
                 effective_goal,
@@ -521,7 +519,7 @@ fn apply_lift_week_modifiers(
             pp,
             stated_goal,
             &week.anchors.lift,
-            &week.names,
+            &main_lifts(&week.anchors.lift),
             default_n,
             week.block.week_in_block,
             week.block.block_weeks,

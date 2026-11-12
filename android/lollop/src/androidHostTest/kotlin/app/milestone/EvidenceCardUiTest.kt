@@ -91,10 +91,11 @@ class EvidenceCardUiTest {
 
     @Test
     fun whyBlockRendersBasisGradeNoteWithConfidenceAndImprovement() {
+        val improves = "Four more logged sessions"
         val why = WhyView(
             basis = listOf("Two randomized trials in trained lifters"),
             grade_note = "Consistent effect, small samples",
-            improves = "Four more logged sessions",
+            improves = improves,
         )
         setCard(confidence = 0.72f, why = why)
         rule.onNodeWithText(str(R.string.main_why_based_on)).assertDoesNotExist()
@@ -106,7 +107,7 @@ class EvidenceCardUiTest {
         rule.onNodeWithText(str(R.string.main_why_this_grade)).assertIsDisplayed()
         rule.onNodeWithText(str(R.string.main_grade_line_confidence, why.grade_note, 72)).assertIsDisplayed()
         rule.onNodeWithText(str(R.string.main_why_to_improve)).assertIsDisplayed()
-        rule.onNodeWithText(why.improves).assertIsDisplayed()
+        rule.onNodeWithText(improves).assertIsDisplayed()
     }
 
     private companion object {

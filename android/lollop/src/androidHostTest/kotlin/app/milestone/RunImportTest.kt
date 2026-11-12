@@ -26,8 +26,6 @@ class RunImportTest {
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
 
-    private fun deg(metres: Double) = metres / 111_195.0
-
     /** A GPX with one `<trkseg>` per segment of (lat, unix second) fixes on the meridian,
      *  each `<trk>` typed [type] when given. */
     private fun gpx(vararg tracks: List<List<Pair<Double, Long>>>, type: String? = null): ByteArray =
@@ -38,7 +36,7 @@ class RunImportTest {
 
     private fun track(endSec: Long, metresPerFix: Double, fixes: Int = 61): List<List<Pair<Double, Long>>> {
         val start = endSec - (fixes - 1) * 10L
-        return listOf(List(fixes) { i -> i * deg(metresPerFix) to start + i * 10L })
+        return listOf(List(fixes) { i -> i * metresPerFix / M_PER_DEG to start + i * 10L })
     }
 
     /** An easy 6:00 /km run. */
@@ -79,7 +77,7 @@ class RunImportTest {
         val p = plan(
             listOf(
                 ParsedRunFile("ride.gpx", read(gpx(track(10_000, metresPerFix = 120.0)))),
-                ParsedRunFile("blip.gpx", read(gpx(listOf(listOf(0.0 to 9_987L, deg(3.0) to 10_000L))))),
+                ParsedRunFile("blip.gpx", read(gpx(listOf(listOf(0.0 to 9_987L, 3.0 / M_PER_DEG to 10_000L))))),
                 ParsedRunFile("quick.gpx", read(gpx(track(20_000, metresPerFix = 40.0, fixes = 16)))),
                 ParsedRunFile("run.gpx", read(gpx(easyRun(30_000)))),
             ),
@@ -178,35 +176,37 @@ class RunImportTest {
     fun everySystemEntryPointYieldsItsFiles() {
         val a = Uri.parse("content://files/a.gpx")
         val b = Uri.parse("content://files/b.fit")
-        assertEquals(listOf(a), RunImport.urisFrom(Intent(Intent.ACTION_VIEW).setData(a)))
-        assertEquals(listOf(a), RunImport.urisFrom(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, a)))
+        assertEquals(listOf(a), RunImport.urisFrom(ctx, Intent(Intent.ACTION_VIEW).setData(a)))
+        assertEquals(listOf(a), RunImport.urisFrom(ctx, Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, a)))
         assertEquals(
             listOf(a, b),
             RunImport.urisFrom(
+                ctx,
                 Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(a, b)),
             ),
         )
         // The launcher / notification intents carry no import.
-        assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_MAIN)).isEmpty())
-        assertTrue(RunImport.urisFrom(null).isEmpty())
+        assertTrue(RunImport.urisFrom(ctx, Intent(Intent.ACTION_MAIN)).isEmpty())
+        assertTrue(RunImport.urisFrom(ctx, null).isEmpty())
     }
 
     @Test
     fun onlyOtherAppsContentUrisAreImported() {
         val private = Uri.parse("file:///data/data/app.milestone/files/events.ndjson")
-        val own = Uri.parse("content://app.milestone.fileprovider/shared/run.gpx")
+        val own = Uri.parse("content://${ctx.packageName}.fileprovider/shared/run.gpx")
         val other = Uri.parse("content://files/a.gpx")
-        assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, private)).isEmpty())
-        assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_VIEW).setData(own)).isEmpty())
+        assertTrue(RunImport.urisFrom(ctx, Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, private)).isEmpty())
+        assertTrue(RunImport.urisFrom(ctx, Intent(Intent.ACTION_VIEW).setData(own)).isEmpty())
         assertEquals(
             listOf(other),
             RunImport.urisFrom(
+                ctx,
                 Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(private, own, other)),
             ),
         )
         val clipped = Intent(Intent.ACTION_SEND).apply {
             clipData = android.content.ClipData.newRawUri(null, private).apply { addItem(android.content.ClipData.Item(other)) }
         }
-        assertEquals(listOf(other), RunImport.urisFrom(clipped))
+        assertEquals(listOf(other), RunImport.urisFrom(ctx, clipped))
     }
 }

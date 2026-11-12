@@ -419,7 +419,7 @@ pub(super) fn why_from<T, K>(basis_override: Option<String>, r: &Recommended<T, 
     WhyView {
         basis: basis_override.unwrap_or_else(|| r.evidence().statement.to_owned()),
         grade_note: grade_note_str(r.grade(), r.contested()),
-        improves: improves_for(r.claim_id()).to_owned(),
+        improves: improves_for(r.claim_id()).map(str::to_owned),
     }
 }
 
@@ -462,9 +462,9 @@ pub(super) fn grade_note_str(
 /// lacks or would sharpen. Keyed by claim, this describes the ENGINE's own
 /// data needs, never training advice, so it carries no evidence tag and
 /// invents no claim (HARD RULE 1-safe by construction; every string is reviewed
-/// against that bar). `"-"` when nothing would genuinely improve the estimate.
-pub(super) fn improves_for(claim: ClaimId) -> &'static str {
-    match claim {
+/// against that bar). `None` when nothing would genuinely improve the estimate.
+pub(super) fn improves_for(claim: ClaimId) -> Option<&'static str> {
+    Some(match claim {
         claims::RUN_HRMAX_001 => {
             "Log a measured max HR from an all-out effort to replace the age-based estimate."
         }
@@ -498,8 +498,8 @@ pub(super) fn improves_for(claim: ClaimId) -> &'static str {
         claims::YOUTH_PA_001 => {
             "Log your sports, PE lessons and other activities so the week's total is complete."
         }
-        _ => "-",
-    }
+        _ => return None,
+    })
 }
 
 /// Human-readable one-liner for an adjustment.

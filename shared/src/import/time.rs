@@ -1,6 +1,6 @@
 //! The `<time>` / `<Time>` stamp of an imported GPX or TCX fix.
 
-use super::kt_trim;
+use super::number::kt_trim;
 
 /// ISO-8601 stamp → unix seconds; 0 when missing or unparseable (a route-only
 /// GPX). Accepts `Z`, `+02:00`, `+02` and `+0200` offsets. GPX and TCX require

@@ -45,24 +45,12 @@ import org.jetbrains.compose.resources.stringResource
 
 
 /**
- * The amend that puts an edited entry back as it was, for "Undo" after an edit
- * [saved] from the edit sheet; null for anything that isn't an amend.
+ * The row an edit [saved] from the edit sheet replaces, for its "Undo"
+ * ([sendUndoable]); null for anything that isn't an amend.
  */
-internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
-    entry is HistoryEntry.Lift && saved is Event.AmendSet -> entry.v.let { v ->
-        Event.AmendSet(
-            entryId = v.entry_id, exercise = v.exercise, weightKg = v.weight_kg, reps = v.reps, rpe = v.rpe,
-            observedAt = v.observed_at, observedAtFallback = saved.observedAt, holdSec = v.hold_sec,
-        )
-    }
-    entry is HistoryEntry.Run && saved is Event.AmendRun -> entry.v.let { v ->
-        Event.AmendRun(
-            entryId = v.entry_id, distanceKm = v.distance_km, durationMin = v.duration_min,
-            hrPctMax = loggedHrPctMax(v), observedAt = v.observed_at, observedAtFallback = saved.observedAt,
-            workoutType = v.workout_type, sessionRpe = v.session_rpe,
-            avgHrBpm = v.avg_hr_bpm,
-        )
-    }
+internal fun undoEditQuery(entry: HistoryEntry, saved: Event): RelogQuery? = when (saved) {
+    is Event.AmendSet -> relogQueryOf(entry, saved.observedAt)
+    is Event.AmendRun -> relogQueryOf(entry, saved.observedAt)
     else -> null
 }
 
@@ -71,9 +59,8 @@ internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
  * The entry detail → edit/delete flow. Tapping a History card sets
  * [selected]; this hosts the detail bottom sheet, the pre-filled keypad editor
  * (emitting AmendSet/AmendRun) and the run's trim sheet. Each detail sheet confirms
- * a delete itself; the delete then lands with a "deleted · Undo" message (Undo is
- * left off only for a GPS run whose route never loaded, so it can't be rebuilt), and
- * an edit save says "updated · Undo".
+ * a delete itself; the delete then lands with a "deleted · Undo" message, and an
+ * edit save says "updated · Undo".
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,9 +90,8 @@ internal fun EntryActionSheets(
     val deletedText = stringResource(if (isRun) Res.string.history_run_deleted else Res.string.history_set_deleted)
     val updatedText = stringResource(if (isRun) Res.string.history_run_updated else Res.string.history_set_updated)
     val saveEdit: (Event) -> Unit = { ev ->
-        onEvent(ev)
+        sendUndoable(onEvent, listOf(ev), listOfNotNull(undoEditQuery(selected, ev)), updatedText, undoLabel)
         onDismiss()
-        postUndoable(updatedText, undoLabel, listOfNotNull(undoEditFor(selected, ev)))
     }
 
     val editGuard = remember(selected) { EditorGuard() }
@@ -169,10 +155,9 @@ internal fun EntryActionSheets(
         // A GPS run's sheet opens once its route has loaded (map, Trim), so its body
         // is final in its first frame. Beside the list on a two-pane window.
         DetailSheet(onDismiss = onDismiss) {
-            val onDelete: (Event?) -> Unit = { restore ->
-                onEvent(deleteEventFor(selected))
+            val onDelete: () -> Unit = {
+                sendUndoable(onEvent, listOf(deleteEventFor(selected)), listOf(relogQueryOf(selected)), deletedText, undoLabel)
                 onDismiss()
-                postUndoable(deletedText, undoLabel, listOfNotNull(restore))
             }
             when (selected) {
                 is HistoryEntry.Run -> RunDetailContent(
@@ -202,7 +187,7 @@ private fun EntryDetailContent(
     weightUnit: WeightUnit,
     nowMillis: Long,
     onEdit: () -> Unit,
-    onDelete: (restore: Event?) -> Unit,
+    onDelete: () -> Unit,
 ) {
     val v = entry.v
     val res = currentResources()
@@ -284,7 +269,7 @@ private fun EntryDetailContent(
                 confirmTitle = stringResource(Res.string.main_delete_set_title),
                 confirmMessage = stringResource(Res.string.history_delete_set_message),
                 confirmLabel = stringResource(Res.string.main_delete),
-                onConfirm = { onDelete(restoreEventFor(entry, emptyList())) },
+                onConfirm = onDelete,
                 testTag = "set-detail-delete",
             ),
         )

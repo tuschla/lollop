@@ -139,7 +139,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
         None => (r.distance_km, r.duration_min),
     };
 
-    let shown_zone = displayed_zone(hr_pct_max, r.session_rpe);
+    let shown_zone = displayed_zone(hr_pct_max, r.meta.session_rpe);
     let spike = running::single_session_spike_flag(distance_km, recent_longest_km);
 
     let pace = run_pace_label(distance_km, duration_min);
@@ -194,14 +194,14 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
         distance_km,
         duration_min,
         hr_pct_max,
-        hr_label: hr_card_label(r.avg_hr_bpm, hr_pct_max, shown_zone),
-        avg_hr_bpm: r.avg_hr_bpm,
-        utc_offset_sec: r.logged_utc_offset_sec,
+        hr_label: hr_card_label(r.meta.avg_hr_bpm, hr_pct_max, shown_zone),
+        avg_hr_bpm: r.meta.avg_hr_bpm,
+        utc_offset_sec: r.meta.utc_offset_sec,
         spike_flag: spike.value,
         spike_note: spike_note.to_string(),
         split,
         interval: variability_index.map(interval_verdict_view),
-        workout_type: r.workout_type,
+        workout_type: r.meta.workout_type,
         summary: format!(
             "{}{:.1}km @ {} ({}){}{}",
             if gps { "GPS " } else { "" },
@@ -223,10 +223,11 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
         observed_at: r.observed_at,
         entry_id: r.entry_id,
         spike_has_baseline: has_baseline,
-        session_rpe: r.session_rpe,
+        session_rpe: r.meta.session_rpe,
         // Session-RPE load (Foster; LOAD-SRPE-001): moving minutes × CR-10.
         // Its own figure, never mixed into the heart-rate load.
         srpe_load_au: r
+            .meta
             .session_rpe
             .filter(|_| duration_min > 0.0)
             .map(|rpe| round_tenths(load::srpe_load_au(duration_min, rpe))),
@@ -255,7 +256,7 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         spike_note: String::new(),
         split: None,
         interval: None,
-        workout_type: r.workout_type,
+        workout_type: r.meta.workout_type,
         summary: "GPS signal too poor to measure this run".to_string(),
         // No measurable distance → the spike gate never ran; carry an
         // empty evidence tag rather than citing a claim that was not used.
@@ -266,10 +267,10 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         entry_id: r.entry_id,
         splits: Vec::new(),
         spike_has_baseline: is_ratio_base_km(r.longest_recent_km),
-        hr_label: hr_card_label(r.avg_hr_bpm, hr_pct_max, None),
-        avg_hr_bpm: r.avg_hr_bpm,
-        utc_offset_sec: r.logged_utc_offset_sec,
-        session_rpe: r.session_rpe,
+        hr_label: hr_card_label(r.meta.avg_hr_bpm, hr_pct_max, None),
+        avg_hr_bpm: r.meta.avg_hr_bpm,
+        utc_offset_sec: r.meta.utc_offset_sec,
+        session_rpe: r.meta.session_rpe,
         srpe_load_au: None,
         best_effort_labels: Vec::new(),
         started_at: run_started_at(r, None),

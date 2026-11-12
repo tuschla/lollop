@@ -47,11 +47,13 @@ import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
 import app.milestone.LiftResultView
+import app.milestone.M_PER_DEG
 import app.milestone.MainActivity
 import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.RunSession
 import app.milestone.TestClock
+import app.milestone.eventLogPath
 import app.milestone.runDistLabel
 import app.milestone.segmentKm
 import app.milestone.todayEpochDay
@@ -609,8 +611,6 @@ class RestoreRoundtripTest {
         assertEquals(before.runs.map { it.distance_km to it.duration_min }, model.runs.map { it.distance_km to it.duration_min })
     }
 
-    private val metresPerDegLat = 111_195.0
-
     /**
      * A seeded wandering run of [n] fixes every [dtSec] s at about [mps] (±15 %),
      * with periodic standing-still stretches (a traffic light, within a metre), so
@@ -626,8 +626,8 @@ class RestoreRoundtripTest {
                 val standing = i % 150 in 1..8
                 val d = if (standing) rnd.nextDouble() * 0.6 else mps * dtSec * (0.85 + 0.3 * rnd.nextDouble())
                 heading += (rnd.nextDouble() - 0.5) * 0.4
-                lat += d * cos(heading) / metresPerDegLat
-                lon += d * sin(heading) / (metresPerDegLat * cos(Math.toRadians(lat)))
+                lat += d * cos(heading) / M_PER_DEG
+                lon += d * sin(heading) / (M_PER_DEG * cos(Math.toRadians(lat)))
             }
             GpsPoint(lat, lon, startSec + i * dtSec, 3.0 + rnd.nextDouble() * 6.0)
         }
@@ -698,7 +698,7 @@ class RestoreRoundtripTest {
         // Later and a short way off, the GPS is back and the run goes on.
         val resumeAt = before.last().observedAt + 120
         val after = synthRun(seed = 33, startSec = resumeAt, n = 400).map {
-            it.copy(lat = it.lat - 52.52 + before.last().lat + 80.0 / metresPerDegLat, lon = it.lon - 13.40 + before.last().lon)
+            it.copy(lat = it.lat - 52.52 + before.last().lat + 80.0 / M_PER_DEG, lon = it.lon - 13.40 + before.last().lon)
         }
         val elapsedBase = android.os.SystemClock.elapsedRealtime() + 1_000
         feedLive(after, resumeAt, baseElapsedMs = elapsedBase)
@@ -733,7 +733,7 @@ class RestoreRoundtripTest {
         val legs = synthRun(seed = 34, startSec = t0, n = 400)
         // Index 200 resumes 20 s after 199 and 30 m further on.
         val pts = legs.mapIndexed { i, p ->
-            if (i < 200) p else p.copy(lat = p.lat + 30.0 / metresPerDegLat, observedAt = p.observedAt + 17)
+            if (i < 200) p else p.copy(lat = p.lat + 30.0 / M_PER_DEG, observedAt = p.observedAt + 17)
         }
         ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000, pauseBefore = setOf(200))
@@ -889,7 +889,7 @@ class RestoreRoundtripTest {
             points = RunSession.decimatedTrackForCore(), entryId = 1_000_002, segmentStarts = RunSession.decimatedSegmentStarts(),
         )
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        Core.restore(ctx)
+        Core.restore(ctx.eventLogPath())
         Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
         Core.send(uninterrupted)
         val runs = Core.send(recovered).view.runs

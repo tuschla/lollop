@@ -87,20 +87,4 @@ class FinishSheetStateTest {
         assertFalse(isShortRun(km = CoreConstants.MIN_RUN_KM, movingSec = CoreConstants.MIN_RUN_SEC.toLong()))
         assertFalse(isShortRun(km = 5.0, movingSec = 1_800))
     }
-
-    @Test
-    fun runTypeIsPreselectedFromThePlannedSession() {
-        // A long run's band is "easy", so the band alone would read Steady: the
-        // planned session type wins when it names a chip.
-        assertEquals(WorkoutType.LongRun, workoutTypeForPlan(SessionType.RunLongRun, "easy"))
-        assertEquals(WorkoutType.Recovery, workoutTypeForPlan(SessionType.RunRecovery, "recovery"))
-        assertEquals(WorkoutType.Tempo, workoutTypeForPlan(SessionType.RunTempo, "threshold"))
-        assertEquals(WorkoutType.Interval, workoutTypeForPlan(SessionType.RunHills, "hill effort"))
-        assertEquals(WorkoutType.Easy, workoutTypeForPlan(SessionType.RunEasy, "easy"))
-        assertEquals(WorkoutType.Easy, workoutTypeForPlan(null, "easy"))
-        assertEquals(WorkoutType.Steady, workoutTypeForPlan(null, "marathon pace"))
-        // Otherwise the band decides; no band = a free run, left untagged.
-        assertEquals(WorkoutType.Tempo, workoutTypeForPlan(null, "threshold"))
-        assertEquals(null, workoutTypeForPlan(null, null))
-    }
 }

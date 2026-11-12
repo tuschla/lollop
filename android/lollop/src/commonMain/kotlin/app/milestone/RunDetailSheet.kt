@@ -121,9 +121,7 @@ internal fun rememberRunRoute(run: RunResultView): RunRoute? {
  * start date, the 3-up headline stats and HR-zone bar, any findings, the route map
  * card, the splits, then YOUR LOG (effort, run type, details: each opens its
  * editor) and the action rows (Export GPX, Trim start or end, Delete run, which
- * confirms first). [route] is [rememberRunRoute]'s, null while it loads. [onDelete]
- * gets the event that re-logs the run for Undo ([restoreEventFor]), null when the
- * route hasn't loaded yet.
+ * confirms first). [route] is [rememberRunRoute]'s, null while it loads.
  */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -133,7 +131,7 @@ internal fun RunDetailContent(
     srpeLoad: SrpeLoadView?,
     onEdit: () -> Unit,
     onTrim: () -> Unit,
-    onDelete: (restore: Event?) -> Unit,
+    onDelete: () -> Unit,
     onEvent: (Event) -> Unit,
 ) {
     val unit = rememberDistanceUnit()
@@ -315,7 +313,7 @@ private fun LogRow(
  * run, which confirms in a dialog.
  */
 @Composable
-private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit, onDelete: (Event?) -> Unit) {
+private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit, onDelete: () -> Unit) {
     val ctx = currentPlatformContext()
     val scope = rememberCoroutineScope()
     val exportFailed = stringResource(Res.string.main_export_gpx_failed)
@@ -359,7 +357,7 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
             confirmMessage = stringResource(Res.string.run_delete_message),
             confirmLabel = stringResource(Res.string.main_delete),
             testTag = "run-delete",
-            onConfirm = { onDelete(restoreEventFor(HistoryEntry.Run(run), route?.segments.orEmpty())) },
+            onConfirm = onDelete,
         ),
     )
 }

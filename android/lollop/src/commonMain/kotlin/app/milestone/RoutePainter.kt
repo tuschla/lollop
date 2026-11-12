@@ -33,9 +33,16 @@ import kotlin.math.roundToInt
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
+/** Opacity of a trimmed-off leg's dashed `OnBgFaint` stroke (spec §4). */
+internal const val TrimCutAlpha = 0.6f
+
+/** Opacity of the ground under the chrome over a map: the label pills, the
+ *  full-screen route's bars and buttons. */
+const val MapChromeAlpha = 0.94f
+
 /** The theme's route painter (colours, label text and font), resolved once per palette and density. */
 @Composable
-internal fun rememberComposeRoutePainter(): ComposeRoutePainter {
+internal fun rememberRoutePainter(): RoutePainter {
     val palette = LocalPalette.current
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = 16)
@@ -44,7 +51,7 @@ internal fun rememberComposeRoutePainter(): ComposeRoutePainter {
     val finish = stringResource(Res.string.runmap_finish)
     val loop = stringResource(Res.string.runmap_start_finish)
     return remember(palette, density, measurer, flag, start, finish, loop) {
-        ComposeRoutePainter(
+        RoutePainter(
             ramp = Array(RouteRampSteps + 1) { palette.routeRamp(it / RouteRampSteps.toFloat()) },
             casing = palette.bgTop,
             accent = palette.accent,
@@ -54,7 +61,7 @@ internal fun rememberComposeRoutePainter(): ComposeRoutePainter {
             pillBorder = palette.onBgFaint.copy(alpha = HairlineAlpha.Strong),
             density = density,
             measurer = measurer,
-            // Android's label paint: the bold default face at the chip size, tabular figures.
+            // The label: the bold chip style, tabular figures.
             label = Type.Chip.copy(color = palette.onBgBody, fontFeatureSettings = "tnum", lineHeight = TextUnit.Unspecified),
             flag = flag,
             startLabel = start,
@@ -65,13 +72,15 @@ internal fun rememberComposeRoutePainter(): ComposeRoutePainter {
 }
 
 /**
- * Draws a [RouteTrack] in Compose as [RouteLayout] places it, with Android's
- * renderer's look (RouteRenderer.android.kt): the `BgTop` casing, the progression
- * ramp (or kept vs dashed trimmed legs), the numbered distance markers, the start
- * ring and finish flag disc (one combined marker on a loop) and the label pills.
- * Holds its own paths and layout; one per surface.
+ * Draws a [RouteTrack] into a Compose [DrawScope] through a [RouteProjector], as
+ * [RouteLayout] places it, keeping its labels inside the bounds: the `BgTop`
+ * casing, the progression ramp (or kept vs dashed trimmed legs), the numbered
+ * distance markers, the start ring and finish flag disc (one combined marker on a
+ * loop) and the label pills. Every route surface draws through it: the tile-less
+ * canvas, Android's osmdroid overlay and the route over iOS's MapKit tiles. Holds
+ * its own paths and layout; one per surface.
  */
-internal class ComposeRoutePainter(
+internal class RoutePainter(
     private val ramp: Array<Color>,
     private val casing: Color,
     private val accent: Color,
@@ -86,7 +95,7 @@ internal class ComposeRoutePainter(
     startLabel: String,
     finishLabel: String,
     loopLabel: String,
-) : RoutePainter {
+) {
     private val d = density.density
     private val sample: TextLayoutResult = measurer.measure("0", label, density = density)
     private val layout = RouteLayout(
@@ -117,7 +126,7 @@ internal class ComposeRoutePainter(
 
     private fun measure(text: String, style: TextStyle = label) = measurer.measure(text, style, density = textDensity)
 
-    override fun draw(scope: DrawScope, track: RouteTrack, projector: RouteProjector, bounds: RouteRect, options: RouteDrawOptions) {
+    fun draw(scope: DrawScope, track: RouteTrack, projector: RouteProjector, bounds: RouteRect, options: RouteDrawOptions) {
         if (track.isEmpty) return
         val l = layout
         l.layout(track, projector, bounds, options)
@@ -227,8 +236,7 @@ internal class ComposeRoutePainter(
         drawCentred(scope, measure(text), pill.centerX, pill.centerY)
     }
 
-    /** [text] centred on ([x], [y]): its line box's middle on [y], as Android's
-     *  `y - (ascent + descent) / 2` baseline does. */
+    /** [text] centred on ([x], [y]): its line box's middle on [y]. */
     private fun drawCentred(scope: DrawScope, text: TextLayoutResult, x: Float, y: Float) {
         val top = y - text.getLineBottom(0) / 2
         scope.drawText(text, topLeft = Offset(x - text.size.width / 2f, top))

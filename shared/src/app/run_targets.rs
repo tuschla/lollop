@@ -11,13 +11,13 @@ use std::fmt::Write as _;
 
 use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min, round_tenths};
 use crate::app::model::{Model, profile_for_day};
-use crate::app::plan_views::PlanItem;
+use crate::app::plan_views::{HrAnchor, PlanItem, TargetAnchor};
 use crate::app::view_types::{EvidenceTagView, RunTargetView};
 use crate::evidence::claims;
 use crate::profile::{DistanceUnit, Profile};
 use crate::schema::{
     Prescription, Recommended, RunIntensity, RunSessionType, Session, SessionType, ThreeZone,
-    VdotBand,
+    VdotBand, WorkoutType,
 };
 use crate::{load, running};
 
@@ -109,22 +109,8 @@ pub(super) enum TargetBand {
 }
 
 impl TargetBand {
-    fn word(self) -> &'static str {
-        match self {
-            TargetBand::Recovery => "recovery",
-            TargetBand::Easy | TargetBand::LongRun => "easy",
-            TargetBand::Marathon => "marathon pace",
-            TargetBand::Threshold => "threshold",
-            TargetBand::Interval => "interval",
-            TargetBand::Repetition => "repetition",
-            TargetBand::Strides => "strides",
-            TargetBand::Hills => "hill effort",
-        }
-    }
-
     /// How the band feels, in plain words, for the human pace/intensity line
-    /// ("8:29–8:53 /mi (comfortably hard)"). `word` stays the wire key the
-    /// shell matches on; this is display only.
+    /// ("8:29–8:53 /mi (comfortably hard)").
     fn plain(self) -> &'static str {
         match self {
             TargetBand::Recovery => "very easy",
@@ -166,6 +152,21 @@ impl TargetBand {
         }
     }
 
+    /// The run type a run in this band is logged as, for a session whose own
+    /// type names none ([`RunSessionType::workout_type`]).
+    fn workout_type(self) -> WorkoutType {
+        match self {
+            TargetBand::Recovery => WorkoutType::Recovery,
+            TargetBand::Easy => WorkoutType::Easy,
+            TargetBand::LongRun => WorkoutType::LongRun,
+            TargetBand::Threshold => WorkoutType::Tempo,
+            TargetBand::Interval | TargetBand::Repetition | TargetBand::Hills => {
+                WorkoutType::Interval
+            }
+            TargetBand::Marathon | TargetBand::Strides => WorkoutType::Steady,
+        }
+    }
+
     /// Easy-family bands get the talk-test cue when nothing is measured.
     fn is_easy(self) -> bool {
         matches!(
@@ -173,6 +174,16 @@ impl TargetBand {
             TargetBand::Recovery | TargetBand::Easy | TargetBand::LongRun
         )
     }
+}
+
+/// The run type a run item preselects: its session's own type when that names
+/// one, else the band the item runs in (`None` without either).
+fn item_workout_type(
+    kind: Option<RunSessionType>,
+    band: Option<TargetBand>,
+) -> Option<WorkoutType> {
+    kind.and_then(RunSessionType::workout_type)
+        .or(band.map(TargetBand::workout_type))
 }
 
 /// Which band a run prescription runs in. The session kind settles the
@@ -301,14 +312,6 @@ fn band_hr_pct(
     Some((Some(lo), Some(hi), None))
 }
 
-/// The heart-rate figures behind a target.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(super) struct HrAnchor {
-    pub(super) max_bpm: f64,
-    pub(super) measured: bool,
-    pub(super) rest_bpm: f64,
-}
-
 pub(super) fn hr_anchor(profile: Option<&Profile>) -> HrAnchor {
     let Some(p) = profile else {
         return HrAnchor::default();
@@ -321,30 +324,6 @@ pub(super) fn hr_anchor(profile: Option<&Profile>) -> HrAnchor {
     }
 }
 
-/// The figures a run target was resolved from: the fitness score behind the
-/// paces, the heart-rate figures (zero when HRmax is unknown) and the unit
-/// the pace label reads in.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct TargetAnchor {
-    pub(super) vdot: Option<f64>,
-    pub(super) hr: HrAnchor,
-    pub(super) unit: DistanceUnit,
-}
-
-impl TargetAnchor {
-    pub(super) fn new(vdot: Option<f64>, hr: HrAnchor, unit: DistanceUnit) -> Self {
-        TargetAnchor {
-            vdot: vdot.filter(|v| v.is_finite() && *v > 0.0),
-            hr: if hr.max_bpm > 0.0 {
-                hr
-            } else {
-                HrAnchor::default()
-            },
-            unit,
-        }
-    }
-}
-
 /// Resolve the numeric target for one band. `vdot` provides the paces; `hr`
 /// the bpm; the effort cue is always present. The pace label reads in `unit`.
 pub(super) fn resolve_target(
@@ -354,10 +333,7 @@ pub(super) fn resolve_target(
     hr: HrAnchor,
     unit: DistanceUnit,
 ) -> RunTargetView {
-    let mut t = RunTargetView {
-        band: band.word().to_string(),
-        ..Default::default()
-    };
+    let mut t = RunTargetView::default();
     let vdot = vdot.filter(|v| v.is_finite() && *v > 0.0);
     let mut evidence: Option<Recommended<()>> = None;
 
@@ -522,8 +498,9 @@ fn apply_target(it: &mut PlanItem, t: RunTargetView, base: &str, feel: &str) {
     it.run_target = Some(t);
 }
 
-/// Fill every run item of one flattened session with its numeric target
-/// (`items` are aligned with `s.prescriptions`; lifts are untouched).
+/// Fill every run item of one flattened session with its session's run type
+/// and its numeric target (`items` are aligned with `s.prescriptions`; lifts
+/// are untouched).
 pub(super) fn apply_run_targets(
     items: &mut [PlanItem],
     s: &Session,
@@ -541,7 +518,9 @@ pub(super) fn apply_run_targets(
         let Prescription::Run(r) = &rx.value else {
             continue;
         };
-        let Some(band) = band_for(kind, &r.intensity) else {
+        let band = band_for(kind, &r.intensity);
+        it.workout_type = item_workout_type(kind, band);
+        let Some(band) = band else {
             continue;
         };
         let t = resolve_target(
@@ -553,11 +532,10 @@ pub(super) fn apply_run_targets(
         );
         let base = base_label(&it.intensity_label, band, &r.intensity);
         apply_target(it, t, &base, band.plain());
-        it.target_anchor = Some(TargetAnchor::new(
-            anchors.run_vdot,
-            hr,
-            model.distance_unit(),
-        ));
+        it.target_anchor = Some(TargetAnchor {
+            kind,
+            ..TargetAnchor::new(anchors.run_vdot, hr, model.distance_unit())
+        });
     }
 }
 
@@ -565,12 +543,14 @@ pub(super) fn apply_run_targets(
 /// safety downgrade, so its numbers match the easy session it now is. Called by
 /// the downgrade path right after it sets the easy `intensity_label` (and
 /// before it rebuilds `summary` from it): appends the easy pace / bpm / effort
-/// to that label. No-op for an item without a run target.
+/// to that label. A session whose own type names no run type now reads as an
+/// easy run. No-op for an item without a run target.
 pub(super) fn downgrade_run_target_to_easy(it: &mut PlanItem) {
     if it.run_target.take().is_none() {
         return;
     }
     let a = it.target_anchor.unwrap_or_default();
+    it.workout_type = item_workout_type(a.kind, Some(TargetBand::Easy));
     let easy = RunIntensity::Vdot(VdotBand::Easy);
     let t = resolve_target(TargetBand::Easy, &easy, a.vdot, a.hr, a.unit);
     let pace = km_pace_label(&t).unwrap_or_default();

@@ -316,8 +316,6 @@ fn calisthenics_days_are_titled_honestly() {
         );
         // Honest, user-facing title — not a borrowed barbell "Heavy day".
         assert_eq!(day.title, "Calisthenics");
-        // The shell's discipline parsing still keys on the "Lift" prefix.
-        assert!(day.session_type.wire_name().starts_with("Lift"));
     }
 }
 

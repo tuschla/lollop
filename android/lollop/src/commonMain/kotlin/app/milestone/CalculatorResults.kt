@@ -205,15 +205,11 @@ internal fun RaceResult(rp: RacePredictionView, onClear: () -> Unit) {
         safety_critical = rp.safety_critical,
         contested = rp.contested,
     )
-    val usable = rp.predicted.isNotBlank() && rp.predicted != "-"
     CalculatorResultCard(
         overline = stringResource(Res.string.main_calc_race_overline),
         headlines = listOf(
-            if (usable) {
-                CalcHeadline(rp.predicted, stringResource(Res.string.main_calc_race_caption, rp.goal_label))
-            } else {
-                CalcHeadline(EmptyValuePlaceholder, rp.summary)
-            },
+            rp.predicted?.let { CalcHeadline(it, stringResource(Res.string.main_calc_race_caption, rp.goal_label)) }
+                ?: CalcHeadline(EmptyValuePlaceholder, rp.summary),
         ),
         claims = listOf(CalcClaim(primary)) + rp.notes.map { CalcClaim(it) },
         notes = rp.notes,

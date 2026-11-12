@@ -13,7 +13,6 @@ import app.milestone.DurableCore
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
-import app.milestone.GpsPoint
 import app.milestone.LiftGoal
 import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
@@ -26,9 +25,12 @@ import app.milestone.SessionType
 import app.milestone.TestClock
 import app.milestone.TestSink
 import app.milestone.ViewModel
+import app.milestone.eventLogPath
 import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
+import app.milestone.northFix
 import app.milestone.setupPrefs
+import app.milestone.straightTrack
 import app.milestone.todayEpochDay
 import app.milestone.toJson
 import app.milestone.utcOffsetSec
@@ -60,7 +62,7 @@ object QaHarness {
 
     fun reboot(ctx: Context): SendResult {
         killProcess()
-        AppCore.engine.restore(ctx)
+        AppCore.engine.restore(ctx.eventLogPath())
         return AppCore.engine.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
     }
 
@@ -309,9 +311,7 @@ object QaHarness {
 
     /** A 10.1 km GPS run at an even 5:00 /km, the first fix at [observedAt]. */
     fun gpsTenK(observedAt: Long, sessionRpe: Int? = null): Event.LogRunTrack {
-        val points = (0 until 1011).map { i ->
-            GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = observedAt + i * 3L, accuracyM = 5.0)
-        }
+        val points = straightTrack(1011, firstAt = observedAt)
         return Event.LogRunTrack(
             points = points,
             hrPctMax = 0.0,
@@ -327,7 +327,7 @@ object QaHarness {
     fun seedRecordingRun() {
         val t0 = AppClock.nowSec() - 400
         for (i in 0..20) {
-            RunSession.add(GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0), (1_000L + i * 10L) * 1_000_000_000L)
+            RunSession.add(northFix(i * 30.0, t0 + i * 10L), (1_000L + i * 10L) * 1_000_000_000L)
         }
         RunSession.recordingStarted()
     }

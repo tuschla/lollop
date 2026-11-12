@@ -39,7 +39,7 @@ pub(crate) fn wire_impl(input: &DeriveInput) -> syn::Result<Tokens> {
             let mut names = Vec::new();
             for field in &named.named {
                 let attrs = FieldAttrs::parse(&field.attrs)?;
-                if attrs.skip {
+                if attrs.skip || attrs.read_only {
                     continue;
                 }
                 let ident = field.ident.as_ref().expect("named field");
@@ -104,6 +104,7 @@ pub(crate) fn wire_impl(input: &DeriveInput) -> syn::Result<Tokens> {
                 };
                 let vdocs = docs(&v.attrs);
                 let other = attrs.other;
+                let default = v.attrs.iter().any(|a| a.path().is_ident("default"));
                 let body = match &v.fields {
                     Fields::Unit => quote! { crate::wire::VariantBody::Unit },
                     Fields::Unnamed(u) if u.unnamed.len() == 1 => {
@@ -117,15 +118,22 @@ pub(crate) fn wire_impl(input: &DeriveInput) -> syn::Result<Tokens> {
                         let mut fields = Vec::new();
                         for field in &named.named {
                             let fattrs = FieldAttrs::parse(&field.attrs)?;
-                            if fattrs.skip || fattrs.flatten {
+                            if fattrs.skip {
                                 return Err(syn::Error::new_spanned(
                                     field,
-                                    "skip/flatten in a variant is not Wire",
+                                    "skip in a variant is not Wire",
                                 ));
+                            }
+                            if fattrs.read_only {
+                                continue;
                             }
                             let ident = field.ident.as_ref().expect("named field");
                             let key = fattrs.wire_name(ident, None)?;
-                            let default = field_default(&fattrs, &field.ty);
+                            let default = if fattrs.flatten {
+                                quote! { ::core::option::Option::None }
+                            } else {
+                                field_default(&fattrs, &field.ty)
+                            };
                             fields.push(field_tokens(
                                 &key,
                                 &field.attrs,
@@ -163,6 +171,7 @@ pub(crate) fn wire_impl(input: &DeriveInput) -> syn::Result<Tokens> {
                         docs: #vdocs,
                         body: #body,
                         other: #other,
+                        default: #default,
                         flags: #flags,
                     }
                 });
@@ -351,6 +360,9 @@ struct FieldAttrs {
     rename: Option<LitStr>,
     default: Option<Default>,
     skip: bool,
+    /// `skip_serializing`: read from old lines, never written, so no part of
+    /// the shape a shell reads or writes.
+    read_only: bool,
     skip_if: Option<LitStr>,
     flatten: bool,
     with: Option<Path>,
@@ -373,6 +385,8 @@ impl FieldAttrs {
                     );
                 } else if meta.path.is_ident("skip") {
                     f.skip = true;
+                } else if meta.path.is_ident("skip_serializing") {
+                    f.read_only = true;
                 } else if meta.path.is_ident("skip_serializing_if") {
                     f.skip_if = Some(str_value(&meta)?);
                 } else if meta.path.is_ident("flatten") {

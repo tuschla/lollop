@@ -20,7 +20,7 @@ use std::hash::{Hash, Hasher};
 use serde::ser::{self, Serialize};
 
 /// Every memo the core keeps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, shared_derive::Variants)]
 pub(crate) enum MemoId {
     /// The finished lift list, per set-history fingerprint and display unit.
     LiftViews,
@@ -49,23 +49,7 @@ pub(crate) enum MemoId {
     CalisthenicsNames,
 }
 
-const MEMO_COUNT: usize = 11;
-
 impl MemoId {
-    pub(crate) const ALL: [MemoId; MEMO_COUNT] = [
-        MemoId::LiftViews,
-        MemoId::RunViews,
-        MemoId::RunCard,
-        MemoId::RunQcTrack,
-        MemoId::RunBestEfforts,
-        MemoId::SetIndex,
-        MemoId::PlanSnapshots,
-        MemoId::PastReadiness,
-        MemoId::Guidance,
-        MemoId::ExerciseNames,
-        MemoId::CalisthenicsNames,
-    ];
-
     /// The most entries the memo holds; an insert past it clears the memo.
     const fn cap(self) -> usize {
         match self {
@@ -172,8 +156,8 @@ impl<K: Any + Eq + Hash, V: Any> Slot for Memo<K, V> {
 }
 
 thread_local! {
-    static MEMOS: RefCell<[Option<Box<dyn Slot>>; MEMO_COUNT]> =
-        const { RefCell::new([const { None }; MEMO_COUNT]) };
+    static MEMOS: RefCell<[Option<Box<dyn Slot>>; MemoId::ALL.len()]> =
+        const { RefCell::new([const { None }; MemoId::ALL.len()]) };
 }
 
 /// Run `f` on memo `id`, created on first use. Each `MemoId` is served with

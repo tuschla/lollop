@@ -1,5 +1,8 @@
 package app.milestone
 
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 /** A tapped History entry, routed to the detail sheet. */
 internal sealed interface HistoryEntry {
     data class Lift(val v: LiftResultView) : HistoryEntry
@@ -15,49 +18,39 @@ internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
     )
 }
 
+/** The row [entry] names, for the core's re-log of it ([DurableCore.relogEvent]);
+ *  [amendedAt] for an edit's Undo: the `observed_at` the edit saves it under. */
+internal fun relogQueryOf(entry: HistoryEntry, amendedAt: Long? = null): RelogQuery = when (entry) {
+    is HistoryEntry.Lift -> RelogQuery(EntryKind.Set, entry.v.entry_id, entry.v.observed_at, amendedAt)
+    is HistoryEntry.Run -> RelogQuery(EntryKind.Run, entry.v.entry_id, entry.v.observed_at, amendedAt)
+}
+
 /**
- * The event that logs a deleted entry again, for "Undo": the same entry_id,
- * observed_at and figures the view shows (the core re-derives everything else:
- * a typed bpm's %HRmax against the profile in force on the run's day, the spike
- * baseline from the runs around it). A GPS run is rebuilt from its [segments]
- * (the core's route fixes, [DurableCore.runTrack]: the route, or for a run QC
- * left unmeasurable its recorded fixes), so it is null for a GPS run whose fixes
- * haven't loaded; the caller then confirms the delete instead of offering Undo.
+ * Send [edits] (a delete, or an edit's amend) and say [text] with an "Undo" that
+ * puts [rows] back as they are now. The core builds each Undo event from its own
+ * row ([DurableCore.relogEvent]), read in one turn of the event queue before the
+ * edits land; a row it has no event for gets no Undo.
  */
-internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpsPoint>>): Event? = when (entry) {
-    is HistoryEntry.Lift -> entry.v.let { v ->
-        Event.LogSet(
-            exercise = v.exercise, weightKg = v.weight_kg, reps = v.reps, rpe = v.rpe,
-            observedAt = v.observed_at, entryId = v.entry_id, holdSec = v.hold_sec,
-        )
+internal fun sendUndoable(
+    onEvent: (Event) -> Unit,
+    edits: List<Event>,
+    rows: List<RelogQuery>,
+    text: String,
+    undoLabel: String,
+) {
+    if (rows.isEmpty()) {
+        edits.forEach(onEvent)
+        postUndoable(text, undoLabel, emptyList())
+        return
     }
-    is HistoryEntry.Run -> entry.v.let { v ->
-        if (!v.has_gpx && !v.gps_unmeasurable) {
-            Event.LogRun(
-                distanceKm = v.distance_km, durationMin = v.duration_min, hrPctMax = loggedHrPctMax(v),
-                observedAt = v.observed_at, entryId = v.entry_id,
-                workoutType = v.workout_type, sessionRpe = v.session_rpe,
-                avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
-            )
-        } else {
-            val points = ArrayList<GpsPoint>()
-            val starts = ArrayList<Int>()
-            for (seg in segments) {
-                if (seg.isEmpty()) continue
-                if (points.isNotEmpty()) starts += points.size
-                points += seg
-            }
-            if (points.size < 2) {
-                null
-            } else {
-                Event.LogRunTrack(
-                    points = points, hrPctMax = loggedHrPctMax(v),
-                    observedAt = v.observed_at, entryId = v.entry_id,
-                    workoutType = v.workout_type, segmentStarts = starts,
-                    sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
-                )
-            }
+    AppProcess.scope.launch {
+        var undo = emptyList<Event>()
+        EventDispatcher.exclusive {
+            undo = withContext(CoreDispatcher) { rows.mapNotNull(AppCore.engine::relogEvent) }
+            null
         }
+        edits.forEach(onEvent)
+        postUndoable(text, undoLabel, undo)
     }
 }
 

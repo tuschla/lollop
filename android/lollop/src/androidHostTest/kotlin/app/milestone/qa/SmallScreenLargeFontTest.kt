@@ -354,9 +354,7 @@ class SmallScreenLargeFontTest {
     private fun runDetail(scale: Float) {
         useFont(scale)
         val end = QaHarness.daysAgoAtMidday(1)
-        val points = (0 until 600).map { i ->
-            app.milestone.GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = end - (599 - i) * 3L, accuracyM = 5.0)
-        }
+        val points = app.milestone.straightTrack(600, firstAt = end - 599 * 3L)
         QaHarness.seedLog(
             ctx,
             listOf(

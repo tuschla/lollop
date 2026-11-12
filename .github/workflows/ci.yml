@@ -50,14 +50,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           rust: "true"
-
-      - name: Cache Robolectric Android runtimes
-        # Robolectric downloads its android-all jars from Maven at test time; a
-        # Maven hiccup then fails every Robolectric class before any test runs.
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
+          robolectric: "true"
 
       - name: Unit tests + offline UI/UX QA
         # :lollop:testAndroidHostTest runs the JVM wire-shape tests AND the
@@ -128,12 +121,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           rust: "true"
-
-      - name: Cache Robolectric Android runtimes
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
+          robolectric: "true"
 
       - name: Full simulated lives + copy sweep (Rust, release)
         env:

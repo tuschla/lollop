@@ -11,16 +11,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import app.milestone.resources.Res
 import app.milestone.resources.log_optional
-import app.milestone.resources.log_pain_area_ankle
-import app.milestone.resources.log_pain_area_elbow_wrist
-import app.milestone.resources.log_pain_area_foot
-import app.milestone.resources.log_pain_area_hip
-import app.milestone.resources.log_pain_area_left_knee
-import app.milestone.resources.log_pain_area_lower_back
-import app.milestone.resources.log_pain_area_neck
-import app.milestone.resources.log_pain_area_other
-import app.milestone.resources.log_pain_area_right_knee
-import app.milestone.resources.log_pain_area_shoulder
 import app.milestone.resources.log_pain_char_doms
 import app.milestone.resources.log_pain_char_not_sure
 import app.milestone.resources.log_pain_char_sharp
@@ -49,22 +39,6 @@ private enum class PainCharacter(val labelRes: StringResource, val kind: PainKin
     Doms(Res.string.log_pain_char_doms, PainKind.Doms),
     NotSure(Res.string.log_pain_char_not_sure, PainKind.Other),
 }
-
-/** The chip text of a preset body area ([PainArea] is the core's: its wire
- *  name is the location the report carries). */
-private val PainArea.labelRes: StringResource
-    get() = when (this) {
-        PainArea.LeftKnee -> Res.string.log_pain_area_left_knee
-        PainArea.RightKnee -> Res.string.log_pain_area_right_knee
-        PainArea.Ankle -> Res.string.log_pain_area_ankle
-        PainArea.Hip -> Res.string.log_pain_area_hip
-        PainArea.LowerBack -> Res.string.log_pain_area_lower_back
-        PainArea.Shoulder -> Res.string.log_pain_area_shoulder
-        PainArea.ElbowWrist -> Res.string.log_pain_area_elbow_wrist
-        PainArea.Neck -> Res.string.log_pain_area_neck
-        PainArea.Foot -> Res.string.log_pain_area_foot
-        PainArea.Other -> Res.string.log_pain_area_other
-    }
 
 /** The chip label of the area the active pain report names (`active_pain.area`);
  *  null when it names none. */

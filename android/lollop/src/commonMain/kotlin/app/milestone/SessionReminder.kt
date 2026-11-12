@@ -7,6 +7,7 @@ import app.milestone.resources.reminder_action_start_run
 import app.milestone.resources.reminder_line_exercises
 import app.milestone.resources.reminder_line_progress
 import app.milestone.resources.reminder_line_single
+import app.milestone.widget.SurfaceIcon
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
 import app.milestone.widget.WidgetItemKind
@@ -16,6 +17,7 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
+import org.jetbrains.compose.resources.StringResource
 
 /**
  * The daily session reminder (Profile › During training, off by default): at the
@@ -122,7 +124,21 @@ internal data class SessionReminderSetting(val enabled: Boolean, val minuteOfDay
 /** Today's session as the reminder shows it: a [WidgetDayKind.Lift] or
  *  [WidgetDayKind.Run] day, its title and items. */
 internal data class Reminder(val kind: WidgetDayKind, val title: String, val items: List<WidgetItem>) {
-    val dest: OpenDest get() = if (kind == WidgetDayKind.Run) OpenDest.Track else OpenDest.LogSet
+    /** What the reminder's one tap does: start the run, or log the first set, or
+     *  the next one once a set of today's lift session is in. */
+    val action: ReminderAction
+        get() = when {
+            kind == WidgetDayKind.Run -> ReminderAction.StartRun
+            items.any { it.kind == WidgetItemKind.Lift && it.done } -> ReminderAction.LogNextSet
+            else -> ReminderAction.LogFirstSet
+        }
+}
+
+/** The reminder's action: its label, the screen it opens and its icon. */
+internal enum class ReminderAction(val labelRes: StringResource, val dest: OpenDest, val icon: SurfaceIcon) {
+    StartRun(Res.string.reminder_action_start_run, OpenDest.Track, SurfaceIcon.TrackRun),
+    LogFirstSet(Res.string.reminder_action_log_first_set, OpenDest.LogSet, SurfaceIcon.LogSet),
+    LogNextSet(Res.string.reminder_action_log_next_set, OpenDest.LogSet, SurfaceIcon.LogSet),
 }
 
 /**
@@ -178,13 +194,3 @@ internal fun reminderLine(res: PlatformResources, reminder: Reminder): String? {
         else -> res.getString(Res.string.reminder_line_progress, done, lifts.size, open.name)
     }
 }
-
-/** The action's label, what one tap does: "Start run", "Log first set", or "Log
- *  next set" once a set of today's lift session is in. */
-internal fun reminderActionLabel(res: PlatformResources, reminder: Reminder): String = res.getString(
-    when {
-        reminder.kind == WidgetDayKind.Run -> Res.string.reminder_action_start_run
-        reminder.items.any { it.kind == WidgetItemKind.Lift && it.done } -> Res.string.reminder_action_log_next_set
-        else -> Res.string.reminder_action_log_first_set
-    },
-)

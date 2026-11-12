@@ -217,8 +217,12 @@ fn unrecorded_rpe_at_band_top_does_not_advance_dynamic_rung() {
     assert_eq!(it.exercise, "Full push-up", "an unrated set is not 'clean'");
     assert!(it.calis.as_ref().unwrap().needs_effort_rating);
     assert!(
-        it.why.improves.contains("Rate how hard the last set felt"),
-        "{}",
+        it.why
+            .improves
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Rate how hard the last set felt"),
+        "{:?}",
         it.why.improves
     );
 }

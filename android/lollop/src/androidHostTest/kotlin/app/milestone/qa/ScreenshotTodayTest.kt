@@ -28,6 +28,7 @@ import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SessionPlanView
 import app.milestone.TestClock
+import app.milestone.WorkoutType
 import app.milestone.overtrainingWeekEdgeLabels
 import java.io.File
 import java.util.Locale
@@ -239,7 +240,7 @@ class ScreenshotTodayTest {
         val today = vm.today_epoch_day ?: app.milestone.todayEpochDay()
         val runDays = vm.week_plan.filter { d -> d.epoch_day >= today && d.items.any { it.run_target != null } }
         val pick: SessionPlanView = runDays.firstOrNull { d -> d.items.any { (it.run_structure?.reps ?: 0) > 0 } }
-            ?: runDays.firstOrNull { d -> d.items.any { it.run_target?.band.orEmpty() in setOf("tempo", "threshold", "interval") } }
+            ?: runDays.firstOrNull { d -> d.items.any { it.workout_type == WorkoutType.Tempo || it.workout_type == WorkoutType.Interval } }
             ?: runDays.firstOrNull { d -> d.items.any { (it.run_structure?.strides_reps ?: 0) > 0 } }
             ?: runDays.first()
         if (pick.epoch_day != today) {

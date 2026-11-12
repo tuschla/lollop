@@ -151,7 +151,7 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             val engine = withContext(CoreDispatcher) { AppCore.engine }
             bootTurn(engine, setupStore, ctx.keyValueStore(AppFileNames.SETTINGS_STORE), AppRuntime, restore = {
                 if (reboot) engine.resetForReboot()
-                engine.restore(ctx)
+                engine.restore(ctx.eventLogPath())
             })?.also { fresh = it.fresh }?.view
         }
         // No model: the core is unavailable. Show the error state, dispatch nothing.

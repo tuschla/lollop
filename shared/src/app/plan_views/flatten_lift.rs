@@ -2,6 +2,7 @@
 
 use crate::app::evidence_views::{grade_note_str, why_from};
 use crate::app::format::{fmt_rounded, fmt_weight};
+use crate::app::plan_views::adjust_fold::reduce_percent_intensity;
 use crate::app::plan_views::basis::planned_text;
 use crate::app::plan_views::item_render::{
     derate_reason, face_rir, range_text, refresh_lift_summary, round_load_or_drop, sets_reps_lead,
@@ -64,8 +65,8 @@ pub(super) fn flatten_lift_prescription(
     let intensity_label = intensity.label().unwrap_or(prose_label);
     // An arm's own basis states the prescription; restated if the face moves.
     let mut why = why_from(basis.as_deref().map(|b| planned_text(b, weight_lb)), rx);
-    if let Some(imp) = improves {
-        why.improves = imp;
+    if improves.is_some() {
+        why.improves = improves;
     }
     // Power/speed prescriptions carry a velocity intent (File 02 strength-023
     // "50–70% FAST"; AUTOREG-VL-001): the load is only a power stimulus at
@@ -121,10 +122,12 @@ pub(super) fn flatten_lift_prescription(
 }
 
 /// A %1RM target. The working LOAD = logged e1RM × % × this lift's single
-/// derate (detraining, layoff re-entry ramp, or an e1RM drop; never stacked).
-/// The e1RM itself stays the logged value (honest `anchored_on`). A >8 wk
-/// layoff's pre-layoff anchor never reaches this arm: it is set aside and the
-/// lift prescribed by RIR.
+/// derate (detraining, layoff re-entry ramp, or an e1RM drop; never stacked),
+/// and the shown percent is cut by the same derate, reduced from the planned
+/// one, so the label states the share of the e1RM the load is. The e1RM
+/// itself stays the logged value (honest `anchored_on`). A >8 wk layoff's
+/// pre-layoff anchor never reaches this arm: it is set aside and the lift
+/// prescribed by RIR.
 fn percent_arm(
     l: &crate::schema::LiftPrescription,
     p: f32,
@@ -234,12 +237,16 @@ fn percent_arm(
             "Log a set of this lift so its weights follow your estimated max instead of a typical value.",
         ),
     };
+    let mut intensity = PlanIntensity::PercentE1rm {
+        pct: p.round() as u32,
+        reduced_from: None,
+    };
+    if load.is_some() && frac < 1.0 {
+        reduce_percent_intensity(&mut intensity, 1.0 - frac);
+    }
     LiftArm {
         load_kg: load,
-        intensity: PlanIntensity::PercentE1rm {
-            pct: p.round() as u32,
-            reduced_from: None,
-        },
+        intensity,
         anchored_on,
         basis: Some(basis),
         improves: Some(improves.to_string()),

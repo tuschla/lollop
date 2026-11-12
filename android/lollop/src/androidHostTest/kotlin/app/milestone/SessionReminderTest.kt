@@ -71,6 +71,7 @@ class SessionReminderTest {
         SessionReminder.setEnabled(app, false)
         SessionReminder.setMinuteOfDay(app, SessionReminder.DEFAULT_MINUTE_OF_DAY)
         RunSession.markStopped()
+        SessionReminder.start(app)
     }
 
     @After
@@ -227,7 +228,8 @@ class SessionReminderTest {
     fun startedLiftDayNamesWhatIsLeft() {
         val r = reminderOf(liftDay(items = liftItemsFirstDone), today, zone)!!
         assertEquals("1 of 3 done · Bench press next", reminderLine(res, r))
-        assertEquals("Log next set", reminderActionLabel(res, r))
+        assertEquals(ReminderAction.LogNextSet, r.action)
+        assertEquals("Log next set", res.getString(r.action.labelRes))
         val single = reminderOf(liftDay(items = liftItems.take(1)), today, zone)!!
         assertEquals("Back squat · 3 × 5 @ 100 kg", reminderLine(res, single))
     }

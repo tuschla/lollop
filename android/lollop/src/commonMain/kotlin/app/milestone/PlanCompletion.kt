@@ -580,8 +580,6 @@ private fun PlanItemFace(
             val t = item.run_target
             if (t != null && runHead != null) {
                 val pace = t.pace_label
-                // The band key ("threshold") is engine vocabulary; the Effort line
-                // below already says how hard in plain words.
                 if (pace.isNotBlank()) add(stringResource(Res.string.plan_face_pace_only, pace))
                 if (t.hr_label.isNotBlank()) add(stringResource(Res.string.plan_face_hr, t.hr_label))
                 if (t.effort_detail.isNotBlank()) add(stringResource(Res.string.plan_face_effort, t.effort_detail))

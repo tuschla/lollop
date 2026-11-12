@@ -11,23 +11,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import app.milestone.resources.Res
-import app.milestone.resources.runmap_finish
-import app.milestone.resources.runmap_start
-import app.milestone.resources.runmap_start_finish
 import kotlin.math.roundToInt
-import org.jetbrains.compose.resources.stringResource
+import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -132,37 +130,6 @@ internal actual fun FullScreenMapDialog(onDismissRequest: () -> Unit, content: @
     }
 }
 
-@Composable
-private fun rememberRouteRenderer(): RouteRenderer {
-    val palette = LocalPalette.current
-    val ctx = LocalContext.current
-    val density = LocalDensity.current
-    val textPx = with(density) { Type.Chip.fontSize.toPx() }
-    val start = stringResource(Res.string.runmap_start)
-    val finish = stringResource(Res.string.runmap_finish)
-    val loop = stringResource(Res.string.runmap_start_finish)
-    return remember(palette, density.density, textPx, start, finish, loop) {
-        val flag = ContextCompat.getDrawable(ctx, R.drawable.ic_route_finish_flag)!!.mutate()
-        flag.setTint(palette.bgTop.toArgb())
-        RouteRenderer(RouteStyle(
-            ramp = IntArray(RouteRampSteps + 1) { palette.routeRamp(it / RouteRampSteps.toFloat()).toArgb() },
-            casing = palette.bgTop.toArgb(),
-            accent = palette.accent.toArgb(),
-            elevated = palette.bgElevated.toArgb(),
-            body = palette.onBgBody.toArgb(),
-            cut = palette.onBgFaint.copy(alpha = TrimCutAlpha).toArgb(),
-            pillFill = palette.bgElevated.copy(alpha = MapChromeAlpha).toArgb(),
-            pillBorder = palette.onBgFaint.copy(alpha = HairlineAlpha.Strong).toArgb(),
-            density = density.density,
-            textPx = textPx,
-            flag = flag,
-            startLabel = start,
-            finishLabel = finish,
-            loopLabel = loop,
-        ))
-    }
-}
-
 /** osmdroid tiles under the route overlay, or the plain canvas; Compose clips the view, so [corner] is unused. */
 @Composable
 internal actual fun RouteLayer(
@@ -177,18 +144,19 @@ internal actual fun RouteLayer(
     bottomPx: Int,
     fitRequests: Int,
 ) {
-    val renderer = rememberRouteRenderer()
+    val painter = rememberRoutePainter()
     if (tiles) {
-        TileRouteLayer(track, renderer, options, interactive, insetPx, topPx, bottomPx, fitRequests, modifier)
+        TileRouteLayer(track, painter, options, interactive, insetPx, topPx, bottomPx, fitRequests, modifier)
     } else {
-        PlainRouteLayer(track, renderer, options, interactive, insetPx, topPx, bottomPx, fitRequests, modifier)
+        PlainRouteLayer(track, painter, options, interactive, insetPx, topPx, bottomPx, fitRequests, modifier)
     }
 }
 
 /** The route as an osmdroid overlay, re-projected (and its markers re-thinned) every frame. */
 private class RouteOverlay : Overlay() {
     var track: RouteTrack? = null
-    var renderer: RouteRenderer? = null
+    var painter: RoutePainter? = null
+    var density = Density(1f)
     var options = RouteDrawOptions()
     var topPx = 0
     var bottomPx = 0
@@ -202,14 +170,17 @@ private class RouteOverlay : Overlay() {
         out[0] = point.x.toFloat()
         out[1] = point.y.toFloat()
     }
+    private val drawScope = CanvasDrawScope()
 
     override fun draw(c: Canvas, pj: Projection) {
         val t = track ?: return
-        val r = renderer ?: return
+        val p = painter ?: return
         projection = pj
         val screen = pj.intrinsicScreenRect
         bounds.set(screen.left.toFloat(), (screen.top + topPx).toFloat(), screen.right.toFloat(), (screen.bottom - bottomPx).toFloat())
-        r.draw(c, t, projector, bounds, options)
+        drawScope.draw(density, LayoutDirection.Ltr, ComposeCanvas(c), Size(c.width.toFloat(), c.height.toFloat())) {
+            p.draw(this, t, projector, bounds, options)
+        }
     }
 }
 
@@ -249,7 +220,7 @@ private class TileMapState {
 @Composable
 private fun TileRouteLayer(
     track: RouteTrack,
-    renderer: RouteRenderer,
+    painter: RoutePainter,
     options: RouteDrawOptions,
     interactive: Boolean,
     insetPx: Float,
@@ -259,6 +230,7 @@ private fun TileRouteLayer(
     modifier: Modifier,
 ) {
     val palette = LocalPalette.current
+    val density = LocalDensity.current
     val state = remember { TileMapState() }
     AndroidView(
         modifier = modifier,
@@ -280,7 +252,8 @@ private fun TileRouteLayer(
                 map.applyMapTheme(palette)
             }
             state.overlay.track = track
-            state.overlay.renderer = renderer
+            state.overlay.painter = painter
+            state.overlay.density = density
             state.overlay.options = options
             state.overlay.topPx = topPx
             state.overlay.bottomPx = bottomPx

@@ -23,13 +23,14 @@ import app.milestone.AppSettings
 import app.milestone.DistanceUnit
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
+import app.milestone.M_PER_DEG
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.TestClock
 import app.milestone.finishSummarySpoken
+import app.milestone.northFix
 import app.milestone.spokenDuration
 import app.milestone.spokenRunDistance
 import kotlinx.serialization.json.jsonArray
@@ -85,9 +86,6 @@ class RunFixGuardsTest {
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
 
-    private fun fix(northM: Double, t: Long, accuracyM: Double = 5.0) =
-        GpsPoint(52.52 + northM / 111_195.0, 13.405, t, accuracyM)
-
     @Test
     fun theFinishReviewShowsTheCoresFiguresNotTheLiveCounters() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -105,7 +103,7 @@ class RunFixGuardsTest {
 
     @Test
     fun recoveryThinningKeepsEverySegmentsFirstFix() {
-        val pts = (0 until 100).map { fix(3.0 * it, 1_790_000_000L + it) }
+        val pts = (0 until 100).map { northFix(3.0 * it, 1_790_000_000L + it) }
         // Stride 10: index 37 is off the stride, yet it opened a segment.
         val thinned = ActiveRunStore.thinForRecovery(pts, maxPoints = 10, segmentStarts = listOf(37))
         assertTrue("thinned: ${thinned.size}", thinned.size < pts.size)
@@ -123,7 +121,7 @@ class RunFixGuardsTest {
         // runner walked 30 m: only the recorded pause boundary keeps that walk out.
         val t0 = System.currentTimeMillis() / 1000 - 900
         val pts = (0 until 200).map { i ->
-            if (i < 100) fix(3.0 * i, t0 + i) else fix(3.0 * i + 30.0, t0 + i + 19)
+            if (i < 100) northFix(3.0 * i, t0 + i) else northFix(3.0 * i + 30.0, t0 + i + 19)
         }
         ActiveRunStore.begin()
         pts.forEachIndexed { i, p ->
@@ -149,7 +147,7 @@ class RunFixGuardsTest {
     private fun location(eastM: Double, tSec: Long, accuracyM: Float): Location =
         Location(LocationManager.GPS_PROVIDER).apply {
             latitude = 0.0
-            longitude = eastM / 111_195.0
+            longitude = eastM / M_PER_DEG
             time = 1_700_000_000_000L + tSec * 1000L
             elapsedRealtimeNanos = (10_000L + tSec * 1000L) * 1_000_000L
             accuracy = accuracyM
@@ -186,7 +184,7 @@ class RunFixGuardsTest {
         val end = QaHarness.daysAgoAtMidday(1)
         // Five fixes, every one past the accuracy gate: QC leaves nothing to
         // measure, but the run and its recorded fixes are the runner's data.
-        val points = (0 until 5).map { fix(3.0 * it, end - 4 + it, accuracyM = 50.0) }
+        val points = (0 until 5).map { northFix(3.0 * it, end - 4 + it, accuracyM = 50.0) }
         val run = Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), run))
         rule.launchApp()

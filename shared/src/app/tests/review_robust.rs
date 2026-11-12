@@ -887,7 +887,7 @@ fn undo_each_entry_diffs(
     }
     entries
         .into_iter()
-        .filter_map(|(kind, id, at, e)| undo_diff(&mut model, kind, id, at, e))
+        .filter_map(|(kind, id, at, _)| undo_diff(&mut model, kind, id, at))
         .collect()
 }
 

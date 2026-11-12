@@ -1,5 +1,7 @@
 use super::*;
 use crate::gps::{MAX_FIX_GAP_SEC, unix_to_rfc3339_utc as iso};
+use crate::import::number::kt_to_double;
+use crate::import::raw::hr_bpm;
 use crate::import::time::parse_import_time_sec;
 use crate::import::xml::{MAX_IMPORT_XML_DEPTH, SNIFF_BYTES, decode_utf16};
 use crate::test_support::fit_writer::{ENUM, FIT_EPOCH, FitWriter, I32, U8, U32, semi};

@@ -9,14 +9,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":123456.789,"reps":18,"rpe":1.0,"observed_at":1,"entry_id":1790000590412}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":1,"ended":true,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":38.32049560546875,"duration_min":678.9502200472606,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":1790000000123,"avg_hr_bpm":0.0,"entry_id":0,"utc_offset_sec":23391}}
-{"LogRunTrack":{"points":[{"lat":12.345,"lon":851.4578061084414,"observed_at":1790000000123,"accuracy_m":0.30853092670440674},{"lat":1.0,"lon":43.95901107788086,"observed_at":1,"accuracy_m":16.68547248840332},{"lat":-2.5,"lon":1.0E-7,"observed_at":-5,"accuracy_m":13.02743911743164}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":1790000474843,"segment_starts":[10,92],"utc_offset_sec":13497}}
+{"LogRun":{"distance_km":38.32049560546875,"duration_min":678.9502200472606,"hr_pct_max":33.599999999999994,"observed_at":1790000000123,"entry_id":0,"avg_hr_bpm":0.0,"utc_offset_sec":23391}}
+{"LogRunTrack":{"points":[{"lat":12.345,"lon":851.4578061084414,"observed_at":1790000000123,"accuracy_m":0.30853092670440674},{"lat":1.0,"lon":43.95901107788086,"observed_at":1,"accuracy_m":16.68547248840332},{"lat":-2.5,"lon":1.0E-7,"observed_at":-5,"accuracy_m":13.02743911743164}],"hr_pct_max":-2.5,"observed_at":1790000000123,"entry_id":1790000474843,"segment_starts":[10,92],"utc_offset_sec":13497}}
 "ClearRuns"
 {"LogActivity":{"kind":"Swimming","minutes":-2.5,"vigorous":false,"strengthening":true,"observed_at":0,"entry_id":1790000913462}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":1790000254190,"exercise":"a\\b\n\tc/d","weight_kg":-2.5,"reps":2,"rpe":321.0124782900426,"observed_at":1,"observed_at_fallback":0,"hold_sec":41}}
-{"AmendRun":{"entry_id":1790000070274,"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Interval","avg_hr_bpm":12.345,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":1790000070274,"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":33.599999999999994,"observed_at":0,"workout_type":"Interval","avg_hr_bpm":12.345,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000836653,"observed_at_fallback":1416261213,"keep_from_sec":0,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":null,"workout_type":"Easy"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":3,"reds_signal_reported":true,"positive_split_pct":35.30959376825254,"rpe_load_gap_sessions":3,"bad_day":false,"observed_at":1}}
@@ -48,14 +48,14 @@
 {"LogSet":{"exercise":"a\\b\n\tc/d","weight_kg":33.599999999999994,"reps":12,"rpe":1.0E-7,"observed_at":-5,"entry_id":0,"hold_sec":70}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":1790000000123,"ended":false,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":0.0,"duration_min":473.1045553830829,"hr_pct_max":13.015240669250488,"longest_recent_km":0.0,"observed_at":1,"avg_hr_bpm":28.99363899230957,"entry_id":1790000578308,"utc_offset_sec":13765}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":366.4796282211137,"observed_at":1790000000123,"accuracy_m":8.135878562927246},{"lat":995.8445911530716,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":3.746793746948242},{"lat":123456.789,"lon":0.0,"observed_at":1,"accuracy_m":14.052044868469238}],"hr_pct_max":13.014721870422363,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":1790000895935,"workout_type":"Steady","segment_starts":[38,99],"session_rpe":9,"utc_offset_sec":5697}}
+{"LogRun":{"distance_km":0.0,"duration_min":473.1045553830829,"hr_pct_max":13.015240669250488,"observed_at":1,"entry_id":1790000578308,"avg_hr_bpm":28.99363899230957,"utc_offset_sec":13765}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":366.4796282211137,"observed_at":1790000000123,"accuracy_m":8.135878562927246},{"lat":995.8445911530716,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":3.746793746948242},{"lat":123456.789,"lon":0.0,"observed_at":1,"accuracy_m":14.052044868469238}],"hr_pct_max":13.014721870422363,"observed_at":1790000000123,"entry_id":1790000895935,"segment_starts":[38,99],"workout_type":"Steady","session_rpe":9,"utc_offset_sec":5697}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":47.4075927734375,"vigorous":false,"strengthening":true,"observed_at":615888422,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":0,"exercise":"Overhead press","weight_kg":123456.789,"reps":1,"rpe":12.345,"observed_at":-5,"observed_at_fallback":1640441531,"hold_sec":105}}
-{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":-2.5,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Steady","session_rpe":4,"avg_hr_bpm":33.599999999999994,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":-2.5,"hr_pct_max":33.599999999999994,"observed_at":0,"workout_type":"Steady","session_rpe":4,"avg_hr_bpm":33.599999999999994,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":1790000436960,"observed_at_fallback":1790000000123,"keep_from_sec":-5,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000924013,"observed_at_fallback":-5,"session_rpe":6,"workout_type":"Tempo"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":4,"overtraining_signal_weeks":-2.5,"easy_frac_time_above_vt1":33.599999999999994,"positive_split_pct":-2.5,"rpe_load_gap_sessions":0,"weekly_velocity_drop_m_s":0.0,"failed_key_sessions":3,"bad_day":false,"observed_at":-5}}
@@ -87,14 +87,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":33.599999999999994,"reps":4,"rpe":123456.789,"observed_at":-5,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":1790000000123,"ended":false,"observed_at":525529114}}
-{"LogRun":{"distance_km":78.49348257067174,"duration_min":28.377685546875,"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Recovery","avg_hr_bpm":9.499910354614258,"entry_id":0,"utc_offset_sec":-14155}}
-{"LogRunTrack":{"points":[{"lat":12.345,"lon":-2.5,"observed_at":1790000000123,"accuracy_m":9.634756088256836},{"lat":459.54355410233757,"lon":12.345,"observed_at":1790000000123,"accuracy_m":9.061795234680176},{"lat":0.0,"lon":0.0,"observed_at":0,"accuracy_m":4.549997329711914}],"hr_pct_max":638.1445982667932,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"workout_type":"Recovery","segment_starts":[40,16],"session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":6335}}
+{"LogRun":{"distance_km":78.49348257067174,"duration_min":28.377685546875,"hr_pct_max":12.345,"observed_at":0,"entry_id":0,"workout_type":"Recovery","avg_hr_bpm":9.499910354614258,"utc_offset_sec":-14155}}
+{"LogRunTrack":{"points":[{"lat":12.345,"lon":-2.5,"observed_at":1790000000123,"accuracy_m":9.634756088256836},{"lat":459.54355410233757,"lon":12.345,"observed_at":1790000000123,"accuracy_m":9.061795234680176},{"lat":0.0,"lon":0.0,"observed_at":0,"accuracy_m":4.549997329711914}],"hr_pct_max":638.1445982667932,"observed_at":-5,"entry_id":0,"segment_starts":[40,16],"workout_type":"Recovery","session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":6335}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":0.0,"vigorous":true,"strengthening":false,"observed_at":1790000000123,"entry_id":1790000739188}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":0,"observed_at_fallback":1875625604}}
 {"AmendSet":{"entry_id":0,"exercise":"Overhead press","weight_kg":1.0,"reps":8,"rpe":461.9047615423319,"observed_at":-5,"observed_at_fallback":984566488}}
-{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":1,"avg_hr_bpm":12.345,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"observed_at":1,"avg_hr_bpm":12.345,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":817459462,"keep_from_sec":1403590775,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":911564569,"session_rpe":6,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":2,"overtraining_signs":{"worse_performance":true,"low_mood":false,"higher_resting_hr":true,"worse_sleep":false},"decoupling":{"drift_pct":0.0,"cool_steady_context":true},"easy_frac_time_above_vt1":123456.789,"positive_split_pct":0.23737847805023193,"rpe_load_gap_sessions":1,"failed_key_sessions":0,"bad_day":false,"observed_at":1790000000123}}
@@ -126,14 +126,14 @@
 {"LogSet":{"exercise":"Overhead press","weight_kg":1.0,"reps":1,"rpe":12.345,"observed_at":-5,"entry_id":1790000701076,"hold_sec":71}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":-5,"ended":false,"observed_at":0}}
-{"LogRun":{"distance_km":12.345,"duration_min":0.0,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":-5,"avg_hr_bpm":12.345,"entry_id":1790000965567}}
-{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000657986,"segment_starts":[90,42],"session_rpe":6}}
+{"LogRun":{"distance_km":12.345,"duration_min":0.0,"hr_pct_max":1.0E-7,"observed_at":-5,"entry_id":1790000965567,"avg_hr_bpm":12.345}}
+{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"observed_at":1,"entry_id":1790000657986,"segment_starts":[90,42],"session_rpe":6}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":1.0,"vigorous":true,"strengthening":false,"observed_at":1790000000123,"entry_id":1790000315653}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":1790000380513,"exercise":"Overhead press","weight_kg":1.0E-7,"reps":1,"rpe":1.0E-7,"observed_at":1790000000123,"observed_at_fallback":1,"hold_sec":37}}
-{"AmendRun":{"entry_id":1790000091550,"distance_km":1.0E-7,"duration_min":17.518421173095703,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":1,"workout_type":"LongRun","avg_hr_bpm":123456.789,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":1790000091550,"distance_km":1.0E-7,"duration_min":17.518421173095703,"hr_pct_max":-2.5,"observed_at":1,"workout_type":"LongRun","avg_hr_bpm":123456.789,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000059756,"observed_at_fallback":-5,"keep_from_sec":0,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000117107,"observed_at_fallback":1790000000123,"session_rpe":3,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":3,"overtraining_signal_weeks":772.9142744726565,"overtraining_signs":{"worse_performance":true,"low_mood":true,"higher_resting_hr":false,"worse_sleep":false},"reds_signal_reported":true,"easy_frac_time_above_vt1":97.05162830753218,"bad_day":false,"observed_at":1}}
@@ -165,14 +165,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":33.599999999999994,"reps":0,"rpe":12.345,"observed_at":1443487061,"entry_id":1790000738209,"hold_sec":71}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Bench \"press\"","epoch_day":0,"ended":true,"observed_at":1}}
-{"LogRun":{"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":0,"workout_type":"LongRun","avg_hr_bpm":29.02214241027832,"entry_id":1790000109071}}
-{"LogRunTrack":{"points":[{"lat":28.64990234375,"lon":12.345,"observed_at":1790000000123,"accuracy_m":9.050193786621094},{"lat":0.0,"lon":33.599999999999994,"observed_at":885342266,"accuracy_m":0.6152880191802979},{"lat":1.0,"lon":733.2688037215256,"observed_at":-5,"accuracy_m":11.788354873657227}],"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000758092,"workout_type":"Steady","session_rpe":8}}
+{"LogRun":{"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":1.0,"observed_at":0,"entry_id":1790000109071,"workout_type":"LongRun","avg_hr_bpm":29.02214241027832}}
+{"LogRunTrack":{"points":[{"lat":28.64990234375,"lon":12.345,"observed_at":1790000000123,"accuracy_m":9.050193786621094},{"lat":0.0,"lon":33.599999999999994,"observed_at":885342266,"accuracy_m":0.6152880191802979},{"lat":1.0,"lon":733.2688037215256,"observed_at":-5,"accuracy_m":11.788354873657227}],"hr_pct_max":123456.789,"observed_at":1,"entry_id":1790000758092,"workout_type":"Steady","session_rpe":8}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":12.345,"vigorous":false,"strengthening":true,"observed_at":862298742,"entry_id":1790000313882}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000834030,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":1790000407138,"exercise":"a\\b\n\tc/d","weight_kg":33.599999999999994,"reps":12,"rpe":-83.63725826514961,"observed_at":1477252337,"observed_at_fallback":0}}
-{"AmendRun":{"entry_id":1790000387302,"distance_km":1.0,"duration_min":-2.5,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":481059055,"avg_hr_bpm":1.0E-7,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":1790000387302,"distance_km":1.0,"duration_min":-2.5,"hr_pct_max":1.0,"observed_at":481059055,"avg_hr_bpm":1.0E-7,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":481562012,"keep_from_sec":1984845285,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":6,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":2,"overtraining_signal_weeks":0.0,"decoupling":{"drift_pct":-2.5,"cool_steady_context":true},"positive_split_pct":0.0,"rpe_load_gap_sessions":0,"bad_day":true,"observed_at":1277658523}}
@@ -204,14 +204,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":-2.5,"reps":14,"rpe":37.50514949228665,"observed_at":-5,"entry_id":1790000678027,"hold_sec":44}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Overhead press","epoch_day":1,"ended":false,"observed_at":-5}}
-{"LogRun":{"distance_km":44.1170768737793,"duration_min":33.599999999999994,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1790000000123,"workout_type":"Recovery","entry_id":0,"utc_offset_sec":-11387}}
-{"LogRunTrack":{"points":[{"lat":-2.5,"lon":1.0,"observed_at":1790000000123,"accuracy_m":23.165576934814453},{"lat":1.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":8.140364646911621}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000543827,"avg_hr_bpm":123456.789}}
+{"LogRun":{"distance_km":44.1170768737793,"duration_min":33.599999999999994,"hr_pct_max":123456.789,"observed_at":1790000000123,"entry_id":0,"workout_type":"Recovery","utc_offset_sec":-11387}}
+{"LogRunTrack":{"points":[{"lat":-2.5,"lon":1.0,"observed_at":1790000000123,"accuracy_m":23.165576934814453},{"lat":1.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":8.140364646911621}],"hr_pct_max":-2.5,"observed_at":0,"entry_id":1790000543827,"avg_hr_bpm":123456.789}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":0.0,"vigorous":true,"strengthening":true,"observed_at":785102619,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":32.376094818115234,"reps":17,"rpe":-2.5,"observed_at":-5,"observed_at_fallback":0,"hold_sec":99}}
-{"AmendRun":{"entry_id":0,"distance_km":29.69806480407715,"duration_min":0.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1,"workout_type":"LongRun","avg_hr_bpm":41.470242083811115,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":29.69806480407715,"duration_min":0.0,"hr_pct_max":0.0,"observed_at":1,"workout_type":"LongRun","avg_hr_bpm":41.470242083811115,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000310079,"observed_at_fallback":402388526,"keep_from_sec":0,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":2,"overtraining_signal_weeks":1.0E-7,"easy_frac_time_above_vt1":1.0,"failed_key_sessions":2,"bad_day":false,"observed_at":-5}}
@@ -243,14 +243,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":1.0E-7,"reps":11,"rpe":-2.5,"observed_at":1,"entry_id":1790000017039}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":1790000000123,"ended":true,"observed_at":0}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":-2.5,"hr_pct_max":20.534839630126953,"longest_recent_km":0.0,"observed_at":1106641939,"entry_id":1790000625804,"utc_offset_sec":-9341}}
-{"LogRunTrack":{"points":[{"lat":123456.789,"lon":-2.5,"observed_at":0,"accuracy_m":7.741838455200195},{"lat":35.296852111816406,"lon":-2.5,"observed_at":67502763,"accuracy_m":10.607279777526855},{"lat":1.0,"lon":1.0E-7,"observed_at":0,"accuracy_m":9.810447692871094}],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":1176727520,"entry_id":0,"workout_type":"Steady","segment_starts":[13,18],"avg_hr_bpm":37.01021957397461,"utc_offset_sec":7612}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":-2.5,"hr_pct_max":20.534839630126953,"observed_at":1106641939,"entry_id":1790000625804,"utc_offset_sec":-9341}}
+{"LogRunTrack":{"points":[{"lat":123456.789,"lon":-2.5,"observed_at":0,"accuracy_m":7.741838455200195},{"lat":35.296852111816406,"lon":-2.5,"observed_at":67502763,"accuracy_m":10.607279777526855},{"lat":1.0,"lon":1.0E-7,"observed_at":0,"accuracy_m":9.810447692871094}],"hr_pct_max":12.345,"observed_at":1176727520,"entry_id":0,"segment_starts":[13,18],"workout_type":"Steady","avg_hr_bpm":37.01021957397461,"utc_offset_sec":7612}}
 "ClearRuns"
 {"LogActivity":{"kind":"Other","minutes":-2.5,"vigorous":true,"strengthening":false,"observed_at":1026276225,"entry_id":1790000222819}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":1790000212612,"exercise":"Overhead press","weight_kg":1.0,"reps":15,"rpe":33.599999999999994,"observed_at":0,"observed_at_fallback":76253824}}
-{"AmendRun":{"entry_id":0,"distance_km":0.0,"duration_min":50.58703621340692,"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":0,"workout_type":"LongRun","observed_at_fallback":0}}
+{"AmendRun":{"entry_id":0,"distance_km":0.0,"duration_min":50.58703621340692,"hr_pct_max":12.345,"observed_at":0,"workout_type":"LongRun","observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000820974,"observed_at_fallback":0,"keep_from_sec":1674061123,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":1790000070069,"observed_at_fallback":-5,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":1,"overtraining_signal_weeks":1.0,"decoupling":{"drift_pct":-2.5,"cool_steady_context":false},"easy_frac_time_above_vt1":1.0,"rpe_load_gap_sessions":3,"failed_key_sessions":3,"bad_day":false,"observed_at":-5}}
@@ -282,14 +282,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":123456.789,"reps":3,"rpe":33.599999999999994,"observed_at":1894310672,"entry_id":1790000892823}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":0,"ended":true,"observed_at":1722149264}}
-{"LogRun":{"distance_km":1.0,"duration_min":1.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Recovery","avg_hr_bpm":565.8988464694933,"entry_id":0,"utc_offset_sec":3394}}
-{"LogRunTrack":{"points":[],"hr_pct_max":24.86763572692871,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000455764,"workout_type":"Easy","session_rpe":9,"utc_offset_sec":5980}}
+{"LogRun":{"distance_km":1.0,"duration_min":1.0,"hr_pct_max":0.0,"observed_at":1,"entry_id":0,"workout_type":"Recovery","avg_hr_bpm":565.8988464694933,"utc_offset_sec":3394}}
+{"LogRunTrack":{"points":[],"hr_pct_max":24.86763572692871,"observed_at":0,"entry_id":1790000455764,"workout_type":"Easy","session_rpe":9,"utc_offset_sec":5980}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":1.0E-7,"vigorous":true,"strengthening":false,"observed_at":1790000000123,"entry_id":1790000113674}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000893394,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":1790000228695,"exercise":"Squat","weight_kg":33.599999999999994,"reps":11,"rpe":0.0,"observed_at":986181719,"observed_at_fallback":1,"hold_sec":70}}
-{"AmendRun":{"entry_id":0,"distance_km":159.21807013548136,"duration_min":-2.5,"hr_pct_max":0.3065168857574463,"longest_recent_km":0.0,"observed_at":1790000000123,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":159.21807013548136,"duration_min":-2.5,"hr_pct_max":0.3065168857574463,"observed_at":1790000000123,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000440853,"observed_at_fallback":-5,"keep_from_sec":1,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1790000000123,"session_rpe":null,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":2,"overtraining_signal_weeks":123456.789,"reds_signal_reported":true,"decoupling":{"drift_pct":1.0E-7,"cool_steady_context":false},"rpe_load_gap_sessions":1,"weekly_velocity_drop_m_s":1.0E-7,"failed_key_sessions":2,"bad_day":false,"observed_at":1}}
@@ -321,14 +321,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":12.345,"reps":19,"rpe":1.0E-7,"observed_at":267011599,"entry_id":1790000811905,"hold_sec":30}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Overhead press","epoch_day":802833282,"ended":false,"observed_at":776511027}}
-{"LogRun":{"distance_km":-2.5,"duration_min":33.599999999999994,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Steady","session_rpe":8,"avg_hr_bpm":1.0E-7,"entry_id":1790000601613}}
-{"LogRunTrack":{"points":[{"lat":3.185424327850342,"lon":33.599999999999994,"observed_at":1,"accuracy_m":10.434043884277344},{"lat":-2.5,"lon":-2.5,"observed_at":0,"accuracy_m":27.69646453857422}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"avg_hr_bpm":-2.5}}
+{"LogRun":{"distance_km":-2.5,"duration_min":33.599999999999994,"hr_pct_max":123456.789,"observed_at":1,"entry_id":1790000601613,"workout_type":"Steady","session_rpe":8,"avg_hr_bpm":1.0E-7}}
+{"LogRunTrack":{"points":[{"lat":3.185424327850342,"lon":33.599999999999994,"observed_at":1,"accuracy_m":10.434043884277344},{"lat":-2.5,"lon":-2.5,"observed_at":0,"accuracy_m":27.69646453857422}],"hr_pct_max":33.599999999999994,"observed_at":-5,"entry_id":0,"avg_hr_bpm":-2.5}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":33.599999999999994,"vigorous":false,"strengthening":false,"observed_at":1790000000123,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":0,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":1790000103796,"exercise":"a\\b\n\tc/d","weight_kg":399.87380049623397,"reps":12,"rpe":12.345,"observed_at":1790000000123,"observed_at_fallback":0}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0E-7,"duration_min":32.92413330078125,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1,"session_rpe":7,"avg_hr_bpm":14.8822603225708,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0E-7,"duration_min":32.92413330078125,"hr_pct_max":0.0,"observed_at":1,"session_rpe":7,"avg_hr_bpm":14.8822603225708,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":111616828,"keep_from_sec":1005861964,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":1790000280537,"observed_at_fallback":-5,"session_rpe":6,"workout_type":"Tempo"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":4,"overtraining_signal_weeks":123456.789,"overtraining_signs":{"worse_performance":false,"low_mood":false,"higher_resting_hr":false,"worse_sleep":true},"decoupling":{"drift_pct":381.68120009863173,"cool_steady_context":true},"easy_frac_time_above_vt1":12.345,"positive_split_pct":1.0,"rpe_load_gap_sessions":2,"failed_key_sessions":3,"bad_day":true,"observed_at":1}}
@@ -360,14 +360,14 @@
 {"LogSet":{"exercise":"","weight_kg":33.599999999999994,"reps":14,"rpe":12.345,"observed_at":1790000000123,"entry_id":1790000144226,"hold_sec":24}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":1790000000123,"ended":false,"observed_at":-5}}
-{"LogRun":{"distance_km":7.9947052001953125,"duration_min":781.7398577137908,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1790000000123,"workout_type":"Recovery","session_rpe":10,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":12.345,"observed_at":0,"accuracy_m":2.0213735103607178}],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":853249177,"entry_id":1790000395067,"workout_type":"Steady","session_rpe":9,"avg_hr_bpm":1.0,"utc_offset_sec":-18820}}
+{"LogRun":{"distance_km":7.9947052001953125,"duration_min":781.7398577137908,"hr_pct_max":1.0E-7,"observed_at":1790000000123,"entry_id":0,"workout_type":"Recovery","session_rpe":10}}
+{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":12.345,"observed_at":0,"accuracy_m":2.0213735103607178}],"hr_pct_max":12.345,"observed_at":853249177,"entry_id":1790000395067,"workout_type":"Steady","session_rpe":9,"avg_hr_bpm":1.0,"utc_offset_sec":-18820}}
 "ClearRuns"
 {"LogActivity":{"kind":"Cycling","minutes":12.345,"vigorous":false,"strengthening":true,"observed_at":1,"entry_id":1790000550330}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":0,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":12.345,"reps":18,"rpe":33.599999999999994,"observed_at":1,"observed_at_fallback":1}}
-{"AmendRun":{"entry_id":1790000246900,"distance_km":-2.5,"duration_min":98.98597508356016,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1790000000123,"observed_at_fallback":1360378317}}
+{"AmendRun":{"entry_id":1790000246900,"distance_km":-2.5,"duration_min":98.98597508356016,"hr_pct_max":0.0,"observed_at":1790000000123,"observed_at_fallback":1360378317}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1790000000123,"keep_from_sec":-5,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":1790000150354,"observed_at_fallback":305992205,"session_rpe":null,"workout_type":"Recovery"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":1,"overtraining_signal_weeks":12.345,"overtraining_signs":{"worse_performance":true,"low_mood":true,"higher_resting_hr":true,"worse_sleep":true},"easy_frac_time_above_vt1":-2.5,"positive_split_pct":1.0E-7,"rpe_load_gap_sessions":0,"weekly_velocity_drop_m_s":11.516961097717285,"bad_day":true,"observed_at":1}}
@@ -399,14 +399,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":0.0,"reps":14,"rpe":30.14160919189453,"observed_at":1105937445,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":0,"ended":false,"observed_at":-5}}
-{"LogRun":{"distance_km":0.0,"duration_min":1.0E-7,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1,"session_rpe":5,"entry_id":0,"utc_offset_sec":206}}
-{"LogRunTrack":{"points":[],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":382826680,"entry_id":0,"workout_type":"Interval","segment_starts":[64],"session_rpe":8}}
+{"LogRun":{"distance_km":0.0,"duration_min":1.0E-7,"hr_pct_max":1.0,"observed_at":1,"entry_id":0,"session_rpe":5,"utc_offset_sec":206}}
+{"LogRunTrack":{"points":[],"hr_pct_max":12.345,"observed_at":382826680,"entry_id":0,"segment_starts":[64],"workout_type":"Interval","session_rpe":8}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":-2.5,"vigorous":true,"strengthening":false,"observed_at":1049816940,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":0,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":-2.5,"reps":11,"rpe":41.79566192626953,"observed_at":1,"observed_at_fallback":0}}
-{"AmendRun":{"entry_id":1790000753987,"distance_km":123456.789,"duration_min":0.0,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1790000000123,"workout_type":"LongRun","session_rpe":8,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":1790000753987,"distance_km":123456.789,"duration_min":0.0,"hr_pct_max":1.0,"observed_at":1790000000123,"workout_type":"LongRun","session_rpe":8,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000665860,"observed_at_fallback":1,"keep_from_sec":1,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":6,"workout_type":"Steady"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":4,"decoupling":{"drift_pct":123456.789,"cool_steady_context":false},"positive_split_pct":33.599999999999994,"weekly_velocity_drop_m_s":-2.5,"bad_day":true,"observed_at":0}}
@@ -438,14 +438,14 @@
 {"LogSet":{"exercise":"a\\b\n\tc/d","weight_kg":1.0E-7,"reps":7,"rpe":1.0,"observed_at":0,"entry_id":0,"hold_sec":70}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":1002827124,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":22.835296630859375,"duration_min":-2.5,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000234201}}
-{"LogRunTrack":{"points":[{"lat":123456.789,"lon":123456.789,"observed_at":1790000000123,"accuracy_m":11.531503677368164},{"lat":18.612340927124023,"lon":33.599999999999994,"observed_at":137340408,"accuracy_m":16.71036720275879},{"lat":33.599999999999994,"lon":12.345,"observed_at":0,"accuracy_m":22.054874420166016}],"hr_pct_max":268.05215127979073,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000089557,"session_rpe":5,"avg_hr_bpm":662.2303236136385,"utc_offset_sec":-22488}}
+{"LogRun":{"distance_km":22.835296630859375,"duration_min":-2.5,"hr_pct_max":1.0,"observed_at":1,"entry_id":1790000234201}}
+{"LogRunTrack":{"points":[{"lat":123456.789,"lon":123456.789,"observed_at":1790000000123,"accuracy_m":11.531503677368164},{"lat":18.612340927124023,"lon":33.599999999999994,"observed_at":137340408,"accuracy_m":16.71036720275879},{"lat":33.599999999999994,"lon":12.345,"observed_at":0,"accuracy_m":22.054874420166016}],"hr_pct_max":268.05215127979073,"observed_at":1,"entry_id":1790000089557,"session_rpe":5,"avg_hr_bpm":662.2303236136385,"utc_offset_sec":-22488}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":12.345,"vigorous":false,"strengthening":true,"observed_at":140016536,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":1790000562858,"exercise":"Bench \"press\"","weight_kg":33.599999999999994,"reps":16,"rpe":1.0E-7,"observed_at":-5,"observed_at_fallback":-5,"hold_sec":68}}
-{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":1.0,"hr_pct_max":500.2970962888986,"longest_recent_km":0.0,"observed_at":-5,"workout_type":"Easy","session_rpe":9,"avg_hr_bpm":123456.789,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":1.0,"hr_pct_max":500.2970962888986,"observed_at":-5,"workout_type":"Easy","session_rpe":9,"avg_hr_bpm":123456.789,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000527827,"observed_at_fallback":1,"keep_from_sec":0,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":8,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":2,"overtraining_signal_weeks":40.406341552734375,"reds_signal_reported":true,"decoupling":{"drift_pct":123456.789,"cool_steady_context":false},"positive_split_pct":33.599999999999994,"failed_key_sessions":0,"bad_day":true,"observed_at":1187782765}}
@@ -477,14 +477,14 @@
 {"LogSet":{"exercise":"Overhead press","weight_kg":0.0,"reps":7,"rpe":123456.789,"observed_at":1,"entry_id":1790000939781,"hold_sec":15}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":1,"ended":false,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Easy","avg_hr_bpm":12.345,"entry_id":1790000841854}}
-{"LogRunTrack":{"points":[],"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":0,"workout_type":"Recovery","segment_starts":[64,58,40],"session_rpe":4,"avg_hr_bpm":170.1435750763593}}
+{"LogRun":{"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":123456.789,"observed_at":1,"entry_id":1790000841854,"workout_type":"Easy","avg_hr_bpm":12.345}}
+{"LogRunTrack":{"points":[],"hr_pct_max":1.0,"observed_at":1790000000123,"entry_id":0,"segment_starts":[64,58,40],"workout_type":"Recovery","session_rpe":4,"avg_hr_bpm":170.1435750763593}}
 "ClearRuns"
 {"LogActivity":{"kind":"Cycling","minutes":31.527042388916016,"vigorous":false,"strengthening":false,"observed_at":1790000000123,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000215405,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":636.9661883915574,"reps":2,"rpe":33.599999999999994,"observed_at":-5,"observed_at_fallback":0,"hold_sec":19}}
-{"AmendRun":{"entry_id":1790000498519,"distance_km":12.345,"duration_min":8.9953031539917,"hr_pct_max":32.99079132080078,"longest_recent_km":0.0,"observed_at":-5,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":1790000498519,"distance_km":12.345,"duration_min":8.9953031539917,"hr_pct_max":32.99079132080078,"observed_at":-5,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":0,"keep_from_sec":1790000000123,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000402306,"observed_at_fallback":1,"session_rpe":4,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":3,"overtraining_signal_weeks":451.33412949851754,"overtraining_signs":{"worse_performance":false,"low_mood":true,"higher_resting_hr":false,"worse_sleep":true},"decoupling":{"drift_pct":12.345,"cool_steady_context":false},"easy_frac_time_above_vt1":12.345,"positive_split_pct":2.8543949127197266,"rpe_load_gap_sessions":0,"weekly_velocity_drop_m_s":-2.5,"failed_key_sessions":1,"bad_day":true,"observed_at":1}}
@@ -516,14 +516,14 @@
 {"LogSet":{"exercise":"","weight_kg":123456.789,"reps":17,"rpe":123456.789,"observed_at":1790000000123,"entry_id":1790000093328}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":-5,"ended":true,"observed_at":-5}}
-{"LogRun":{"distance_km":1.0,"duration_min":1.0E-7,"hr_pct_max":2.955186367034912,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":31.7995548248291,"lon":12.345,"observed_at":1790000000123,"accuracy_m":23.293075561523438}],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"workout_type":"Easy","session_rpe":6}}
+{"LogRun":{"distance_km":1.0,"duration_min":1.0E-7,"hr_pct_max":2.955186367034912,"observed_at":-5,"entry_id":0}}
+{"LogRunTrack":{"points":[{"lat":31.7995548248291,"lon":12.345,"observed_at":1790000000123,"accuracy_m":23.293075561523438}],"hr_pct_max":12.345,"observed_at":-5,"entry_id":0,"workout_type":"Easy","session_rpe":6}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":-2.5,"vigorous":true,"strengthening":true,"observed_at":0,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000084508,"observed_at_fallback":1430644873}}
 {"AmendSet":{"entry_id":0,"exercise":"","weight_kg":12.345,"reps":4,"rpe":1.0,"observed_at":1,"observed_at_fallback":1790000000123}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":750.637701438169,"longest_recent_km":0.0,"observed_at":0,"session_rpe":2,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":750.637701438169,"observed_at":0,"session_rpe":2,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":1790000943911,"observed_at_fallback":1,"keep_from_sec":-5,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":1790000792457,"observed_at_fallback":1978061711,"session_rpe":2,"workout_type":"Steady"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":3,"overtraining_signal_weeks":496.4920918893687,"reds_signal_reported":true,"positive_split_pct":-10.708351973070336,"rpe_load_gap_sessions":0,"bad_day":false,"observed_at":1}}
@@ -555,14 +555,14 @@
 {"LogSet":{"exercise":"","weight_kg":123456.789,"reps":14,"rpe":1.0,"observed_at":1,"entry_id":0,"hold_sec":39}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Overhead press","epoch_day":1691838251,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":33.599999999999994,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":937581879,"entry_id":0,"utc_offset_sec":20984}}
-{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":17.07904624938965},{"lat":123456.789,"lon":10.941797256469727,"observed_at":1790000000123,"accuracy_m":5.022860050201416}],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":-5,"entry_id":1790000003459,"workout_type":"Easy","segment_starts":[87,57],"avg_hr_bpm":33.599999999999994}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":33.599999999999994,"hr_pct_max":-2.5,"observed_at":937581879,"entry_id":0,"utc_offset_sec":20984}}
+{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":17.07904624938965},{"lat":123456.789,"lon":10.941797256469727,"observed_at":1790000000123,"accuracy_m":5.022860050201416}],"hr_pct_max":12.345,"observed_at":-5,"entry_id":1790000003459,"segment_starts":[87,57],"workout_type":"Easy","avg_hr_bpm":33.599999999999994}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":1.0,"vigorous":false,"strengthening":false,"observed_at":-5,"entry_id":1790000472773}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"","weight_kg":123456.789,"reps":17,"rpe":33.599999999999994,"observed_at":746082374,"observed_at_fallback":1247630599,"hold_sec":24}}
-{"AmendRun":{"entry_id":1790000433794,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":-5,"session_rpe":7,"avg_hr_bpm":12.345,"observed_at_fallback":537167184}}
+{"AmendRun":{"entry_id":1790000433794,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":0.0,"observed_at":-5,"session_rpe":7,"avg_hr_bpm":12.345,"observed_at_fallback":537167184}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":108896379,"keep_from_sec":0,"keep_until_sec":0}}
 {"AmendRunMeta":{"entry_id":1790000560691,"observed_at_fallback":1790000000123,"session_rpe":8,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":0,"overtraining_signal_weeks":123456.789,"overtraining_signs":{"worse_performance":true,"low_mood":false,"higher_resting_hr":true,"worse_sleep":false},"rpe_load_gap_sessions":4,"failed_key_sessions":1,"bad_day":true,"observed_at":1790000000123}}
@@ -594,14 +594,14 @@
 {"LogSet":{"exercise":"Squat","weight_kg":-2.5,"reps":9,"rpe":0.0,"observed_at":0,"entry_id":1790000818772}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":1790000000123,"ended":true,"observed_at":-5}}
-{"LogRun":{"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":132695343,"session_rpe":2,"avg_hr_bpm":33.599999999999994,"entry_id":0,"utc_offset_sec":-18176}}
-{"LogRunTrack":{"points":[{"lat":12.345,"lon":23.086437225341797,"observed_at":921377298,"accuracy_m":5.653205871582031}],"hr_pct_max":48.39051818847656,"longest_recent_km":0.0,"observed_at":1691322268,"entry_id":0,"workout_type":"Recovery","session_rpe":7,"avg_hr_bpm":0.0}}
+{"LogRun":{"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"observed_at":132695343,"entry_id":0,"session_rpe":2,"avg_hr_bpm":33.599999999999994,"utc_offset_sec":-18176}}
+{"LogRunTrack":{"points":[{"lat":12.345,"lon":23.086437225341797,"observed_at":921377298,"accuracy_m":5.653205871582031}],"hr_pct_max":48.39051818847656,"observed_at":1691322268,"entry_id":0,"workout_type":"Recovery","session_rpe":7,"avg_hr_bpm":0.0}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":422.42857198815875,"vigorous":true,"strengthening":false,"observed_at":523666515,"entry_id":1790000690802}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":1790000176418,"observed_at_fallback":938485673}}
 {"AmendSet":{"entry_id":1790000812957,"exercise":"Squat","weight_kg":1.0E-7,"reps":16,"rpe":793.0984548338786,"observed_at":1,"observed_at_fallback":0,"hold_sec":27}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":921.6823758408567,"hr_pct_max":-54.56943862336927,"longest_recent_km":0.0,"observed_at":1,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":921.6823758408567,"hr_pct_max":-54.56943862336927,"observed_at":1,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":1790000908128,"observed_at_fallback":1790000000123,"keep_from_sec":1790000000123,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000811086,"observed_at_fallback":1,"session_rpe":null,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":0,"overtraining_signs":{"worse_performance":false,"low_mood":true,"higher_resting_hr":false,"worse_sleep":true},"easy_frac_time_above_vt1":123456.789,"positive_split_pct":0.0,"rpe_load_gap_sessions":3,"weekly_velocity_drop_m_s":1.0E-7,"failed_key_sessions":3,"bad_day":true,"observed_at":0}}
@@ -633,14 +633,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":23.561126708984375,"reps":14,"rpe":-73.25233762478402,"observed_at":0,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":1911839483,"ended":true,"observed_at":1167111976}}
-{"LogRun":{"distance_km":1.0E-7,"duration_min":-2.5,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":1790000730422}}
-{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":0,"accuracy_m":27.221162796020508},{"lat":0.0,"lon":96.30828563217392,"observed_at":1,"accuracy_m":20.46160316467285}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":925822559,"entry_id":0,"segment_starts":[29,45],"session_rpe":7,"avg_hr_bpm":33.599999999999994,"utc_offset_sec":262}}
+{"LogRun":{"distance_km":1.0E-7,"duration_min":-2.5,"hr_pct_max":1.0E-7,"observed_at":1790000000123,"entry_id":1790000730422}}
+{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":0,"accuracy_m":27.221162796020508},{"lat":0.0,"lon":96.30828563217392,"observed_at":1,"accuracy_m":20.46160316467285}],"hr_pct_max":-2.5,"observed_at":925822559,"entry_id":0,"segment_starts":[29,45],"session_rpe":7,"avg_hr_bpm":33.599999999999994,"utc_offset_sec":262}}
 "ClearRuns"
 {"LogActivity":{"kind":"Other","minutes":967.3205737742028,"vigorous":true,"strengthening":false,"observed_at":1790000000123,"entry_id":1790000439598}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000912710,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":1790000295465,"exercise":"Ü-Kniebeuge ✓","weight_kg":33.599999999999994,"reps":10,"rpe":1.0,"observed_at":1,"observed_at_fallback":0,"hold_sec":22}}
-{"AmendRun":{"entry_id":1790000902074,"distance_km":-2.5,"duration_min":-2.5,"hr_pct_max":43.32572555541992,"longest_recent_km":0.0,"observed_at":1,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":1790000902074,"distance_km":-2.5,"duration_min":-2.5,"hr_pct_max":43.32572555541992,"observed_at":1,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1790000000123,"keep_from_sec":1,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":0,"session_rpe":0,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":3,"easy_frac_time_above_vt1":-2.5,"rpe_load_gap_sessions":2,"weekly_velocity_drop_m_s":-2.5,"failed_key_sessions":3,"bad_day":false,"observed_at":0}}
@@ -672,14 +672,14 @@
 {"LogSet":{"exercise":"Squat","weight_kg":33.599999999999994,"reps":17,"rpe":-2.5,"observed_at":-5,"entry_id":1790000728492,"hold_sec":17}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Bench \"press\"","epoch_day":1987685744,"ended":true,"observed_at":1088635780}}
-{"LogRun":{"distance_km":12.345,"duration_min":-2.5,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":858019325,"workout_type":"Tempo","avg_hr_bpm":33.599999999999994,"entry_id":1790000227131,"utc_offset_sec":1}}
-{"LogRunTrack":{"points":[{"lat":-2.5,"lon":12.345,"observed_at":0,"accuracy_m":21.194347381591797},{"lat":123456.789,"lon":123456.789,"observed_at":1790000000123,"accuracy_m":28.160358428955078}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"workout_type":"Recovery","segment_starts":[27,55],"session_rpe":3}}
+{"LogRun":{"distance_km":12.345,"duration_min":-2.5,"hr_pct_max":-2.5,"observed_at":858019325,"entry_id":1790000227131,"workout_type":"Tempo","avg_hr_bpm":33.599999999999994,"utc_offset_sec":1}}
+{"LogRunTrack":{"points":[{"lat":-2.5,"lon":12.345,"observed_at":0,"accuracy_m":21.194347381591797},{"lat":123456.789,"lon":123456.789,"observed_at":1790000000123,"accuracy_m":28.160358428955078}],"hr_pct_max":33.599999999999994,"observed_at":-5,"entry_id":0,"segment_starts":[27,55],"workout_type":"Recovery","session_rpe":3}}
 "ClearRuns"
 {"LogActivity":{"kind":"Other","minutes":33.599999999999994,"vigorous":true,"strengthening":true,"observed_at":0,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000038338,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":1790000204063,"exercise":"Overhead press","weight_kg":123456.789,"reps":6,"rpe":-2.5,"observed_at":0,"observed_at_fallback":0,"hold_sec":107}}
-{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":8.572912216186523,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":-5,"workout_type":"Steady","session_rpe":4,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":8.572912216186523,"hr_pct_max":1.0E-7,"observed_at":-5,"workout_type":"Steady","session_rpe":4,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000604427,"observed_at_fallback":1,"keep_from_sec":1790000000123,"keep_until_sec":287896895}}
 {"AmendRunMeta":{"entry_id":1790000064346,"observed_at_fallback":1,"session_rpe":2,"workout_type":"Tempo"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":1,"easy_frac_time_above_vt1":33.599999999999994,"bad_day":true,"observed_at":0}}
@@ -711,14 +711,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":8.78466690602157,"reps":11,"rpe":0.0,"observed_at":0,"entry_id":0,"hold_sec":57}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":1627742827,"ended":false,"observed_at":0}}
-{"LogRun":{"distance_km":339.79524072676656,"duration_min":1.0,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1582253250,"avg_hr_bpm":1.0E-7,"entry_id":1790000967664}}
-{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":1.0,"observed_at":1,"accuracy_m":18.134262084960938}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":0,"segment_starts":[1,90],"avg_hr_bpm":33.599999999999994}}
+{"LogRun":{"distance_km":339.79524072676656,"duration_min":1.0,"hr_pct_max":1.0,"observed_at":1582253250,"entry_id":1790000967664,"avg_hr_bpm":1.0E-7}}
+{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":1.0,"observed_at":1,"accuracy_m":18.134262084960938}],"hr_pct_max":-2.5,"observed_at":1790000000123,"entry_id":0,"segment_starts":[1,90],"avg_hr_bpm":33.599999999999994}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":12.345,"vigorous":false,"strengthening":false,"observed_at":719390917,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000384400,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":1790000089968,"exercise":"Squat","weight_kg":33.599999999999994,"reps":15,"rpe":789.194621667258,"observed_at":1790000000123,"observed_at_fallback":1703205582,"hold_sec":54}}
-{"AmendRun":{"entry_id":1790000102209,"distance_km":12.345,"duration_min":0.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":489294073,"workout_type":"LongRun","session_rpe":6,"avg_hr_bpm":-2.5,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":1790000102209,"distance_km":12.345,"duration_min":0.0,"hr_pct_max":0.0,"observed_at":489294073,"workout_type":"LongRun","session_rpe":6,"avg_hr_bpm":-2.5,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000933223,"observed_at_fallback":-5,"keep_from_sec":1,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":1790000484939,"observed_at_fallback":0,"session_rpe":null,"workout_type":"Tempo"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":1,"rpe_load_gap_sessions":1,"weekly_velocity_drop_m_s":33.599999999999994,"failed_key_sessions":4,"bad_day":true,"observed_at":1}}
@@ -750,14 +750,14 @@
 {"LogSet":{"exercise":"a\\b\n\tc/d","weight_kg":1.0E-7,"reps":4,"rpe":804.3535571373659,"observed_at":1790000000123,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":1790000000123,"ended":true,"observed_at":1385168198}}
-{"LogRun":{"distance_km":-44.01511899834962,"duration_min":38.53129577636719,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":1790000000123,"avg_hr_bpm":1.0,"entry_id":1790000405738}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":1.0,"observed_at":1,"accuracy_m":26.163854598999023},{"lat":12.345,"lon":276.62062569225856,"observed_at":261619671,"accuracy_m":22.557634353637695}],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":0,"entry_id":0,"session_rpe":1,"utc_offset_sec":17850}}
+{"LogRun":{"distance_km":-44.01511899834962,"duration_min":38.53129577636719,"hr_pct_max":-2.5,"observed_at":1790000000123,"entry_id":1790000405738,"avg_hr_bpm":1.0}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":1.0,"observed_at":1,"accuracy_m":26.163854598999023},{"lat":12.345,"lon":276.62062569225856,"observed_at":261619671,"accuracy_m":22.557634353637695}],"hr_pct_max":1.0E-7,"observed_at":0,"entry_id":0,"session_rpe":1,"utc_offset_sec":17850}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":33.599999999999994,"vigorous":false,"strengthening":false,"observed_at":563197071,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":1790000519915,"exercise":"Ü-Kniebeuge ✓","weight_kg":123456.789,"reps":9,"rpe":32.57416534423828,"observed_at":1,"observed_at_fallback":0,"hold_sec":98}}
-{"AmendRun":{"entry_id":1790000943942,"distance_km":1.0E-7,"duration_min":0.0,"hr_pct_max":895.5986925583012,"longest_recent_km":0.0,"observed_at":1790000000123,"observed_at_fallback":1931447774}}
+{"AmendRun":{"entry_id":1790000943942,"distance_km":1.0E-7,"duration_min":0.0,"hr_pct_max":895.5986925583012,"observed_at":1790000000123,"observed_at_fallback":1931447774}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":124943129,"keep_from_sec":636047475,"keep_until_sec":0}}
 {"AmendRunMeta":{"entry_id":1790000190738,"observed_at_fallback":0,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":1,"reds_signal_reported":true,"bad_day":true,"observed_at":1790000000123}}
@@ -789,14 +789,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":12.345,"reps":2,"rpe":12.345,"observed_at":0,"entry_id":1790000970026,"hold_sec":29}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":744596853,"ended":true,"observed_at":-5}}
-{"LogRun":{"distance_km":-2.5,"duration_min":0.0,"hr_pct_max":571.2088529250767,"longest_recent_km":0.0,"observed_at":1,"session_rpe":10,"avg_hr_bpm":1.0E-7,"entry_id":0,"utc_offset_sec":13157}}
-{"LogRunTrack":{"points":[],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":0,"entry_id":0,"workout_type":"Interval","segment_starts":[48,94,68],"utc_offset_sec":-5894}}
+{"LogRun":{"distance_km":-2.5,"duration_min":0.0,"hr_pct_max":571.2088529250767,"observed_at":1,"entry_id":0,"session_rpe":10,"avg_hr_bpm":1.0E-7,"utc_offset_sec":13157}}
+{"LogRunTrack":{"points":[],"hr_pct_max":-2.5,"observed_at":0,"entry_id":0,"segment_starts":[48,94,68],"workout_type":"Interval","utc_offset_sec":-5894}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":1.0E-7,"vigorous":true,"strengthening":false,"observed_at":-5,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":1194942003}}
 {"AmendSet":{"entry_id":1790000331276,"exercise":"a\\b\n\tc/d","weight_kg":12.345,"reps":4,"rpe":12.345,"observed_at":1749147000,"observed_at_fallback":1369090223}}
-{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":0.30752718448638916,"hr_pct_max":0.3968566656112671,"longest_recent_km":0.0,"observed_at":1906780361,"workout_type":"Easy","avg_hr_bpm":0.0,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":0.30752718448638916,"hr_pct_max":0.3968566656112671,"observed_at":1906780361,"workout_type":"Easy","avg_hr_bpm":0.0,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1790000000123,"keep_from_sec":1,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":null,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":1,"overtraining_signal_weeks":1.0E-7,"overtraining_signs":{"worse_performance":true,"low_mood":false,"higher_resting_hr":false,"worse_sleep":false},"weekly_velocity_drop_m_s":12.345,"bad_day":false,"observed_at":240038355}}
@@ -828,14 +828,14 @@
 {"LogSet":{"exercise":"Overhead press","weight_kg":47.00718688964844,"reps":8,"rpe":123456.789,"observed_at":-5,"entry_id":1790000501120,"hold_sec":98}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Overhead press","epoch_day":-5,"ended":true,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":374.53739083052284,"duration_min":1.0E-7,"hr_pct_max":549.3252886076087,"longest_recent_km":0.0,"observed_at":0,"session_rpe":7,"entry_id":1790000534101}}
-{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":627.1934499151992,"observed_at":-5,"accuracy_m":27.35723304748535},{"lat":0.0,"lon":123456.789,"observed_at":223034352,"accuracy_m":5.503056049346924},{"lat":1.0,"lon":576.798039980964,"observed_at":1,"accuracy_m":4.627852916717529}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000894975,"avg_hr_bpm":-2.5,"utc_offset_sec":19418}}
+{"LogRun":{"distance_km":374.53739083052284,"duration_min":1.0E-7,"hr_pct_max":549.3252886076087,"observed_at":0,"entry_id":1790000534101,"session_rpe":7}}
+{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":627.1934499151992,"observed_at":-5,"accuracy_m":27.35723304748535},{"lat":0.0,"lon":123456.789,"observed_at":223034352,"accuracy_m":5.503056049346924},{"lat":1.0,"lon":576.798039980964,"observed_at":1,"accuracy_m":4.627852916717529}],"hr_pct_max":33.599999999999994,"observed_at":0,"entry_id":1790000894975,"avg_hr_bpm":-2.5,"utc_offset_sec":19418}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":12.345,"vigorous":false,"strengthening":true,"observed_at":-5,"entry_id":1790000174259}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":1790000902685,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":1790000004301,"exercise":"Squat","weight_kg":123456.789,"reps":14,"rpe":1.0E-7,"observed_at":0,"observed_at_fallback":-5,"hold_sec":112}}
-{"AmendRun":{"entry_id":0,"distance_km":-2.5,"duration_min":37.12179566104044,"hr_pct_max":44.7212028503418,"longest_recent_km":0.0,"observed_at":1,"session_rpe":5,"avg_hr_bpm":48.63495635986328,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":-2.5,"duration_min":37.12179566104044,"hr_pct_max":44.7212028503418,"observed_at":1,"session_rpe":5,"avg_hr_bpm":48.63495635986328,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000450477,"observed_at_fallback":0,"keep_from_sec":1,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":10,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":2,"overtraining_signal_weeks":12.345,"easy_frac_time_above_vt1":0.0,"positive_split_pct":10.741707801818848,"failed_key_sessions":3,"bad_day":false,"observed_at":1}}
@@ -867,14 +867,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":33.599999999999994,"reps":4,"rpe":12.345,"observed_at":1497917698,"entry_id":1790000276765}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Bench \"press\"","epoch_day":1790000000123,"ended":true,"observed_at":1747048176}}
-{"LogRun":{"distance_km":1.0,"duration_min":0.0,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":0,"session_rpe":10,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":123456.789,"observed_at":0,"accuracy_m":17.6688289642334},{"lat":12.345,"lon":1.0,"observed_at":1,"accuracy_m":8.560503005981445},{"lat":1.0,"lon":1.0,"observed_at":1209576259,"accuracy_m":16.997730255126953}],"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"segment_starts":[38],"session_rpe":4,"avg_hr_bpm":12.345}}
+{"LogRun":{"distance_km":1.0,"duration_min":0.0,"hr_pct_max":1.0E-7,"observed_at":0,"entry_id":0,"session_rpe":10}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":123456.789,"observed_at":0,"accuracy_m":17.6688289642334},{"lat":12.345,"lon":1.0,"observed_at":1,"accuracy_m":8.560503005981445},{"lat":1.0,"lon":1.0,"observed_at":1209576259,"accuracy_m":16.997730255126953}],"hr_pct_max":0.0,"observed_at":-5,"entry_id":0,"segment_starts":[38],"session_rpe":4,"avg_hr_bpm":12.345}}
 "ClearRuns"
 {"LogActivity":{"kind":"Cycling","minutes":123456.789,"vigorous":true,"strengthening":false,"observed_at":0,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000130160,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":1790000124950,"exercise":"Ü-Kniebeuge ✓","weight_kg":33.599999999999994,"reps":2,"rpe":-2.5,"observed_at":1790000000123,"observed_at_fallback":330853208,"hold_sec":78}}
-{"AmendRun":{"entry_id":1790000386240,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":25.424518585205078,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Steady","session_rpe":4,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":1790000386240,"distance_km":1.0E-7,"duration_min":1.0,"hr_pct_max":25.424518585205078,"observed_at":0,"workout_type":"Steady","session_rpe":4,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1790000000123,"keep_from_sec":1,"keep_until_sec":0}}
 {"AmendRunMeta":{"entry_id":1790000000157,"observed_at_fallback":1,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":3,"rpe_load_gap_sessions":4,"weekly_velocity_drop_m_s":0.0,"bad_day":false,"observed_at":1791127484}}
@@ -906,14 +906,14 @@
 {"LogSet":{"exercise":"Squat","weight_kg":1.0,"reps":8,"rpe":15.145197868347168,"observed_at":-5,"entry_id":1790000674735,"hold_sec":100}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Bench \"press\"","epoch_day":1,"ended":true,"observed_at":1}}
-{"LogRun":{"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":-96.39274171831549,"longest_recent_km":0.0,"observed_at":-5,"workout_type":"Steady","session_rpe":3,"entry_id":0,"utc_offset_sec":24759}}
-{"LogRunTrack":{"points":[{"lat":123456.789,"lon":29.460630416870117,"observed_at":1,"accuracy_m":7.2592644691467285}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":-5,"entry_id":1790000065768,"workout_type":"Interval","segment_starts":[35],"avg_hr_bpm":33.599999999999994}}
+{"LogRun":{"distance_km":-2.5,"duration_min":12.345,"hr_pct_max":-96.39274171831549,"observed_at":-5,"entry_id":0,"workout_type":"Steady","session_rpe":3,"utc_offset_sec":24759}}
+{"LogRunTrack":{"points":[{"lat":123456.789,"lon":29.460630416870117,"observed_at":1,"accuracy_m":7.2592644691467285}],"hr_pct_max":-2.5,"observed_at":-5,"entry_id":1790000065768,"segment_starts":[35],"workout_type":"Interval","avg_hr_bpm":33.599999999999994}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":33.599999999999994,"vigorous":false,"strengthening":false,"observed_at":-5,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":0,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":1790000738911,"exercise":"Overhead press","weight_kg":123456.789,"reps":19,"rpe":1.0,"observed_at":1,"observed_at_fallback":0,"hold_sec":24}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":123456.789,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1790000000123,"session_rpe":3,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":123456.789,"hr_pct_max":1.0,"observed_at":1790000000123,"session_rpe":3,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":310179944,"keep_from_sec":1,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":8,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":3,"overtraining_signal_weeks":12.345,"overtraining_signs":{"worse_performance":false,"low_mood":false,"higher_resting_hr":false,"worse_sleep":true},"reds_signal_reported":true,"rpe_load_gap_sessions":2,"weekly_velocity_drop_m_s":56.95020111728752,"bad_day":false,"observed_at":0}}
@@ -945,14 +945,14 @@
 {"LogSet":{"exercise":"Overhead press","weight_kg":12.345,"reps":19,"rpe":0.0,"observed_at":1609454131,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Overhead press","epoch_day":0,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":1.0E-7,"duration_min":-26.409672704518215,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":-5,"session_rpe":2,"entry_id":0}}
-{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":0,"session_rpe":1,"utc_offset_sec":-2436}}
+{"LogRun":{"distance_km":1.0E-7,"duration_min":-26.409672704518215,"hr_pct_max":-2.5,"observed_at":-5,"entry_id":0,"session_rpe":2}}
+{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"observed_at":1790000000123,"entry_id":0,"session_rpe":1,"utc_offset_sec":-2436}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":112.50329641972323,"vigorous":true,"strengthening":true,"observed_at":-5,"entry_id":1790000208067}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000168042,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":0.0,"reps":7,"rpe":-2.5,"observed_at":121017697,"observed_at_fallback":1790000000123}}
-{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":12.345,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":-5,"avg_hr_bpm":1.0,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":12.345,"hr_pct_max":1.0E-7,"observed_at":-5,"avg_hr_bpm":1.0,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":0,"keep_from_sec":0,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":-5,"session_rpe":null,"workout_type":"Interval"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":2,"overtraining_signs":{"worse_performance":false,"low_mood":true,"higher_resting_hr":false,"worse_sleep":false},"reds_signal_reported":true,"easy_frac_time_above_vt1":34.917755126953125,"positive_split_pct":15.65686099486733,"failed_key_sessions":2,"bad_day":false,"observed_at":-5}}
@@ -984,14 +984,14 @@
 {"LogSet":{"exercise":"","weight_kg":1.0E-7,"reps":11,"rpe":-2.5,"observed_at":573204257,"entry_id":0,"hold_sec":30}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":202315703,"ended":true,"observed_at":-5}}
-{"LogRun":{"distance_km":12.345,"duration_min":12.345,"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":0,"session_rpe":4,"entry_id":0}}
-{"LogRunTrack":{"points":[],"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000761228,"workout_type":"Easy","segment_starts":[16,90],"avg_hr_bpm":0.0,"utc_offset_sec":15689}}
+{"LogRun":{"distance_km":12.345,"duration_min":12.345,"hr_pct_max":12.345,"observed_at":0,"entry_id":0,"session_rpe":4}}
+{"LogRunTrack":{"points":[],"hr_pct_max":123456.789,"observed_at":0,"entry_id":1790000761228,"segment_starts":[16,90],"workout_type":"Easy","avg_hr_bpm":0.0,"utc_offset_sec":15689}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":1.0E-7,"vigorous":true,"strengthening":false,"observed_at":1,"entry_id":1790000649329}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000443570,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":12.345,"reps":10,"rpe":33.599999999999994,"observed_at":1790000000123,"observed_at_fallback":0,"hold_sec":8}}
-{"AmendRun":{"entry_id":0,"distance_km":24.340686798095703,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Tempo","observed_at_fallback":1740773888}}
+{"AmendRun":{"entry_id":0,"distance_km":24.340686798095703,"duration_min":33.599999999999994,"hr_pct_max":0.0,"observed_at":0,"workout_type":"Tempo","observed_at_fallback":1740773888}}
 {"TrimRunTrack":{"entry_id":1790000406686,"observed_at_fallback":508887610,"keep_from_sec":1790000000123,"keep_until_sec":0}}
 {"AmendRunMeta":{"entry_id":1790000381660,"observed_at_fallback":-5,"session_rpe":2,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":3,"decoupling":{"drift_pct":30.2398624420166,"cool_steady_context":false},"failed_key_sessions":4,"bad_day":false,"observed_at":1790000000123}}
@@ -1023,14 +1023,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":12.345,"reps":17,"rpe":1.0,"observed_at":-5,"entry_id":0,"hold_sec":32}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":0,"ended":false,"observed_at":-5}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":777252800,"workout_type":"Interval","session_rpe":5,"entry_id":1790000885876}}
-{"LogRunTrack":{"points":[{"lat":-2.5,"lon":1.0,"observed_at":1184044716,"accuracy_m":23.570470809936523},{"lat":1.0E-7,"lon":123456.789,"observed_at":-5,"accuracy_m":2.401247501373291},{"lat":12.345,"lon":123456.789,"observed_at":-5,"accuracy_m":24.615482330322266}],"hr_pct_max":861.2318639821451,"longest_recent_km":0.0,"observed_at":1790000000123,"entry_id":1790000095001,"workout_type":"LongRun","segment_starts":[46,87,1]}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":123456.789,"observed_at":777252800,"entry_id":1790000885876,"workout_type":"Interval","session_rpe":5}}
+{"LogRunTrack":{"points":[{"lat":-2.5,"lon":1.0,"observed_at":1184044716,"accuracy_m":23.570470809936523},{"lat":1.0E-7,"lon":123456.789,"observed_at":-5,"accuracy_m":2.401247501373291},{"lat":12.345,"lon":123456.789,"observed_at":-5,"accuracy_m":24.615482330322266}],"hr_pct_max":861.2318639821451,"observed_at":1790000000123,"entry_id":1790000095001,"segment_starts":[46,87,1],"workout_type":"LongRun"}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":0.0,"vigorous":false,"strengthening":true,"observed_at":0,"entry_id":1790000115466}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":1790000167043,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":0,"exercise":"Bench \"press\"","weight_kg":1.0E-7,"reps":9,"rpe":-2.5,"observed_at":793004181,"observed_at_fallback":1542157383}}
-{"AmendRun":{"entry_id":1790000856639,"distance_km":12.345,"duration_min":3.2321512699127197,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Recovery","avg_hr_bpm":0.0,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":1790000856639,"distance_km":12.345,"duration_min":3.2321512699127197,"hr_pct_max":1.0E-7,"observed_at":0,"workout_type":"Recovery","avg_hr_bpm":0.0,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1,"keep_from_sec":0,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":8,"workout_type":"Recovery"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":3,"overtraining_signal_weeks":33.599999999999994,"overtraining_signs":{"worse_performance":true,"low_mood":false,"higher_resting_hr":false,"worse_sleep":true},"reds_signal_reported":true,"decoupling":{"drift_pct":12.308743476867676,"cool_steady_context":true},"weekly_velocity_drop_m_s":12.345,"bad_day":false,"observed_at":858250994}}
@@ -1062,14 +1062,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":1.0E-7,"reps":0,"rpe":830.0990467883803,"observed_at":-5,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":-5,"ended":true,"observed_at":0}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":340729714,"avg_hr_bpm":33.599999999999994,"entry_id":0,"utc_offset_sec":10566}}
-{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":0,"accuracy_m":7.422500133514404},{"lat":-2.5,"lon":1.0E-7,"observed_at":-5,"accuracy_m":19.232067108154297}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":-5,"entry_id":1790000432246,"workout_type":"Steady","session_rpe":9,"utc_offset_sec":-14382}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":33.599999999999994,"observed_at":340729714,"entry_id":0,"avg_hr_bpm":33.599999999999994,"utc_offset_sec":10566}}
+{"LogRunTrack":{"points":[{"lat":0.0,"lon":33.599999999999994,"observed_at":0,"accuracy_m":7.422500133514404},{"lat":-2.5,"lon":1.0E-7,"observed_at":-5,"accuracy_m":19.232067108154297}],"hr_pct_max":33.599999999999994,"observed_at":-5,"entry_id":1790000432246,"workout_type":"Steady","session_rpe":9,"utc_offset_sec":-14382}}
 "ClearRuns"
 {"LogActivity":{"kind":"Walking","minutes":-2.5,"vigorous":true,"strengthening":false,"observed_at":0,"entry_id":1790000377810}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000519587,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":1790000134729,"exercise":"Squat","weight_kg":-2.5,"reps":4,"rpe":123456.789,"observed_at":0,"observed_at_fallback":-5}}
-{"AmendRun":{"entry_id":1790000285861,"distance_km":0.0,"duration_min":123456.789,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":-5,"session_rpe":0,"avg_hr_bpm":269.1205218435644,"observed_at_fallback":91194805}}
+{"AmendRun":{"entry_id":1790000285861,"distance_km":0.0,"duration_min":123456.789,"hr_pct_max":-2.5,"observed_at":-5,"session_rpe":0,"avg_hr_bpm":269.1205218435644,"observed_at_fallback":91194805}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":1,"keep_from_sec":1939051598,"keep_until_sec":1413944353}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":4,"overtraining_signs":{"worse_performance":true,"low_mood":true,"higher_resting_hr":true,"worse_sleep":true},"decoupling":{"drift_pct":1.0E-7,"cool_steady_context":false},"easy_frac_time_above_vt1":0.0,"positive_split_pct":1.0E-7,"failed_key_sessions":1,"bad_day":false,"observed_at":-5}}
@@ -1101,14 +1101,14 @@
 {"LogSet":{"exercise":"","weight_kg":755.8843263827066,"reps":12,"rpe":0.0,"observed_at":779147992,"entry_id":1790000809654}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":1,"ended":false,"observed_at":0}}
-{"LogRun":{"distance_km":12.345,"duration_min":1.0,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":135877149,"entry_id":1790000107905}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":33.599999999999994,"observed_at":0,"accuracy_m":24.839719772338867},{"lat":1.0E-7,"lon":-2.5,"observed_at":1902042491,"accuracy_m":23.224109649658203},{"lat":38.45923614501953,"lon":917.8680743204135,"observed_at":1,"accuracy_m":2.359156608581543}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000953324,"segment_starts":[79,93,41]}}
+{"LogRun":{"distance_km":12.345,"duration_min":1.0,"hr_pct_max":-2.5,"observed_at":135877149,"entry_id":1790000107905}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":33.599999999999994,"observed_at":0,"accuracy_m":24.839719772338867},{"lat":1.0E-7,"lon":-2.5,"observed_at":1902042491,"accuracy_m":23.224109649658203},{"lat":38.45923614501953,"lon":917.8680743204135,"observed_at":1,"accuracy_m":2.359156608581543}],"hr_pct_max":33.599999999999994,"observed_at":0,"entry_id":1790000953324,"segment_starts":[79,93,41]}}
 "ClearRuns"
 {"LogActivity":{"kind":"Other","minutes":1.0,"vigorous":false,"strengthening":true,"observed_at":688488584,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"Bench \"press\"","weight_kg":1.0E-7,"reps":15,"rpe":1.0,"observed_at":-5,"observed_at_fallback":1}}
-{"AmendRun":{"entry_id":1790000233238,"distance_km":12.345,"duration_min":33.599999999999994,"hr_pct_max":21.218782424926758,"longest_recent_km":0.0,"observed_at":1076452529,"workout_type":"Easy","avg_hr_bpm":925.3107889199343,"observed_at_fallback":1}}
+{"AmendRun":{"entry_id":1790000233238,"distance_km":12.345,"duration_min":33.599999999999994,"hr_pct_max":21.218782424926758,"observed_at":1076452529,"workout_type":"Easy","avg_hr_bpm":925.3107889199343,"observed_at_fallback":1}}
 {"TrimRunTrack":{"entry_id":1790000361202,"observed_at_fallback":1790000000123,"keep_from_sec":1790000000123,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000763170,"observed_at_fallback":1790000000123,"session_rpe":0,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":3,"decoupling":{"drift_pct":113.94168435475001,"cool_steady_context":true},"easy_frac_time_above_vt1":12.345,"positive_split_pct":33.599999999999994,"weekly_velocity_drop_m_s":12.345,"failed_key_sessions":2,"bad_day":false,"observed_at":1194354577}}
@@ -1140,14 +1140,14 @@
 {"LogSet":{"exercise":"","weight_kg":1.0,"reps":9,"rpe":24.19192886352539,"observed_at":1790000000123,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":-5,"ended":false,"observed_at":437028286}}
-{"LogRun":{"distance_km":0.0,"duration_min":33.599999999999994,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":1289444497,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":0.0,"lon":1.0,"observed_at":-5,"accuracy_m":10.153271675109863}],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1170820664,"entry_id":1790000072486,"workout_type":"Easy","segment_starts":[41],"session_rpe":3}}
+{"LogRun":{"distance_km":0.0,"duration_min":33.599999999999994,"hr_pct_max":-2.5,"observed_at":1289444497,"entry_id":0}}
+{"LogRunTrack":{"points":[{"lat":0.0,"lon":1.0,"observed_at":-5,"accuracy_m":10.153271675109863}],"hr_pct_max":1.0E-7,"observed_at":1170820664,"entry_id":1790000072486,"segment_starts":[41],"workout_type":"Easy","session_rpe":3}}
 "ClearRuns"
 {"LogActivity":{"kind":"Cycling","minutes":-26.716288037001462,"vigorous":false,"strengthening":false,"observed_at":1790000000123,"entry_id":1790000620285}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000324711,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"Overhead press","weight_kg":33.599999999999994,"reps":13,"rpe":12.345,"observed_at":57998475,"observed_at_fallback":1}}
-{"AmendRun":{"entry_id":0,"distance_km":12.345,"duration_min":47.336002349853516,"hr_pct_max":831.8330467470453,"longest_recent_km":0.0,"observed_at":56093090,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":12.345,"duration_min":47.336002349853516,"hr_pct_max":831.8330467470453,"observed_at":56093090,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":984158507,"keep_from_sec":1790000000123,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":0,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":3,"overtraining_signs":{"worse_performance":true,"low_mood":true,"higher_resting_hr":true,"worse_sleep":true},"reds_signal_reported":true,"decoupling":{"drift_pct":42.71822738647461,"cool_steady_context":false},"positive_split_pct":1.0,"rpe_load_gap_sessions":0,"failed_key_sessions":1,"bad_day":true,"observed_at":1502692620}}
@@ -1179,14 +1179,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":499.7917239579598,"reps":7,"rpe":1.0E-7,"observed_at":1,"entry_id":1790000838980,"hold_sec":14}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":0,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":123456.789,"duration_min":33.599999999999994,"hr_pct_max":29.525379180908203,"longest_recent_km":0.0,"observed_at":1,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":991.7714369560629,"lon":1.0,"observed_at":0,"accuracy_m":0.017434358596801758},{"lat":33.599999999999994,"lon":0.0,"observed_at":0,"accuracy_m":11.285172462463379},{"lat":123456.789,"lon":0.0,"observed_at":716936939,"accuracy_m":8.73023796081543}],"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"session_rpe":1,"utc_offset_sec":-2460}}
+{"LogRun":{"distance_km":123456.789,"duration_min":33.599999999999994,"hr_pct_max":29.525379180908203,"observed_at":1,"entry_id":0}}
+{"LogRunTrack":{"points":[{"lat":991.7714369560629,"lon":1.0,"observed_at":0,"accuracy_m":0.017434358596801758},{"lat":33.599999999999994,"lon":0.0,"observed_at":0,"accuracy_m":11.285172462463379},{"lat":123456.789,"lon":0.0,"observed_at":716936939,"accuracy_m":8.73023796081543}],"hr_pct_max":-2.5,"observed_at":-5,"entry_id":0,"session_rpe":1,"utc_offset_sec":-2460}}
 "ClearRuns"
 {"LogActivity":{"kind":"Cycling","minutes":1.0,"vigorous":true,"strengthening":false,"observed_at":1,"entry_id":1790000773641}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000518153,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":1.0E-7,"reps":19,"rpe":33.599999999999994,"observed_at":1,"observed_at_fallback":1790000000123,"hold_sec":111}}
-{"AmendRun":{"entry_id":1790000290990,"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":1,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":1790000290990,"distance_km":1.0,"duration_min":33.599999999999994,"hr_pct_max":33.599999999999994,"observed_at":1,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000342145,"observed_at_fallback":0,"keep_from_sec":1,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000297335,"observed_at_fallback":0,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":2,"overtraining_signal_weeks":33.599999999999994,"overtraining_signs":{"worse_performance":false,"low_mood":false,"higher_resting_hr":false,"worse_sleep":true},"reds_signal_reported":true,"easy_frac_time_above_vt1":600.2000786139131,"positive_split_pct":1.0E-7,"bad_day":true,"observed_at":0}}
@@ -1218,14 +1218,14 @@
 {"LogSet":{"exercise":"","weight_kg":33.52010726928711,"reps":9,"rpe":11.500930786132812,"observed_at":-5,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":0,"ended":true,"observed_at":-5}}
-{"LogRun":{"distance_km":12.345,"duration_min":33.599999999999994,"hr_pct_max":876.3897379673767,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Steady","session_rpe":6,"avg_hr_bpm":12.345,"entry_id":1790000309942,"utc_offset_sec":-4590}}
-{"LogRunTrack":{"points":[],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000120551,"workout_type":"Interval","session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":-17418}}
+{"LogRun":{"distance_km":12.345,"duration_min":33.599999999999994,"hr_pct_max":876.3897379673767,"observed_at":0,"entry_id":1790000309942,"workout_type":"Steady","session_rpe":6,"avg_hr_bpm":12.345,"utc_offset_sec":-4590}}
+{"LogRunTrack":{"points":[],"hr_pct_max":33.599999999999994,"observed_at":1,"entry_id":1790000120551,"workout_type":"Interval","session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":-17418}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":12.345,"vigorous":true,"strengthening":false,"observed_at":-5,"entry_id":1790000419932}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000233549,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"Ü-Kniebeuge ✓","weight_kg":12.345,"reps":11,"rpe":14.0277681350708,"observed_at":0,"observed_at_fallback":-5,"hold_sec":63}}
-{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":18.54486083984375,"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":0,"workout_type":"Easy","session_rpe":0,"avg_hr_bpm":0.0,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":0,"distance_km":33.599999999999994,"duration_min":18.54486083984375,"hr_pct_max":1.0E-7,"observed_at":0,"workout_type":"Easy","session_rpe":0,"avg_hr_bpm":0.0,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":1790000242255,"observed_at_fallback":-5,"keep_from_sec":-5,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":1790000207781,"observed_at_fallback":0,"session_rpe":null,"workout_type":"Steady"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":false,"overtraining_signal_count":1,"overtraining_signal_weeks":745.0995780173515,"reds_signal_reported":true,"easy_frac_time_above_vt1":123456.789,"rpe_load_gap_sessions":2,"bad_day":false,"observed_at":742516933}}
@@ -1257,14 +1257,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":-2.5,"reps":15,"rpe":1.0,"observed_at":0,"entry_id":1790000497137,"hold_sec":66}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":-5,"ended":false,"observed_at":-5}}
-{"LogRun":{"distance_km":0.0,"duration_min":1.0,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":-5,"session_rpe":9,"entry_id":0,"utc_offset_sec":-3429}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":-2.5,"observed_at":1790000000123,"accuracy_m":11.754618644714355},{"lat":33.599999999999994,"lon":1.0,"observed_at":1,"accuracy_m":11.834031105041504}],"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":0,"entry_id":0,"workout_type":"Steady","avg_hr_bpm":33.599999999999994,"utc_offset_sec":23854}}
+{"LogRun":{"distance_km":0.0,"duration_min":1.0,"hr_pct_max":-2.5,"observed_at":-5,"entry_id":0,"session_rpe":9,"utc_offset_sec":-3429}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":-2.5,"observed_at":1790000000123,"accuracy_m":11.754618644714355},{"lat":33.599999999999994,"lon":1.0,"observed_at":1,"accuracy_m":11.834031105041504}],"hr_pct_max":123456.789,"observed_at":0,"entry_id":0,"workout_type":"Steady","avg_hr_bpm":33.599999999999994,"utc_offset_sec":23854}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":123456.789,"vigorous":false,"strengthening":true,"observed_at":-5,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":1790000923258,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":0,"exercise":"Ü-Kniebeuge ✓","weight_kg":40.01151657104492,"reps":17,"rpe":1.0E-7,"observed_at":0,"observed_at_fallback":945601497}}
-{"AmendRun":{"entry_id":1790000140673,"distance_km":0.0,"duration_min":33.599999999999994,"hr_pct_max":950.0171222065062,"longest_recent_km":0.0,"observed_at":1790000000123,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":1790000140673,"distance_km":0.0,"duration_min":33.599999999999994,"hr_pct_max":950.0171222065062,"observed_at":1790000000123,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":-5,"keep_from_sec":-5,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000819025,"observed_at_fallback":-5,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":3,"reds_signal_reported":true,"decoupling":{"drift_pct":12.345,"cool_steady_context":true},"easy_frac_time_above_vt1":12.345,"rpe_load_gap_sessions":2,"bad_day":true,"observed_at":1790000000123}}
@@ -1296,14 +1296,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":0.0,"reps":1,"rpe":1.0E-7,"observed_at":1474988749,"entry_id":1790000292264}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Squat","epoch_day":-5,"ended":false,"observed_at":91272893}}
-{"LogRun":{"distance_km":47.83058547973633,"duration_min":0.0,"hr_pct_max":-2.5,"longest_recent_km":0.0,"observed_at":0,"avg_hr_bpm":34.244964599609375,"entry_id":0}}
-{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":123456.789,"observed_at":1,"accuracy_m":18.09493637084961},{"lat":12.345,"lon":8.013182640075684,"observed_at":1,"accuracy_m":15.658071517944336}],"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000695659,"segment_starts":[47],"avg_hr_bpm":12.345,"utc_offset_sec":20756}}
+{"LogRun":{"distance_km":47.83058547973633,"duration_min":0.0,"hr_pct_max":-2.5,"observed_at":0,"entry_id":0,"avg_hr_bpm":34.244964599609375}}
+{"LogRunTrack":{"points":[{"lat":33.599999999999994,"lon":123456.789,"observed_at":1,"accuracy_m":18.09493637084961},{"lat":12.345,"lon":8.013182640075684,"observed_at":1,"accuracy_m":15.658071517944336}],"hr_pct_max":123456.789,"observed_at":1,"entry_id":1790000695659,"segment_starts":[47],"avg_hr_bpm":12.345,"utc_offset_sec":20756}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":-2.5,"vigorous":true,"strengthening":false,"observed_at":1790000000123,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000175841,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":0,"exercise":"Bench \"press\"","weight_kg":-2.5,"reps":13,"rpe":-2.5,"observed_at":253859425,"observed_at_fallback":1}}
-{"AmendRun":{"entry_id":1790000684352,"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":-5,"workout_type":"Tempo","session_rpe":2,"observed_at_fallback":1790000000123}}
+{"AmendRun":{"entry_id":1790000684352,"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":123456.789,"observed_at":-5,"workout_type":"Tempo","session_rpe":2,"observed_at_fallback":1790000000123}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":0,"keep_from_sec":-5,"keep_until_sec":-5}}
 {"AmendRunMeta":{"entry_id":1790000219167,"observed_at_fallback":898081563,"session_rpe":9,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":4,"overtraining_signs":{"worse_performance":false,"low_mood":true,"higher_resting_hr":true,"worse_sleep":false},"reds_signal_reported":true,"decoupling":{"drift_pct":546.3574535224241,"cool_steady_context":false},"easy_frac_time_above_vt1":-2.5,"positive_split_pct":0.0,"rpe_load_gap_sessions":1,"bad_day":false,"observed_at":225300913}}
@@ -1335,14 +1335,14 @@
 {"LogSet":{"exercise":"a\\b\n\tc/d","weight_kg":12.345,"reps":3,"rpe":0.0,"observed_at":0,"entry_id":1790000274683,"hold_sec":5}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"a\\b\n\tc/d","epoch_day":1790000000123,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":12.345,"duration_min":-19.695308970250508,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1,"session_rpe":0,"avg_hr_bpm":738.8121608785997,"entry_id":1790000854278}}
-{"LogRunTrack":{"points":[{"lat":-97.1775245628663,"lon":1.0E-7,"observed_at":-5,"accuracy_m":28.168367385864258}],"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1673304915,"entry_id":1790000296381,"utc_offset_sec":6403}}
+{"LogRun":{"distance_km":12.345,"duration_min":-19.695308970250508,"hr_pct_max":1.0,"observed_at":1,"entry_id":1790000854278,"session_rpe":0,"avg_hr_bpm":738.8121608785997}}
+{"LogRunTrack":{"points":[{"lat":-97.1775245628663,"lon":1.0E-7,"observed_at":-5,"accuracy_m":28.168367385864258}],"hr_pct_max":123456.789,"observed_at":1673304915,"entry_id":1790000296381,"utc_offset_sec":6403}}
 "ClearRuns"
 {"LogActivity":{"kind":"Other","minutes":33.599999999999994,"vigorous":true,"strengthening":false,"observed_at":1,"entry_id":1790000160885}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Activity","entry_id":1790000171313,"observed_at_fallback":1790000000123}}
 {"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":658.1464490643278,"reps":17,"rpe":33.599999999999994,"observed_at":1,"observed_at_fallback":1790000000123,"hold_sec":77}}
-{"AmendRun":{"entry_id":1790000047883,"distance_km":1.0E-7,"duration_min":123456.789,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Easy","observed_at_fallback":1345644201}}
+{"AmendRun":{"entry_id":1790000047883,"distance_km":1.0E-7,"duration_min":123456.789,"hr_pct_max":123456.789,"observed_at":1,"workout_type":"Easy","observed_at_fallback":1345644201}}
 {"TrimRunTrack":{"entry_id":1790000550681,"observed_at_fallback":1790000000123,"keep_from_sec":789671261,"keep_until_sec":1871873299}}
 {"AmendRunMeta":{"entry_id":1790000810776,"observed_at_fallback":1790000000123,"session_rpe":null,"workout_type":"LongRun"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":3,"overtraining_signal_weeks":123456.789,"reds_signal_reported":true,"decoupling":{"drift_pct":979.9711393388786,"cool_steady_context":true},"easy_frac_time_above_vt1":390.26082832725984,"rpe_load_gap_sessions":4,"bad_day":true,"observed_at":-5}}
@@ -1374,14 +1374,14 @@
 {"LogSet":{"exercise":"","weight_kg":-2.5,"reps":7,"rpe":9.27140998840332,"observed_at":1790000000123,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":-5,"ended":false,"observed_at":1}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Tempo","session_rpe":6,"entry_id":0}}
-{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1,"entry_id":1790000655751,"workout_type":"LongRun","segment_starts":[45,41,58],"session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":-18910}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":0.0,"hr_pct_max":0.0,"observed_at":1,"entry_id":0,"workout_type":"Tempo","session_rpe":6}}
+{"LogRunTrack":{"points":[],"hr_pct_max":1.0E-7,"observed_at":1,"entry_id":1790000655751,"segment_starts":[45,41,58],"workout_type":"LongRun","session_rpe":9,"avg_hr_bpm":12.345,"utc_offset_sec":-18910}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":123456.789,"vigorous":false,"strengthening":false,"observed_at":0,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":0,"observed_at_fallback":1}}
 {"AmendSet":{"entry_id":1790000127702,"exercise":"a\\b\n\tc/d","weight_kg":41.06807327270508,"reps":10,"rpe":12.345,"observed_at":1,"observed_at_fallback":-5,"hold_sec":68}}
-{"AmendRun":{"entry_id":0,"distance_km":0.0,"duration_min":123456.789,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":-5,"observed_at_fallback":916964099}}
+{"AmendRun":{"entry_id":0,"distance_km":0.0,"duration_min":123456.789,"hr_pct_max":1.0,"observed_at":-5,"observed_at_fallback":916964099}}
 {"TrimRunTrack":{"entry_id":1790000467230,"observed_at_fallback":-5,"keep_from_sec":1,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":1790000555572,"observed_at_fallback":463104299,"session_rpe":8,"workout_type":"Steady"}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":0,"overtraining_signal_weeks":-2.5,"easy_frac_time_above_vt1":12.345,"rpe_load_gap_sessions":4,"weekly_velocity_drop_m_s":12.345,"bad_day":true,"observed_at":1790000000123}}
@@ -1413,14 +1413,14 @@
 {"LogSet":{"exercise":"Squat","weight_kg":27.377302169799805,"reps":19,"rpe":1.0,"observed_at":953274071,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":1521035500,"ended":true,"observed_at":0}}
-{"LogRun":{"distance_km":123456.789,"duration_min":1.0E-7,"hr_pct_max":11.687609672546387,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Easy","session_rpe":10,"entry_id":1790000518812}}
-{"LogRunTrack":{"points":[{"lat":1.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":1.2390446662902832},{"lat":525.6565813001805,"lon":1.0,"observed_at":0,"accuracy_m":24.052757263183594}],"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":-5,"entry_id":1790000258430,"session_rpe":7,"avg_hr_bpm":-2.5,"utc_offset_sec":22537}}
+{"LogRun":{"distance_km":123456.789,"duration_min":1.0E-7,"hr_pct_max":11.687609672546387,"observed_at":1,"entry_id":1790000518812,"workout_type":"Easy","session_rpe":10}}
+{"LogRunTrack":{"points":[{"lat":1.0,"lon":33.599999999999994,"observed_at":-5,"accuracy_m":1.2390446662902832},{"lat":525.6565813001805,"lon":1.0,"observed_at":0,"accuracy_m":24.052757263183594}],"hr_pct_max":0.0,"observed_at":-5,"entry_id":1790000258430,"session_rpe":7,"avg_hr_bpm":-2.5,"utc_offset_sec":22537}}
 "ClearRuns"
 {"LogActivity":{"kind":"Strength","minutes":123456.789,"vigorous":true,"strengthening":true,"observed_at":-5,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000856456,"observed_at_fallback":-5}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":12.345,"reps":15,"rpe":123456.789,"observed_at":860007657,"observed_at_fallback":-5}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":12.345,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1790000000123,"workout_type":"Easy","avg_hr_bpm":0.0,"observed_at_fallback":0}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":12.345,"hr_pct_max":123456.789,"observed_at":1790000000123,"workout_type":"Easy","avg_hr_bpm":0.0,"observed_at_fallback":0}}
 {"TrimRunTrack":{"entry_id":1790000025337,"observed_at_fallback":-5,"keep_from_sec":-5,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1790000000123,"session_rpe":8,"workout_type":"Easy"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":1,"reds_signal_reported":true,"positive_split_pct":1.0E-7,"weekly_velocity_drop_m_s":33.599999999999994,"failed_key_sessions":0,"bad_day":true,"observed_at":-5}}
@@ -1452,14 +1452,14 @@
 {"LogSet":{"exercise":"Ü-Kniebeuge ✓","weight_kg":12.345,"reps":19,"rpe":0.0,"observed_at":1,"entry_id":0}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":1,"ended":false,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":0.0,"duration_min":12.345,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":-5,"session_rpe":1,"avg_hr_bpm":0.0,"entry_id":1790000889343}}
-{"LogRunTrack":{"points":[{"lat":0.0,"lon":12.345,"observed_at":-5,"accuracy_m":0.40503859519958496},{"lat":-2.5,"lon":1.0E-7,"observed_at":733106081,"accuracy_m":22.66744613647461},{"lat":1.0,"lon":0.0,"observed_at":-5,"accuracy_m":4.929718017578125}],"hr_pct_max":1.0E-7,"longest_recent_km":0.0,"observed_at":1,"entry_id":0,"segment_starts":[17,59]}}
+{"LogRun":{"distance_km":0.0,"duration_min":12.345,"hr_pct_max":123456.789,"observed_at":-5,"entry_id":1790000889343,"session_rpe":1,"avg_hr_bpm":0.0}}
+{"LogRunTrack":{"points":[{"lat":0.0,"lon":12.345,"observed_at":-5,"accuracy_m":0.40503859519958496},{"lat":-2.5,"lon":1.0E-7,"observed_at":733106081,"accuracy_m":22.66744613647461},{"lat":1.0,"lon":0.0,"observed_at":-5,"accuracy_m":4.929718017578125}],"hr_pct_max":1.0E-7,"observed_at":1,"entry_id":0,"segment_starts":[17,59]}}
 "ClearRuns"
 {"LogActivity":{"kind":"Sport","minutes":0.0,"vigorous":false,"strengthening":false,"observed_at":-5,"entry_id":1790000631270}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000358691,"observed_at_fallback":0}}
 {"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":1.0E-7,"reps":12,"rpe":12.345,"observed_at":-5,"observed_at_fallback":1,"hold_sec":87}}
-{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":-2.5,"hr_pct_max":-11.166285054923378,"longest_recent_km":0.0,"observed_at":1,"workout_type":"Easy","avg_hr_bpm":1.0E-7,"observed_at_fallback":1143445313}}
+{"AmendRun":{"entry_id":0,"distance_km":1.0,"duration_min":-2.5,"hr_pct_max":-11.166285054923378,"observed_at":1,"workout_type":"Easy","avg_hr_bpm":1.0E-7,"observed_at_fallback":1143445313}}
 {"TrimRunTrack":{"entry_id":1790000917483,"observed_at_fallback":0,"keep_from_sec":1790000000123,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":0,"session_rpe":7,"workout_type":"Recovery"}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":true,"overtraining_signal_count":1,"overtraining_signs":{"worse_performance":true,"low_mood":false,"higher_resting_hr":false,"worse_sleep":false},"reds_signal_reported":true,"easy_frac_time_above_vt1":23.971525192260742,"rpe_load_gap_sessions":4,"bad_day":true,"observed_at":1790000000123}}
@@ -1491,14 +1491,14 @@
 {"LogSet":{"exercise":"a\\b\n\tc/d","weight_kg":-2.5,"reps":13,"rpe":12.345,"observed_at":6796076,"entry_id":1790000505300}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"Ü-Kniebeuge ✓","epoch_day":0,"ended":true,"observed_at":0}}
-{"LogRun":{"distance_km":1.0,"duration_min":420.1194135246285,"hr_pct_max":48.651920318603516,"longest_recent_km":0.0,"observed_at":0,"entry_id":1790000880335,"utc_offset_sec":-6871}}
-{"LogRunTrack":{"points":[{"lat":123456.789,"lon":0.0,"observed_at":432448460,"accuracy_m":15.973323822021484},{"lat":-2.5,"lon":33.599999999999994,"observed_at":1790000000123,"accuracy_m":1.4270800352096558}],"hr_pct_max":33.599999999999994,"longest_recent_km":0.0,"observed_at":-5,"entry_id":0,"workout_type":"Recovery","session_rpe":2}}
+{"LogRun":{"distance_km":1.0,"duration_min":420.1194135246285,"hr_pct_max":48.651920318603516,"observed_at":0,"entry_id":1790000880335,"utc_offset_sec":-6871}}
+{"LogRunTrack":{"points":[{"lat":123456.789,"lon":0.0,"observed_at":432448460,"accuracy_m":15.973323822021484},{"lat":-2.5,"lon":33.599999999999994,"observed_at":1790000000123,"accuracy_m":1.4270800352096558}],"hr_pct_max":33.599999999999994,"observed_at":-5,"entry_id":0,"workout_type":"Recovery","session_rpe":2}}
 "ClearRuns"
 {"LogActivity":{"kind":"Dance","minutes":15.163397789001465,"vigorous":true,"strengthening":false,"observed_at":-5,"entry_id":1790000271463}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Set","entry_id":0,"observed_at_fallback":1371333279}}
 {"AmendSet":{"entry_id":0,"exercise":"a\\b\n\tc/d","weight_kg":0.0,"reps":10,"rpe":1.0,"observed_at":1,"observed_at_fallback":1,"hold_sec":50}}
-{"AmendRun":{"entry_id":1790000086050,"distance_km":1.0E-7,"duration_min":-2.5,"hr_pct_max":1.0,"longest_recent_km":0.0,"observed_at":1,"session_rpe":4,"observed_at_fallback":1838310613}}
+{"AmendRun":{"entry_id":1790000086050,"distance_km":1.0E-7,"duration_min":-2.5,"hr_pct_max":1.0,"observed_at":1,"session_rpe":4,"observed_at_fallback":1838310613}}
 {"TrimRunTrack":{"entry_id":1790000251058,"observed_at_fallback":956721588,"keep_from_sec":-5,"keep_until_sec":1}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":null,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":4,"reds_signal_reported":true,"positive_split_pct":399.2450542049338,"bad_day":true,"observed_at":0}}
@@ -1530,14 +1530,14 @@
 {"LogSet":{"exercise":"Bench \"press\"","weight_kg":-2.5,"reps":2,"rpe":1.0,"observed_at":-5,"entry_id":1790000962215,"hold_sec":88}}
 "ClearSets"
 {"SetExerciseEnded":{"exercise":"","epoch_day":0,"ended":true,"observed_at":1790000000123}}
-{"LogRun":{"distance_km":33.599999999999994,"duration_min":123456.789,"hr_pct_max":313.92496850055505,"longest_recent_km":0.0,"observed_at":1543764934,"avg_hr_bpm":12.345,"entry_id":1790000887992,"utc_offset_sec":8696}}
-{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":123456.789,"observed_at":-5,"accuracy_m":23.877452850341797},{"lat":33.599999999999994,"lon":1.0E-7,"observed_at":940363915,"accuracy_m":1.7021745443344116},{"lat":33.599999999999994,"lon":10.689738273620605,"observed_at":0,"accuracy_m":18.72199058532715}],"hr_pct_max":12.345,"longest_recent_km":0.0,"observed_at":235227516,"entry_id":1790000342058,"utc_offset_sec":7881}}
+{"LogRun":{"distance_km":33.599999999999994,"duration_min":123456.789,"hr_pct_max":313.92496850055505,"observed_at":1543764934,"entry_id":1790000887992,"avg_hr_bpm":12.345,"utc_offset_sec":8696}}
+{"LogRunTrack":{"points":[{"lat":1.0E-7,"lon":123456.789,"observed_at":-5,"accuracy_m":23.877452850341797},{"lat":33.599999999999994,"lon":1.0E-7,"observed_at":940363915,"accuracy_m":1.7021745443344116},{"lat":33.599999999999994,"lon":10.689738273620605,"observed_at":0,"accuracy_m":18.72199058532715}],"hr_pct_max":12.345,"observed_at":235227516,"entry_id":1790000342058,"utc_offset_sec":7881}}
 "ClearRuns"
 {"LogActivity":{"kind":"Swimming","minutes":-2.5,"vigorous":false,"strengthening":true,"observed_at":1,"entry_id":0}}
 "ClearActivities"
 {"DeleteEntry":{"kind":"Run","entry_id":1790000038585,"observed_at_fallback":719605961}}
 {"AmendSet":{"entry_id":1790000485520,"exercise":"Squat","weight_kg":556.7991722107646,"reps":8,"rpe":1.0,"observed_at":-5,"observed_at_fallback":-5,"hold_sec":46}}
-{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":-2.5,"hr_pct_max":123456.789,"longest_recent_km":0.0,"observed_at":1790000000123,"workout_type":"Easy","avg_hr_bpm":1.0E-7,"observed_at_fallback":-5}}
+{"AmendRun":{"entry_id":0,"distance_km":123456.789,"duration_min":-2.5,"hr_pct_max":123456.789,"observed_at":1790000000123,"workout_type":"Easy","avg_hr_bpm":1.0E-7,"observed_at_fallback":-5}}
 {"TrimRunTrack":{"entry_id":0,"observed_at_fallback":-5,"keep_from_sec":1790000000123,"keep_until_sec":1790000000123}}
 {"AmendRunMeta":{"entry_id":0,"observed_at_fallback":1,"session_rpe":2,"workout_type":null}}
 {"SubmitReview":{"bone_pain_red_flag":true,"compulsive_flag":true,"overtraining_signal_count":1,"overtraining_signal_weeks":10.484501838684082,"overtraining_signs":{"worse_performance":true,"low_mood":true,"higher_resting_hr":false,"worse_sleep":true},"easy_frac_time_above_vt1":1.0E-7,"weekly_velocity_drop_m_s":548.1323211319054,"failed_key_sessions":2,"bad_day":true,"observed_at":-5}}

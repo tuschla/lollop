@@ -410,7 +410,7 @@ class CoreConcurrencyTest {
         )
         QaHarness.freshProcess(engine)
         val sent = ConcurrentHashMap.newKeySet<Long>()
-        val booter = thread(name = "boot") { engine.restore(ctx) }
+        val booter = thread(name = "boot") { engine.restore(ctx.eventLogPath()) }
         runWorkers(4) { t ->
             check(restoring.await(STALL_SEC, TimeUnit.SECONDS)) { "restore never started" }
             repeat(15) { i ->

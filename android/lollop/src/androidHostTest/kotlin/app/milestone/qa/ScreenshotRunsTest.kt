@@ -31,6 +31,7 @@ import app.milestone.RunSession
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
 import app.milestone.AppSettings
+import app.milestone.WorkoutType
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -147,8 +148,8 @@ class ScreenshotRunsTest {
             summary = "6 × 800 m · 400 m jog between",
             run_head = "6 × 800 m",
             face_lead = "6 × 800 m",
+            workout_type = WorkoutType.Interval,
             run_target = RunTargetView(
-                band = "interval",
                 pace_fast_sec_per_km = 250,
                 pace_slow_sec_per_km = 260,
                 // The seeded US install shows miles; the core renders the label in them.

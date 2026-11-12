@@ -312,7 +312,7 @@ class EventLogTest {
         file.writeText(lines.joinToString("\n", postfix = "\n"))
         // The removed plan keeps its span (`Model::past_plans`): both lines stay.
         assertEquals(lines, EventLog.load(file, Core).lines)
-        Core.restoreFrom(file)
+        Core.restore(file)
         val view = Core.send(Event.SetToday(2)).view
         assertNull(view.program)
         assertTrue(view.plan_removed)

@@ -452,7 +452,7 @@ internal fun WhyDetail(
     confidenceHigh: Float? = null,
 ) {
     val hasWhy = why != null &&
-        (why.basis.isNotEmpty() || why.grade_note.isNotBlank() || why.improves.isNotBlank())
+        (why.basis.isNotEmpty() || why.grade_note.isNotBlank() || why.improves != null)
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         // SAFETY stays on the card face (HARD RULE), never here.
         Row(
@@ -479,11 +479,7 @@ internal fun WhyDetail(
                 }
                 WhyLine(stringResource(Res.string.main_why_this_grade), gradeLineFull)
             }
-            // The core reports "-" when nothing would improve it.
-            val improves = why.improves.trim()
-            if (improves.isNotBlank() && improves != "-") {
-                WhyLine(stringResource(Res.string.main_why_to_improve), improves)
-            }
+            why.improves?.let { WhyLine(stringResource(Res.string.main_why_to_improve), it) }
         } else {
             // Hidden for an unmapped grade rather than leaking a raw Debug string.
             gradeLabel(evidence.grade)?.let { label ->

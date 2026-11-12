@@ -310,13 +310,13 @@ internal fun LogSheetContent(
             LogMode.Run -> LogRunEditor(
                 initialObservedAt = planObservedAt,
                 // The run type of the planned run this entry logs (today's, or the
-                // past plan day's), by the Finish review's rule.
+                // past plan day's), as the core sends it on the session's run items.
                 plannedType = remember(model.week_plan, planObservedAt) {
                     val day = planObservedAt?.let { localEpochDay(it) } ?: model.today()
                     model.week_plan.firstOrNull {
                         it.epoch_day == day && it.session_type.discipline == SessionDiscipline.Run &&
                             !it.isDone && it.status != SessionStatus.Blocked
-                    }?.let { s -> workoutTypeForPlan(s.session_type, s.runItem?.run_target?.band) }
+                    }?.items?.firstNotNullOfOrNull { it.workout_type }
                 },
                 hrMaxKnown = model.hr_max_known,
                 onClose = { onMode(LogMode.Chooser) },

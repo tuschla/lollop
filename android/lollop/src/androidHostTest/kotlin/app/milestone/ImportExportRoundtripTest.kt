@@ -77,7 +77,7 @@ class ImportExportRoundtripTest {
      *  the pinned today, as boot does. Later [Core.send]s append to that log. */
     private fun bootCore(vararg seed: Event): ViewModel {
         QaHarness.seedLog(ctx, seed.toList())
-        Core.restore(ctx)
+        Core.restore(ctx.eventLogPath())
         return Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec())).view
     }
 
@@ -92,8 +92,6 @@ class ImportExportRoundtripTest {
         assertTrue("core refused ${e::class.simpleName}", r.accepted)
         return r.view
     }
-
-    private val metresPerDegLat = 111_195.0
 
     /**
      * A seeded wandering run. A fix index in [pauseAt] opens a new recording segment
@@ -122,8 +120,8 @@ class ImportExportRoundtripTest {
                 val d = if (i in pauseAt) 60.0 else mps * dtSec * (0.9 + 0.2 * rnd.nextDouble())
                 t += if (i in pauseAt) pauseSec else dtSec
                 heading += (rnd.nextDouble() - 0.5) * 0.3
-                lat += d * cos(heading) / metresPerDegLat
-                lon += d * sin(heading) / (metresPerDegLat * cos(Math.toRadians(lat)))
+                lat += d * cos(heading) / M_PER_DEG
+                lon += d * sin(heading) / (M_PER_DEG * cos(Math.toRadians(lat)))
                 if (i in pauseAt) starts += i
             }
             pts += GpsPoint(lat, lon, t, 4.0 + rnd.nextDouble() * 4.0)

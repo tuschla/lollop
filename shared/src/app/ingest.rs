@@ -1,6 +1,7 @@
 //! Wire → model ingest: `update`'s fold of one event into the model
 //! ([`apply`]) and the row builders it uses, so a logged row and its amended
-//! replacement are built by the same code.
+//! replacement are built by the same code; and back, the event that re-logs
+//! a stored row ([`relog_event`], the shell's Undo).
 
 use crate::app::model::{
     EndedMarker, LoggedActivity, LoggedRun, LoggedSet, Model, PlanRequest, RaceQuery,
@@ -13,10 +14,9 @@ use crate::app::{HrZoneInputView, HypertrophyInputView, ProteinInputView};
 use crate::day::is_undated;
 use crate::event::entry::{EntryRef, LoggedEntry, find_entry};
 use crate::event::rules::{PlanStep, end_marker_key, readiness_removal};
-use crate::event::{EntryKind, Event, SessionReview};
+use crate::event::{EntryKind, Event, RunMeta, SessionReview};
 use crate::hypertrophy;
 use crate::profile::Profile;
-use crate::schema::WorkoutType;
 #[cfg(any(ffi_surface, test))]
 use crate::{gps::GpsPoint, sanitize::Sanitize};
 
@@ -136,10 +136,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             longest_recent_km,
             observed_at,
             entry_id: _,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
-            utc_offset_sec,
+            meta,
         } => {
             let run = logged_run(RunFields {
                 distance_km,
@@ -148,10 +145,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                 longest_recent_km,
                 observed_at,
                 entry_id: row_id,
-                workout_type,
-                session_rpe,
-                avg_hr_bpm,
-                utc_offset_sec,
+                meta,
             });
             store_run(model, run, None);
         }
@@ -161,11 +155,8 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             longest_recent_km,
             observed_at,
             entry_id: _,
-            workout_type,
-            session_rpe,
             segment_starts,
-            avg_hr_bpm,
-            utc_offset_sec,
+            meta,
         } => {
             let mut run = logged_run(RunFields {
                 distance_km: 0.0,
@@ -174,10 +165,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                 longest_recent_km,
                 observed_at,
                 entry_id: row_id,
-                workout_type,
-                session_rpe,
-                avg_hr_bpm,
-                utc_offset_sec,
+                meta,
             });
             run.track = points;
             run.track_segment_starts = segment_starts;
@@ -255,9 +243,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
             hr_pct_max,
             longest_recent_km,
             observed_at,
-            workout_type,
-            session_rpe,
-            avg_hr_bpm,
+            meta,
             ..
         } => {
             // A STRICT update like `AmendSet`. The replacement is a fresh manual
@@ -272,10 +258,7 @@ pub(super) fn apply(model: &mut Model, event: Event) {
                     longest_recent_km,
                     observed_at,
                     entry_id: row_id,
-                    workout_type,
-                    session_rpe,
-                    avg_hr_bpm,
-                    utc_offset_sec: None,
+                    meta,
                 });
                 store_run(model, run, Some(&old));
             }
@@ -310,8 +293,8 @@ pub(super) fn apply(model: &mut Model, event: Event) {
         } => {
             if let Some(pos) = located(&model.runs, target) {
                 let run = &mut model.runs[pos];
-                run.session_rpe = session_rpe;
-                run.workout_type = workout_type;
+                run.meta.session_rpe = session_rpe;
+                run.meta.workout_type = workout_type;
             }
         }
         Event::SetProfile(profile) => {
@@ -490,12 +473,7 @@ struct RunFields {
     longest_recent_km: f64,
     observed_at: i64,
     entry_id: u64,
-    workout_type: Option<WorkoutType>,
-    session_rpe: Option<u8>,
-    avg_hr_bpm: Option<f64>,
-    /// The device's UTC offset when the run was logged (wire `utc_offset_sec`;
-    /// `None` on a legacy line and on an amend, which keeps its row's).
-    utc_offset_sec: Option<i64>,
+    meta: RunMeta,
 }
 
 /// The run row as the wire states it, with no track. Its two figures that read
@@ -510,14 +488,14 @@ fn logged_run(f: RunFields) -> LoggedRun {
         longest_recent_km: f.longest_recent_km,
         wire_longest_recent_km: f.longest_recent_km,
         track: Vec::new(),
-        logged_utc_offset_sec: f.utc_offset_sec,
         hr_pinned: false,
         track_segment_starts: Vec::new(),
         observed_at: f.observed_at,
         entry_id: f.entry_id,
-        workout_type: f.workout_type,
-        session_rpe: f.session_rpe,
-        avg_hr_bpm: run_targets::plausible_avg_hr_bpm(f.avg_hr_bpm),
+        meta: RunMeta {
+            avg_hr_bpm: run_targets::plausible_avg_hr_bpm(f.meta.avg_hr_bpm),
+            ..f.meta
+        },
     }
 }
 
@@ -527,7 +505,7 @@ fn logged_run(f: RunFields) -> LoggedRun {
 /// departure can move.
 fn store_run(model: &mut Model, mut run: LoggedRun, replaced: Option<&LoggedRun>) {
     if let Some(old) = replaced {
-        run.logged_utc_offset_sec = old.logged_utc_offset_sec;
+        run.meta.utc_offset_sec = old.meta.utc_offset_sec;
     }
     run.hr_pct_max = derived_hr_pct_max(model, &run);
     let at = run.observed_at;
@@ -543,14 +521,15 @@ fn store_run(model: &mut Model, mut run: LoggedRun, replaced: Option<&LoggedRun>
 /// the row was logged under), else the wire figure. A pure function of the
 /// row and the profile history, never of log order.
 pub(super) fn derived_hr_pct_max(model: &Model, run: &LoggedRun) -> f64 {
-    if run.avg_hr_bpm.is_none() {
+    if run.meta.avg_hr_bpm.is_none() {
         return run.wire_hr_pct_max;
     }
     let offset = run
-        .logged_utc_offset_sec
+        .meta
+        .utc_offset_sec
         .unwrap_or(model.today_utc_offset_sec);
     let profile = profile_at(model, run.observed_at, offset);
-    run_targets::logged_hr_pct_max(run.wire_hr_pct_max, run.avg_hr_bpm, profile.as_deref())
+    run_targets::logged_hr_pct_max(run.wire_hr_pct_max, run.meta.avg_hr_bpm, profile.as_deref())
 }
 
 /// Re-derive every typed-bpm run's %HRmax ([`derived_hr_pct_max`]) after the
@@ -562,7 +541,7 @@ fn refresh_run_hr(model: &mut Model) {
         .runs
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.avg_hr_bpm.is_some() && !r.hr_pinned)
+        .filter(|(_, r)| r.meta.avg_hr_bpm.is_some() && !r.hr_pinned)
         .map(|(i, r)| (i, derived_hr_pct_max(model, r)))
         .collect();
     for (i, pct) in derived {
@@ -618,6 +597,113 @@ pub(crate) fn preview_track_figures(points: Vec<GpsPoint>, segment_starts: &[u32
         return (0.0, 0.0);
     }
     (q.distance_km, q.moving_min)
+}
+
+/// The event that puts the stored row `(entry_id, observed_at)` back as it is
+/// now, the identity delete and amend name it by (the newest such row). For a
+/// delete's Undo (`amended_at` `None`) the logging event, a GPS run with its
+/// recorded track; for an edit's Undo the amend that restores the row the
+/// edit saved under `amended_at`. A run carries its wire `hr_pct_max` and
+/// its [`RunMeta`], so `update` derives a typed bpm's percentage again; the
+/// legacy `longest_recent_km` is never written, so the shell's copy carries
+/// none. `None` for an unknown row, and for an edit's Undo of a GPS run or an
+/// activity, which no amend restores.
+#[cfg(any(ffi_surface, test))]
+pub(crate) fn relog_event(
+    model: &Model,
+    kind: EntryKind,
+    entry_id: u64,
+    observed_at: i64,
+    amended_at: Option<i64>,
+) -> Option<Event> {
+    let named = |id: u64, at: i64| id == entry_id && at == observed_at;
+    match kind {
+        EntryKind::Set => {
+            let s = model
+                .sets
+                .iter()
+                .rev()
+                .find(|s| named(s.entry_id, s.observed_at))?;
+            Some(match amended_at {
+                None => Event::LogSet {
+                    exercise: s.exercise.clone(),
+                    weight_kg: s.weight_kg,
+                    reps: s.reps,
+                    rpe: s.rpe,
+                    observed_at,
+                    entry_id,
+                    hold_sec: s.hold_sec,
+                },
+                Some(at) => Event::AmendSet {
+                    entry_id,
+                    exercise: s.exercise.clone(),
+                    weight_kg: s.weight_kg,
+                    reps: s.reps,
+                    rpe: s.rpe,
+                    observed_at,
+                    observed_at_fallback: at,
+                    hold_sec: s.hold_sec,
+                },
+            })
+        }
+        EntryKind::Run => {
+            let r = model
+                .runs
+                .iter()
+                .rev()
+                .find(|r| named(r.entry_id, r.observed_at))?;
+            match (amended_at, r.track.is_empty()) {
+                (None, true) => Some(Event::LogRun {
+                    distance_km: r.distance_km,
+                    duration_min: r.duration_min,
+                    hr_pct_max: r.wire_hr_pct_max,
+                    longest_recent_km: 0.0,
+                    observed_at,
+                    entry_id,
+                    meta: r.meta,
+                }),
+                (None, false) => Some(Event::LogRunTrack {
+                    points: r.track.clone(),
+                    hr_pct_max: r.wire_hr_pct_max,
+                    longest_recent_km: 0.0,
+                    observed_at,
+                    entry_id,
+                    segment_starts: r.track_segment_starts.clone(),
+                    meta: r.meta,
+                }),
+                // The amend keeps its row's logged offset.
+                (Some(at), true) => Some(Event::AmendRun {
+                    entry_id,
+                    distance_km: r.distance_km,
+                    duration_min: r.duration_min,
+                    hr_pct_max: r.wire_hr_pct_max,
+                    longest_recent_km: 0.0,
+                    observed_at,
+                    meta: RunMeta {
+                        utc_offset_sec: None,
+                        ..r.meta
+                    },
+                    observed_at_fallback: at,
+                }),
+                (Some(_), false) => None,
+            }
+        }
+        EntryKind::Activity => {
+            let a = model
+                .activities
+                .iter()
+                .rev()
+                .find(|a| named(a.entry_id, a.observed_at))?;
+            amended_at.is_none().then_some(Event::LogActivity {
+                kind: a.kind,
+                minutes: a.minutes,
+                vigorous: a.vigorous,
+                strengthening: a.strengthening,
+                observed_at,
+                entry_id,
+            })
+        }
+    }
 }
 
 /// Store `review`'s weekly part as the weekly check-in in force: the newest

@@ -878,6 +878,122 @@ fn run_track_answers_a_runs_route_fixes_by_segment() {
     assert_eq!(bad["error"]["context"], "run_track");
 }
 
+fn relog(core: &CoreBridge, row: &Value) -> Value {
+    serde_json::from_slice(&call(core, Op::RelogEvent, row.to_string().as_bytes())).unwrap()
+}
+
+/// One logged row of each kind, as the shell sends it: a set, a run typed in
+/// bpm (sent with `hr_pct_max` 0) under a known HRmax, a GPS run of two
+/// segments, an activity.
+fn logged_rows() -> [(&'static str, u64, i64, Value); 4] {
+    let points: Vec<Value> = (0..40)
+        .map(|k| json!({"lat": 47.0 + f64::from(k) * 0.0001, "lon": 8.0, "observed_at": 1_750_000_000 + k * 5, "accuracy_m": 5.0}))
+        .collect();
+    [
+        (
+            "Set",
+            11,
+            1_750_000_100,
+            json!({"LogSet": {"exercise": "Back Squat", "weight_kg": 100.0,
+            "reps": 5, "rpe": 8.0, "observed_at": 1_750_000_100, "entry_id": 11, "hold_sec": 30}}),
+        ),
+        (
+            "Run",
+            12,
+            1_750_000_200,
+            json!({"LogRun": {"distance_km": 8.0, "duration_min": 45.0,
+            "hr_pct_max": 0.0, "observed_at": 1_750_000_200, "entry_id": 12, "workout_type": "Tempo",
+            "session_rpe": 6, "avg_hr_bpm": 150.0, "utc_offset_sec": 7200}}),
+        ),
+        (
+            "Run",
+            13,
+            1_750_000_300,
+            json!({"LogRunTrack": {"points": points, "hr_pct_max": 0.0,
+            "observed_at": 1_750_000_300, "entry_id": 13, "segment_starts": [20],
+            "workout_type": "Easy", "utc_offset_sec": -18000}}),
+        ),
+        (
+            "Activity",
+            14,
+            1_750_000_400,
+            json!({"LogActivity": {"kind": "Cycling", "minutes": 45.0,
+            "vigorous": true, "strengthening": false, "observed_at": 1_750_000_400, "entry_id": 14}}),
+        ),
+    ]
+}
+
+#[test]
+fn relog_event_answers_the_line_that_logged_the_row_and_undoes_its_delete() {
+    let core = CoreBridge::new();
+    send(&core, &profile_with(json!({"measured_hr_max": 190.0})));
+    for (_, _, _, line) in logged_rows() {
+        send(&core, &line);
+    }
+    for (kind, id, at, line) in logged_rows() {
+        let row = json!({"kind": kind, "entry_id": id, "observed_at": at});
+        let before = view(&core);
+        let again = relog(&core, &row);
+        assert_eq!(again, line, "the row comes back as it was logged");
+        send(
+            &core,
+            &json!({"DeleteEntry": {"kind": kind, "entry_id": id}}),
+        );
+        assert_ne!(view(&core), before);
+        send(&core, &again);
+        assert_eq!(view(&core), before, "Undo of the {kind} delete");
+    }
+    let unknown = json!({"kind": "Run", "entry_id": 12, "observed_at": 1});
+    assert_eq!(relog(&core, &unknown), Value::Null);
+    let bad: Value = serde_json::from_slice(&call(&core, Op::RelogEvent, b"{")).unwrap();
+    assert_eq!(bad["error"]["kind"], "bad_input");
+    assert_eq!(bad["error"]["context"], "relog_event");
+}
+
+#[test]
+fn relog_event_answers_the_amend_that_undoes_an_edit() {
+    let core = CoreBridge::new();
+    for (_, _, _, line) in logged_rows() {
+        send(&core, &line);
+    }
+    let edited_at = 1_750_090_000;
+    let undo_of = |kind: &str, id: u64, at: i64| {
+        relog(
+            &core,
+            &json!({"kind": kind, "entry_id": id, "observed_at": at, "amended_at": edited_at}),
+        )
+    };
+    assert_eq!(
+        undo_of("Set", 11, 1_750_000_100),
+        json!({"AmendSet": {"entry_id": 11, "exercise": "Back Squat", "weight_kg": 100.0,
+            "reps": 5, "rpe": 8.0, "observed_at": 1_750_000_100,
+            "observed_at_fallback": edited_at, "hold_sec": 30}})
+    );
+    // The amend keeps its row's logged UTC offset, so it sends none.
+    let undo = undo_of("Run", 12, 1_750_000_200);
+    assert_eq!(
+        undo,
+        json!({"AmendRun": {"entry_id": 12, "distance_km": 8.0, "duration_min": 45.0,
+            "hr_pct_max": 0.0, "observed_at": 1_750_000_200, "workout_type": "Tempo",
+            "session_rpe": 6, "avg_hr_bpm": 150.0, "observed_at_fallback": edited_at}})
+    );
+    let before = view(&core);
+    send(
+        &core,
+        &json!({"AmendRun": {"entry_id": 12, "distance_km": 10.0, "duration_min": 50.0,
+            "hr_pct_max": 70.0, "observed_at": edited_at, "observed_at_fallback": 1_750_000_200}}),
+    );
+    assert_ne!(view(&core), before);
+    send(&core, &undo);
+    assert_eq!(view(&core), before, "Undo of the run edit");
+    assert_eq!(
+        undo_of("Run", 13, 1_750_000_300),
+        Value::Null,
+        "no amend restores a track"
+    );
+    assert_eq!(undo_of("Activity", 14, 1_750_000_400), Value::Null);
+}
+
 #[test]
 fn malformed_event_is_dropped_without_panicking() {
     let core = CoreBridge::new();
@@ -1043,7 +1159,8 @@ fn op_contexts_are_the_snake_case_names_the_shell_reads() {
             "draft_facts",
             "run_track",
             "thin_track",
-            "imported_hr_pct"
+            "imported_hr_pct",
+            "relog_event"
         ]
     );
 }

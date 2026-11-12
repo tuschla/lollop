@@ -90,7 +90,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         .run_target
         .clone()
         .expect("a tempo run carries a numeric target");
-    assert_eq!(t.band, "threshold");
+    assert_eq!(it.workout_type, Some(WorkoutType::Tempo));
     // Daniels VDOT 40: T ≈ 5:06 /km (88 %VO2max) to ≈ 5:20 /km (83 %).
     assert!((303..=309).contains(&t.pace_fast_sec_per_km), "{t:?}");
     assert!((317..=323).contains(&t.pace_slow_sec_per_km), "{t:?}");
@@ -112,6 +112,58 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         t.evidence.citation,
         Recommended::new((), claims::RUN_VDOT_001).reference()
     );
+}
+
+/// Each run item carries the run type of the session it belongs to, so a
+/// tracker following one item preselects that item's type whatever the next
+/// session is. The long run reads LongRun though it runs in the easy band;
+/// lift items carry none.
+#[test]
+fn run_items_carry_their_own_sessions_workout_type() {
+    let (app, model) = planned_on(tempo_racer_profile(), [], MON);
+    let vm = app.view(&model);
+    let mut types = Vec::new();
+    for s in vm.next_session.iter().chain(&vm.week_plan) {
+        for it in &s.items {
+            let at = format!("{}: {}", s.title, it.summary);
+            match s.session_type {
+                SessionType::Run(k) if it.is_run() => {
+                    let wt = k
+                        .workout_type()
+                        .expect("each kind in this week names a run type");
+                    assert_eq!(it.workout_type, Some(wt), "{at}");
+                }
+                _ => assert_eq!(it.workout_type, None, "{at}"),
+            }
+            types.extend(it.workout_type);
+        }
+    }
+    for wt in [WorkoutType::LongRun, WorkoutType::Tempo, WorkoutType::Easy] {
+        assert!(types.contains(&wt), "{wt:?} in {types:?}");
+    }
+}
+
+/// A race-pace day names no run type of its own, so it preselects by the band
+/// it runs in: Steady at marathon pace, Easy once a low-HRV morning eases it
+/// to an easy run.
+#[test]
+fn race_pace_day_preselects_by_its_band() {
+    let profile = Profile {
+        goal_distance: GoalDistance::Marathon,
+        running_days_per_week: 5,
+        running_km_per_week: 60.0,
+        measured_hr_max: Some(190.0),
+        goal_race_epoch_day: Some(MON + 7 * 10 + 6),
+        ..racer_profile(MON)
+    };
+    let (planned, eased, _) = eased_on_its_day(profile, "Race-pace run");
+    assert_eq!(planned.workout_type, Some(WorkoutType::Steady));
+    assert!(
+        eased.intensity_label.starts_with(EASY_RUN_LABEL),
+        "{}",
+        eased.intensity_label
+    );
+    assert_eq!(eased.workout_type, Some(WorkoutType::Easy));
 }
 
 #[test]
@@ -208,11 +260,17 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
 
 #[test]
 fn downgrade_re_resolves_the_easy_band() {
-    let (planned, eased, _) = eased_on_its_day(tempo_racer_profile(), "Tempo run");
+    let (planned, eased, easy) = eased_on_its_day(tempo_racer_profile(), "Tempo run");
     let t = planned.run_target.expect("a planned threshold target");
-    assert_eq!(t.band, "threshold");
     let e = eased.run_target.clone().expect("still targeted");
-    assert_eq!(e.band, "easy");
+    let easy = easy.run_target.expect("easy target");
+    assert_eq!(
+        e.effort_cue, easy.effort_cue,
+        "the downgrade reads the easy run's effort"
+    );
+    assert_ne!(e.effort_cue, t.effort_cue);
+    // A tempo session names its run type, so it stays the preselected one.
+    assert_eq!(eased.workout_type, Some(WorkoutType::Tempo));
     assert!(
         e.pace_fast_sec_per_km > t.pace_slow_sec_per_km,
         "easy is slower: {e:?}"
@@ -248,8 +306,8 @@ fn downgrade_keeps_anchors_from_interval() {
     // An interval shows no bpm; it still carries the anchors, so its
     // downgrade reads like the week's planned easy run.
     let (planned, eased, easy) = eased_on_its_day(interval_racer_profile(), "Intervals");
+    assert_eq!(planned.workout_type, Some(WorkoutType::Interval));
     let p = planned.run_target.expect("a planned interval target");
-    assert_eq!(p.band, "interval");
     assert!(p.hr_label.is_empty(), "{p:?}");
     let (e, easy) = (
         eased.run_target.expect("target"),

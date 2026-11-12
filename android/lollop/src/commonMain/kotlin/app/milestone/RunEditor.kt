@@ -88,8 +88,8 @@ fun LogRunEditor(
     // Seed the stamp to a plan day's local noon when logging a PAST prescribed run
     // (null falls back to now). The date chip stays user-editable.
     initialObservedAt: Long? = null,
-    // NEW-mode run type of the planned run this entry logs (the Finish review's
-    // rule, [workoutTypeForPlan]); preselected, still the user's to change.
+    // NEW-mode run type of the planned run this entry logs (the core's
+    // [PrescriptionView.workout_type]); preselected, still the user's to change.
     plannedType: WorkoutType? = null,
     // Whether the core can turn an average bpm into %HRmax ([ViewModel.hr_max_known]).
     hrMaxKnown: Boolean,
@@ -347,19 +347,10 @@ internal fun editDurationDigits(digits: String, key: Char, replaceAll: Boolean):
     return base + key
 }
 
-/** Run types in the order a runner thinks of them, easiest first. */
-private val RunTypeOrder = listOf(
-    WorkoutType.Easy,
-    WorkoutType.Recovery,
-    WorkoutType.Steady,
-    WorkoutType.LongRun,
-    WorkoutType.Tempo,
-    WorkoutType.Interval,
-)
-
 /**
- * The run's type as single-select chips under its [FieldLabel]. USER DATA only;
- * [onSelect] gets the tapped type, and the caller toggles a re-tapped type off.
+ * The run's type as single-select chips under its [FieldLabel], easiest first (the
+ * core declares [WorkoutType] in that order). USER DATA only; [onSelect] gets the
+ * tapped type, and the caller toggles a re-tapped type off.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -371,7 +362,7 @@ fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
             verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
         ) {
-            RunTypeOrder.forEach { wt ->
+            WorkoutType.entries.forEach { wt ->
                 val label = stringResource(wt.labels.label)
                 ChoiceChip(
                     label = label,

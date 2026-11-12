@@ -10,7 +10,8 @@
 //!   enum with data) is a sealed interface with a serializer for serde's
 //!   external tagging. A newtype variant's struct payload is inlined into the
 //!   variant class (`{"SetProfile":{…}}` reads the same either way), in its
-//!   `#[wire(payload_order)]`, omitting defaults when `payload_omits_defaults`.
+//!   `#[wire(payload_order)]`, omitting defaults when `payload_omits_defaults`;
+//!   so is a struct variant's flattened struct, in its field's place.
 //! - Types only the shell writes (reached from an event or an op input, not
 //!   from an output) take Kotlin property names and only serde's defaults;
 //!   every other type keeps the wire names and defaults every field, as the
@@ -21,9 +22,11 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use serde_json::Value;
+use shared::ffi::constants::{constants, hypertrophy_muscles};
+use shared::ffi::ops::{Roots, roots};
 use shared::wire::{
     Body, ConstValue, Field, Float, Int, Registry, Shape, Strings, Struct, TypeDef, Variant,
-    VariantBody, constants, roots,
+    VariantBody,
 };
 
 use crate::{HEADER, Output};
@@ -50,13 +53,10 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
     ),
     ("Event::LogRun", "observed_at", "AppClock.nowSec()"),
     ("Event::LogRun", "entry_id", "EntryIds.next()"),
-    ("Event::LogRun", "longest_recent_km", "0.0"),
     ("Event::LogRunTrack", "observed_at", "AppClock.nowSec()"),
     ("Event::LogRunTrack", "entry_id", "EntryIds.next()"),
-    ("Event::LogRunTrack", "longest_recent_km", "0.0"),
     ("Event::LogActivity", "observed_at", "AppClock.nowSec()"),
     ("Event::LogActivity", "entry_id", "EntryIds.next()"),
-    ("Event::AmendRun", "longest_recent_km", "0.0"),
     ("Event::SubmitReadiness", "streak", "0"),
     ("Event::SubmitReview", "observed_at", "AppClock.nowSec()"),
     ("Event::SubmitReview", "bone_pain_red_flag", "false"),
@@ -78,31 +78,10 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
     ("Event::SubmitWeeklyCheckin", "bad_day", "false"),
 ];
 
-/// Types the shell writes, and the types it reads (`shared::wire::roots`).
-const INPUT_ROOTS: &[&str] = &[
-    "Event",
-    "RunRef",
-    "WarmUpQuery",
-    "ProfileDraft",
-    "TrackThinning",
-    "ImportedHr",
-];
-const OUTPUT_ROOTS: &[&str] = &[
-    "ViewModel",
-    "ErrorEnvelope",
-    "TrackFigures",
-    "Compaction",
-    "ImportVerdict",
-    "RunTrack",
-    "WarmUpStep",
-    "DraftFacts",
-    "ThinnedTrack",
-];
-
 pub(crate) fn wire_types() -> Output {
     let mut reg = Registry::default();
-    roots(&mut reg);
-    let mut generator = Gen::new(&reg);
+    let roots = roots(&mut reg);
+    let mut generator = Gen::new(&reg, &roots);
     let body = generator.file();
     for (owner, field, _) in DEFAULTS {
         assert!(
@@ -147,22 +126,22 @@ struct Gen<'a> {
 }
 
 impl<'a> Gen<'a> {
-    fn new(reg: &'a Registry) -> Self {
+    fn new(reg: &'a Registry, roots: &Roots) -> Self {
         let mut input = HashSet::new();
         let mut output = HashSet::new();
         let mut viewed = HashSet::new();
         let mut emitted = HashSet::new();
-        for root in OUTPUT_ROOTS {
+        for root in &roots.outputs {
             mark(reg, root, &mut output, &mut emitted, false);
         }
-        mark(reg, "ViewModel", &mut viewed, &mut HashSet::new(), false);
-        for root in INPUT_ROOTS {
+        mark(reg, roots.view, &mut viewed, &mut HashSet::new(), false);
+        for root in &roots.inputs {
             mark(reg, root, &mut input, &mut emitted, false);
         }
         for def in reg.types() {
             assert!(
                 input.contains(def.name) || output.contains(def.name),
-                "{} is reached from no root in INPUT_ROOTS/OUTPUT_ROOTS",
+                "{} is reached from no op's input or answer",
                 def.name
             );
         }
@@ -254,6 +233,21 @@ impl<'a> Gen<'a> {
             }
         }
         out.push_str("}\n\n");
+        out.push_str(
+            "/** The muscles the core's hypertrophy landmarks cover, by the name a\n \
+             * `PlanHypertrophyMeso` sends (`hypertrophy::LANDMARKS`). */\n\
+             enum class HypertrophyMuscle(val wire: String) {\n",
+        );
+        let muscles: Vec<String> = hypertrophy_muscles()
+            .map(|m| format!("    {}({})", pascal(m), string(m)))
+            .collect();
+        out.push_str(&muscles.join(",\n"));
+        out.push_str(
+            ";\n\n    companion object {\n        \
+             /** The muscle for a wire name, matched case-insensitively as the core does; null if none. */\n        \
+             fun of(wire: String?): HypertrophyMuscle? = entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }\n    \
+             }\n}\n\n",
+        );
     }
 
     fn role(&self, name: &str) -> Role {
@@ -262,8 +256,13 @@ impl<'a> Gen<'a> {
 
     /// The fields a class declares for `s`: flattened structs inlined.
     fn flat_fields(&self, s: &'a Struct) -> Vec<&'a Field> {
+        self.inlined(&s.fields)
+    }
+
+    /// `fields` with every flattened struct's fields inlined in its place.
+    fn inlined(&self, fields: &'a [Field]) -> Vec<&'a Field> {
         let mut out = Vec::new();
-        for f in &s.fields {
+        for f in fields {
             if f.flatten {
                 let Shape::Named(name) = &f.shape else {
                     panic!("flattened {} is not a struct", f.name)
@@ -505,8 +504,14 @@ impl<'a> Gen<'a> {
             Shape::List(_) => Value::Array(Vec::new()),
             Shape::OptionAs { none, .. } => Value::from(*none),
             Shape::Named(name) => match &self.def(name).body {
-                Body::Enum { variants, .. } => Value::from(variants[0].name),
-                Body::Strings(s) => Value::from(s.entries[0].0),
+                Body::Enum { variants, .. } => Value::from(
+                    variants
+                        .iter()
+                        .find(|v| v.default)
+                        .unwrap_or(&variants[0])
+                        .name,
+                ),
+                Body::Strings(s) => Value::from(s.default),
                 Body::Struct(s) => Value::Object(
                     self.flat_fields(s)
                         .into_iter()
@@ -718,7 +723,7 @@ impl<'a> Gen<'a> {
                 }
                 VariantBody::Struct(fields) => {
                     let _ = writeln!(out, "    @Serializable\n    data class {}(", v.ident);
-                    for f in fields {
+                    for f in self.inlined(fields) {
                         self.property(out, owner, f, Role::Input, false, "        ");
                     }
                     out.push_str("    )");
@@ -860,8 +865,9 @@ impl<'a> Gen<'a> {
     }
 }
 
-/// Mark `name` and everything it reaches. An event's newtype payload struct
-/// is walked but gets no class of its own unless reached another way.
+/// Mark `name` and everything it reaches. An event's newtype payload struct,
+/// or the struct a struct variant flattens, is walked but gets no class of
+/// its own unless reached another way.
 fn mark(
     reg: &Registry,
     name: &'static str,
@@ -895,7 +901,12 @@ fn mark(
                     VariantBody::Newtype(shape) => mark_shape(reg, shape, into, emitted),
                     VariantBody::Struct(fields) => {
                         for f in fields {
-                            mark_shape(reg, &f.shape, into, emitted);
+                            match &f.shape {
+                                Shape::Named(inner) if f.flatten => {
+                                    mark(reg, inner, into, emitted, true);
+                                }
+                                shape => mark_shape(reg, shape, into, emitted),
+                            }
                         }
                     }
                 }
@@ -918,6 +929,11 @@ fn mark_shape(
         Shape::Named(name) => mark(reg, name, into, emitted, false),
         _ => {}
     }
+}
+
+/// The Kotlin type of a value the shell reads.
+pub(crate) fn type_name(shape: &Shape) -> String {
+    Gen::kt_type(shape, false)
 }
 
 fn named(shape: &Shape) -> &'static str {
@@ -945,6 +961,19 @@ fn set_of(items: &[&str]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+/// `"side delts"` → `SideDelts`.
+fn pascal(words: &str) -> String {
+    words
+        .split_whitespace()
+        .map(|w| {
+            let mut chars = w.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_ascii_uppercase().to_string() + chars.as_str()
+            })
+        })
+        .collect()
 }
 
 /// `snake_case` → `camelCase`.

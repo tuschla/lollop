@@ -78,7 +78,7 @@ pub(super) fn flatten_calisthenics_prescription(
         Some(calis_basis(&sh, performance_only, bodyweight_kg, weight_lb)),
         rx,
     );
-    why.improves = if c.needs_effort_rating {
+    why.improves = Some(if c.needs_effort_rating {
         "Rate how hard the last set felt to move up to the next step.".to_string()
     } else if performance_only {
         "Log your reps (or hold time) so the plan can time your next step.".to_string()
@@ -86,7 +86,7 @@ pub(super) fn flatten_calisthenics_prescription(
         "Log your reps (or hold time) and how hard the last set felt so the plan can time your \
          next step."
             .to_string()
-    };
+    });
     let (lead, clauses) = calis_summary(&sh, &intensity, weight_lb);
 
     // Numeric prefill targets: hold band in seconds for a timed rung, and the

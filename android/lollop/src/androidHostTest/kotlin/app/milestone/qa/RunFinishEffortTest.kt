@@ -18,6 +18,8 @@ import app.milestone.AppSettings
 import app.milestone.PrescriptionView
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
+import app.milestone.EventDispatcher
+import app.milestone.WorkoutType
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsSelected
@@ -29,6 +31,7 @@ import org.junit.After
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -117,8 +120,8 @@ class RunFinishEffortTest {
             summary = "6 × 800 m · 400 m jog between",
             run_head = "6 × 800 m",
             face_lead = "6 × 800 m",
+            workout_type = WorkoutType.Interval,
             run_target = RunTargetView(
-                band = "interval",
                 pace_fast_sec_per_km = 250,
                 pace_slow_sec_per_km = 260,
                 pace_label = "4:10–4:20 /km",
@@ -152,9 +155,28 @@ class RunFinishEffortTest {
         val hits = v.filter { it.kind in setOf("forbidden-text", "unlabeled-action", "small-touch-target") }
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
 
-        // Stopping a guided run preselects its type from the plan (interval band).
+        // Stopping a guided run preselects the plan item's run type.
         rule.stopToFinishReview()
         rule.onNodeWithText(str(R.string.run_type_interval)).performScrollTo().assertIsSelected()
+    }
+
+    /**
+     * The Finish review preselects the run type of the plan item being followed,
+     * not the next session's: the two differ once the next session has moved on
+     * (a run past midnight, a restored run).
+     */
+    @Test
+    fun followedPlan_preselectsTheFollowedItemsRunType_notTheNextSessions() {
+        QaHarness.seedLog(ctx, listOf(QaHarness.tenKRunnerProfile()))
+        QaHarness.seedRecordingRun()
+        rule.launchOnTracker()
+        rule.waitUntil(30_000) { EventDispatcher.model.value?.next_session != null }
+        val next = EventDispatcher.model.value?.next_session?.items?.firstNotNullOfOrNull { it.workout_type }
+        assertNotNull("the next session is a planned run", next)
+        val followed = WorkoutType.entries.first { it != next }
+        RunSession.followPlan(PrescriptionView(exercise = "Run", workout_type = followed))
+        rule.stopToFinishReview()
+        rule.onNodeWithTag("run-type-${followed.name}").performScrollTo().assertIsSelected()
     }
 
     /**

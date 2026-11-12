@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::app::profile_age::aged_on;
 use crate::event::entry::{EntryRef, LoggedEntry};
 use crate::event::rules::{Family, PlanStep};
-use crate::event::{ActivityKind, SessionReview};
+use crate::event::{ActivityKind, RunMeta, SessionReview};
 use crate::gps::GpsPoint;
 use crate::profile::{DistanceUnit, Profile};
-use crate::schema::{CheckinInput, ReadinessInput, WorkoutType};
+use crate::schema::{CheckinInput, ReadinessInput};
 
 // `Serialize` derives the content fingerprint that keys the view caches
 // (`memo::fingerprint`); the type never rides the wire.
@@ -87,32 +87,19 @@ pub(super) struct LoggedRun {
     pub(super) observed_at: i64,
     /// Stable per-entry identity; see [`LoggedSet::entry_id`].
     pub(super) entry_id: u64,
-    /// The device's UTC offset when the row was logged (the wire
-    /// `utc_offset_sec` the shell stamps; an amend keeps the original row's).
-    /// The %HRmax conversion reads the run's local day with it, so a later
-    /// time-zone change never re-converts the run. `None` (a legacy row) =
-    /// the clock's current offset.
-    pub(super) logged_utc_offset_sec: Option<i64>,
     /// A legacy undated `SetProfile` arrived after this row was logged: its
     /// `hr_pct_max` stays the figure it had then (the edit applies from its
     /// position in the log, not to runs already logged). Cleared by
     /// `ClearProfile`. Kept as row state: the edit carries no date to stamp it
     /// with that a compacted log would reproduce.
     pub(super) hr_pinned: bool,
-    /// User-declared run-intent label. USER DATA, carries no evidence of its
-    /// own: history display, and the weekly hard-session checks honor it as
-    /// the session's declared goal (running-012/023). `None` = untagged; never
-    /// fabricated. (Model-internal struct, not wire-decoded.)
-    pub(super) workout_type: Option<WorkoutType>,
-    /// Whole-session effort on the CR-10 scale (0–10), rated ~30 min after the
-    /// run (LOAD-SRPE-001). `None` = unrated; never prefilled or invented.
-    /// Drives the separate session-RPE load series (minutes × rating).
-    pub(super) session_rpe: Option<u8>,
-    /// The average heart rate the athlete entered, bpm, when plausible
-    /// (`run_targets::plausible_avg_hr_bpm`). Kept beside the derived
-    /// `hr_pct_max` so the run card shows the figure the user typed rather than
-    /// a re-derived percentage. `None` = not entered.
-    pub(super) avg_hr_bpm: Option<f64>,
+    /// The run's tag, rating, typed bpm and logged UTC offset as the event
+    /// stated them, with the bpm only when plausible
+    /// (`run_targets::plausible_avg_hr_bpm`) and an amend keeping the
+    /// original row's offset. The run card shows the typed bpm rather than the
+    /// derived percentage; the %HRmax conversion reads the run's local day on
+    /// the logged offset (`None`, a legacy row: the clock's current offset).
+    pub(super) meta: RunMeta,
 }
 
 /// One logged "other activity" (sport, cycling, a PE lesson…): the minutes the

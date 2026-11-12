@@ -12,7 +12,8 @@
 //! follows the app's stated convention and says so.
 
 use super::*;
-use crate::app::run_targets::{HrAnchor, TargetBand, band_for, resolve_target};
+use crate::app::plan_views::HrAnchor;
+use crate::app::run_targets::{TargetBand, band_for, resolve_target};
 
 mod oracle {
     /// KB extracted/07-data-harvesting.md:158 — Tanaka 2001: `208 − 0.7·age`.
@@ -522,7 +523,7 @@ fn race_prediction_matches_riegel_and_daniels_oracles_over_5k_grid() {
                         // A tie at exactly .5 s between the two rounding paths is
                         // only possible if the engine and oracle differ by <1e-6 s
                         // across it; accept the engine's own low_sec clock then.
-                        if v.predicted != want {
+                        if v.predicted.as_deref() != Some(want.as_str()) {
                             let alt = if agreed {
                                 oracle::clock(v.low_sec)
                             } else {
@@ -532,7 +533,7 @@ fn race_prediction_matches_riegel_and_daniels_oracles_over_5k_grid() {
                                     oracle::clock(v.high_sec)
                                 )
                             };
-                            assert_eq!(v.predicted, alt, "{}", ctx());
+                            assert_eq!(v.predicted, Some(alt), "{}", ctx());
                         }
                     }
                     compared += 1;
@@ -551,7 +552,7 @@ fn race_prediction_identity_and_monotonicity() {
         let v = race(&race_q(5000.0, t, 5000.0, 40.0), None, DistanceUnit::Km);
         assert!(v.agreed, "identity must agree: {t}");
         assert!((v.low_sec - t).abs() < 1e-6, "{t} → {}", v.low_sec);
-        assert_eq!(v.predicted, oracle::clock(t));
+        assert_eq!(v.predicted, Some(oracle::clock(t)));
     }
     // Faster recent race → faster (never slower) predictions. Each METHOD is
     // monotone, so the band centre (Riegel + Daniels)/2 — identical under both
@@ -633,6 +634,7 @@ fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
             .race_prediction
             .expect("prediction")
             .predicted
+            .expect("a shown prediction")
     };
     for t in [1080.0, 1320.0, 1500.0, 1800.0, 2400.0] {
         let bare = predict(&mut Model::default(), t);

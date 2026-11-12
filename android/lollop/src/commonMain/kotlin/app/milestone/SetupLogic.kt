@@ -1045,7 +1045,7 @@ internal data class StashedRun(val days: Int, val km: Double?, val goal: GoalDis
 internal data class StashedLift(val days: Int?, val goal: LiftGoal, val weeklySets: Int, val weekdays: Int?)
 
 /** Accepted keypad ranges for the person numbers (wizard, Profile and the morning
- *  check-in share them). Resting HR is the core's plausible band. */
+ *  check-in share them). Resting HR and measured HRmax are the bands the core trusts. */
 internal val AGE_RANGE = 14.0..100.0
 internal val RESTING_HR_RANGE = CoreConstants.RESTING_HR_MIN_BPM..CoreConstants.RESTING_HR_MAX_BPM
-internal val MAX_HR_RANGE = 120.0..230.0
+internal val MAX_HR_RANGE = CoreConstants.MEASURED_HR_MAX_MIN_BPM..CoreConstants.MEASURED_HR_MAX_MAX_BPM

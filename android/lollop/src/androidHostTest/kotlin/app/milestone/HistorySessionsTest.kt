@@ -6,9 +6,6 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toJavaZoneId
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,8 +13,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** History's shell-side session grouping, heatmap days, set summaries and Undo
- *  events (zone-explicit). Robolectric for the string resources. */
+/** History's shell-side session grouping, heatmap days and set summaries
+ *  (zone-explicit). Robolectric for the string resources. */
 @RunWith(RobolectricTestRunner::class)
 class HistorySessionsTest {
 
@@ -101,6 +98,22 @@ class HistorySessionsTest {
     }
 
     @Test
+    fun theLastSevenDaysCountARunByItsStartLikeTheHeatmap() {
+        val now = at("2026-09-20T12:00:00")
+        val lifts = (0 until 10).map { set("Squat", at("2026-09-18T18:00:00") + it * 60L).copy(tonnage_kg = 500.0) } +
+            set("Squat", at("2026-09-10T18:00:00")).copy(tonnage_kg = 500.0)
+        val runs = listOf(
+            RunResultView(distance_km = 5.0, observed_at = at("2026-09-19T07:40:00"), started_at = at("2026-09-19T07:00:00")),
+            // Logged inside the window, started before it: an earlier week's run.
+            RunResultView(distance_km = 21.0, observed_at = at("2026-09-14T08:00:00"), started_at = at("2026-09-12T08:00:00")),
+        )
+        val week = lastSevenDays(lifts, runs, now, berlin)
+        assertEquals(2, week.sessions) // one lifting day + one run
+        assertEquals(5.0, week.runKm, 0.0)
+        assertEquals(10 * 500.0, week.liftKg, 0.0)
+    }
+
+    @Test
     fun identicalConsecutiveSetsFoldIntoOneSummaryLine() {
         val res = ApplicationProvider.getApplicationContext<Context>().resources
         val t = at("2026-09-14T18:00:00")
@@ -122,90 +135,5 @@ class HistorySessionsTest {
         val freshDecode = listOf(set("Squat", t), set("Squat", t + 60))
         assertTrue(cached.holdsNewestSet(freshDecode))
         assertFalse(cached.holdsNewestSet(freshDecode + set("Bench", at("2026-09-15T18:00:00"))))
-    }
-
-    @Test
-    fun undoOfADeletedSetRelogsItWithItsOwnIdAndStamp() {
-        val s = set("Squat", at("2026-09-14T18:00:00"), 120.0, 5).copy(rpe = 8.0)
-        val ev = restoreEventFor(HistoryEntry.Lift(s), emptyList()) as Event.LogSet
-        assertEquals(s.entry_id, ev.entryId)
-        assertEquals(s.observed_at, ev.observedAt)
-        assertEquals(listOf(120.0, 5.0, 8.0), listOf(ev.weightKg, ev.reps.toDouble(), ev.rpe))
-    }
-
-    @Test
-    fun undoOfADeletedGpsRunWaitsForItsRoute() {
-        val run = RunResultView(distance_km = 5.0, observed_at = 2_000L, entry_id = 7L, has_gpx = true)
-        assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
-        val route = listOf(
-            listOf(GpsPoint(0.0, 0.0, 1_000L, 5.0), GpsPoint(0.0, 0.001, 1_500L, 5.0)),
-            listOf(GpsPoint(0.0, 0.002, 1_800L, 5.0), GpsPoint(0.0, 0.003, 2_000L, 5.0)),
-        )
-        val ev = restoreEventFor(HistoryEntry.Run(run), route) as Event.LogRunTrack
-        assertEquals(7L, ev.entryId)
-        assertEquals(2_000L, ev.observedAt)
-        assertEquals(4, ev.points.size)
-        assertEquals(listOf(2), ev.segmentStarts)
-    }
-
-    @Test
-    fun undoOfADeletedUnmeasurableGpsRunRelogsItsRecordedFixesNotAManualRun() {
-        // A GPS run whose fixes all failed QC ("GPS signal too poor") has no route
-        // (has_gpx false) and shows 0 km. Undo must re-log the recorded fixes the
-        // core exports for it, never a 0 km manual LogRun with another card.
-        val run = RunResultView(
-            distance_km = 0.0, observed_at = 2_000L, entry_id = 8L,
-            has_gpx = false, gps_unmeasurable = true, workout_type = WorkoutType.LongRun, session_rpe = 2,
-        )
-        assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
-        val recorded = listOf(
-            listOf(GpsPoint(48.1, 11.5, 1_940L, 5.0), GpsPoint(48.1, 11.5, 1_970L, 5.0)),
-        )
-        val ev = restoreEventFor(HistoryEntry.Run(run), recorded) as Event.LogRunTrack
-        assertEquals(8L, ev.entryId)
-        assertEquals(2_000L, ev.observedAt)
-        assertEquals(2, ev.points.size)
-        assertEquals(5.0, ev.points[0].accuracyM, 1e-9)
-        assertEquals(2, ev.sessionRpe)
-    }
-
-    @Test
-    fun undoOfADeletedRunRelogsTheEnteredBpmNotTheDerivedPercentage() {
-        val run = RunResultView(
-            distance_km = 8.0, duration_min = 48.0, hr_pct_max = 82.5, avg_hr_bpm = 152.0,
-            observed_at = 3_000L, entry_id = 9L, session_rpe = 5,
-        )
-        val ev = restoreEventFor(HistoryEntry.Run(run), emptyList()) as Event.LogRun
-        assertEquals(152.0, ev.avgHrBpm)
-        assertEquals(0.0, ev.hrPctMax, 0.0)
-        val pctOnly = run.copy(avg_hr_bpm = null)
-        val ev2 = restoreEventFor(HistoryEntry.Run(pctOnly), emptyList()) as Event.LogRun
-        assertEquals(null, ev2.avgHrBpm)
-        assertEquals(82.5, ev2.hrPctMax, 0.0)
-    }
-
-    @Test
-    fun undoOfADeletedBpmRunResendsTheUtcOffsetItWasLoggedUnder() {
-        // The core echoes the row's logged offset as `utc_offset_sec` (RevLedger
-        // F2): Undo must send it back, or the restored run is converted on the
-        // current clock's day (a different age / profile after a time-zone change).
-        val run = coreJson.decodeFromString<RunResultView>(
-            """{"distance_km":8.0,"duration_min":48.0,"hr_pct_max":90.0,"avg_hr_bpm":162.0,""" +
-                """"utc_offset_sec":7200,"observed_at":3000,"entry_id":9}""",
-        )
-        val manual = restoreEventFor(HistoryEntry.Run(run), emptyList()) as Event.LogRun
-        assertEquals(7200L, manual.utcOffsetSec)
-        assertEquals(
-            7200,
-            manual.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"]!!.jsonPrimitive.int,
-        )
-        val gps = run.copy(has_gpx = true)
-        val route = listOf(listOf(GpsPoint(52.0, 13.0, 2_900L, 5.0), GpsPoint(52.001, 13.0, 3_000L, 5.0)))
-        val track = restoreEventFor(HistoryEntry.Run(gps), route) as Event.LogRunTrack
-        assertEquals(7200L, track.utcOffsetSec)
-        // A legacy row (no logged offset) stays unstamped.
-        val legacy = restoreEventFor(HistoryEntry.Run(run.copy(utc_offset_sec = null)), emptyList()) as Event.LogRun
-        assertEquals(null, legacy.utcOffsetSec)
-        assertEquals(null, legacy.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"])
     }
 }

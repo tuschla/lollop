@@ -13,17 +13,6 @@ fn set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, day: i64) -> LoggedS
     }
 }
 
-fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::LiftAnchors {
-    build_plan_anchors(
-        SetIndex::new(sets)
-            .with_facts(sets)
-            .filter(|(s, _)| s.observed_at / DAY_SEC < today),
-        ctx,
-        today,
-        0,
-    )
-}
-
 /// A Monday, a lift day of the strength plan, far enough out that every set
 /// below keeps a positive (dated) timestamp.
 const T: i64 = POS_MON;
@@ -218,6 +207,48 @@ fn declared_layoff_and_inactivity_do_not_stack() {
 }
 
 #[test]
+fn a_derated_percent_label_states_the_share_of_the_estimate_the_load_is() {
+    // A derate (44 days off; a >5 % e1RM drop) scales the load, and the label
+    // shows that same share of the estimated max, reduced from the planned
+    // percent, not the planned percent over the lighter load.
+    let detrained = [("Back Squat", 100.0, 5, 8.0, T - 44)];
+    let dropped = [
+        ("Back Squat", 100.0, 5, 8.0, T - 15),
+        ("Back Squat", 100.0, 5, 8.0, T - 8),
+        ("Back Squat", 100.0, 5, 10.0, T - 1),
+    ];
+    for sets in [&detrained[..], &dropped[..]] {
+        let squat = squat_on(strength_profile(), sets, T);
+        assert!(squat.why.basis.contains("scaled to"), "{}", squat.why.basis);
+        let load = squat.load_kg.expect("an anchored load");
+        let e1: f64 = squat
+            .anchored_on
+            .strip_prefix("Estimated max ")
+            .and_then(|s| s.split(' ').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("{}", squat.anchored_on));
+        let (shown, planned) = squat
+            .intensity_label
+            .split_once("% e1RM (reduced from ")
+            .and_then(|(p, rest)| {
+                let orig = rest.strip_suffix("%)")?.parse::<f64>().ok()?;
+                Some((p.parse::<f64>().ok()?, orig))
+            })
+            .unwrap_or_else(|| panic!("a reduced percent: {}", squat.intensity_label));
+        assert!(shown < planned, "{}", squat.intensity_label);
+        // The load is the shown share (to a whole percent) floored onto the
+        // plate grid.
+        let share = 100.0 * load / e1;
+        let step = 100.0 * crate::plates::load_grid_step_kg(load, false) / e1;
+        assert!(
+            (-0.5..=step + 0.5).contains(&(shown - share)),
+            "{} on {load} kg of {e1} kg ({share:.1}%)",
+            squat.intensity_label
+        );
+    }
+}
+
+#[test]
 fn six_weeks_off_starts_near_70pct_and_ramps_to_full() {
     // 6 wk off → 70 % on the return day, ramping to 100 % over the 4-wk
     // window; the athlete trains the lift lightly meanwhile, the last time the
@@ -297,7 +328,7 @@ fn missed_target_cuts_next_load_5pct_unless_off_day() {
         set("Back Squat", 100.0, 5, 8.0, 7),
         set("Back Squat", 100.0, 5, 10.0, 14),
     ];
-    let a = anchors_at(&sets, AnchorCtx::default(), 15);
+    let a = anchors_through(&sets, AnchorCtx::default(), 15);
     let d = a.load_frac_for("Back Squat").expect("an e1RM-drop cut");
     assert_eq!(d.frac, 0.95);
     assert!(matches!(d.cause, DerateCause::E1rmDrop));
@@ -306,7 +337,7 @@ fn missed_target_cuts_next_load_5pct_unless_off_day() {
         ..Default::default()
     };
     assert!(
-        anchors_at(&sets, off, 15)
+        anchors_through(&sets, off, 15)
             .load_frac_for("Back Squat")
             .is_none(),
         "a session marked as an off day keeps the load"
@@ -384,7 +415,7 @@ fn a_light_lift_drop_at_the_same_load_is_cut() {
         set("Overhead Press", 45.0, 5, 8.0, 0),
         set("Overhead Press", 45.0, 3, 9.5, 3),
     ];
-    let d = anchors_at(&sets, AnchorCtx::default(), 4)
+    let d = anchors_through(&sets, AnchorCtx::default(), 4)
         .load_frac_for("Overhead Press")
         .cloned()
         .expect("an e1RM-drop cut");
@@ -416,11 +447,11 @@ fn a_plate_floored_load_is_asked_at_the_effort_it_takes() {
     let base = set("Back Squat", 45.0, 5, 8.0, 0);
     let asked = [base.clone(), set("Back Squat", 45.0, 3, 6.0, 3)];
     assert_eq!(
-        anchors_at(&asked, AnchorCtx::default(), 4).load_frac_for("Back Squat"),
+        anchors_through(&asked, AnchorCtx::default(), 4).load_frac_for("Back Squat"),
         None
     );
     let harder = [base, set("Back Squat", 45.0, 3, 8.0, 3)];
-    let d = anchors_at(&harder, AnchorCtx::default(), 4)
+    let d = anchors_through(&harder, AnchorCtx::default(), 4)
         .load_frac_for("Back Squat")
         .cloned()
         .expect("an e1RM-drop cut");
@@ -482,13 +513,13 @@ fn planned_deload_sets_neither_cut_nor_anchor_the_next_load() {
         deloads: DeloadDays(&[11, 13]),
         ..Default::default()
     };
-    let a = anchors_at(&sets, deload, 14);
+    let a = anchors_through(&sets, deload, 14);
     let work = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
     assert_eq!(a.e1rm_for("Back Squat"), Some(work));
     assert!(a.load_frac_for("Back Squat").is_none(), "no e1RM-drop cut");
     assert_eq!(a.last_working_for("Back Squat").unwrap().weight_kg, 100.0);
     // The same sets outside a planned deload are a >5 % drop.
-    let b = anchors_at(&sets, AnchorCtx::default(), 14);
+    let b = anchors_through(&sets, AnchorCtx::default(), 14);
     assert!(
         b.load_frac_for("Back Squat")
             .is_some_and(|d| matches!(d.cause, DerateCause::E1rmDrop))

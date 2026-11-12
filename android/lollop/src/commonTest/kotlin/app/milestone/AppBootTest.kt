@@ -66,7 +66,7 @@ class AppBootTest : PlatformTest() {
     }
 
     private suspend fun boot(core: FakeCore, engine: DurableCore = DurableCore(core), today: Pair<Long, Long> = day): BootTurn? =
-        bootTurn(engine, store, settings, ledger, restore = { engine.restoreFrom(log) }, today = today, planDay = { 19_999L })
+        bootTurn(engine, store, settings, ledger, restore = { engine.restore(log) }, today = today, planDay = { 19_999L })
 
     private fun logVariants(): List<String?> {
         val lines = mutableListOf<String?>()

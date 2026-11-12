@@ -434,9 +434,8 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
 /// (metrics before the red-flag block).
 pub(super) fn build_signal_groups() -> std::borrow::Cow<'static, [SignalGroupView]> {
     static CACHE: std::sync::LazyLock<Vec<SignalGroupView>> = std::sync::LazyLock::new(|| {
-        autoreg::ALL_SIGNALS
-            .iter()
-            .map(|&s| SignalGroupView {
+        autoreg::signals_in_summary_order()
+            .map(|s| SignalGroupView {
                 signal: s,
                 group: autoreg::signal_group(s),
             })

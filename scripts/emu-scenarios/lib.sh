@@ -196,29 +196,61 @@ shot() { adb_ exec-out screencap -p >"$OUT/shots/$1.png" || log "screencap $1 fa
 evidence() { shot "$1"; dump_ui >"$OUT/ui/$1.xml" || log "UI dump $1 failed"; }
 
 focus() { sh_ dumpsys window | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^ }]*\)}.*/\1/p' | head -1; }
+# A force-stop or `pm clear` removes the app's task, and the system kills the
+# package's processes once that task's 1 s destroy timeout runs out
+# (ActivityTaskSupervisor KILL_TASK_PROCESSES_TIMEOUT_MS, "Killing …: remove
+# task" in logcat): a start inside that second loses its new process. stop_app
+# sets the end of that window (µs); a start waits for it.
+_TASK_KILL_END=0
+_now_us() { echo "${EPOCHREALTIME//[.,]/}"; }
 _am_start() {
-  local r; r="$(sh_ am start "$@")"
+  local r w=$(( _TASK_KILL_END - $(_now_us) ))
+  (( w <= 0 )) || sleep "$((w / 1000000)).$(printf '%06d' $((w % 1000000)))"
+  r="$(sh_ am start "$@")"
   [[ "$r" != *Error* ]] || { log "am start $*: $r"; return 1; }
 }
-launch() { _am_start -n "${COMP[MainActivity]}"; }
+# _start_up AM-START-ARGS...: start the activity and wait (15 s) until the app
+# is up; when it is not, start it once more.
+_start_up() {
+  _am_start "$@" && wait_for 15 app_up && return 0
+  log "start: app not up ($(focus)), starting again"
+  _am_start "$@" && wait_for 15 app_up
+}
+launch() { _start_up -n "${COMP[MainActivity]}"; }
 # open_dest DEST: the app's open intent (DEST: a DEST[...] wire value or any other).
-open_dest() { _am_start -a "$ACTION_OPEN" -n "${COMP[MainActivity]}" --es "$EXTRA_DEST" "$1"; }
+open_dest() { _start_up -a "$ACTION_OPEN" -n "${COMP[MainActivity]}" --es "$EXTRA_DEST" "$1"; }
 app_pid() { sh_ pidof "$APP_ID"; return 0; }
 app_up() { [[ -n "$(app_pid)" && "$(focus)" == "$APP_ID"* ]]; }
-app_gone() { [[ -z "$(app_pid)" ]]; }
 # pid_released PID: the system no longer hosts process PID. `pidof` loses a killed
 # process at once, but ActivityManager keeps its record until it hears of the death;
 # a launch before then goes to the dead process's activity and is finished with it.
 pid_released() { [[ "$(app_pid)" != "$1" ]] && ! sh_ dumpsys activity processes "$APP_ID" | grep " $1:$APP_ID/" >/dev/null; }
-# launch_up: launch, then wait (15 s) until the app is up. A force-stop or `pm clear`
-# removes the app's task, and the system kills the package's processes once that
-# task's 1 s destroy timeout runs out (ActivityTaskSupervisor
-# KILL_TASK_PROCESSES_TIMEOUT_MS, "Killing …: remove task" in logcat): a launch
-# inside that second loses its new process. Then it launches once more.
-launch_up() {
-  launch && wait_for 15 app_up && return 0
-  log "launch_up: app not up ($(focus)), launching again"
-  launch && wait_for 15 app_up
+# stop_app [HOW [PERMISSION...]]: end the app's process and return once the
+# system has let go of it (pid_released); 1 when it still hosts it after 10 s.
+# HOW: force-stop (default); clear (force-stop + `pm clear`); kill (`am kill`,
+# a background process only); sigkill (kill -9, the low-memory killer's way);
+# crash (`am crash`); revoke PERMISSION... (android.permission.PERMISSION, which
+# the platform kills a running app for).
+stop_app() {
+  local how="${1:-force-stop}" pid p
+  shift $(($# > 0))
+  pid="$(app_pid)"
+  case "$how" in
+    force-stop|clear)
+      adb_ shell am force-stop "$APP_ID"
+      [[ "$how" == force-stop ]] || adb_ shell pm clear "$APP_ID" >/dev/null
+      _TASK_KILL_END=$(( $(_now_us) + 1500000 )) ;;
+    kill) adb_ shell am kill "$APP_ID" ;;
+    sigkill) [[ -z "$pid" ]] || adb_ shell kill -9 "$pid" ;;
+    crash)
+      adb_ shell am crash "$APP_ID"
+      # The crash dialog shows for a crash within 2 min of the app's previous one
+      # (AppErrors MIN_CRASH_INTERVAL), and the process lives until it is answered.
+      if wait_text eq "Close app" 3; then tap_node eq "Close app"; fi ;;
+    revoke) for p in "$@"; do adb_ shell pm revoke "$APP_ID" "android.permission.$p"; done ;;
+    *) log "stop_app: unknown HOW '$how'"; return 2 ;;
+  esac
+  [[ -z "$pid" ]] || wait_for 10 pid_released "$pid" || { log "stop_app $how: process $pid still hosted"; return 1; }
 }
 grant_perms() {
   local p
@@ -281,22 +313,21 @@ duration() { python3 "$HELP/parse.py" duration "$1"; }
 
 wipe_app() {
   stop_feeder
-  adb_ shell am force-stop "$APP_ID"
-  adb_ shell pm clear "$APP_ID" >/dev/null
+  stop_app clear
   baseline_device
   grant_perms
 }
 # seed_app FILE: start the app once (its data directory), stop it and put FILE in
 # place as its event log.
 seed_app() {
-  if ! { launch && wait_for 20 app_up; }; then log "first launch before the seed: app not up ($(focus))"; fi
-  adb_ shell am force-stop "$APP_ID"
+  launch || log "first launch before the seed: app not up ($(focus))"
+  stop_app
   push_log "$1"
 }
 # boot_day DAY: relaunch the app with the clock on DAY; succeeds once it shows
 # Today and wrote its snapshot for DAY.
 boot_day() {
-  adb_ shell am force-stop "$APP_ID"
+  stop_app
   pin_clock "$1"
   launch && wait_text eq "${STR[main_dest_today]}" 40 && wait_for 15 snapshot_for "$1"
 }
@@ -313,6 +344,23 @@ fresh_app() {
   seed_app "$2" || return 1
   boot_week "$1"
 }
+# Seed events in the core's own encoding (EV event: the wire fixture's line of
+# that kind); a field a seed doesn't set keeps the fixture's value.
+# seed_profile KEY=VALUE...: a 30-year-old's SetProfile (not advanced, no sex or
+# resting HR stated), progressing week to week toward maximal strength.
+seed_profile() {
+  EV event SetProfile progression_cadence=WeekToWeek lift_goal=MaxStrength advanced=false \
+    female=null age_years=30.0 resting_hr_bpm=null "$@"
+}
+# seed_set EXERCISE KG REPS AT: a set at RPE 8 at unix time AT.
+seed_set() {
+  EV event LogSet exercise="$1" weight_kg="$2" reps="$3" rpe=8.0 hold_sec=null observed_at="$4" entry_id="${4}000"
+}
+# seed_run KM MINUTES AT: a logged run, no heart rate, type or effort, at AT.
+seed_run() {
+  EV event LogRun distance_km="$1" duration_min="$2" hr_pct_max=0.0 longest_recent_km=0.0 \
+    workout_type=null session_rpe=null avg_hr_bpm=null observed_at="$3" entry_id="${3}001"
+}
 # seed_basic DAY RUN_DAYS: a set-up lifter (12 weekly sets) with RUN_DAYS run days
 # (20 km a week when RUN_DAYS > 0), a Back Squat at DAY 09:00 and a 5 km run at
 # DAY 10:00 ($TZ0), as the ndjson event log the app replays on launch.
@@ -320,11 +368,10 @@ seed_basic() {
   local y km=0.0
   y="$(TZ="$TZ0" date -d "$1 09:00" +%s)"
   if [[ "$2" -gt 0 ]]; then km=20.0; fi
-  cat <<EOF
-{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":$2,"running_km_per_week":${km},"advanced":false,"endurance_intensity_pct_vo2max":75.0,"bodyweight_kg":85.0,"age_years":30.0}}
-{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":8.0,"observed_at":${y},"entry_id":${y}000}}
-{"LogRun":{"distance_km":5.0,"duration_min":27.5,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":$((y + 3600)),"entry_id":$((y + 3600))001}}
-EOF
+  seed_profile goal_distance=General concurrent_goal=Strength weekly_sets=12 \
+    running_days_per_week="$2" running_km_per_week="$km" bodyweight_kg=85.0 &&
+    seed_set "Back Squat" 120.0 3 "$y" &&
+    seed_run 5.0 27.5 $((y + 3600))
 }
 
 open_set_editor() {
@@ -686,7 +733,7 @@ monkey_run() {
     if [[ "$f" != "$APP_ID"* ]]; then
       escapes=$((escapes + 1)); echo "chunk $i: focus=$f" >>"$dir/escapes.txt"
       adb_ shell input keyevent 4
-      launch; wait_for 10 app_up
+      launch
     fi
   done
   monkey_restore

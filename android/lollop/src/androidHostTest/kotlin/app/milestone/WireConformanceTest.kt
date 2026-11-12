@@ -35,6 +35,9 @@ class WireConformanceTest {
     /** The keys the shell fills with a fresh value when it creates an event. */
     private val shellFilled = setOf("entry_id", "observed_at")
 
+    /** Keys older logs carry that the core still reads but the shell never writes. */
+    private val legacyOnly = setOf("longest_recent_km")
+
     private fun fixtures(dir: String, suffix: String): List<File> {
         val files = File(REPO_ROOT, "shared/tests/fixtures/$dir").listFiles { f -> f.name.endsWith(suffix) }.orEmpty().sortedBy { it.name }
         assertTrue("no $dir/*$suffix fixtures", files.isNotEmpty())
@@ -77,15 +80,18 @@ class WireConformanceTest {
     }
 
     /** [line] decoded and re-encoded by the shell, or null when the shell can't decode
-     *  it or would fill in its identity: a legacy line without `entry_id` or
-     *  `observed_at` decodes with a fresh id / the current time (the shell's defaults
-     *  for an event it creates), so it is no longer the line's event. The shell never
-     *  re-encodes a stored line; this is only the conformance check's own round trip. */
+     *  it, would fill in its identity, or never writes one of its keys: a legacy line
+     *  without `entry_id` or `observed_at` decodes with a fresh id / the current time
+     *  (the shell's defaults for an event it creates), so it is no longer the line's
+     *  event, and a line with a [legacyOnly] key is not one the shell could have
+     *  written. Any other key the round trip drops still fails the check. The shell
+     *  never re-encodes a stored line; this is only the conformance check's own round trip. */
     private fun reencoded(line: String): String? {
         val event = runCatching { coreJson.decodeFromString(Event.serializer(), line) }.getOrNull() ?: return null
         val again = event.toJson()
         val had = payloadKeys(Json.parseToJsonElement(line))
         if (shellFilled.any { it in payloadKeys(again) && it !in had }) return null
+        if (legacyOnly.any { it in had }) return null
         return again.toString()
     }
 

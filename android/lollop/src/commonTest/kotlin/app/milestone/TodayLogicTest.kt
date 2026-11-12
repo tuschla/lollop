@@ -234,7 +234,7 @@ class TodayLogicTest : PlatformTest() {
             PrescriptionView.serializer(),
             """
             {"summary":"6 × 800 m · 3:40–3:50 /km (interval) · effort 8 of 10","run_head":"6 × 800 m","face_lead":"6 × 800 m",
-             "run_target":{"band":"interval","pace_label_km":"3:40–3:50 /km","effort_cue":"effort 8 of 10","effort_detail":"8 of 10"}}
+             "run_target":{"pace_label_km":"3:40–3:50 /km","effort_cue":"effort 8 of 10","effort_detail":"8 of 10"}}
             """.trimIndent(),
         )
         assertEquals("6 × 800 m", runFaceHead(item, DistanceUnit.Km))
@@ -253,7 +253,7 @@ class TodayLogicTest : PlatformTest() {
     @Test
     fun distancesFollowTheDisplayUnit() {
         val item = PrescriptionView(
-            run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(band = "easy"),
+            run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(),
             safety_reason = "Capped at 8 km: at most 10% over your longest recent run",
         )
         assertEquals("8 km", runFaceHead(item, DistanceUnit.Km))

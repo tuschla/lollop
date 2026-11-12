@@ -275,15 +275,15 @@ fun <T> OptionList(
  * Label + enum picker as a tap-row that expands into a full-width [OptionList].
  * The header row (label left, current value + chevron right) is a ≥48dp
  * whole-row tap target; opening it reveals every option at once with the same
- * generous targets, and picking one collapses the list. Callers serialize only
- * the value's `.name`.
+ * generous targets, and picking one collapses the list. [display] is the
+ * on-screen text; callers serialize only the value's `.name`.
  */
 @Composable
 fun <T : Enum<T>> EnumRow(
     label: String,
     values: List<T>,
     current: T,
-    display: (T) -> String = { it.name },
+    display: (T) -> String,
     divideBefore: (T) -> Boolean = { false },
     onSelect: (T) -> Unit,
 ) {
@@ -334,7 +334,7 @@ fun <T> SegmentedEnumRow(
     label: String?,
     values: List<T>,
     current: T,
-    display: (T) -> String = { it.toString() },
+    display: (T) -> String,
     onSelect: (T) -> Unit,
 ) {
     Column(

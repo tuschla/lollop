@@ -34,6 +34,7 @@ import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.RunResultView
 import app.milestone.ViewModel
+import app.milestone.eventLogPath
 import app.milestone.formatLogDate
 import app.milestone.groupedFigure
 import app.milestone.kgToLb
@@ -582,7 +583,7 @@ class LongHistoryUiTest {
         QaHarness.reset(ctx)
         QaHarness.seedLog(ctx, h.events)
         val t0 = System.nanoTime()
-        Core.restore(ctx)
+        Core.restore(ctx.eventLogPath())
         val restoreMs = (System.nanoTime() - t0) / 1_000_000
         val stale = Core.send(Event.SetToday(h.today, 0)).stale
         var last: ViewModel? = null

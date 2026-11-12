@@ -16,6 +16,7 @@ import app.milestone.AppTheme
 import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.GpsPoint
+import app.milestone.M_PER_DEG
 import app.milestone.R
 import org.junit.After
 import org.junit.Before
@@ -87,14 +88,13 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
         /** A 5.12 km (3.18 mi) rectangular loop, 1600 m east-west by 960 m north-south,
          *  run clockwise from the south-west corner: one clean fix every 3 s, 10 m apart. */
         fun loopRun(observedAt: Long): Event {
-            val mLat = 111_195.0
-            val mLon = mLat * Math.cos(Math.toRadians(52.5))
+            val mLon = M_PER_DEG * Math.cos(Math.toRadians(52.5))
             val legs = listOf(0.0 to 96, 1.0 to 160, 2.0 to 96, 3.0 to 160)
             var north = 0.0
             var east = 0.0
             val points = ArrayList<GpsPoint>()
             var t = observedAt
-            points += GpsPoint(52.5 + north / mLat, 13.35 + east / mLon, t, 5.0)
+            points += GpsPoint(52.5 + north / M_PER_DEG, 13.35 + east / mLon, t, 5.0)
             for ((dir, steps) in legs) {
                 repeat(steps) {
                     when (dir) {
@@ -104,7 +104,7 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
                         else -> east -= 10.0
                     }
                     t += 3
-                    points += GpsPoint(52.5 + north / mLat, 13.35 + east / mLon, t, 5.0)
+                    points += GpsPoint(52.5 + north / M_PER_DEG, 13.35 + east / mLon, t, 5.0)
                 }
             }
             return Event.LogRunTrack(

@@ -2,7 +2,7 @@ name: Set up the build
 description: >
   The toolchains a job needs, at the versions the repo pins: the JDK from
   .java-version, the Android SDK, Rust from rust-toolchain.toml (its targets and
-  components included), cargo-ndk, and the Kotlin/Native toolchain cache.
+  components included), cargo-ndk, and the Kotlin/Native and Robolectric caches.
 inputs:
   java:
     description: JDK + Gradle cache
@@ -18,6 +18,12 @@ inputs:
     default: "false"
   konan:
     description: Kotlin/Native toolchain cache (~/.konan)
+    default: "false"
+  robolectric:
+    description: >
+      Robolectric's android-all jars (~/.m2/repository/org/robolectric), which it
+      downloads from Maven at test time; a Maven hiccup would otherwise fail every
+      Robolectric class before any test runs
     default: "false"
 runs:
   using: composite
@@ -50,3 +56,9 @@ runs:
       with:
         path: ~/.konan
         key: konan-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml') }}
+
+    - if: inputs.robolectric == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.m2/repository/org/robolectric
+        key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}

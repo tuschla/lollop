@@ -138,6 +138,22 @@ internal fun historyActivityDays(
     return days
 }
 
+/** History's LAST 7 DAYS tiles: the [DayActivity.sessions] of the rolling 7 days
+ *  before [nowSec], their lifted tonnage and run distance. A run counts by its start
+ *  ([runDaySec]), as everywhere else that dates it. */
+internal class LastSevenDays(val sessions: Int, val liftKg: Double, val runKm: Double)
+
+internal fun lastSevenDays(lifts: List<LiftResultView>, runs: List<RunResultView>, nowSec: Long, zone: TimeZone): LastSevenDays {
+    val windowStart = nowSec - 7L * 86400L
+    val weekLifts = lifts.filter { it.observed_at >= windowStart }
+    val weekRuns = runs.filter { runDaySec(it) >= windowStart }
+    return LastSevenDays(
+        sessions = historyActivityDays(weekLifts, weekRuns, zone).values.sumOf { it.sessions },
+        liftKg = weekLifts.sumOf { it.tonnage_kg },
+        runKm = weekRuns.sumOf { it.distance_km },
+    )
+}
+
 /**
  * Per exercise key ([LiftSession.exerciseKeys]), its best e1RM of each dated
  * session in ascending day order: the factual series behind the session sheet's
@@ -443,13 +459,14 @@ internal fun LiftSessionSheet(
                     ),
                     confirmLabel = stringResource(Res.string.main_delete),
                     onConfirm = {
-                        session.sets.forEach { onEvent(deleteEventFor(HistoryEntry.Lift(it))) }
-                        onDismiss()
-                        postUndoable(
+                        sendUndoable(
+                            onEvent,
+                            session.sets.map { deleteEventFor(HistoryEntry.Lift(it)) },
+                            session.sets.map { relogQueryOf(HistoryEntry.Lift(it)) },
                             deletedText,
                             undoLabel,
-                            session.sets.mapNotNull { restoreEventFor(HistoryEntry.Lift(it), emptyList()) },
                         )
+                        onDismiss()
                     },
                     testTag = "lift-session-delete",
                 ),

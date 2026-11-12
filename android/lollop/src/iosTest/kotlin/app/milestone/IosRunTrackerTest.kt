@@ -2,6 +2,8 @@
 
 package app.milestone
 
+import app.milestone.widget.IosRunLive
+import app.milestone.widget.iosSurfaceJson
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.CoreLocation.CLLocation
 import platform.CoreLocation.CLLocationCoordinate2DMake
@@ -51,7 +53,6 @@ class IosRunTrackerTest {
 
     @AfterTest
     fun tearDown() {
-        RunActivity.sink = null
         tracker.recorder.stop()
         ActiveRunStore.flush()
         AppFiles.delete(sidecar)
@@ -186,26 +187,37 @@ class IosRunTrackerTest {
 
     @Test
     fun theSurfaceGetsAFrameForEachPhase() {
-        val frames = mutableListOf<RunSurfacePhase>()
+        // Each frame as the activity shows it: (recording, paused).
+        val frames = mutableListOf<Pair<Boolean, Boolean>>()
         var ended = 0
-        RunActivity.sink = object : RunActivitySink {
-            override fun update(state: RunSurfaceState) {
-                frames += state.phase
+        IosSurfaces.install(object : IosSurfaceHost {
+            override fun publishWidget(json: String) = Unit
+
+            override fun updateRunActivity(json: String) {
+                val live = iosSurfaceJson.decodeFromString(IosRunLive.serializer(), json)
+                frames += live.recording to live.paused
             }
 
-            override fun end() {
+            override fun endRunActivity() {
                 ended++
             }
-        }
+
+            override fun updateRestActivity(json: String) = Unit
+
+            override fun endRestActivity() = Unit
+        })
+        val armed = false to false
+        val recording = true to false
+        val paused = false to true
         tracker.recorder.start(record = false, arming = true)
-        runLoopUntil("armed frame") { RunSurfacePhase.Armed in frames }
+        runLoopUntil("armed frame") { armed in frames }
         deliver(location(0, ageSec = 2.0), location(1, ageSec = 1.0))
         RunSession.setPaused(true)
         // The pause reaches the surface through the main-thread flow collector.
-        runLoopUntil("paused frame") { frames.lastOrNull() == RunSurfacePhase.Paused }
+        runLoopUntil("paused frame") { frames.lastOrNull() == paused }
         deliver(location(2, ageSec = 0.0))
         tracker.recorder.stop()
-        assertEquals(listOf(RunSurfacePhase.Armed, RunSurfacePhase.Recording, RunSurfacePhase.Paused), frames.distinct())
+        assertEquals(listOf(armed, recording, paused), frames.distinct())
         assertEquals(1, ended)
     }
 

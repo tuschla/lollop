@@ -801,16 +801,8 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
                 assert!(m <= 20.0, "return run over 20 min: {}", it.summary);
             }
             if let Some(t) = &it.run_target {
-                // The CR-10 ceiling in the "effort lo–hi of 10" cue; 0 without one.
-                let rpe_high: u8 = t
-                    .effort_cue
-                    .split(" of 10")
-                    .next()
-                    .and_then(|s| s.rsplit(['–', ' ']).next())
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or(0);
                 assert!(
-                    rpe_high <= 4 || t.band.to_lowercase().contains("easy"),
+                    effort_ceiling(t).is_none_or(|hi| hi <= easy_effort_ceiling()),
                     "{t:?}"
                 );
             }

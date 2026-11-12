@@ -136,10 +136,7 @@ class OwnerRegressionJourneyTest {
     fun deletingAGpsRunThenUndo_restoresTheRunAndItsRoute() {
         val at = QaHarness.daysAgoAtMidday(1)
         val entryId = at * 1000
-        val metresPerDegLat = 111_195.0
-        val points = (0 until 201).map { i ->
-            app.milestone.GpsPoint(lat = 47.0 + i * 10.0 / metresPerDegLat, lon = 8.0, observedAt = at + i * 3L, accuracyM = 5.0)
-        }
+        val points = app.milestone.straightTrack(201, firstAt = at)
         QaHarness.seedLog(
             ctx,
             listOf(

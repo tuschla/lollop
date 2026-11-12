@@ -1,12 +1,36 @@
 //! Test support shared by every unit-test module of the crate.
 
+use serde::de::DeserializeOwned;
+
 use crate::gps::EARTH_RADIUS_M;
+use crate::wire::{Body, Registry, Shape, VariantBody, Wire};
 
 pub(crate) mod fit_writer;
 
 /// Metres per degree of latitude, or of longitude on the equator, for the
 /// core's haversine: `x` metres is `x / M_PER_DEG` degrees.
 pub(crate) const M_PER_DEG: f64 = EARTH_RADIUS_M * std::f64::consts::PI / 180.0;
+
+/// Every unit variant of the wire enum `T`, in declaration order, each
+/// decoded from its wire name in the [`Registry`], so a list built from it
+/// grows with the enum.
+pub(crate) fn unit_variants<T: Wire + DeserializeOwned>() -> Vec<T> {
+    let mut reg = Registry::default();
+    let Shape::Named(name) = T::shape(&mut reg) else {
+        panic!("a wire enum is a named type")
+    };
+    let Some(Body::Enum { variants, .. }) = reg.get(name).map(|t| &t.body) else {
+        panic!("{name} is a wire enum")
+    };
+    variants
+        .iter()
+        .filter(|v| v.body == VariantBody::Unit)
+        .map(|v| {
+            serde_json::from_value(serde_json::Value::String(v.name.to_owned()))
+                .unwrap_or_else(|e| panic!("{name}::{} decodes from its wire name: {e}", v.ident))
+        })
+        .collect()
+}
 
 /// SplitMix64: a seedable stream; `SplitMix(x).next()` is one step from `x`.
 pub(crate) struct SplitMix(pub(crate) u64);

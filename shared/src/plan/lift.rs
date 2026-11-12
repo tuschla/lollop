@@ -22,29 +22,19 @@ use super::day::LiftDay;
 use super::regions::WeekRegions;
 use super::volume::sized_sets;
 
-/// KB core movement patterns + the File-03 catalog compound that FILLS each when
-/// the user's log leaves it uncovered (exercise_entry-known names → real long-
-/// length / SFR lookups). These are the KB's named horizontal defaults; using
-/// them turns a one-pattern (e.g. leg-heavy) log into a balanced week
-/// (STR-SESSION-BALANCE-001).
+/// KB core movement patterns + the compound that FILLS each when the user's
+/// log leaves it uncovered (exercise_entry-known names → real long-length /
+/// SFR lookups); using them turns a one-pattern (e.g. leg-heavy) log into a
+/// balanced week (STR-SESSION-BALANCE-001). The hinge is the conventional
+/// deadlift: these days train a max-strength or power goal, so the hinge is
+/// the lift whose 1RM they build (KB strength-035, STR-COMP-ANCHOR-001:
+/// anchor strength work on the competition lift; movement/ROM specificity).
 const CORE_PATTERN_FILLS: &[(MovementPattern, &str)] = &[
     (MovementPattern::Squat, "Back squat"),
-    (MovementPattern::Hinge, "Romanian deadlift"),
+    (MovementPattern::Hinge, "Deadlift"),
     (MovementPattern::Push, "Bench press"),
     (MovementPattern::Pull, "Cable row"),
 ];
-
-/// The fill for a core pattern under a lifting goal. A max-strength or power
-/// goal fills the hinge with the conventional deadlift, the lift whose 1RM it
-/// is training (KB strength-035, STR-COMP-ANCHOR-001: anchor strength work on
-/// the competition lift; movement/ROM specificity); hypertrophy keeps the
-/// File-03 catalog's Romanian deadlift (long-length hamstring work).
-fn core_fill(pat: MovementPattern, catalog: &'static str, goal: LiftGoal) -> &'static str {
-    match (pat, goal) {
-        (MovementPattern::Hinge, LiftGoal::MaxStrength | LiftGoal::Power) => "Deadlift",
-        _ => catalog,
-    }
-}
 
 /// Exercises per lift day: the DUP primary plus accessories covering the other
 /// core patterns; ~3-4 spans squat/hinge/push/pull (STR-SESSION-BALANCE-001).
@@ -52,9 +42,8 @@ const MAX_LIFTS_PER_DAY: usize = 4;
 
 /// A lift day's exercises, pattern-balanced (STR-SESSION-BALANCE-001): the
 /// user's logged lifts first (each anchored → a load), one per core pattern,
-/// then catalog fills for the missing patterns (→ RIR). A strength or power goal
-/// fills the hinge with the competition deadlift (STR-COMP-ANCHOR-001).
-pub(super) fn main_lifts(anchors: &LiftAnchors, goal: LiftGoal) -> Vec<String> {
+/// then [`CORE_PATTERN_FILLS`] for the missing patterns (→ RIR).
+pub(super) fn main_lifts(anchors: &LiftAnchors) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut covered: Vec<MovementPattern> = Vec::new();
     // 1. Logged lifts, newest first: one per core pattern (a repeat would
@@ -92,8 +81,7 @@ pub(super) fn main_lifts(anchors: &LiftAnchors, goal: LiftGoal) -> Vec<String> {
     });
     // 2. Fill the missing core patterns from the catalog; `same_movement` keeps
     //    a logged "Smith machine back squat" from repeating as "Back squat".
-    for &(pat, catalog) in CORE_PATTERN_FILLS {
-        let def = core_fill(pat, catalog, goal);
+    for &(pat, def) in CORE_PATTERN_FILLS {
         if out.len() >= MAX_LIFTS_PER_DAY {
             break;
         }

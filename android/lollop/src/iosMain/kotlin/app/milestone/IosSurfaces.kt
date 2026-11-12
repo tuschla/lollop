@@ -31,10 +31,12 @@ public interface IosSurfaceHost {
 
 /** Where the app's surfaces outside its window go. Main thread. */
 public object IosSurfaces {
-    private var host: IosSurfaceHost? = null
-
     private class State {
+        var host: IosSurfaceHost? = null
         var widget: String? = null
+
+        // The recording run's last frame; null while no run records.
+        var run: RunSurfaceState? = null
     }
 
     private val state by ProcessLocal { State() }
@@ -44,9 +46,9 @@ public object IosSurfaces {
      * run's and rest's activities, at once; every change after.
      */
     public fun install(host: IosSurfaceHost) {
-        this.host = host
-        RunActivity.sink = HostRunSink
+        state.host = host
         state.widget?.let(host::publishWidget)
+        state.run?.let(::showRun)
         RestAlarm.showCountdownAgain(PlatformContext.INSTANCE)
     }
 
@@ -54,29 +56,31 @@ public object IosSurfaces {
     internal fun publishWidget(json: String) {
         if (json == state.widget) return
         state.widget = json
-        host?.publishWidget(json)
+        state.host?.publishWidget(json)
+    }
+
+    /** Show the recording run's frame [run] in its activity. */
+    internal fun showRun(run: RunSurfaceState) {
+        state.run = run
+        val host = state.host ?: return
+        val live = runLiveOf(run, AppSettings.theme.value, PlatformContext.INSTANCE.appResources())
+        host.updateRunActivity(iosSurfaceJson.encodeToString(IosRunLive.serializer(), live))
+    }
+
+    /** The run's location stream is down: take its activity away. */
+    internal fun endRun() {
+        state.run = null
+        state.host?.endRunActivity()
     }
 
     /** Show [run] (and the [next] set) in the rest's activity. */
     internal fun showRest(run: RestRun, next: RestNextSet?) {
-        val host = host ?: return
+        val host = state.host ?: return
         val live = restLiveOf(run, next, AppSettings.theme.value, PlatformContext.INSTANCE.appResources())
         host.updateRestActivity(iosSurfaceJson.encodeToString(IosRestLive.serializer(), live))
     }
 
     internal fun endRest() {
-        host?.endRestActivity()
-    }
-
-    private object HostRunSink : RunActivitySink {
-        override fun update(state: RunSurfaceState) {
-            val host = host ?: return
-            val live = runLiveOf(state, AppSettings.theme.value, PlatformContext.INSTANCE.appResources())
-            host.updateRunActivity(iosSurfaceJson.encodeToString(IosRunLive.serializer(), live))
-        }
-
-        override fun end() {
-            host?.endRunActivity()
-        }
+        state.host?.endRestActivity()
     }
 }

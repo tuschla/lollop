@@ -11,41 +11,50 @@ package app.milestone.core
  */
 interface CoreBridge {
     /**
-     * One event's wire JSON in; the effect-request array (`[...]`) out, no
-     * bytes for a dropped (malformed or unknown) event, or a `panic_reset`
-     * error after a caught core panic (the core was replaced: replay the log).
+     * One event in; the effect-request array (`[...]`) out, no bytes for a
+     * dropped (malformed or unknown) event, or a `panic_reset` error after a
+     * caught core panic (the core was replaced: replay the log).
+     *
+     * Takes `Event` JSON.
      */
     fun update(event: ByteArray): ByteArray?
 
     /**
-     * The current `ViewModel` JSON, or a `panic` error that leaves the core
-     * intact.
+     * The current view, or a `panic` error that leaves the core intact.
+     *
+     * Answers `ViewModel` JSON.
      */
     fun view(): ByteArray?
 
     /**
-     * A run file's bytes in (FIT, GPX or TCX, sniffed from the content); its
-     * `ImportVerdict` out: the runs to log, or the one reason the file gave
-     * none. Reads no core state.
+     * A run file's bytes in (FIT, GPX or TCX, sniffed from the content); the
+     * runs to log, or the one reason the file gave none. Reads no core state.
+     *
+     * Answers `ImportVerdict` JSON.
      */
     fun parseRunFile(file: ByteArray): ByteArray?
 
     /**
-     * A `LogRunTrack` event's wire JSON in; the figures it will be saved with
-     * (`{"distance_km":D,"duration_min":M}`) out. Reads no core state.
+     * A `LogRunTrack` event in; the figures it will be saved with. Reads no
+     * core state.
+     *
+     * Takes `Event` JSON; answers `TrackFigures` JSON.
      */
     fun trackFigures(event: ByteArray): ByteArray?
 
     /**
-     * A run's `{"entry_id":I,"observed_at":T}` in; the GPX document of its
-     * route out, or no bytes for a run with no exportable route or an
-     * unknown run.
+     * A logged run in; the GPX document of its route, or no bytes for a run
+     * with no exportable route or an unknown run.
+     *
+     * Takes `RunRef` JSON.
      */
     fun exportGpx(run: ByteArray): ByteArray?
 
     /**
-     * The event log's lines in; the compaction verdict JSON out. Reads no
-     * core state.
+     * The event log's lines in; the compaction verdict out. Reads no core
+     * state.
+     *
+     * Answers `Compaction` JSON.
      */
     fun compactLog(lines: Array<String>): ByteArray?
 
@@ -55,47 +64,65 @@ interface CoreBridge {
     fun reset(): ByteArray?
 
     /**
-     * Exercise names in, one per line; their match keys out, a JSON array of
-     * strings in line order (two spellings of one exercise share a key).
-     * Reads no core state.
+     * Exercise names in, one per line; their match keys out, in line order
+     * (two spellings of one exercise share a key). Reads no core state.
+     *
+     * Answers `List<String>` JSON.
      */
     fun exerciseKeys(names: Array<String>): ByteArray?
 
     /**
-     * A `WarmUpQuery`'s JSON in; the `WarmUpStep`s before the first work
-     * set at its load out, a JSON array (empty for a lift off the straight
-     * barbell or a load at or below the first step). Reads no core state.
+     * A lift and its work set's load in; the warm-up steps before the first
+     * work set (none for a lift off the straight barbell or a load at or
+     * below the first step). Reads no core state.
+     *
+     * Takes `WarmUpQuery` JSON; answers `List<WarmUpStep>` JSON.
      */
     fun warmUpRamp(query: ByteArray): ByteArray?
 
     /**
-     * A `ProfileDraft`'s JSON in (a profile still being edited, with the
-     * health answer just given); its `DraftFacts` out: the age, the gates it
-     * would raise and the PAR-Q+ answers as the form shows them. Reads no
-     * core state.
+     * A profile still being edited, with the health answer just given; the
+     * age, the gates it would raise and the PAR-Q+ answers as the form shows
+     * them. Reads no core state.
+     *
+     * Takes `ProfileDraft` JSON; answers `DraftFacts` JSON.
      */
     fun draftFacts(draft: ByteArray): ByteArray?
 
     /**
-     * A run's `{"entry_id":I,"observed_at":T}` in; its `RunTrack` out: the
-     * fixes the GPX export writes, one list per recording segment (none for
-     * a run with no track or an unknown run).
+     * A logged run in; the fixes the GPX export writes, one list per
+     * recording segment (none for a run with no track or an unknown run).
+     *
+     * Takes `RunRef` JSON; answers `RunTrack` JSON.
      */
     fun runTrack(run: ByteArray): ByteArray?
 
     /**
-     * A `TrackThinning`'s JSON in (a recorded track's fix count, cap and
-     * segment starts); its `ThinnedTrack` out: the fixes a save or a crash
-     * recovery keeps and the segment starts among them. Reads no core state.
+     * A recorded track's fix count, cap and segment starts in; the fixes a
+     * save or a crash recovery keeps and the segment starts among them.
+     * Reads no core state.
+     *
+     * Takes `TrackThinning` JSON; answers `ThinnedTrack` JSON.
      */
     fun thinTrack(track: ByteArray): ByteArray?
 
     /**
-     * An `ImportedHr`'s JSON in; the imported run's `hr_pct_max` out, a
-     * JSON number (0.0 without samples or a measured HRmax). Reads no core
-     * state.
+     * An imported run's heart rate in; its `hr_pct_max` (0.0 without samples
+     * or a measured HRmax). Reads no core state.
+     *
+     * Takes `ImportedHr` JSON; answers `Double` JSON.
      */
     fun importedHrPct(hr: ByteArray): ByteArray?
+
+    /**
+     * A logged row in, read before the delete or edit it undoes; the event
+     * that puts it back as it is now: for a delete the logging event (a GPS
+     * run with its recorded track), for an edit the amend that restores it.
+     * `null` for an unknown row, or an edit of a GPS run or an activity.
+     *
+     * Takes `RelogQuery` JSON; answers `Event?` JSON.
+     */
+    fun relogEvent(row: ByteArray): ByteArray?
 }
 
 /**
@@ -122,6 +149,7 @@ abstract class CoreCalls : CoreBridge {
     final override fun runTrack(run: ByteArray): ByteArray? = call(10, run)
     final override fun thinTrack(track: ByteArray): ByteArray? = call(11, track)
     final override fun importedHrPct(hr: ByteArray): ByteArray? = call(12, hr)
+    final override fun relogEvent(row: ByteArray): ByteArray? = call(13, row)
 
     private companion object {
         val NO_INPUT = ByteArray(0)

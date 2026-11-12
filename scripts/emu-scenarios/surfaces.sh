@@ -80,16 +80,16 @@ out_init "$OUT_DIR"
 
 # seed_basic plus a pain report on DAY 07:30: training paused.
 seed_hold() { # seed_hold DAY
-  seed_basic "$SEED_DAY" 2
-  echo "{\"SubmitReadiness\":{\"signal\":\"Pain\",\"value\":1.0,\"observed_at\":$(TZ="$TZ0" date -d "$1 07:30" +%s),\"streak\":0,\"pain\":null,\"effort_min\":null}}"
+  seed_basic "$SEED_DAY" 2 &&
+    EV event SubmitReadiness signal=Pain value=1.0 streak=0 pain=null effort_min=null \
+      observed_at="$(TZ="$TZ0" date -d "$1 07:30" +%s)"
 }
 # A beginner runner on a couch-to-5k plan: run/walk bouts (a guided run).
 seed_c25k() {
   local y; y="$(TZ="$TZ0" date -d "$SEED_DAY 09:00" +%s)"
-  cat <<EOF
-{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"C25k","concurrent_goal":"EndurancePriority","weekly_sets":0,"running_days_per_week":3,"running_km_per_week":5.0,"advanced":false,"endurance_intensity_pct_vo2max":70.0,"bodyweight_kg":80.0,"age_years":30.0}}
-{"LogRun":{"distance_km":2.0,"duration_min":20.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":${y},"entry_id":${y}001}}
-EOF
+  seed_profile goal_distance=C25k concurrent_goal=EndurancePriority weekly_sets=0 \
+    running_days_per_week=3 running_km_per_week=5.0 bodyweight_kg=80.0 &&
+    seed_run 2.0 20.0 "$y"
 }
 # seed SEED-FN [ARG]: the seed's event log as logs/seed-SEED-FN.ndjson; echoes its path.
 seed() { "$@" >"$OUT/logs/seed-$1.ndjson" && echo "$OUT/logs/seed-$1.ndjson"; }
@@ -100,11 +100,12 @@ fresh() { local day="$1"; shift; fresh_app "$day" "$(seed "$@")"; }
 reseed() {
   local day="$1"; shift
   stop_feeder
-  adb_ shell am force-stop "$APP_ID"
+  stop_app
   push_log "$(seed "$@")" || return 1
   boot_week "$day"
 }
 snap_stale() { [[ "$(snap_field stale)" == True ]]; }
+snap_run_detail() { snapshot | python3 -c "import json,sys;print(next(i['detail'] for i in json.load(sys.stdin)['items'] if i['kind']=='Run'))"; }
 
 # Which app screen is in front: today | log | track | log_set (the open intent's
 # destinations) | other | none.
@@ -172,7 +173,7 @@ sc_links() {
   for d in "${DEST[Today]}" "${DEST[Log]}" "${DEST[Track]}" "${DEST[LogSet]}" bogus; do
     if [[ "$d" == bogus ]]; then want="${DEST[Today]}"; else want="$d"; fi
     mark "links-cold-$d"
-    adb_ shell am force-stop "$APP_ID"
+    stop_app
     open_dest "$d"
     wait_screen "$want" 25; s="$(screen)"; evidence "links-cold-$d"
     expect $S "cold start dest=$d opens $want" "screen '$s'; shots/links-cold-$d.png" test "$s" = "$want"
@@ -181,14 +182,14 @@ sc_links() {
         eval '[[ -n "$ex" ]] && q eq "$(fmt log_change_exercise_cd "$ex")" <"$OUT/ui/links-cold-$d.xml" >/dev/null'
     fi
     mark "links-warm-$d"
-    adb_ shell am force-stop "$APP_ID"; launch; wait_screen today 25
+    stop_app; launch; wait_screen today 25
     open_dest "$d"
     wait_screen "$want" 15; s="$(screen)"; evidence "links-warm-$d"
     expect $S "warm (onNewIntent) dest=$d opens $want" "screen '$s'; shots/links-warm-$d.png" test "$s" = "$want"
   done
   # A rotation must not navigate again: open log, close the sheet, rotate.
   mark links-rotate
-  adb_ shell am force-stop "$APP_ID"
+  stop_app
   open_dest "${DEST[Log]}"
   wait_screen log 25; adb_ shell input keyevent 4; wait_screen today 5
   adb_ shell settings put system accelerometer_rotation 0
@@ -298,7 +299,7 @@ sc_tilelock() {
   add_tile || check FAIL $S "tile added to Quick Settings" "not on the QS panel ~40 s after add-tile; ui/tile-added.xml"
   tilelock_case background "${STR[tile_start_run]}" track
   adb_ shell input keyevent 4; home
-  n="$(app_pid)"; [[ -n "$n" ]] && sh_ kill -9 "$n"; wait_for 5 app_gone
+  stop_app sigkill
   tilelock_case killed "${STR[tile_start_run]}" track
   adb_ shell input keyevent 4
   reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
@@ -316,7 +317,7 @@ widget_tap() {
   fi
   evidence "widget-tap-$1"
   expect $S "tap '$2' opens $3" "screen '$s'; shots/widget-tap-$1.png" test "$s" = "$3"
-  adb_ shell am force-stop "$APP_ID"; launch; wait_screen today 20; home
+  stop_app; launch; wait_screen today 20; home
 }
 sc_widget() {
   local S=widget t title open_today="${STR[widget_open_today_cd]}" log="${STR[tile_log]}"
@@ -339,16 +340,17 @@ sc_widget() {
   observe $S "widget size" "${ww} × ${wh} dp: Log beside the primary $( ((wide)) && echo yes || echo no), date line $( ((dated)) && echo yes || echo no); shots/widget-run-day.png"
   # The run line: "Run · 8 km · 5:40–6:00 /km", or on a card with room the run's
   # volume as the hero; a detail that is only a figure ("3.4 mi") is the hero
-  # alone (visual-design-system § 10, Home screen widget, Hero).
+  # alone (visual-design-system § 10, Home screen widget, Hero). The figure and
+  # its unit are glued with a no-break space, in the snapshot and on the widget.
   local fig tn run_line
-  fig="$(snapshot | python3 -c "import json,sys;print(next(i['detail'] for i in json.load(sys.stdin)['items'] if i['kind']=='Run'))")"
+  fig="$(snap_run_detail)"
   # shellcheck disable=SC2034 # read by the check below
-  tn="${t//$'\xc2\xa0'/ }" # the widget keeps a figure and its unit together with a no-break space
+  tn="${t//$'\xc2\xa0'/ }"
   title="$(snap_field title)"
   # shellcheck disable=SC2034 # read by the check below
   run_line="$(fmt widget_item_line "${STR[main_run]}" '')"
   expect $S "run day: title, run line (or its figure as the hero), ${STR[tile_start_run]} (+ $log at ${ww} dp)" "title '$title'; run detail '$fig'; $t; shots/widget-run-day.png" \
-    eval 'grep -qxF "text=$title" <<<"$t" && { grep -qF "text=$run_line" <<<"$tn" || { [[ -n "$fig" ]] && grep -qxF "text=$fig" <<<"$tn"; }; } && grep -qxF "text=${STR[tile_start_run]}" <<<"$t" && { ((!wide)) || grep -qxF "content-desc=$log" <<<"$t"; }'
+    eval 'grep -qxF "text=$title" <<<"$t" && { grep -qF "text=$run_line" <<<"$tn" || { [[ -n "$fig" ]] && grep -qxF "text=$fig" <<<"$t"; }; } && grep -qxF "text=${STR[tile_start_run]}" <<<"$t" && { ((!wide)) || grep -qxF "content-desc=$log" <<<"$t"; }'
   widget_tap run-track "${STR[tile_start_run]}" track
   if ((wide)); then widget_tap run-log "$log" log; else observe $S "tap '$log'" "not checked: no $log beside the primary at ${ww} dp wide"; fi
   widget_tap run-body "$open_today" today
@@ -483,7 +485,7 @@ live_promoted() {
 sc_guided() {
   local S=guided d found="" RUN=$RUN_NOTIF_ID
   fresh "$RUN_DAY" seed_c25k || { check FAIL $S "seeded boot" "Today never rendered"; return; }
-  for d in "$RUN_DAY" 2026-09-22 2026-09-23 2026-09-24 2026-09-25 2026-09-26 2026-09-27; do
+  for d in "$RUN_DAY" $(for i in 1 2 3 4 5 6; do date -d "$RUN_DAY +$i day" +%F; done); do
     [[ "$d" == "$RUN_DAY" ]] || boot_day "$d"
     [[ "$(snap_field kind)" == Run && "$(snap_field trackable)" == True ]] && { found=$d; break; }
   done
@@ -594,7 +596,7 @@ bg_state() { case "$(proc_state)" in cached|frozen|gone) return 0 ;; *) return 1
 rest_bg() {
   local S=restbg c="$1" mode="$2" kill="${3:-}" end pid0 pid1 st="" t0 now want delay
   mark "restbg-$c"
-  adb_ shell am force-stop "$APP_ID"
+  stop_app
   sh_ appops set "$APP_ID" SCHEDULE_EXACT_ALARM "$mode"
   launch; wait_text eq "${STR[main_dest_today]}" 40
   open_dest "${DEST[LogSet]}"
@@ -618,12 +620,11 @@ rest_bg() {
   t0=$SECONDS
   wait_for 120 bg_state; st="$(proc_state)"
   if [[ -n "$kill" ]]; then
-    adb_ shell am kill "$APP_ID"
-    # The kill is asynchronous, and a widget or tile broadcast may start a new
-    # process right after it: the check is that the cached pid died.
-    wait_for 5 eval '[[ "$(app_pid)" != "$pid0" ]]'
+    # A widget or tile broadcast may start a new process right after the kill:
+    # the check is that the cached pid died.
+    stop_app kill
     expect $S "$c: cached process killed (am kill)" "pid $pid0 → '$(app_pid)' (state '$st' before); $(sh_ logcat -d -b events | grep "am_kill.*$pid0," | tail -1)" \
-      eval '[[ -n "$pid0" && "$(app_pid)" != "$pid0" ]]'
+      eval '[[ -n "$pid0" ]] && pid_released "$pid0"'
   else
     expect $S "$c: app cached or frozen in the background before the rest end" \
       "state '$st' $((SECONDS - t0)) s after home; rest end in $(( end / 1000 - $(dev_now) )) s" eval '[[ "$st" == cached || "$st" == frozen ]] && [[ $(( end / 1000 )) -gt $(dev_now) ]]'
@@ -707,7 +708,7 @@ sc_toggle() {
   [[ "${p[2]}" == true ]] && { tap_xy "${p[0]}" "${p[1]}"; wait_for 5 switch_is toggle-settings-off false; }
   r="$(promo_switch toggle-settings-off)"; shot toggle-settings-off
   expect $S "Live Updates switched off in system settings" "switch checked=$(cut -d' ' -f3 <<<"$r"); shots/toggle-settings-off.png" eval '[[ "$(cut -d" " -f3 <<<"$r")" == false ]]'
-  adb_ shell am force-stop "$APP_ID"; launch; wait_screen today 20
+  stop_app; launch; wait_screen today 20
   open_tracker
   wait_for 10 eval 'notif toggle-off-run "$RUN_NOTIF_ID" | grep -qv "^null$"'
   expect $S "off: the run notification is not promoted" "flags $(nfield toggle-off-run "'|'.join(r['flags'])")" test "$(promoted toggle-off-run)" = False
@@ -743,24 +744,21 @@ REM_PIN=1234
 REM_ALARM=""
 # rem_text TITLE LINE ACTION: the "title<TAB>line<TAB>action" a reminder shows (rem_case).
 rem_text() { printf '%s\t%s\t%s' "$@"; }
-snap_run_detail() { snapshot | python3 -c "import json,sys;print(next(i['detail'] for i in json.load(sys.stdin)['items'] if i['kind']=='Run'))"; }
 rem_open_lift() { snapshot | python3 -c "import json,sys;print(next(i['name'] for i in json.load(sys.stdin)['items'] if i['kind']=='Lift' and not i['done']))"; }
-rem_set_line() { echo "{\"LogSet\":{\"exercise\":\"$1\",\"weight_kg\":$2,\"reps\":$3,\"rpe\":8.0,\"observed_at\":$4,\"entry_id\":${4}000}}"; }
 # seed_basic plus the lift day's sets from 06:00, all but the last Cable row set.
 seed_rem_lift_left() {
   local t i
   seed_basic "$SEED_DAY" 2
   t="$(TZ="$TZ0" date -d "$LIFT_DAY 06:00" +%s)"
-  for i in 1 2 3 4 5; do rem_set_line "Back Squat" 117.5 3 "$t"; t=$((t + 180)); done
-  for i in 1 2 3; do rem_set_line Deadlift 140.0 5 "$t"; t=$((t + 180)); done
-  for i in 1 2 3; do rem_set_line "Bench press" 90.0 5 "$t"; t=$((t + 180)); done
-  for i in 1 2; do rem_set_line "Cable row" 60.0 5 "$t"; t=$((t + 180)); done
+  for i in 1 2 3 4 5; do seed_set "Back Squat" 117.5 3 "$t"; t=$((t + 180)); done
+  for i in 1 2 3; do seed_set Deadlift 140.0 5 "$t"; t=$((t + 180)); done
+  for i in 1 2 3; do seed_set "Bench press" 90.0 5 "$t"; t=$((t + 180)); done
+  for i in 1 2; do seed_set "Cable row" 60.0 5 "$t"; t=$((t + 180)); done
 }
 # seed_basic plus the run day's run, logged at 07:00.
 seed_rem_run_done() {
   local y; y="$(TZ="$TZ0" date -d "$RUN_DAY 07:00" +%s)"
-  seed_basic "$SEED_DAY" 2
-  echo "{\"LogRun\":{\"distance_km\":5.5,\"duration_min\":31.0,\"hr_pct_max\":0.0,\"longest_recent_km\":0.0,\"observed_at\":$y,\"entry_id\":${y}001}}"
+  seed_basic "$SEED_DAY" 2 && seed_run 5.5 31.0 "$y"
 }
 # rem_forget: with the app stopped, drop SessionReminder's record of the local
 # days it already reminded about (at most one post per day), so that a case can
@@ -768,7 +766,7 @@ seed_rem_run_done() {
 # SELinux label.
 rem_forget() {
   local f="/data/data/$APP_ID/shared_prefs/$REMINDER_PREFS.xml"
-  adb_ shell am force-stop "$APP_ID"
+  stop_app
   adb_ shell "[ ! -f $f ] || { grep -v $REMINDED_DAYS_KEY $f >/data/local/tmp/emu-rem.xml && cat /data/local/tmp/emu-rem.xml >$f && rm /data/local/tmp/emu-rem.xml; }" ||
     log "rem_forget: $f not rewritten"
 }
@@ -1059,7 +1057,7 @@ sc_reminder() {
   # reason nothing posts.
   rem_forget
   pin_clock "$LIFT_DAY" 08:43; launch; wait_screen today 20; home
-  n="$(app_pid)"; [[ -n "$n" ]] && sh_ kill -9 "$n"; wait_for 5 app_gone
+  n="$(app_pid)"; stop_app sigkill
   # The receivers' answer to the change: 3 s.
   sh_ cmd alarm set-timezone Europe/London >/dev/null; sleep 3
   observe $S "tz-cold: app process killed before the change, not opened (by design nothing posts: today's snapshot is stale)" \

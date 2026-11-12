@@ -185,7 +185,7 @@ pub(in crate::app) fn build_run_progress(
             let w = &mut weekly[w_i];
             w.km += km;
             w.runs += 1;
-            if let Some(rpe) = r.session_rpe
+            if let Some(rpe) = r.meta.session_rpe
                 && min > 0.0
             {
                 w.srpe_load_au += load::srpe_load_au(min, rpe);

@@ -291,7 +291,7 @@ fn tie_history_undo_diffs(same_stamp_sets: bool) -> Vec<String> {
     }
     entries
         .into_iter()
-        .filter_map(|(kind, id, at, e)| undo_diff(&mut m, kind, id, at, e))
+        .filter_map(|(kind, id, at, _)| undo_diff(&mut m, kind, id, at))
         .collect()
 }
 

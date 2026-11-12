@@ -8,8 +8,6 @@ import kotlin.test.assertTrue
 
 class RunArmingTest {
 
-    // ~1 m of longitude at the equator, for building legs of a known ground speed.
-    private val degPerM = 1.0 / 111_320.0
     private fun sec(t: Long) = t * 1_000_000_000L // monotonic nanos for a whole second
 
     @Test
@@ -55,8 +53,8 @@ class RunArmingTest {
     fun movingGateFiresAtTwoLegsAndSeedsTheWholeWindowInOrder() {
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         val p0 = GpsPoint(0.0, 0.0, 0, 5.0)
-        val p1 = GpsPoint(0.0, 3.0 * degPerM, 1, 5.0) // 3 m/s
-        val p2 = GpsPoint(0.0, 6.0 * degPerM, 2, 5.0) // 3 m/s
+        val p1 = GpsPoint(0.0, 3.0 / M_PER_DEG, 1, 5.0) // 3 m/s
+        val p2 = GpsPoint(0.0, 6.0 / M_PER_DEG, 2, 5.0) // 3 m/s
         assertNull(t.offer(p0, sec(0)), "0 legs → wait")
         assertNull(t.offer(p1, sec(1)), "1 leg → wait")
         val seed = t.offer(p2, sec(2)) // 2 legs → fire
@@ -69,9 +67,9 @@ class RunArmingTest {
         // gate measures net ground over the window, so it still fires while moving.
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         val p0 = GpsPoint(0.0, 0.0, 0, 5.0)
-        val m1 = GpsPoint(0.0, 3.0 * degPerM, 1, 5.0) // clean 3 m/s leg
-        val dupe = GpsPoint(0.0, 3.0 * degPerM, 2, 5.0) // a duplicate / stationary fix
-        val m2 = GpsPoint(0.0, 6.0 * degPerM, 3, 5.0) // running continues
+        val m1 = GpsPoint(0.0, 3.0 / M_PER_DEG, 1, 5.0) // clean 3 m/s leg
+        val dupe = GpsPoint(0.0, 3.0 / M_PER_DEG, 2, 5.0) // a duplicate / stationary fix
+        val m2 = GpsPoint(0.0, 6.0 / M_PER_DEG, 3, 5.0) // running continues
         assertNull(t.offer(p0, sec(0)))
         assertNull(t.offer(m1, sec(1)))
         // The blip does NOT reset the run-up; net so far (3 m) is just under the floor.
@@ -89,9 +87,9 @@ class RunArmingTest {
         // next real fix returns to the true track.
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         val p0 = GpsPoint(0.0, 0.0, 0, 5.0)
-        val m1 = GpsPoint(0.0, 3.0 * degPerM, 1, 5.0) // clean 3 m/s
-        val spike = GpsPoint(0.0, 100.0 * degPerM, 2, 5.0) // ~97 m teleport (jitter)
-        val m2 = GpsPoint(0.0, 6.0 * degPerM, 3, 5.0) // back on the true track
+        val m1 = GpsPoint(0.0, 3.0 / M_PER_DEG, 1, 5.0) // clean 3 m/s
+        val spike = GpsPoint(0.0, 100.0 / M_PER_DEG, 2, 5.0) // a 100 m teleport (jitter)
+        val m2 = GpsPoint(0.0, 6.0 / M_PER_DEG, 3, 5.0) // back on the true track
         assertNull(t.offer(p0, sec(0)))
         assertNull(t.offer(m1, sec(1)))
         // The spike as the NEWEST fix reads implausibly fast (50 m/s) → don't fire ON
@@ -108,7 +106,7 @@ class RunArmingTest {
         // displacement stays under the floor, so no fix in the window fires.
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         listOf(0.0, 2.0, -1.0, 1.0, -2.0, 1.0).forEachIndexed { i, m ->
-            val p = GpsPoint(0.0, m * degPerM, i.toLong(), 5.0)
+            val p = GpsPoint(0.0, m / M_PER_DEG, i.toLong(), 5.0)
             assertNull(t.offer(p, sec(i.toLong())), "wander fix $i must not auto-start")
         }
     }
@@ -120,8 +118,8 @@ class RunArmingTest {
         assertNull(t.offer(GpsPoint(0.0, 0.0, 0, 40.0), sec(0)))
         // Precise + moving legs then fire, seeding the whole precise run-up.
         val a = GpsPoint(0.0, 0.0, 1, 10.0)
-        val b = GpsPoint(0.0, 3.0 * degPerM, 2, 10.0)
-        val c = GpsPoint(0.0, 6.0 * degPerM, 3, 10.0)
+        val b = GpsPoint(0.0, 3.0 / M_PER_DEG, 2, 10.0)
+        val c = GpsPoint(0.0, 6.0 / M_PER_DEG, 3, 10.0)
         assertNull(t.offer(a, sec(1)))
         assertNull(t.offer(b, sec(2)))
         val seed = t.offer(c, sec(3))
@@ -136,7 +134,7 @@ class RunArmingTest {
         var lon = 0.0
         val pts = (0..2).map {
             val p = GpsPoint(0.0, lon, it.toLong(), 5.0)
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             p
         }
         assertNull(t.offer(pts[0], sec(0)))
@@ -254,8 +252,8 @@ class RunArmingTest {
         data class Fix(val p: GpsPoint, val nanos: Long, val ageMs: Long)
         val batch = listOf(
             Fix(GpsPoint(0.0, 0.0, 0, 5.0), sec(0), nowMs - 0L),
-            Fix(GpsPoint(0.0, 12.0 * degPerM, 4, 5.0), sec(4), nowMs - 4_000L),
-            Fix(GpsPoint(0.0, 24.0 * degPerM, 8, 5.0), sec(8), nowMs - 8_000L),
+            Fix(GpsPoint(0.0, 12.0 / M_PER_DEG, 4, 5.0), sec(4), nowMs - 4_000L),
+            Fix(GpsPoint(0.0, 24.0 / M_PER_DEG, 8, 5.0), sec(8), nowMs - 8_000L),
         )
         assertTrue(batch.all { it.ageMs > ARMED_FIX_MAX_AGE_MS }, "every fix is stale")
 

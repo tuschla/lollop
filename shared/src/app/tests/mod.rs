@@ -2,9 +2,7 @@
 //! module holds the shared app fixtures.
 
 use super::*;
-use crate::app::anchors::{
-    AnchorCtx, Layoff, build_plan_anchors, build_run_anchors, build_run_week_km,
-};
+use crate::app::anchors::{AnchorCtx, Layoff, build_run_anchors, build_run_week_km};
 use crate::app::calculators::{build_hr_zones, race_band};
 use crate::app::evidence_views::grade_note_str;
 use crate::app::format::{
@@ -27,7 +25,9 @@ use crate::app::view_types::{
 use crate::autoreg::SignalGroup;
 use crate::autoreg::tests::input;
 use crate::day::DAY_SEC;
-use crate::event::{ActivityKind, Decouple, EntryKind, IntervalExec, LiftExec, SessionReview};
+use crate::event::{
+    ActivityKind, Decouple, EntryKind, IntervalExec, LiftExec, RunMeta, SessionReview,
+};
 use crate::evidence::{ClaimId, EvidenceGrade, claims};
 use crate::feedback::{self, FeedbackCategory, TrendDirection};
 use crate::gps::GpsPoint;
@@ -129,10 +129,7 @@ pub(crate) fn log_run(
         longest_recent_km,
         observed_at,
         entry_id,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
+        meta: RunMeta::default(),
     }
 }
 
@@ -168,11 +165,8 @@ fn log_run_track_seg(
         longest_recent_km,
         observed_at,
         entry_id,
-        workout_type: None,
-        session_rpe: None,
         segment_starts,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
+        meta: RunMeta::default(),
     }
 }
 
@@ -257,11 +251,8 @@ pub(in crate::app) fn logged_run(km: f64, minutes: f64, hr: f64, at: i64) -> Log
         track_segment_starts: Vec::new(),
         observed_at: at,
         entry_id: 0,
-        logged_utc_offset_sec: None,
         hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        meta: RunMeta::default(),
     }
 }
 
@@ -308,9 +299,7 @@ pub(crate) fn amend_run(
         longest_recent_km: 0.0,
         observed_at,
         observed_at_fallback: fallback,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        meta: RunMeta::default(),
     }
 }
 
@@ -322,30 +311,15 @@ pub(crate) fn with_run_meta(
     rpe: Option<u8>,
     bpm: Option<f64>,
 ) -> Event {
-    let (Event::LogRun {
-        workout_type,
-        session_rpe,
-        avg_hr_bpm,
-        ..
-    }
-    | Event::LogRunTrack {
-        workout_type,
-        session_rpe,
-        avg_hr_bpm,
-        ..
-    }
-    | Event::AmendRun {
-        workout_type,
-        session_rpe,
-        avg_hr_bpm,
-        ..
-    }) = &mut ev
+    let (Event::LogRun { meta, .. }
+    | Event::LogRunTrack { meta, .. }
+    | Event::AmendRun { meta, .. }) = &mut ev
     else {
         unreachable!("with_run_meta takes a LogRun, LogRunTrack or AmendRun")
     };
-    *workout_type = tag;
-    *session_rpe = rpe;
-    *avg_hr_bpm = bpm;
+    meta.workout_type = tag;
+    meta.session_rpe = rpe;
+    meta.avg_hr_bpm = bpm;
     ev
 }
 
@@ -423,6 +397,19 @@ fn run_anchors(runs: &[LoggedRun], today: i64, offset: i64) -> (Option<f64>, Opt
         a.longest_recent_run_km,
         a.recent_weekly_km,
         a.longest_run_detrained,
+    )
+}
+
+/// The lift anchors a plan day after local day `through` is prescribed from
+/// (`anchors::lift_anchors_through`), for `sets` stamped in UTC.
+fn anchors_through(sets: &[LoggedSet], ctx: AnchorCtx, through: i64) -> crate::plan::LiftAnchors {
+    crate::app::anchors::lift_anchors_through(
+        sets,
+        &SetIndex::new(sets),
+        &crate::app::logged_days::attribute_session_days(sets, 0),
+        ctx,
+        through,
+        0,
     )
 }
 
@@ -959,12 +946,10 @@ fn fix(x_m: f64, t: i64) -> GpsPoint {
 /// `ev` (a [`log_run`] or [`log_run_track`] event) stamped with the device's
 /// UTC offset at logging time, as the shell logs it.
 fn stamped(mut ev: Event, offset: i64) -> Event {
-    let (Event::LogRun { utc_offset_sec, .. } | Event::LogRunTrack { utc_offset_sec, .. }) =
-        &mut ev
-    else {
+    let (Event::LogRun { meta, .. } | Event::LogRunTrack { meta, .. }) = &mut ev else {
         unreachable!("stamped takes a LogRun or LogRunTrack")
     };
-    *utc_offset_sec = Some(offset);
+    meta.utc_offset_sec = Some(offset);
     ev
 }
 
@@ -1072,16 +1057,33 @@ fn delete_of(kind: EntryKind, entry_id: u64, observed_at: i64) -> Event {
     }
 }
 
-/// Delete History row `(kind, id, at)` ([`delete_of`]), then send `restore`,
-/// the event the caller's Undo logs it again with (the shell's
-/// `restoreEventFor` mirror, or the original log event). `None` when the
-/// delete removed exactly one row and the Undo renders the view byte for
-/// byte as before; else what differed (the first differing JSON path).
-fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, restore: Event) -> Option<String> {
+/// The event the core answers the shell's `RelogEvent` op with for row
+/// `(kind, id, at)` ([`crate::app::relog_event`]), passed through the wire
+/// JSON as the bridge passes it.
+fn relogged(
+    m: &Model,
+    kind: EntryKind,
+    id: u64,
+    at: i64,
+    amended_at: Option<i64>,
+) -> Option<Event> {
+    let event = crate::app::relog_event(m, kind, id, at, amended_at)?;
+    let json = serde_json::to_string(&event).expect("an event serializes");
+    Some(serde_json::from_str(&json).expect("the shell's copy decodes"))
+}
+
+/// Delete History row `(kind, id, at)` ([`delete_of`]), then Undo it with
+/// its [`relogged`] event, read before the delete. `None` when the delete
+/// removed exactly one row and the Undo renders the view byte for byte as
+/// before; else what differed (the first differing JSON path).
+fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64) -> Option<String> {
     let rows = |vm: &ViewModel| match kind {
         EntryKind::Set => vm.lifts.len(),
         EntryKind::Run => vm.runs.len(),
         EntryKind::Activity => vm.activities.len(),
+    };
+    let Some(restore) = relogged(m, kind, id, at, None) else {
+        return Some(format!("no Undo for {kind:?} {id}@{at}"));
     };
     let before = Engine.view(m);
     let _ = Engine.update(delete_of(kind, id, at), m);
@@ -1099,4 +1101,25 @@ fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, restore: Event) -
             json_diff(&before, &after)
         )
     })
+}
+
+/// The CR-10 ceiling a run target's effort cue states (`"effort 3–4 of 10…"`
+/// → 4), `None` when it states none.
+pub(crate) fn effort_ceiling(t: &RunTargetView) -> Option<u8> {
+    let (head, _) = t.effort_cue.split_once(" of 10")?;
+    head.rsplit(['–', ' ']).next()?.parse().ok()
+}
+
+/// The highest CR-10 ceiling of an easy-family run: recovery, easy or long
+/// run (running-014…016).
+pub(crate) fn easy_effort_ceiling() -> u8 {
+    [
+        RunSessionType::Recovery,
+        RunSessionType::Easy,
+        RunSessionType::LongRun,
+    ]
+    .into_iter()
+    .filter_map(|k| running::workout_rx(k).value.rpe.map(|(_, hi)| hi))
+    .max()
+    .expect("the easy bands state an effort")
 }

@@ -1,5 +1,6 @@
 package app.milestone
 
+import app.milestone.core.CoreBridge
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,14 +37,14 @@ class DurableCoreTest : PlatformTest() {
     @Test
     fun aFreshInstallAppendsAndAReturningOneReplays() {
         val (_, first) = core()
-        assertTrue(first.restoreFrom(log), "no log yet: a fresh install")
+        assertTrue(first.restore(log), "no log yet: a fresh install")
         val sent = first.sendAll(listOf(set(1), set(2), Event.SetToday(20_000)))
         assertTrue(sent.accepted && sent.persisted && !sent.stale)
         assertEquals(3, sent.view.input_count, "the view reflects every applied event")
         assertEquals(listOf(wire(set(1)), wire(set(2))), lines(), "persisted events only, one per line")
 
         val (script, second) = core()
-        assertFalse(second.restoreFrom(log), "a log exists: a returning user")
+        assertFalse(second.restore(log), "a log exists: a returning user")
         assertEquals(lines(), script.applied, "boot replays the log in order")
         assertEquals(2L, EventLog.read(log, second).maxEntryId)
     }
@@ -51,15 +52,15 @@ class DurableCoreTest : PlatformTest() {
     @Test
     fun aLogWithNoLinesLeftIsNotAFreshInstall() {
         write(listOf(""))
-        assertFalse(core().second.restoreFrom(log))
+        assertFalse(core().second.restore(log))
     }
 
     @Test
     fun aSecondRestoreInTheSameProcessReplaysNothing() {
         write(listOf(wire(set(1))))
         val (script, engine) = core()
-        engine.restoreFrom(log)
-        assertFalse(engine.restoreFrom(log))
+        engine.restore(log)
+        assertFalse(engine.restore(log))
         assertEquals(1, script.applied.size, "replayed once")
     }
 
@@ -70,7 +71,7 @@ class DurableCoreTest : PlatformTest() {
         assertFalse(AppFiles.endsWithNewline(log))
 
         val (script, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertEquals(listOf(wire(set(1))), script.applied, "the torn line is not replayed")
         assertEquals(listOf(wire(set(1))), lines(), "boot rewrote the log without it")
         assertTrue(AppFiles.endsWithNewline(log))
@@ -82,7 +83,7 @@ class DurableCoreTest : PlatformTest() {
     @Test
     fun aFailedAppendIsReportedAndTheNextAppendLeadsWithANewline() {
         val (_, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertTrue(engine.send(set(1)).persisted)
 
         // A log path that can't be written (its directory is missing): the core
@@ -109,7 +110,7 @@ class DurableCoreTest : PlatformTest() {
             (1..dropped * EventLog.REWRITE_MIN_DROPPED_SHARE_INVERSE - 1).map { wire(Event.ComputeHrZones(30.0 + it)) }
         write(old + kept)
         val (script, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertEquals(kept, script.applied, "the compacted replay")
         assertEquals(kept, lines(), "$dropped dropped lines are worth a rewrite")
         assertEquals(dropped + 1L, EventLog.read(log, engine).maxEntryId, "boot raises the entry ids above this")
@@ -122,7 +123,7 @@ class DurableCoreTest : PlatformTest() {
         val original = listOf(wire(set(1)), wire(Event.ClearSets)) + fill
         write(original)
         val (script, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertEquals(original.drop(1), script.applied)
         assertEquals(original, lines(), "dropping one line of ${original.size} is not worth an fsync")
     }
@@ -133,7 +134,7 @@ class DurableCoreTest : PlatformTest() {
         AppFiles.writeLinesSynced(bak, listOf(wire(set(1))))
         AppFiles.writeLinesSynced(AppFiles.sibling(log, AppFileNames.IMPORT_SUFFIX), listOf(wire(set(9))))
         val (script, engine) = core()
-        assertFalse(engine.restoreFrom(log), "the set-aside log is put back: not a fresh install")
+        assertFalse(engine.restore(log), "the set-aside log is put back: not a fresh install")
         assertEquals(listOf(wire(set(1))), script.applied)
         assertFalse(AppFiles.exists(bak))
         assertFalse(AppFiles.exists(AppFiles.sibling(log, AppFileNames.IMPORT_SUFFIX)))
@@ -142,7 +143,7 @@ class DurableCoreTest : PlatformTest() {
     @Test
     fun aPanicResetRebuildsTheCoreFromTheLogAndKeepsTheClock() {
         val (script, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         engine.send(set(1))
         val today = Event.SetToday(20_000)
         engine.send(today)
@@ -162,7 +163,7 @@ class DurableCoreTest : PlatformTest() {
         write(listOf(wire(set(1)), wire(set(2)), wire(set(3))))
         val script = FakeCore().apply { poison = setOf(wire(set(2))) }
         val (_, engine) = core(script)
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertEquals(listOf(wire(set(1)), wire(set(3))), script.applied)
         assertTrue(engine.send(set(4)).stale, "the core misses a saved line until the next boot")
     }
@@ -171,7 +172,7 @@ class DurableCoreTest : PlatformTest() {
     fun anUnreadableLogStartsEmptyAndDegraded() {
         // A directory where the log should be: it exists but can't be read or appended to.
         val (script, engine) = core()
-        assertFalse(engine.restoreFrom(dir))
+        assertFalse(engine.restore(dir))
         assertTrue(script.applied.isEmpty())
         val r = engine.send(set(1))
         assertTrue(r.accepted, "the core still works in memory")
@@ -182,7 +183,7 @@ class DurableCoreTest : PlatformTest() {
     @Test
     fun aFailingViewKeepsTheLastGoodOneAndIsStale() {
         val (script, engine) = core()
-        engine.restoreFrom(log)
+        engine.restore(log)
         assertEquals(1, engine.send(set(1)).view.input_count)
         script.viewFails = true
         val r = engine.send(set(2))
@@ -202,11 +203,21 @@ class DurableCoreTest : PlatformTest() {
         val (_, engine) = core(script)
         assertFalse(engine.probe())
         assertTrue(engine.unavailable)
-        assertFalse(engine.restoreFrom(log))
+        assertFalse(engine.restore(log))
         assertFalse(engine.send(set(2)).accepted)
         assertTrue(script.applied.isEmpty())
         assertEquals(listOf(wire(set(1))), lines())
         assertNull(engine.compaction(lines()), "no verdict from an unavailable core")
+    }
+
+    @Test
+    fun aQueryTheCoreRefusesAnswersNull() {
+        val refused = coreErrorJson(ErrorKind.Panic, "track_figures").encodeToByteArray()
+        val engine = DurableCore(object : CoreBridge by FakeCore() {
+            override fun trackFigures(event: ByteArray) = refused
+        })
+        val track = Event.LogRunTrack(listOf(GpsPoint(47.0, 8.0, 1_725_904_800, 5.0)), 0.0, observedAt = 1_725_904_800, entryId = 1)
+        assertNull(engine.savedFigures(track), "an error envelope is no figures, not 0 km in 0 min")
     }
 
     @Test

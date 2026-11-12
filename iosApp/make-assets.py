@@ -159,18 +159,6 @@ def main():
             })
     write_set("LaunchLogo.imageset", {"images": entries, "info": {"author": "xcode", "version": 1}}, images)
 
-    # The launch ground: the splash's white, black in dark mode (values/colors_launch.xml splash_bg_*).
-    color = lambda v, appearance=None: {
-        "idiom": "universal",
-        "color": {"color-space": "srgb", "components": {"red": v, "green": v, "blue": v, "alpha": "1.000"}},
-        **({"appearances": [{"appearance": "luminosity", "value": appearance}]} if appearance else {}),
-    }
-    d = ASSETS / "LaunchBackground.colorset"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "Contents.json").write_text(json.dumps(
-        {"colors": [color("1.000"), color("0.000", "dark")], "info": {"author": "xcode", "version": 1}},
-        indent=2) + "\n")
-
     write_widget_icons()
 
 

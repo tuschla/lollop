@@ -162,8 +162,7 @@ class RatingScaleTest {
                 }
             }
         }
-        val labels = listOf(WorkoutType.Easy, WorkoutType.Recovery, WorkoutType.Steady, WorkoutType.LongRun, WorkoutType.Tempo, WorkoutType.Interval)
-        val lefts = labels.map { rule.onNodeWithTag("run-type-${it.name}").fetchSemanticsNode().boundsInRoot.left }
+        val lefts = WorkoutType.entries.map { rule.onNodeWithTag("run-type-${it.name}").fetchSemanticsNode().boundsInRoot.left }
         assertTrue("chips flow left to right in runner order: $lefts", lefts.first() < lefts[1])
         rule.onNodeWithText(str(R.string.run_type_tempo)).performClick()
         assertEquals(WorkoutType.Tempo, type)

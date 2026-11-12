@@ -34,8 +34,8 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
-	<!-- The Android splash: the brand mark on white, white on black in dark mode
-	     (Assets.xcassets, rendered by iosApp/make-assets.py). -->
+	<!-- The Android splash: the brand mark on the default theme's ground
+	     (LaunchBackground, written by GeneratedSourcesTest from Palette.kt). -->
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

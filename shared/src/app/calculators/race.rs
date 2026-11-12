@@ -66,8 +66,8 @@ pub(in crate::app) fn race_band(q: &RaceQuery, longest_logged_km: Option<f64>) -
 
 /// The graded finish-time prediction of [`race_band`]. Agreement within ~2%
 /// collapses to a single time; otherwise a low–high range is shown so neither
-/// method's false precision stands alone. Degenerate input yields an empty
-/// (`-`) prediction. Distances in the notes read in `unit`.
+/// method's false precision stands alone. Degenerate input yields no
+/// prediction (`predicted` is `None`). Distances in the notes read in `unit`.
 pub(in crate::app) fn to_race_view(
     q: &RaceQuery,
     longest_logged_km: Option<f64>,
@@ -87,18 +87,16 @@ pub(in crate::app) fn to_race_view(
     // A derate can open a span even where the two methods agreed.
     let single = low_sec == high_sec;
     let predicted = if degenerate {
-        "-".to_string()
+        None
     } else if single {
-        fmt_clock(low_sec)
+        Some(fmt_clock(low_sec))
     } else {
-        format!("{}–{}", fmt_clock(low_sec), fmt_clock(high_sec))
+        Some(format!("{}–{}", fmt_clock(low_sec), fmt_clock(high_sec)))
     };
-    let summary = if degenerate {
-        format!("{goal_label}: enter a recent race to get a prediction")
-    } else if agreed {
-        format!("{goal_label} ≈ {predicted} (two prediction methods agree)")
-    } else {
-        format!("{goal_label} ≈ {predicted} (range from two prediction methods)")
+    let summary = match &predicted {
+        None => format!("{goal_label}: enter a recent race to get a prediction"),
+        Some(p) if agreed => format!("{goal_label} ≈ {p} (two prediction methods agree)"),
+        Some(p) => format!("{goal_label} ≈ {p} (range from two prediction methods)"),
     };
 
     // Caveats on the prediction; a degenerate view has none to qualify.

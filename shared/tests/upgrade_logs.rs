@@ -112,6 +112,7 @@ const REMOVED: &[&str] = &[
     ".next_session.adjustment.neutral",
     ".next_session.items[].intensity",
     ".next_session.items[].rep_count",
+    ".next_session.items[].run_target.band",
     ".next_session.items[].run_target.hr_high_bpm",
     ".next_session.items[].run_target.hr_low_bpm",
     ".next_session.items[].run_target.hr_max_bpm",
@@ -152,6 +153,7 @@ const REMOVED: &[&str] = &[
     ".week_plan[].adjustment.neutral",
     ".week_plan[].items[].intensity",
     ".week_plan[].items[].rep_count",
+    ".week_plan[].items[].run_target.band",
     ".week_plan[].items[].run_target.hr_high_bpm",
     ".week_plan[].items[].run_target.hr_low_bpm",
     ".week_plan[].items[].run_target.hr_max_bpm",
@@ -233,6 +235,10 @@ fn diffs(path: &str, expected: &Value, got: &Value, out: &mut Vec<String>) {
         // Copy, sent as its sentences now so the shell never splits the text.
         (Value::String(_), Value::Array(g))
             if path.ends_with(".why.basis") && g.iter().all(Value::is_string) => {}
+        // "Nothing would sharpen this call" was sent as "-" ("" on a card with no
+        // data need) and is null now (BUGS.md 2026-11-11).
+        (Value::String(s), Value::Null)
+            if path.ends_with(".why.improves") && (s == "-" || s.is_empty()) => {}
         // A best-effort label is copy: a rewording is not a difference.
         (Value::String(_), Value::String(_)) if shape(path).ends_with(".best_effort_labels[]") => {}
         _ if expected == got => {}

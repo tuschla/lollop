@@ -21,7 +21,7 @@ use crate::event::SessionReview;
 use crate::evidence::claims;
 use crate::feedback::FeedbackCategory;
 use crate::profile::DistanceUnit;
-use crate::schema::{Recommended, WorkoutType};
+use crate::schema::Recommended;
 use crate::{autoreg, feedback, running};
 
 /// Days a win (a new best, a completed week, a session or run done as planned,
@@ -126,7 +126,7 @@ pub(in crate::app) struct TrackSplit {
 pub(in crate::app) fn feedback_track_split(model: &Model, facts: &RunFacts) -> Option<TrackSplit> {
     let i = latest_tracked_run(model)?;
     let r = &model.runs[i];
-    if r.workout_type == Some(WorkoutType::Interval) {
+    if r.meta.workout_type.map(running::tagged_hard_kind) == Some(running::HardRunKind::Interval) {
         return None;
     }
     let card = run_card(r, facts.keys[i], facts.qc[i].as_deref(), DistanceUnit::Km);

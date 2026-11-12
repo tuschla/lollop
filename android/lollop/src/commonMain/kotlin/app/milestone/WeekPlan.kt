@@ -110,7 +110,8 @@ private fun weekDayStatusPhrase(status: SessionStatus): StringResource = when (s
     SessionStatus.Planned -> Res.string.main_week_a11y_planned
 }
 
-private fun disciplineLabel(s: SessionPlanView): String = s.session_type.discipline.name
+@Composable
+private fun disciplineLabel(s: SessionPlanView): String = stringResource(s.session_type.discipline.labelRes)
 
 /** What a week day's sessions can do: log an item or a run dated to that day,
  *  end or reopen an exercise, move a session. */
@@ -618,12 +619,13 @@ private fun WeekStripDay(
     val todayPrefix = stringResource(Res.string.main_a11y_today_prefix)
     val phrase = stringResource(weekDayStatusPhrase(s.status))
     val phraseOn = creditedFrom?.let { stringResource(Res.string.main_week_a11y_on, phrase, weekdayFull(it)) }
+    val discipline = disciplineLabel(s)
     val dayDesc = buildString {
         if (isToday) append(todayPrefix)
         append(weekdayFull(s.epoch_day))
         append(", ")
         if (!beforePlan) {
-            append(disciplineLabel(s))
+            append(discipline)
             append(", ")
         }
         append(phraseOn ?: phrase)
@@ -660,7 +662,7 @@ private fun WeekStripDay(
             maxLines = 1,
         )
         Text(
-            if (beforePlan) "\u2014" else disciplineLabel(s),
+            if (beforePlan) "\u2014" else discipline,
             color = OnBgMuted,
             style = Type.Chip,
             maxLines = 1,

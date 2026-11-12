@@ -121,7 +121,7 @@ config old "$OLD ($(sha256sum "$OLD" | cut -c1-16))"
 [[ -n "$MID" ]] && config mid "$MID ($(sha256sum "$MID" | cut -c1-16))"
 config new "$NEW ($(sha256sum "$NEW" | cut -c1-16))"
 session_start "$AVD" 2048
-seed_basic "$SEED_DAY" 2 >"$SEED"
+seed_basic "$SEED_DAY" 2 >"$SEED" || die "seed_basic failed"
 
 mark old-install
 expect $S "old build boots the seeded profile" "Today rendered" old_install
@@ -222,7 +222,7 @@ if [[ -n "$MID" ]]; then
   expect $S "reminder alarm set after the update" "mid '$MID_ALARM' → '$A1'" test -n "$A1"
 fi
 # A second process start reads what the first one rewrote.
-adb_ shell am force-stop "$APP_ID"; launch
+stop_app; launch
 expect $S "second launch of the new build" "Today rendered" wait_text pre "$HERO" 40
 pull_log "$OUT/logs/new-2.ndjson"
 observe $S "log after the second launch" "$(facts "$OUT/logs/new-2.ndjson")"

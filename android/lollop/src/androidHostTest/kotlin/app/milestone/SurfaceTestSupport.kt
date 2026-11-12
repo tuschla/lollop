@@ -7,9 +7,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.service.quicksettings.TileService
+import androidx.core.content.IntentCompat
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetSnapshot
 import java.lang.reflect.Proxy
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
@@ -75,4 +77,10 @@ internal fun fireRestEnd(ctx: Context) = RestEndReceiver().onReceive(ctx, restEn
 internal fun resetRest(ctx: Context) {
     AppRuntime.resetForTest(clock = TestClock)
     RestAlarm.cancel(ctx)
+}
+
+/** The intent a share sheet ([Intent.ACTION_CHOOSER], [chooser]) offers. */
+internal fun sharedIntent(chooser: Intent?): Intent {
+    assertEquals("the share sheet opened", Intent.ACTION_CHOOSER, chooser?.action)
+    return checkNotNull(IntentCompat.getParcelableExtra(chooser!!, Intent.EXTRA_INTENT, Intent::class.java)) { "no share intent" }
 }

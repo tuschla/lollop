@@ -105,19 +105,29 @@ pub enum HardRunKind {
     Interval,
 }
 
-/// Classify a run for the weekly hard-run cap check. A tagged Tempo run is
-/// threshold and a tagged Interval run is interval, regardless of average HR (a
-/// correctly executed tempo must not be charged as interval volume). An untagged
+/// The effort class a run's tag declares: Tempo is threshold work, Interval is
+/// interval work, every other type is easy ([`HardRunKind::None`]).
+pub fn tagged_hard_kind(workout_type: WorkoutType) -> HardRunKind {
+    match workout_type {
+        WorkoutType::Easy | WorkoutType::Recovery | WorkoutType::Steady | WorkoutType::LongRun => {
+            HardRunKind::None
+        }
+        WorkoutType::Tempo => HardRunKind::Threshold,
+        WorkoutType::Interval => HardRunKind::Interval,
+    }
+}
+
+/// Classify a run for the weekly hard-run cap check. A run tagged hard
+/// ([`tagged_hard_kind`]) counts as its tag says, regardless of average HR (a
+/// correctly executed tempo must not be charged as interval volume). Any other
 /// run falls back to its average %HRmax: below the T floor (88 %HRmax,
 /// running-018) it is neither; 88–95 % is threshold; ≥95 % is interval
 /// (running-019). `pct_hr_max` is a percent (e.g. 90.0), not a fraction.
 pub fn classify_hard_run(pct_hr_max: f64, workout_type: Option<&WorkoutType>) -> HardRunKind {
-    match workout_type {
-        Some(WorkoutType::Tempo) => return HardRunKind::Threshold,
-        Some(WorkoutType::Interval) => return HardRunKind::Interval,
-        _ => {}
-    }
-    if pct_hr_max < THRESHOLD_FLOOR_PCT_HRMAX {
+    let tagged = workout_type.map_or(HardRunKind::None, |t| tagged_hard_kind(*t));
+    if tagged != HardRunKind::None {
+        tagged
+    } else if pct_hr_max < THRESHOLD_FLOOR_PCT_HRMAX {
         HardRunKind::None
     } else if pct_hr_max < INTERVAL_FLOOR_PCT_HRMAX {
         HardRunKind::Threshold

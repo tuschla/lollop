@@ -8,9 +8,10 @@
 //! (`gps::export_gpx`). Each `<trk>` is one run. Everything else (waypoints,
 //! routes, metadata) is ignored.
 
+use super::number::{kt_to_double, kt_trim};
+use super::raw::{RawFix, RawRun, hr_bpm};
 use super::time::parse_import_time_sec;
 use super::xml::{Event, Malformed, pull_tags};
-use super::{RawFix, RawRun, hr_bpm, kt_to_double, kt_trim};
 use crate::gps::hdop_accuracy_m;
 
 /// One [`RawRun`] per `<trk>` that holds fixes: its segments (one per

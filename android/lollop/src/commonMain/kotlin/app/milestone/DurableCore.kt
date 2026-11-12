@@ -7,6 +7,7 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
 
 /**
@@ -80,15 +81,10 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
      *  QC and derivation (the same as the saved run's card), so the Finish review
      *  shows what History will list. Null when the core can't answer. O(fixes):
      *  fine on the main thread for a capped (decimated) track. */
-    fun savedFigures(track: Event.LogRunTrack): TrackFigures? {
-        val json = query { bridge.trackFigures(track.toJson().toString().encodeToByteArray()) } ?: return null
-        return try {
-            coreJson.decodeFromString(TrackFigures.serializer(), json)
-        } catch (e: SerializationException) {
-            PlatformLog.w("Core", "track figures unreadable", e)
-            null
+    fun savedFigures(track: Event.LogRunTrack): TrackFigures? =
+        decodeQuery("track figures", TrackFigures.serializer()) {
+            bridge.trackFigures(track.toJson().toString().encodeToByteArray())
         }
-    }
 
     /** The core's import verdict on a run file's [bytes] (`ParseRunFile`: FIT, GPX or
      *  TCX): the runs to log, or why the file holds none; null when the core can't
@@ -137,11 +133,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         }
 
     private inline fun <T> decodeQuery(what: String, serializer: KSerializer<T>, call: () -> ByteArray?): T? {
-        val json = query(call) ?: return null
-        if (isCoreErrorEnvelope(json)) {
-            PlatformLog.w("Core", "$what failed: $json")
-            return null
-        }
+        val json = answer(what, call) ?: return null
         return try {
             coreJson.decodeFromString(serializer, json)
         } catch (e: SerializationException) {
@@ -155,12 +147,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
      *  that can't answer. Heavy, so off the main thread. */
     fun runGpx(entryId: Long, observedAt: Long): String {
         val run = coreJson.encodeToString(RunRef.serializer(), RunRef(entryId, observedAt))
-        val gpx = query { bridge.exportGpx(run.encodeToByteArray()) } ?: return ""
-        if (isCoreErrorEnvelope(gpx)) {
-            PlatformLog.w("Core", "GPX export failed: $gpx")
-            return ""
-        }
-        return gpx
+        return answer("GPX export") { bridge.exportGpx(run.encodeToByteArray()) }.orEmpty()
     }
 
     /** The route fixes of ONE logged run (the fixes its GPX export writes), one list
@@ -173,33 +160,36 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
             ?.segments.orEmpty()
     }
 
-    /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
-     *  the core can't answer: the caller then keeps every line. */
-    override fun compaction(lines: List<String>): Compaction? {
-        val json = query { bridge.compactLog(lines.toTypedArray()) } ?: return null
-        if (isCoreErrorEnvelope(json)) {
-            PlatformLog.w("Core", "compaction failed, keeping every line: $json")
-            return null
-        }
-        return try {
-            coreJson.decodeFromString(Compaction.serializer(), json)
-        } catch (e: SerializationException) {
-            PlatformLog.w("Core", "compaction verdict unreadable, keeping every line", e)
-            null
-        }
+    /** The event that puts the logged [row] back as it is now (`RelogEvent` op): for
+     *  a delete's Undo the logging event, for an edit's Undo ([RelogQuery.amendedAt])
+     *  the amend that restores it. Null for an unknown row, an edit no amend undoes
+     *  (a GPS run, an activity), or a core that can't answer. Off the main thread. */
+    fun relogEvent(row: RelogQuery): Event? {
+        val query = coreJson.encodeToString(RelogQuery.serializer(), row)
+        return decodeQuery("re-log", Event.serializer().nullable) { bridge.relogEvent(query.encodeToByteArray()) }
     }
 
+    /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
+     *  the core can't answer: the caller then keeps every line. */
+    override fun compaction(lines: List<String>): Compaction? =
+        decodeQuery("log compaction", Compaction.serializer()) { bridge.compactLog(lines.toTypedArray()) }
+
     /** A core call outside the event path, as text: null when the library didn't
-     *  load, the core is [unavailable], the answer couldn't be allocated, or the
-     *  call hit a missing native symbol. */
-    private inline fun query(call: () -> ByteArray?): String? {
+     *  load, the core is [unavailable], the answer couldn't be allocated or is an
+     *  error envelope, or the call hit a missing native symbol. */
+    private inline fun answer(what: String, call: () -> ByteArray?): String? {
         if (loadError != null || unavailable) return null
-        return try {
+        val text = try {
             call()?.decodeToString()
         } catch (e: Throwable) {
             if (!e.isLinkageError()) throw e
             null
+        } ?: return null
+        if (isCoreErrorEnvelope(text)) {
+            PlatformLog.w("Core", "$what failed: $text")
+            return null
         }
+        return text
     }
 
     // Append-only, newline-delimited event log. The crux core holds all state in
@@ -213,7 +203,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     private var restored = false
 
     /**
-     * Point the core at [ctx]'s event log and replay it to rebuild state. Safe to
+     * Point the core at the event log [file] and replay it to rebuild state. Safe to
      * call on every Activity creation: replay runs only on the first call per
      * process. Returns true only on a genuinely FRESH INSTALL: the log file
      * never existed, so the caller may seed a default profile + onboarding. A
@@ -226,13 +216,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
      * empty, a line that resets the core is skipped, and either is reported as
      * [SendResult.stale] on every later send.
      */
-    fun restore(ctx: PlatformContext): Boolean = synchronized(this) {
-        if (unavailable) return false
-        restoreFrom(ctx.eventLogPath())
-    }
-
-    /** [restore] from the event log at [file]. */
-    fun restoreFrom(file: AppPath): Boolean = synchronized(this) {
+    fun restore(file: AppPath): Boolean = synchronized(this) {
         if (unavailable) return false
         // Already replayed this process (Activity recreation): the only way this
         // is still a fresh install is if nothing was ever persisted. [log] stays as

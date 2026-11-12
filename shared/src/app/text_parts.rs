@@ -31,30 +31,6 @@ enum Left {
 }
 
 impl GlossaryTerm {
-    /// Every term, in the glossary's order (the order a card lists its terms).
-    pub const ALL: [GlossaryTerm; 20] = [
-        GlossaryTerm::E1rm,
-        GlossaryTerm::OneRm,
-        GlossaryTerm::Rpe,
-        GlossaryTerm::Rir,
-        GlossaryTerm::ZScore,
-        GlossaryTerm::Vdot,
-        GlossaryTerm::Decoupling,
-        GlossaryTerm::VariabilityIndex,
-        GlossaryTerm::Tonnage,
-        GlossaryTerm::Spike,
-        GlossaryTerm::HrMax,
-        GlossaryTerm::Deload,
-        GlossaryTerm::Mesocycle,
-        GlossaryTerm::Ctl,
-        GlossaryTerm::Trimp,
-        GlossaryTerm::HrZones,
-        GlossaryTerm::Volume,
-        GlossaryTerm::Maf,
-        GlossaryTerm::Pap,
-        GlossaryTerm::RedS,
-    ];
-
     /// How the term is spotted in card copy; `None` for a word too generic to
     /// spot ("spike", "volume"), reachable only from an explicit glossary link.
     fn pattern(self) -> Option<Pattern> {

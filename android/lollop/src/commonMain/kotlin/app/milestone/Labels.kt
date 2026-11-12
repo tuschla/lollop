@@ -25,6 +25,16 @@ import app.milestone.resources.log_muscle_quads
 import app.milestone.resources.log_muscle_rear_delts
 import app.milestone.resources.log_muscle_side_delts
 import app.milestone.resources.log_muscle_triceps
+import app.milestone.resources.log_pain_area_ankle
+import app.milestone.resources.log_pain_area_elbow_wrist
+import app.milestone.resources.log_pain_area_foot
+import app.milestone.resources.log_pain_area_hip
+import app.milestone.resources.log_pain_area_left_knee
+import app.milestone.resources.log_pain_area_lower_back
+import app.milestone.resources.log_pain_area_neck
+import app.milestone.resources.log_pain_area_other
+import app.milestone.resources.log_pain_area_right_knee
+import app.milestone.resources.log_pain_area_shoulder
 import app.milestone.resources.log_signal_bar_velocity
 import app.milestone.resources.log_signal_bone_stress
 import app.milestone.resources.log_signal_cardiac
@@ -40,6 +50,9 @@ import app.milestone.resources.log_signal_rpe
 import app.milestone.resources.log_signal_soreness
 import app.milestone.resources.log_signal_velocity_loss
 import app.milestone.resources.log_signal_wellness
+import app.milestone.resources.main_week_discipline_lift
+import app.milestone.resources.main_week_discipline_rest
+import app.milestone.resources.main_week_discipline_run
 import app.milestone.resources.run_type_easy
 import app.milestone.resources.run_type_interval
 import app.milestone.resources.run_type_long
@@ -102,6 +115,30 @@ internal val Environment.labelRes: StringResource
         Environment.Neutral -> Res.string.setup_env_neutral
     }
 
+/** The chip text of a preset body area; its wire name is the location the pain
+ *  report carries. */
+internal val PainArea.labelRes: StringResource
+    get() = when (this) {
+        PainArea.LeftKnee -> Res.string.log_pain_area_left_knee
+        PainArea.RightKnee -> Res.string.log_pain_area_right_knee
+        PainArea.Ankle -> Res.string.log_pain_area_ankle
+        PainArea.Hip -> Res.string.log_pain_area_hip
+        PainArea.LowerBack -> Res.string.log_pain_area_lower_back
+        PainArea.Shoulder -> Res.string.log_pain_area_shoulder
+        PainArea.ElbowWrist -> Res.string.log_pain_area_elbow_wrist
+        PainArea.Neck -> Res.string.log_pain_area_neck
+        PainArea.Foot -> Res.string.log_pain_area_foot
+        PainArea.Other -> Res.string.log_pain_area_other
+    }
+
+/** A planned day's discipline on the week strip. */
+internal val SessionDiscipline.labelRes: StringResource
+    get() = when (this) {
+        SessionDiscipline.Lift -> Res.string.main_week_discipline_lift
+        SessionDiscipline.Run -> Res.string.main_week_discipline_run
+        SessionDiscipline.Rest -> Res.string.main_week_discipline_rest
+    }
+
 /** The signal's picker label (the readiness editor and Today's chips). */
 internal val ReadinessSignal.labelRes: StringResource
     get() = when (this) {
@@ -136,27 +173,18 @@ internal val WorkoutType.labels: WorkoutTypeLabels
         WorkoutType.Easy -> WorkoutTypeLabels(Res.string.run_type_easy, Res.string.history_run_easy)
     }
 
-/**
- * Muscle picker for the hypertrophy volume planner. [wire] is the exact string the
- * core's `hypertrophy::landmarks_for` looks up (case-insensitive, but sent verbatim);
- * [labelRes] is display-only. The set MUST match the LANDMARKS table in
- * `hypertrophy.rs`: an unknown muscle yields a single explanatory row instead of a plan.
- */
-internal enum class HypertrophyMuscle(val wire: String, val labelRes: StringResource) {
-    Chest("chest", Res.string.log_muscle_chest),
-    Back("back", Res.string.log_muscle_back),
-    Quads("quads", Res.string.log_muscle_quads),
-    Hamstrings("hamstrings", Res.string.log_muscle_hamstrings),
-    Glutes("glutes", Res.string.log_muscle_glutes),
-    SideDelts("side delts", Res.string.log_muscle_side_delts),
-    RearDelts("rear delts", Res.string.log_muscle_rear_delts),
-    Biceps("biceps", Res.string.log_muscle_biceps),
-    Triceps("triceps", Res.string.log_muscle_triceps),
-    Calves("calves", Res.string.log_muscle_calves),
-    Abs("abs", Res.string.log_muscle_abs);
-
-    companion object {
-        /** The muscle for a wire name, matched case-insensitively as the core does; null if none. */
-        fun of(wire: String?): HypertrophyMuscle? = entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }
+/** A hypertrophy planner muscle's picker label. */
+internal val HypertrophyMuscle.labelRes: StringResource
+    get() = when (this) {
+        HypertrophyMuscle.Chest -> Res.string.log_muscle_chest
+        HypertrophyMuscle.Back -> Res.string.log_muscle_back
+        HypertrophyMuscle.Quads -> Res.string.log_muscle_quads
+        HypertrophyMuscle.Hamstrings -> Res.string.log_muscle_hamstrings
+        HypertrophyMuscle.Glutes -> Res.string.log_muscle_glutes
+        HypertrophyMuscle.SideDelts -> Res.string.log_muscle_side_delts
+        HypertrophyMuscle.RearDelts -> Res.string.log_muscle_rear_delts
+        HypertrophyMuscle.Biceps -> Res.string.log_muscle_biceps
+        HypertrophyMuscle.Triceps -> Res.string.log_muscle_triceps
+        HypertrophyMuscle.Calves -> Res.string.log_muscle_calves
+        HypertrophyMuscle.Abs -> Res.string.log_muscle_abs
     }
-}

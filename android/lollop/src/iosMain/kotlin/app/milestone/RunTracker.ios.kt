@@ -33,30 +33,9 @@ import platform.darwin.dispatch_time
 
 internal actual fun platformRunTracker(): RunTracker? = IosRunTracker
 
-/** Receives the run's frames while the tracker's location stream is up. Main thread. */
-internal interface RunActivitySink {
-    fun update(state: RunSurfaceState)
-
-    /** The stream is down: take the surface away. */
-    fun end()
-}
-
-/**
- * The run's hook for its Live Activity: the tracker pushes [RunSurfaceState]
- * frames to [sink] ([IosSurfaces] installs one that hands them to the Swift
- * side), and the activity's Pause/Resume buttons call [setPaused] (through
- * `LollopSurfaces` in the `Lollop` framework). With no sink the tracker shows no
- * system surface; iOS still shows its blue location indicator while a run records
- * in the background. Main thread only.
- */
+/** The run's Live Activity buttons: Pause/Resume call [setPaused] (through
+ *  `LollopSurfaces` in the `Lollop` framework). Main thread only. */
 public object RunActivity {
-    /** Where frames go; a new sink gets the current frame at once. */
-    internal var sink: RunActivitySink? = null
-        set(value) {
-            field = value
-            IosRunTracker.resendSurface()
-        }
-
     /** Pause or resume the recording run (a no-op unless one records), like the
      *  Android notification's Pause/Resume action. */
     public fun setPaused(paused: Boolean) {
@@ -70,8 +49,8 @@ public object RunActivity {
  * stream that keeps running in the background (`UIBackgroundModes` `location`, the
  * blue indicator), the shared [RunRecorder] state machine and the common
  * [ActiveRunStore] sidecar. iOS has no ongoing notification and no battery
- * exemption ([serviceGrants]); the run's system surface is the [RunActivity] hook.
- * Main thread only.
+ * exemption ([serviceGrants]); the run's system surface is its Live Activity
+ * ([IosSurfaces.showRun]). Main thread only.
  */
 internal object IosRunTracker : RunTracker {
     // The recording stream, made by the first locate / arm / start.
@@ -82,11 +61,6 @@ internal object IosRunTracker : RunTracker {
 
     fun setPaused(paused: Boolean) {
         recording?.recorder?.setPaused(paused)
-    }
-
-    /** Hand the current frame to a new [RunActivity.sink]. */
-    fun resendSurface() {
-        recording?.resendSurface()
     }
 
     // The manager the grant, the prompts and the last-known fix go through; its
@@ -276,7 +250,8 @@ internal fun liveFixOf(fix: CLLocation, nowWallMs: Long, nowMonoNanos: Long): Li
 /**
  * One app's run recording on iOS: [RunRecorder] over a [LocationStream], with the
  * CoreLocation delegate that feeds it ([delegate]), main-queue timers, vibration
- * cues and the [RunActivity] surface. Process-wide; lives as long as the app.
+ * cues and the run's Live Activity ([IosSurfaces]). Process-wide; lives as long as
+ * the app.
  */
 internal class IosRunRecording(private val stream: LocationStream) {
     private var lastFrame: RunSurfaceState? = null
@@ -304,18 +279,12 @@ internal class IosRunRecording(private val stream: LocationStream) {
         lastFrame = null
     }
 
-    /** Push the current frame again (a new [RunActivity.sink]). */
-    fun resendSurface() {
-        invalidateSurface()
-        pushFrame()
-    }
-
     private fun pushFrame() {
         if (recorder.stopped) return
         val frame = recorder.surfaceState()
         if (frame == lastFrame) return
         lastFrame = frame
-        RunActivity.sink?.update(frame)
+        IosSurfaces.showRun(frame)
     }
 
     private fun onLocations(locations: List<CLLocation>) {
@@ -363,7 +332,10 @@ internal class IosRunRecording(private val stream: LocationStream) {
 
         override fun openSidecar() = ActiveRunStore.begin()
 
-        override fun reassertSurface() = resendSurface()
+        override fun reassertSurface() {
+            invalidateSurface()
+            pushFrame()
+        }
 
         override fun refresh() = pushFrame()
 
@@ -382,7 +354,7 @@ internal class IosRunRecording(private val stream: LocationStream) {
 
         override fun finished(userStop: Boolean) {
             lastFrame = null
-            RunActivity.sink?.end()
+            IosSurfaces.endRun()
         }
 
         override fun wakeTimer(tag: String, action: () -> Unit): RecorderTimer = MainQueueWakeTimer(action)

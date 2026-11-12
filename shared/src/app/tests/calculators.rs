@@ -38,11 +38,8 @@ fn predict_race_produces_graded_two_method_estimate() {
         pred.low_sec
     );
     assert!(pred.high_sec >= pred.low_sec);
-    assert!(
-        pred.predicted.contains(':'),
-        "clock-formatted, got {}",
-        pred.predicted
-    );
+    let shown = pred.predicted.as_deref().expect("a prediction");
+    assert!(shown.contains(':'), "clock-formatted, got {shown}");
 
     app.update(Event::ClearRacePrediction, &mut model)
         .expect_only_render();
@@ -71,7 +68,7 @@ fn predict_race_with_degenerate_input_surfaces_no_false_time() {
         .view(&model)
         .race_prediction
         .expect("the section is present, just with no numeric estimate");
-    assert_eq!(pred.predicted, "-");
+    assert_eq!(pred.predicted, None);
     assert!(
         pred.summary.contains("enter a recent race"),
         "degenerate summary should explain the missing input, got {}",
@@ -399,7 +396,7 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
                     .race_prediction
                     .expect("a prediction section");
                     assert!(
-                        !v.predicted.contains("NaN"),
+                        !v.predicted.as_deref().unwrap_or_default().contains("NaN"),
                         "NaN clock for d={d} t={t} g={g}"
                     );
                     assert!(!v.evidence.citation.is_empty(), "uncited race view");
@@ -759,8 +756,8 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
 #[test]
 fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
     // An absurd goal distance overflows Riegel's power to f64::INFINITY. The
-    // prediction must collapse to the degenerate "-"/"need a valid recent
-    // race" path with no notes, never an Inf-derived clock (a `low_sec <= 0.0`
+    // view must collapse to the degenerate path (no prediction, "enter a
+    // recent race", no notes), never an Inf-derived clock (a `low_sec <= 0.0`
     // guard alone does not catch Inf).
     let app = Engine;
     let mut model = Model::default();
@@ -776,7 +773,7 @@ fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
     )
     .expect_only_render();
     let pred = app.view(&model).race_prediction.expect("prediction");
-    assert_eq!(pred.predicted, "-", "absurd goal → degenerate dash");
+    assert_eq!(pred.predicted, None, "absurd goal → no prediction");
     assert!(pred.summary.contains("enter a recent race"));
     assert!(pred.notes.is_empty(), "{:#?}", pred.notes);
 }
@@ -907,7 +904,7 @@ fn maf_row_skipped_when_age_out_of_range_with_measured_max() {
     }
 }
 
-/// A degenerate prediction ("-") carries no freshness or marathon-derate note:
+/// A degenerate prediction (none shown) carries no freshness or marathon-derate note:
 /// there is no prediction for them to qualify.
 #[test]
 fn degenerate_race_view_has_no_prediction_notes() {
@@ -922,7 +919,7 @@ fn degenerate_race_view_has_no_prediction_notes() {
         },
     ]);
     let v = app.view(&model).race_prediction.expect("prediction");
-    assert_eq!(v.predicted, "-");
+    assert_eq!(v.predicted, None);
     let notes: Vec<_> = v.notes.iter().map(|n| n.summary.clone()).collect();
     assert!(notes.is_empty(), "{notes:#?}");
 }

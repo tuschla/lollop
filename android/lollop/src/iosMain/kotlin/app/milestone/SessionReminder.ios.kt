@@ -6,8 +6,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import app.milestone.resources.Res
 import app.milestone.resources.reminder_title_fallback
-import app.milestone.widget.WidgetDayKind
-import app.milestone.widget.WidgetItemKind
 import app.milestone.widget.widgetInputs
 import app.milestone.widget.widgetSnapshotOf
 import kotlin.coroutines.resume
@@ -159,20 +157,14 @@ internal object IosReminder : SessionReminderPort {
     private fun idOf(day: Long) = "$ID_PREFIX$day"
 
     /** [reminder] for local epoch [day] at [minuteOfDay]: a tap opens Today, its
-     *  action starts the session ([Reminder.dest]). */
+     *  action starts the session ([Reminder.action]). */
     private fun request(res: PlatformResources, reminder: Reminder, day: Long, minuteOfDay: Int): UNNotificationRequest {
         val content = UNMutableNotificationContent().apply {
             setTitle(reminder.title.ifBlank { res.getString(Res.string.reminder_title_fallback) })
             reminderLine(res, reminder)?.let { setBody(it) }
             setSound(UNNotificationSound.defaultSound())
-            setCategoryIdentifier(
-                when {
-                    reminder.kind == WidgetDayKind.Run -> CATEGORY_REMINDER_RUN
-                    reminder.items.any { it.kind == WidgetItemKind.Lift && it.done } -> CATEGORY_REMINDER_NEXT_SET
-                    else -> CATEGORY_REMINDER_FIRST_SET
-                },
-            )
-            setUserInfo(mapOf<Any?, Any?>(NOTIF_KEY_DEST to OpenDest.Today.wire, NOTIF_KEY_ACTION_DEST to reminder.dest.wire))
+            setCategoryIdentifier(reminder.action.category)
+            setUserInfo(mapOf<Any?, Any?>(NOTIF_KEY_DEST to OpenDest.Today.wire, NOTIF_KEY_ACTION_DEST to reminder.action.dest.wire))
         }
         val date = LocalDate.fromEpochDays(day.toInt())
         val components = NSDateComponents().apply {

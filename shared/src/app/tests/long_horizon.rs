@@ -490,10 +490,10 @@ impl Sim {
             longest_recent_km: 0.0,
             observed_at: r.at,
             entry_id: r.id,
-            workout_type: None,
-            session_rpe: self.rng.chance(0.5).then(|| self.rng.int(2, 6) as u8),
-            avg_hr_bpm: None,
-            utc_offset_sec: None,
+            meta: RunMeta {
+                session_rpe: self.rng.chance(0.5).then(|| self.rng.int(2, 6) as u8),
+                ..RunMeta::default()
+            },
         };
         if backdate {
             self.backdated.push((e, None, Some(r)));
@@ -1259,10 +1259,9 @@ impl Sim {
                 true
             } else if it.is_run() {
                 it.run_structure.as_ref().is_none_or(|rs| rs.reps == 0)
-                    && it
-                        .run_target
-                        .as_ref()
-                        .is_none_or(|t| t.band == "easy" || t.band == "recovery")
+                    && it.run_target.as_ref().is_none_or(|t| {
+                        effort_ceiling(t).is_some_and(|hi| hi <= easy_effort_ceiling())
+                    })
             } else {
                 it.target_rpe.is_none_or(|r| r <= 7.0)
             };

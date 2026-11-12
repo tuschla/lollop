@@ -43,15 +43,10 @@ class RunTrackingUnitTest {
     fun runSessionAccumulatesDistanceLikeFullHaversine() {
         RunSession.reset()
         assertEquals(0.0, RunSession.distanceKm.value, 1e-12)
-        // Realistic running legs: ~30 m north every 10 s ≈ 3 m/s, well under the
+        // Realistic running legs: 30 m north every 10 s = 3 m/s, well under the
         // jitter guard, so every leg is accepted and the incremental sum equals a
-        // full haversine. (0.00027° lat ≈ 30 m.)
-        val pts = listOf(
-            GpsPoint(52.52000, 13.4050, 0, 5.0),
-            GpsPoint(52.52027, 13.4050, 10, 5.0),
-            GpsPoint(52.52054, 13.4050, 20, 5.0),
-            GpsPoint(52.52081, 13.4050, 30, 5.0),
-        )
+        // full haversine.
+        val pts = straightTrack(4, firstAt = 0L, stepM = 30.0, stepSec = 10L, lat = 52.52, lon = 13.405)
         // add() takes the fix's monotonic timestamp (elapsedRealtimeNanos); drive it
         // from observedAt so the per-leg dt is a plausible 10 s.
         pts.forEach { RunSession.add(it, it.observedAt * 1_000_000_000L) }
@@ -297,10 +292,9 @@ class RunTrackingUnitTest {
     /** Feed [seconds] of 1 Hz fixes moving north at [mps] (0 = standing still), starting
      *  from [state] = (lat, tSec); returns the new state. */
     private fun runFor(state: Pair<Double, Long>, seconds: Int, mps: Double): Pair<Double, Long> {
-        val degPerM = 1.0 / 111_194.93 // metres → degrees of latitude at R = 6371 km
         var (lat, t) = state
         repeat(seconds) {
-            lat += mps * degPerM
+            lat += mps / M_PER_DEG
             t += 1
             RunSession.add(GpsPoint(lat, 13.4, t, 5.0), t * 1_000_000_000L)
         }
@@ -368,7 +362,7 @@ class RunTrackingUnitTest {
         var lon = 0.0
         RunSession.add(GpsPoint(0.0, 0.0, 0, 5.0), 0L)
         for (t in 1..150) {
-            lon += 3.0 * DEG_PER_M
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         // Two full one-minute slices of 180 m (5:33 /km) and a 30 s tail of 90 m.
@@ -382,7 +376,6 @@ class RunTrackingUnitTest {
     @Test
     fun standingStillWithGpsWanderAccruesNoDistanceOrElapsed() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         // 60 s standing still at 1 Hz: the fix drifts within a ~±2 m envelope but each
         // consecutive-fix step is ≈0.2 m/s peak: every leg is below the stop floor
         // (CoreConstants.MIN_MOVING_SPEED_MPS, mirroring the core's gps.rs `is_stopped`),
@@ -391,7 +384,7 @@ class RunTrackingUnitTest {
         // inflate the run.
         RunSession.add(GpsPoint(52.52, 13.405, 0, 5.0), 0L)
         for (t in 1..60) {
-            val latOff = 2.0 * degPerM * kotlin.math.sin(2.0 * Math.PI * t / 60.0)
+            val latOff = 2.0 / M_PER_DEG * kotlin.math.sin(2.0 * Math.PI * t / 60.0)
             RunSession.add(GpsPoint(52.52 + latOff, 13.405, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         assertEquals(0.0, RunSession.distanceKm.value, 1e-12)
@@ -402,23 +395,22 @@ class RunTrackingUnitTest {
     @Test
     fun pauseGapAdvancesMovingElapsedByZero() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         // Three 3 m/s legs (t=0..3): 3 s of moving time.
         RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
         for (t in 1..3) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         assertEquals(3L, RunSession.elapsedSec.value)
         // A 37 s fix gap (> MAX_FIX_GAP_SEC): a pause bridge, its span adds ZERO
         // moving time (the runner may have stood/relocated). Elapsed stays at 3 s.
-        lon += 3.0 * degPerM
+        lon += 3.0 / M_PER_DEG
         RunSession.add(GpsPoint(0.0, lon, 40, 5.0), 40_000_000_000L)
         assertEquals(3L, RunSession.elapsedSec.value)
         // Three more 3 m/s legs (t=41..43): moving time resumes, +3 s (never +40).
         for (t in 41..43) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         assertEquals(6L, RunSession.elapsedSec.value)
@@ -428,12 +420,11 @@ class RunTrackingUnitTest {
     @Test
     fun theSaveEventCarriesTheDecimatedTrackItsPausesAndItsLastFix() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         RunSession.add(GpsPoint(0.0, lon, 1_000, 5.0), 0L)
         for (t in 1..80) {
             if (t == 41) RunSession.pauseAndResume()
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, 1_000L + t, 5.0), t * 995_000_000L)
         }
         // The Finish review previews this very event's figures (Core.savedFigures),
@@ -469,12 +460,11 @@ class RunTrackingUnitTest {
     fun stationaryGapDoesNotSlowTheCurrentPaceBucket() {
         RunSession.reset()
         RunSession.setPaceBucketMinutes(1)
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         // 30 s of moving at 3 m/s → an OPEN (partial) 30 s slice at ~5.56 min/km.
         RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
         for (t in 1..30) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         val before = RunSession.paceBucketsFlow.value.last()
@@ -485,7 +475,7 @@ class RunTrackingUnitTest {
         // segment-break gap, so no boundary opens either. Every such leg must be DROPPED
         // from the pace accumulator: standing at a red light must not slow the slice.
         for (t in 31..150) {
-            val latOff = 2.0 * degPerM * kotlin.math.sin(2.0 * Math.PI * (t - 30) / 60.0)
+            val latOff = 2.0 / M_PER_DEG * kotlin.math.sin(2.0 * Math.PI * (t - 30) / 60.0)
             RunSession.add(GpsPoint(0.0 + latOff, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         val after = RunSession.paceBucketsFlow.value.last()
@@ -505,12 +495,11 @@ class RunTrackingUnitTest {
     @Test
     fun steadyRunElapsedEqualsWallSpanAndDistanceUnchanged() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0))
         for (t in 1..150) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
         pts.forEach { RunSession.add(it, it.observedAt * 1_000_000_000L) }
@@ -525,12 +514,11 @@ class RunTrackingUnitTest {
 
     @Test
     fun restoreMatchesLivePathForACleanRun() {
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0))
         for (t in 1..120) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
         // Live path (monotonic clock driven from observedAt).
@@ -566,12 +554,11 @@ class RunTrackingUnitTest {
     fun decimatedTrackKeepsEndpointsAndRespectsCap() {
         RunSession.reset()
         // 1200 fixes at ~3 m/s, 1 Hz, no pauses.
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0))
         for (t in 1..1199) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
         pts.forEach { RunSession.add(it, it.observedAt * 1_000_000_000L) }
@@ -590,19 +577,18 @@ class RunTrackingUnitTest {
     @Test
     fun decimatedTrackAlwaysKeepsPauseBoundaries() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0)) // index 0
         // Segment A: indices 1..200.
         for (t in 1..200) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
         // A 61 s gap (> MAX_FIX_GAP_SEC) opens a new segment at index 201.
         var t = 261L
         for (k in 1..199) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t, 5.0))
             t += 1
         }
@@ -623,12 +609,11 @@ class RunTrackingUnitTest {
     fun decimationPreservesDistanceWithinOnePercent() {
         RunSession.reset()
         // 900 fixes at ~3 m/s with realistic sub-metre lateral jitter (~0.44 m).
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0))
         for (t in 1..900) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             val lat = 0.000_004 * Math.sin(t * 1.3)
             pts.add(GpsPoint(lat, lon, t.toLong(), 5.0))
         }
@@ -669,18 +654,17 @@ class RunTrackingUnitTest {
     @Test
     fun decimatedSegmentStartsRemapToTheThinnedBoundaryFix() {
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         val pts = ArrayList<GpsPoint>()
         pts.add(GpsPoint(0.0, 0.0, 0, 5.0))
         for (t in 1..200) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t.toLong(), 5.0))
         }
         // A 61 s gap (> MAX_FIX_GAP_SEC) opens a new segment at index 201.
         var t = 261L
         for (k in 1..199) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             pts.add(GpsPoint(0.0, lon, t, 5.0))
             t += 1
         }
@@ -702,17 +686,16 @@ class RunTrackingUnitTest {
         // a longer wall span, is still short: the gate reads RunSession.elapsedSec
         // (moving time only), never the first→last span.
         RunSession.reset()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
         // 170 legs of 5 m/s: 0.85 km in 170 s moving (< MIN_RUN_SEC).
         for (t in 1..170) {
-            lon += 5.0 * degPerM
+            lon += 5.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         // A fix gap over MAX_FIX_GAP_SEC is a pause bridge: no moving time, but it
         // stretches the wall span to 400 s.
-        lon += 5.0 * degPerM
+        lon += 5.0 / M_PER_DEG
         RunSession.add(GpsPoint(0.0, lon, 400, 5.0), 400_000_000_000L)
         val captured = RunSession.points.value
         assertTrue("wall span passes the bar", captured.last().observedAt - captured.first().observedAt >= CoreConstants.MIN_RUN_SEC)
@@ -753,13 +736,13 @@ class RunTrackingUnitTest {
         var lon = 0.0
         RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
         for (t in 1..100) {
-            lon += 3.0 * DEG_PER_M
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
-        lon += 200.0 * DEG_PER_M
+        lon += 200.0 / M_PER_DEG
         RunSession.add(GpsPoint(0.0, lon, 140, 5.0), 140_000_000_000L)
         for (t in 141..170) {
-            lon += 3.0 * DEG_PER_M
+            lon += 3.0 / M_PER_DEG
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         RunSession.add(GpsPoint(0.0, lon + 5.0, 171, 5.0), 171_000_000_000L)
@@ -788,7 +771,6 @@ class RunTrackingUnitTest {
         // functions of that list.
         RunSession.reset()
         val expected = ArrayList<GpsPoint>()
-        val degPerM = 1.0 / 111_320.0
         var lon = 0.0
         fun feed(p: GpsPoint, nanos: Long, survives: Boolean) {
             RunSession.add(p, nanos)
@@ -796,17 +778,17 @@ class RunTrackingUnitTest {
         }
         feed(GpsPoint(0.0, lon, 0, 5.0), 0L, true) // index 0
         for (t in 1..50) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             feed(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L, true) // 1..50
         }
         // A non-monotonic fix (monotonic stamp EARLIER than the last) is DROPPED -
         // never appended, so it must not appear in the saved track.
-        feed(GpsPoint(0.0, lon + degPerM, 51, 5.0), 25_000_000_000L, false)
+        feed(GpsPoint(0.0, lon + 1.0 / M_PER_DEG, 51, 5.0), 25_000_000_000L, false)
         // Pause boundary at index 51 (50 s monotonic gap), then more legs.
-        lon += 3.0 * degPerM
+        lon += 3.0 / M_PER_DEG
         feed(GpsPoint(0.0, lon, 100, 5.0), 100_000_000_000L, true) // index 51 (boundary)
         for (t in 101..150) {
-            lon += 3.0 * degPerM
+            lon += 3.0 / M_PER_DEG
             feed(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L, true) // 52..101
         }
         assertEquals("points expose the surviving fixes", expected, RunSession.points.value)
@@ -939,10 +921,9 @@ class RunTrackingUnitTest {
     fun trimKeepsReadsMovingTimeNotTheWallClockSpanOfAPausedRun() {
         // 60 s of running (30 m every 10 s), 20 s standing still, a pause, then
         // another 60 s of running: 4:20 on the wall clock, 2:00 moving.
-        val degPerM = 1.0 / 111_195.0
-        val seg1 = (0..6).map { GpsPoint(47.0 + it * 30.0 * degPerM, 8.0, it * 10L, 5.0) } +
-            GpsPoint(47.0 + 180.0 * degPerM, 8.0, 80L, 5.0)
-        val seg2 = (0..6).map { GpsPoint(47.01 + it * 30.0 * degPerM, 8.0, 200L + it * 10L, 5.0) }
+        val seg1 = straightTrack(7, firstAt = 0L, stepM = 30.0, stepSec = 10L) +
+            GpsPoint(47.0 + 180.0 / M_PER_DEG, 8.0, 80L, 5.0)
+        val seg2 = straightTrack(7, firstAt = 200L, stepM = 30.0, stepSec = 10L, lat = 47.01)
         val points = timedTrackFromSegments(listOf(seg1, seg2))
         val last = points.lastIndex
         assertEquals(260L, points[last].timeSec - points[0].timeSec)
@@ -963,10 +944,6 @@ class RunTrackingUnitTest {
         assertEquals(0, trimKeptMovingSec(points, -1, -1, recordSec = 120.0))
     }
 }
-
-/** Degrees of arc per metre along a great circle (the equator or a meridian) on the
- *  core's Earth, for legs of an exact ground length. */
-private const val DEG_PER_M = 180.0 / (PI * CoreConstants.EARTH_RADIUS_M)
 
 /** Path length (km) over [points] by the flat-earth (equirectangular) formula on the
  *  core's Earth radius: a measure independent of the app's haversine, exact along the

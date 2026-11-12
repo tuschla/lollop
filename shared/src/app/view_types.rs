@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::model::{HrZoneInputView, HypertrophyInputView, ProteinInputView};
 use crate::event::ActivityKind;
 use crate::evidence::EvidenceGrade;
-use crate::profile::{PlanWithheld, Profile};
+use crate::profile::{PlanProfile, PlanWithheld, Profile};
 use crate::schema::{
     CheckinInput, MesoPhase, ReadinessSignal, Recommended, SafetyTier, SessionType, ThreeZone,
     WorkoutType,
@@ -75,7 +75,7 @@ pub(crate) mod grade_or_empty {
 
 /// Wire form of a planned day's [`SessionType`]: its stable
 /// [`SessionType::wire_name`] (`"Lift(MaxEffort)"`, `"Run(LongRun)"`, `"Rest"`),
-/// which the shell keys its discipline on.
+/// described with its discipline group (`SessionDiscipline`).
 pub(crate) mod session_type_wire {
     use crate::schema::SessionType;
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -107,6 +107,7 @@ pub(crate) mod session_type_wire {
                     .collect(),
                 group_type: "SessionDiscipline",
                 group_property: "discipline",
+                default: SessionType::default().wire_name(),
             })
         })
     }
@@ -361,6 +362,9 @@ pub struct ViewModel {
     /// The currently-set profile, echoed back so a shell can hydrate its editor
     /// after a log replay instead of falling back to a hardcoded default.
     pub profile: Option<Profile>,
+    /// The sides the echoed profile trains, as the plan reads them; `None`
+    /// without a profile.
+    pub trains: Option<TrainsView>,
     /// The last requested race-time prediction, if any.
     pub race_prediction: Option<RacePredictionView>,
     /// The last requested hypertrophy volume plan, as graded rows. Empty when no
@@ -903,10 +907,31 @@ pub struct TodayHeadlineView {
     pub repeats_session: bool,
 }
 
+/// Which sides a profile trains: the facts [`PlanProfile`] derives, so a shell
+/// gates its lift and run surfaces on the plan's rule instead of re-deriving
+/// it from the raw answers.
+#[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, Copy, PartialEq)]
+pub struct TrainsView {
+    /// The week holds lift sessions: a lifting profile, or a runner's
+    /// supplemental strength block (RUN-STRENGTH-001).
+    pub lifts: bool,
+    pub runs: bool,
+}
+
+impl TrainsView {
+    pub(crate) fn of(pp: &PlanProfile) -> Self {
+        TrainsView {
+            lifts: pp.lifts() || pp.runner_strength(),
+            runs: pp.runs(),
+        }
+    }
+}
+
 /// The three-part "why?" disclosure carried by every action-bearing card:
 /// `basis` (the rule/method and the user datum behind the call), `grade_note`
 /// (a one-sentence gloss of this claim's evidence grade, contested question
-/// appended when relevant), and `improves` (what data would sharpen the call).
+/// appended when relevant), and `improves` (what data would sharpen the call,
+/// `None` when no datum would).
 /// `basis` and `improves` describe the engine's own reasoning and data needs,
 /// never new training advice, so they invent no claim (HARD RULE 1).
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
@@ -917,7 +942,7 @@ pub struct WhyView {
     #[serde(with = "basis_sentences")]
     pub basis: String,
     pub grade_note: String,
-    pub improves: String,
+    pub improves: Option<String>,
 }
 
 /// Wire form of [`WhyView::basis`]: its sentences as a list. The core builds
@@ -956,9 +981,21 @@ pub(crate) mod basis_sentences {
 }
 
 /// A jargon term the glossary explains; the wire name is the key the shell
-/// opens the glossary at.
+/// opens the glossary at. Declared in the glossary's order, the order a card
+/// lists its terms.
 #[derive(
-    Serialize, Deserialize, Wire, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+    Serialize,
+    Deserialize,
+    Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 pub enum GlossaryTerm {
     #[serde(rename = "e1rm")]
@@ -1189,6 +1226,12 @@ pub struct PrescriptionView {
     /// `None` for lifts/calisthenics. The `intensity_label` already reads the
     /// numbers; this carries them structured.
     pub run_target: Option<RunTargetView>,
+    /// For a run item: the run type it is logged as, preselected when the
+    /// athlete logs or finishes the run: its session's type
+    /// (`RunSessionType::workout_type`), else the band it runs in. `None` for
+    /// lifts/calisthenics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workout_type: Option<WorkoutType>,
     /// Calisthenics plan item data (ladder, rung, Easier/Harder, added-load
     /// capability, skill test hold). `None` for lifts and runs.
     pub calis: Option<CalisItemView>,
@@ -1488,8 +1531,9 @@ pub struct SignalGroupView {
 pub struct RacePredictionView {
     /// Human label for the goal distance, e.g. `"10K"`, `"Half marathon"` or `"15 km"`.
     pub goal_label: String,
-    /// Formatted finish time (`"41:30"`) or range (`"41:30–43:00"`).
-    pub predicted: String,
+    /// Formatted finish time (`"41:30"`) or range (`"41:30–43:00"`); `None`
+    /// when the input gives no prediction.
+    pub predicted: Option<String>,
     pub summary: String,
     /// The glossary terms `summary` uses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1936,9 +1980,6 @@ pub struct BestEffortView {
 /// known, and an effort cue (RPE, plus the talk test when nothing is measured).
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
 pub struct RunTargetView {
-    /// Training band, plain word: `"easy"`, `"recovery"`, `"marathon pace"`,
-    /// `"threshold"`, `"interval"`, `"repetition"`, `"hill effort"`.
-    pub band: String,
     /// Pace range, seconds per km (fast, slow). Both 0 without a pace anchor.
     /// A recovery run carries only `pace_slow_sec_per_km` ("slower than");
     /// a repetition run only `pace_fast_sec_per_km` ("this fast or faster").

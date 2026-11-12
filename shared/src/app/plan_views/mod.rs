@@ -27,7 +27,7 @@ pub(super) use consistency::build_consistency;
 pub(super) use first_set::{ItemCue, apply_first_set_autoreg};
 pub(super) use flatten_run::vdot_band_name;
 pub(super) use item_render::run_planned;
-pub(super) use plan_item::{PlanItem, PlanRow};
+pub(super) use plan_item::{HrAnchor, PlanItem, PlanRow, TargetAnchor};
 pub(super) use plan_week::{PlanViews, build_plan_views};
 
 #[cfg(test)]

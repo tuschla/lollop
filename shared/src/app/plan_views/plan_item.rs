@@ -5,11 +5,11 @@
 
 use std::ops::{Deref, DerefMut};
 
-use crate::app::run_targets::TargetAnchor;
 use crate::app::view_types::{
     AdjustmentView, PlanIntensity, PrescriptionView, SessionPlanView, SessionStatus,
 };
-use crate::schema::SessionType;
+use crate::profile::DistanceUnit;
+use crate::schema::{RunSessionType, SessionType};
 
 /// One plan item: its wire view (read through `Deref`) and the working state
 /// behind it.
@@ -76,6 +76,41 @@ impl From<PrescriptionView> for PlanItem {
             ..PlanItem::default()
         }
     }
+}
+
+/// The figures a run item's target was resolved from
+/// (`run_targets::apply_run_targets`): the session's run type, the fitness
+/// score behind the paces, the heart-rate figures (zero when HRmax is unknown)
+/// and the unit the pace label reads in.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct TargetAnchor {
+    pub(in crate::app) kind: Option<RunSessionType>,
+    pub(in crate::app) vdot: Option<f64>,
+    pub(in crate::app) hr: HrAnchor,
+    pub(in crate::app) unit: DistanceUnit,
+}
+
+impl TargetAnchor {
+    pub(in crate::app) fn new(vdot: Option<f64>, hr: HrAnchor, unit: DistanceUnit) -> Self {
+        TargetAnchor {
+            kind: None,
+            vdot: vdot.filter(|v| v.is_finite() && *v > 0.0),
+            hr: if hr.max_bpm > 0.0 {
+                hr
+            } else {
+                HrAnchor::default()
+            },
+            unit,
+        }
+    }
+}
+
+/// The heart-rate figures behind a run target.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct HrAnchor {
+    pub(in crate::app) max_bpm: f64,
+    pub(in crate::app) measured: bool,
+    pub(in crate::app) rest_bpm: f64,
 }
 
 /// One plan day as the pipeline works it: the day's [`SessionPlanView`]

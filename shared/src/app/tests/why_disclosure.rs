@@ -37,17 +37,16 @@ fn why_disclosure_on_hr_zones_carries_basis_grade_note_and_improves() {
         why.grade_note
     );
     // improves: the engagement loop, replace the age estimate.
+    let improves = why.improves.as_deref().expect("an improves line");
     assert!(
-        why.improves.to_lowercase().contains("measured max hr"),
-        "improves points at the data that would sharpen it: {}",
-        why.improves
+        improves.to_lowercase().contains("measured max hr"),
+        "improves points at the data that would sharpen it: {improves}"
     );
     // The improves line describes the engine's data need, never a training
     // prescription (HARD RULE 1): no imperative training terms (word-level
     // match so "replace"/"estimate" don't false-trip on "rep"/"set").
     let banned = ["squat", "deadlift", "%1rm", "rir", "rpe", "reps", "sets"];
-    let words: Vec<String> = why
-        .improves
+    let words: Vec<String> = improves
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric() && c != '%')
         .map(|w| w.to_string())
@@ -55,8 +54,7 @@ fn why_disclosure_on_hr_zones_carries_basis_grade_note_and_improves() {
     for b in banned {
         assert!(
             !words.iter().any(|w| w == b),
-            "improves must not prescribe: {}",
-            why.improves
+            "improves must not prescribe: {improves}"
         );
     }
 }
@@ -199,7 +197,7 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
             "grade_note must gloss the evidence grade: {}",
             it.summary
         );
-        assert_data_need(&it.why.improves);
+        assert_data_need(it.why.improves.as_deref().unwrap_or_default());
     };
 
     // Anchored (%1RM × logged e1RM): the improves line is about keeping the
@@ -214,8 +212,12 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
     assert!(sq.load_kg.is_some(), "this arm is the anchored case");
     check(sq);
     assert!(
-        sq.why.improves.contains("estimated max"),
-        "anchored improves points at the estimated-max anchor: {}",
+        sq.why
+            .improves
+            .as_deref()
+            .unwrap_or_default()
+            .contains("estimated max"),
+        "anchored improves points at the estimated-max anchor: {:?}",
         sq.why.improves
     );
 
@@ -231,8 +233,12 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
     assert!(it.load_kg.is_none(), "this arm is the unanchored case");
     check(it);
     assert!(
-        it.why.improves.contains("estimated max"),
-        "RIR improves points at anchoring to an estimated max: {}",
+        it.why
+            .improves
+            .as_deref()
+            .unwrap_or_default()
+            .contains("estimated max"),
+        "RIR improves points at anchoring to an estimated max: {:?}",
         it.why.improves
     );
 }

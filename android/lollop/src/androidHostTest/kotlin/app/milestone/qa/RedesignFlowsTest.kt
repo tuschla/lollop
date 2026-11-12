@@ -35,6 +35,7 @@ import app.milestone.TestClock
 import app.milestone.TestSink
 import app.milestone.WorkoutType
 import app.milestone.setupPrefs
+import app.milestone.sharedIntent
 import app.milestone.train_blocked
 import java.util.Locale
 import org.junit.After
@@ -387,10 +388,7 @@ class RedesignFlowsTest {
     /** A GPS run recorded the way the tracker saves it: stamped (observed_at) at
      *  the LAST fix. */
     private fun trackedRun(endAt: Long, fixes: Int = 400): Event.LogRunTrack {
-        val start = endAt - (fixes - 1) * 3L
-        val points = (0 until fixes).map { i ->
-            app.milestone.GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = start + i * 3L, accuracyM = 5.0)
-        }
+        val points = app.milestone.straightTrack(fixes, firstAt = endAt - (fixes - 1) * 3L)
         return Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = endAt, entryId = endAt * 1000)
     }
 
@@ -623,10 +621,8 @@ class RedesignFlowsTest {
         rule.onNodeWithTagScrolled("run-export").performClick()
         var chooser: android.content.Intent? = null
         rule.waitForState { org.robolectric.Shadows.shadowOf(application).peekNextStartedActivity()?.also { chooser = it } != null }
-        @Suppress("DEPRECATION")
-        val send = chooser!!.getParcelableExtra<android.content.Intent>(android.content.Intent.EXTRA_INTENT)!!
-        @Suppress("DEPRECATION")
-        val uri = send.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)!!
+        val send = sharedIntent(chooser)
+        val uri = androidx.core.content.IntentCompat.getParcelableExtra(send, android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)!!
         val startSec = run.points.first().observedAt
         assertEquals(
             "the shared file names the run's start (${run.points.size * 3 / 60} min before its end)",

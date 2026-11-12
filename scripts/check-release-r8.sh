@@ -31,6 +31,7 @@
 # aapt2) and python3.
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR source=lib/env.sh
 . "$(dirname "$0")/lib/env.sh"
 BUILD_DIR="$REPO_ROOT/android/app/build"
 case "${1:-}" in

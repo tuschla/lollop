@@ -8,10 +8,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RouteGeometryTest {
-    private val metresPerDegLat = 111_195.0
-
     private fun north(lat: Double, lon: Double, n: Int, stepM: Double, t0: Long = 0L, stepSec: Long = 10L) =
-        (0 until n).map { GpsPoint(lat + it * stepM / metresPerDegLat, lon, t0 + it * stepSec, 5.0) }
+        straightTrack(n, t0, stepM, stepSec, lat, lon)
 
     /** Label metrics with a fixed advance per character, so pill sizes are exact. */
     private val metrics = object : RouteTextMetrics {
@@ -34,7 +32,7 @@ class RouteGeometryTest {
         assertEquals(2000.0, track.totalM, 5.0)
         // Cumulative distance carries over the gap unchanged.
         assertEquals(track.cumM[0].last(), track.cumM[1].first(), 1e-9)
-        assertEquals(47.02 + 1000.0 / metresPerDegLat, track.north, 1e-9)
+        assertEquals(47.02 + 1000.0 / M_PER_DEG, track.north, 1e-9)
         assertEquals(47.0, track.south, 1e-9)
         assertFalse(track.crossesDateLine)
     }
@@ -44,11 +42,11 @@ class RouteGeometryTest {
         val track = RouteTrack(listOf(north(47.0, 8.0, 3, 100.0)))
         val out = DoubleArray(2)
         track.pointAt(150.0, out)
-        assertEquals(47.0 + 150.0 / metresPerDegLat, out[0], 1e-6)
+        assertEquals(47.0 + 150.0 / M_PER_DEG, out[0], 1e-6)
         track.pointAt(-5.0, out)
         assertEquals(47.0, out[0], 1e-12)
         track.pointAt(1e9, out)
-        assertEquals(47.0 + 200.0 / metresPerDegLat, out[0], 1e-12)
+        assertEquals(47.0 + 200.0 / M_PER_DEG, out[0], 1e-12)
     }
 
     @Test

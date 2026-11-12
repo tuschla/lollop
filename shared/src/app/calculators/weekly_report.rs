@@ -54,7 +54,7 @@ fn dated_runs(model: &Model, facts: &RunFacts) -> Vec<DatedRun> {
             km: facts.km[i],
             minutes: facts.minutes[i],
             zone: (r.hr_pct_max > 0.0).then(|| running::classify_three_zone(r.hr_pct_max)),
-            hard: running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref()),
+            hard: running::classify_hard_run(r.hr_pct_max, r.meta.workout_type.as_ref()),
         })
         .collect()
 }
@@ -78,12 +78,7 @@ fn is_hard_logged_run(
     if r.hard != running::HardRunKind::None {
         return true;
     }
-    if matches!(
-        workout_type,
-        Some(
-            WorkoutType::Steady | WorkoutType::Easy | WorkoutType::Recovery | WorkoutType::LongRun
-        )
-    ) {
+    if workout_type.is_some_and(|t| running::tagged_hard_kind(*t) == running::HardRunKind::None) {
         return false;
     }
     if planned_quality_days.contains(&local_day(r.started_at, offset)) {
@@ -167,7 +162,7 @@ impl WeekRuns {
             .filter(|r| {
                 is_hard_logged_run(
                     r,
-                    model.runs[r.idx].workout_type.as_ref(),
+                    model.runs[r.idx].meta.workout_type.as_ref(),
                     offset,
                     &planned_quality_days,
                     threshold_slow_pace,

@@ -764,3 +764,48 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
         "30 min · ≤ 76% HRmax · ≤ 70% of heart-rate reserve"
     );
 }
+
+/// `trains` carries the sides the plan schedules: a runner who opted into
+/// strength sessions (RUN-STRENGTH-001) has lift days, so the view says the
+/// profile lifts and the shell offers set logging.
+#[test]
+fn runner_strength_profile_trains_lifting() {
+    let runner = Profile {
+        weekly_sets: 0,
+        ..sample_profile()
+    };
+    let lift_days = |model: &Model| {
+        Engine
+            .view(model)
+            .week_plan
+            .iter()
+            .filter(|s| matches!(s.session_type, SessionType::Lift(_)))
+            .count()
+    };
+    let (app, model) = planned_on(runner.clone(), [], MON);
+    assert_eq!(lift_days(&model), 0);
+    assert_eq!(
+        app.view(&model).trains,
+        Some(TrainsView {
+            lifts: false,
+            runs: true
+        })
+    );
+
+    let (app, model) = planned_on(
+        Profile {
+            runner_strength: true,
+            ..runner
+        },
+        [],
+        MON,
+    );
+    assert!(lift_days(&model) > 0, "the plan holds strength sessions");
+    assert_eq!(
+        app.view(&model).trains,
+        Some(TrainsView {
+            lifts: true,
+            runs: true
+        })
+    );
+}

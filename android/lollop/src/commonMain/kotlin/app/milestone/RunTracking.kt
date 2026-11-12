@@ -539,12 +539,9 @@ fun RunTrackingScreen(
             FinishEffect.None -> {}
             FinishEffect.PauseRecording -> {
                 RunSession.setPaused(true)
-                // Preselect the run type from the plan being followed (visible and
+                // Preselect the run type of the plan item being followed (visible and
                 // one tap to change or clear); a free run starts untagged.
-                val followed = RunSession.plannedRun.value
-                if (finishType == null && followed != null) {
-                    finishType = workoutTypeForPlan(model.next_session?.session_type, followed.run_target?.band)
-                }
+                if (finishType == null) finishType = RunSession.plannedRun.value?.workout_type
             }
             FinishEffect.ResumeRecording -> RunSession.setPaused(false)
             FinishEffect.SaveRun -> stopAndLog(finishRpe, finishType)

@@ -181,16 +181,25 @@ pub struct Mesocycle {
 }
 
 /// Lifting session types (File 02 §6).
-#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
 pub enum LiftSessionType {
     MaxEffort,
     DynamicEffort,
     Repetition,
     Accessory,
     /// A bodyweight (calisthenics) day: leverage-tier ladders, not %1RM
-    /// barbell loading. Kept under `SessionType::Lift(_)` so the shell's
-    /// discipline parsing (keys on the `Lift` prefix) is unchanged, but titled
-    /// honestly rather than borrowing a barbell heavy/power/volume label.
+    /// barbell loading, titled honestly rather than borrowing a barbell
+    /// heavy/power/volume label.
     Calisthenics,
     /// A uniform full-body strength day (novice linear progression, or a day
     /// prescribed by effort rather than undulating %1RM): titled by what it
@@ -199,7 +208,17 @@ pub enum LiftSessionType {
 }
 
 /// Running session types (File 04 §3).
-#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
 pub enum RunSessionType {
     /// A true recovery run (running-014: <76 %HRmax, 20–40 min), placed the
     /// day after a hard session or long run.
@@ -216,6 +235,25 @@ pub enum RunSessionType {
     Easy,
 }
 
+impl RunSessionType {
+    /// The run type a planned session of this kind is logged as: the type the
+    /// Finish review and the run editor preselect for it. `None` for a
+    /// marathon-pace or strides day, which preselect by the band the run is
+    /// in (an eased marathon-pace day is an easy run).
+    pub fn workout_type(self) -> Option<WorkoutType> {
+        match self {
+            RunSessionType::Recovery => Some(WorkoutType::Recovery),
+            RunSessionType::Easy => Some(WorkoutType::Easy),
+            RunSessionType::LongRun => Some(WorkoutType::LongRun),
+            RunSessionType::Tempo => Some(WorkoutType::Tempo),
+            RunSessionType::Interval | RunSessionType::Repetition | RunSessionType::Hills => {
+                Some(WorkoutType::Interval)
+            }
+            RunSessionType::RacePace | RunSessionType::Strides => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SessionType {
     Lift(LiftSessionType),
@@ -226,31 +264,23 @@ pub enum SessionType {
 
 impl SessionType {
     /// Every session type, for decoding a [`wire_name`](Self::wire_name).
-    pub const ALL: [SessionType; 16] = {
-        use LiftSessionType as L;
-        use RunSessionType as R;
-        [
-            SessionType::Lift(L::MaxEffort),
-            SessionType::Lift(L::DynamicEffort),
-            SessionType::Lift(L::Repetition),
-            SessionType::Lift(L::Accessory),
-            SessionType::Lift(L::Calisthenics),
-            SessionType::Lift(L::FullBody),
-            SessionType::Run(R::Recovery),
-            SessionType::Run(R::LongRun),
-            SessionType::Run(R::Tempo),
-            SessionType::Run(R::Interval),
-            SessionType::Run(R::Repetition),
-            SessionType::Run(R::Strides),
-            SessionType::Run(R::Hills),
-            SessionType::Run(R::RacePace),
-            SessionType::Run(R::Easy),
-            SessionType::Rest,
-        ]
+    pub const ALL: [SessionType; LiftSessionType::ALL.len() + RunSessionType::ALL.len() + 1] = {
+        let mut all =
+            [SessionType::Rest; LiftSessionType::ALL.len() + RunSessionType::ALL.len() + 1];
+        let mut i = 0;
+        while i < LiftSessionType::ALL.len() {
+            all[i] = SessionType::Lift(LiftSessionType::ALL[i]);
+            i += 1;
+        }
+        let mut j = 0;
+        while j < RunSessionType::ALL.len() {
+            all[i + j] = SessionType::Run(RunSessionType::ALL[j]);
+            j += 1;
+        }
+        all
     };
 
-    /// Stable wire name of a planned day; the shell keys its discipline on the
-    /// `"Lift"` / `"Run"` prefix.
+    /// Stable wire name of a planned day, grouped by its discipline prefix.
     pub fn wire_name(self) -> &'static str {
         use LiftSessionType as L;
         use RunSessionType as R;
@@ -632,6 +662,7 @@ impl RxBasis {
 #[derive(
     Serialize,
     Deserialize,
+    shared_derive::Variants,
     crate::wire::Wire,
     Debug,
     Clone,
@@ -858,7 +889,17 @@ pub struct PainDetail {
 /// The preset body areas the pain triage offers. The wire name is the
 /// `PainDetail::location` the shell writes for it, a fixed English key that
 /// [`crate::autoreg::pain_region`] maps to a region (`Other` maps to none).
-#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
 pub enum PainArea {
     #[serde(rename = "Left knee")]
     LeftKnee,
@@ -883,19 +924,6 @@ pub enum PainArea {
 }
 
 impl PainArea {
-    pub const ALL: [PainArea; 10] = [
-        PainArea::LeftKnee,
-        PainArea::RightKnee,
-        PainArea::Ankle,
-        PainArea::Hip,
-        PainArea::LowerBack,
-        PainArea::Shoulder,
-        PainArea::ElbowWrist,
-        PainArea::Neck,
-        PainArea::Foot,
-        PainArea::Other,
-    ];
-
     /// The location the triage writes for this area.
     pub fn location(self) -> &'static str {
         match self {
@@ -1051,7 +1079,17 @@ pub const PARQ_INJURY_BIT: u8 = 0b010_0000;
 
 /// The seven PAR-Q+ general health questions (onboard-051), in form order;
 /// question `n` is bit `n` of [`HealthScreen::parq_yes`].
-#[derive(Serialize, Deserialize, crate::wire::Wire, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    crate::wire::Wire,
+    shared_derive::Variants,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
 pub enum ParqQuestion {
     /// Q1: a heart condition or high blood pressure (follow-up).
     HeartOrBloodPressure,
@@ -1070,17 +1108,6 @@ pub enum ParqQuestion {
 }
 
 impl ParqQuestion {
-    /// Every question, in form order.
-    pub const ALL: [ParqQuestion; 7] = [
-        ParqQuestion::HeartOrBloodPressure,
-        ParqQuestion::ChestPain,
-        ParqQuestion::DizzyOrFainting,
-        ParqQuestion::OtherCondition,
-        ParqQuestion::Medication,
-        ParqQuestion::BoneOrJoint,
-        ParqQuestion::SupervisedOnly,
-    ];
-
     /// The question's bit in [`HealthScreen::parq_yes`].
     pub const fn bit(self) -> u8 {
         1 << self as u8
@@ -1461,14 +1488,15 @@ pub enum PainRegion {
 /// A user-declared factual label for a logged run's intent (steady, easy,
 /// interval, tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
 /// NOT a knowledge-base claim and carries NO [`ClaimId`]. It is deliberately
-/// *not* wrapped in [`Recommended`]: nothing here recommends anything, and per
-/// HARD RULE 1 no coaching output may branch on it. It exists for storage and
-/// display only (history rendering); anything that would consume it to shape
-/// programming needs its own KB backing first. `None`/unset is always valid -
-/// the label is never fabricated for a run the user did not tag.
+/// *not* wrapped in [`Recommended`]: nothing here recommends anything. Beyond
+/// storage and display it is read only as the effort the user declared
+/// ([`crate::running::tagged_hard_kind`]); anything that would consume it to
+/// shape programming needs its own KB backing first (HARD RULE 1). `None`/unset
+/// is always valid - the label is never fabricated for a run the user did not
+/// tag.
 ///
-/// Serializes to its bare variant name (external form), so the Kotlin shell can
-/// mirror the strings by `WorkoutType.name`; renaming a variant is a wire break.
+/// Declared easiest-first, the order the shell offers the types in. Serializes
+/// to its bare variant name, so renaming a variant is a wire break.
 #[derive(
     Serialize,
     Deserialize,
@@ -1482,19 +1510,19 @@ pub enum PainRegion {
     crate::sanitize::Sanitize,
 )]
 pub enum WorkoutType {
+    /// Easy / general-aerobic run (a planned easy day).
+    Easy,
+    /// Easy recovery / regeneration run.
+    Recovery,
     /// Continuous even-effort run.
     Steady,
+    /// The week's long endurance run.
+    LongRun,
+    /// Sustained comfortably-hard effort.
+    Tempo,
     /// Reps-plus-recovery structure (hand-entered/treadmill intervals have no
     /// GPS track, so the measured VI verdict cannot see them, this labels them).
     Interval,
-    /// Sustained comfortably-hard effort.
-    Tempo,
-    /// The week's long endurance run.
-    LongRun,
-    /// Easy recovery / regeneration run.
-    Recovery,
-    /// Easy / general-aerobic run (a planned easy day).
-    Easy,
 }
 
 #[cfg(test)]
@@ -1558,5 +1586,37 @@ mod tests {
         assert_eq!(r.grade(), EvidenceGrade::Moderate);
         assert_eq!(r.contested(), Some(ContestedId::CQ_07));
         assert!((r.confidence() - 0.65).abs() < f32::EPSILON);
+    }
+
+    /// The run type a planned session preselects. A long run is its own type,
+    /// though it runs in the easy band; hills and repetitions log as intervals;
+    /// marathon-pace and strides days name none (their band decides).
+    #[test]
+    fn every_run_session_type_maps_to_a_workout_type() {
+        use RunSessionType as R;
+        let expected = [
+            (R::Recovery, Some(WorkoutType::Recovery)),
+            (R::LongRun, Some(WorkoutType::LongRun)),
+            (R::Tempo, Some(WorkoutType::Tempo)),
+            (R::Interval, Some(WorkoutType::Interval)),
+            (R::Repetition, Some(WorkoutType::Interval)),
+            (R::Strides, None),
+            (R::Hills, Some(WorkoutType::Interval)),
+            (R::RacePace, None),
+            (R::Easy, Some(WorkoutType::Easy)),
+        ];
+        for (kind, wt) in expected {
+            assert_eq!(kind.workout_type(), wt, "{kind:?}");
+        }
+        let run_kinds = SessionType::ALL.iter().filter_map(|t| match t {
+            SessionType::Run(k) => Some(*k),
+            _ => None,
+        });
+        for kind in run_kinds {
+            assert!(
+                expected.iter().any(|(k, _)| *k == kind),
+                "{kind:?} has no pinned run type"
+            );
+        }
     }
 }

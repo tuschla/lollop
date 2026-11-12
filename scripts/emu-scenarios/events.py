@@ -1,4 +1,4 @@
-"""Read the app's event-log ndjson. argv: cmd log [args]
+"""Read the app's event-log ndjson, or write one event. argv: cmd args
 
   count LOG KIND        number of events whose variant is KIND
   lastset LOG           "<exercise>|<weight_kg>|<reps>|<rpe>" of the last LogSet
@@ -8,9 +8,18 @@
                         shared/examples/track_figures)
   canon LOG             every event re-serialized with sorted keys, one per line,
                         in log order (SetToday — the shell clock — dropped)
+  event KIND KEY=VALUE...
+                        one KIND event line: the first KIND line of the core's
+                        wire fixture (FIXTURE, which the wire gates keep in the
+                        core's current encoding) with each KEY set to VALUE (JSON,
+                        else a string); exit 1 for a KIND or KEY the fixture
+                        lacks
 """
 import json
 import sys
+from pathlib import Path
+
+FIXTURE = Path(__file__).resolve().parents[2] / "shared/tests/fixtures/view_snapshot/hybrid.events.ndjson"
 
 
 def events(path):
@@ -41,8 +50,32 @@ def track_facts(path):
             "segment_starts": sorted(seg), "utc_offset_sec": r.get("utc_offset_sec")}
 
 
+def event(kind_name, assignments):
+    line = next((e for e in events(FIXTURE) if kind(e) == kind_name), None)
+    if line is None:
+        sys.exit(f"event: no {kind_name} line in {FIXTURE}")
+    fields = line[kind_name]
+    for a in assignments:
+        key, sep, raw = a.partition("=")
+        if not sep or key not in fields:
+            sys.exit(f"event: {kind_name} has no field '{key}' ({FIXTURE.name})")
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            value = raw
+        # A whole number for a float field keeps the core's float form.
+        if isinstance(fields[key], float) and type(value) is int:
+            value = float(value)
+        fields[key] = value
+    return json.dumps(line, separators=(",", ":"))
+
+
 if __name__ == "__main__":
-    cmd, path = sys.argv[1], sys.argv[2]
+    cmd = sys.argv[1]
+    if cmd == "event":
+        print(event(sys.argv[2], sys.argv[3:]))
+        sys.exit()
+    path = sys.argv[2]
     if cmd == "count":
         print(sum(kind(e) == sys.argv[3] for e in events(path)))
     elif cmd == "lastset":

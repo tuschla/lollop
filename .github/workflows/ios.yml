@@ -63,9 +63,8 @@ jobs:
     name: iOS framework link + simulator tests (macOS)
     # Links the app's `Lollop` framework (:lollop-ios: the app's Kotlin + the
     # release Rust core) for a device, then runs every iOS test suite in a
-    # simulator: the bridge (:core-bridge), the app's common tests (:lollop,
-    # among them the event-log engine on a scripted core) and the engine on the
-    # real core (:lollop-ios).
+    # simulator: the bridge (:core-bridge) and the app's tests (:lollop, among
+    # them the event-log engine on a scripted core and on the real core).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -79,13 +78,11 @@ jobs:
 
       - name: Link the app framework (device) + run the iOS tests (simulator)
         working-directory: android
-        # Linking Compose into a framework needs more heap than gradle.properties gives.
         run: >
-          ./gradlew --no-daemon --continue "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
+          ./gradlew --no-daemon --continue
           :lollop-ios:linkReleaseFrameworkIosArm64
           :core-bridge:iosSimulatorArm64Test
           :lollop:iosSimulatorArm64Test
-          :lollop-ios:iosSimulatorArm64Test
           -Plollop.iosSimulator="$SIMULATOR_UDID"
 
       - name: iOS test counts

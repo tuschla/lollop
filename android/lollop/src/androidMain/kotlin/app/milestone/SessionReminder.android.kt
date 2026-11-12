@@ -19,7 +19,11 @@ import androidx.core.app.NotificationManagerCompat
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
+import app.milestone.widget.drawable
 import kotlin.math.abs
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 
 /**
@@ -49,8 +53,21 @@ internal object AndroidReminder : SessionReminderPort {
     private const val EXTRA_DAY = "app.milestone.reminder.epoch_day"
     private const val EXTRA_KIND = "app.milestone.reminder.kind"
 
-    // A force stop clears the alarm; the next process sets it again.
-    override fun start(ctx: Context) = reschedule(ctx)
+    /** Set the alarm (a force stop clears it; the next process sets it again) and
+     *  follow every stored snapshot ([onSnapshot]) and a run starting to record
+     *  ([onRecording]). */
+    override fun start(ctx: Context) {
+        val app = ctx.applicationContext
+        reschedule(app)
+        AppProcess.scope.launch {
+            // The revision ticks on every write and stale mark; the one stored now
+            // was already followed when it was written.
+            WidgetSnapshotStore.revision.drop(1).collect { WidgetSnapshotStore.read(app)?.let { onSnapshot(app, it) } }
+        }
+        AppProcess.scope.launch {
+            RunSession.tracking.filter { it }.collect { onRecording(app) }
+        }
+    }
 
     /** Set the next alarm when the reminder is on, else remove it. Replaces any
      *  earlier one (same PendingIntent). */
@@ -119,12 +136,12 @@ internal object AndroidReminder : SessionReminderPort {
     }
 
     /**
-     * A fresh snapshot was stored. A shown reminder for another local day goes.
+     * A snapshot was stored. A shown reminder for another local day goes.
      * A shown reminder for today goes once a snapshot for today has nothing left
      * to remind about ([SessionReminder.due]); otherwise it is redrawn quietly (a
      * changed session).
      */
-    internal fun onSnapshot(ctx: Context, snapshot: WidgetSnapshot) {
+    private fun onSnapshot(ctx: Context, snapshot: WidgetSnapshot) {
         val today = todayEpochDay()
         val app = ctx.applicationContext
         val nm = nm(app) ?: return
@@ -152,9 +169,8 @@ internal object AndroidReminder : SessionReminderPort {
         if ((shownDay(nm) ?: return) != today) nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
     }
 
-    /** A shown run reminder goes once a run records
-     *  ([app.milestone.widget.AndroidWidgets]): its "Start run" is done. */
-    internal fun onRecording(ctx: Context) {
+    /** A shown run reminder goes once a run records: its "Start run" is done. */
+    private fun onRecording(ctx: Context) {
         val nm = nm(ctx) ?: return
         if (shown(nm)?.extras?.getString(EXTRA_KIND) == WidgetDayKind.Run.name) nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
     }
@@ -171,10 +187,11 @@ internal object AndroidReminder : SessionReminderPort {
     private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
         val res = app.appResources()
+        val action = reminder.action
         val start = NotificationCompat.Action.Builder(
-            if (reminder.kind == WidgetDayKind.Run) R.drawable.ic_content_track_run else R.drawable.ic_content_set_dumbbell,
-            reminderActionLabel(res, reminder),
-            actionPendingIntent(app, reminder.dest),
+            action.icon.drawable,
+            res.getString(action.labelRes),
+            actionPendingIntent(app, action.dest),
         )
             // From the lock screen the session opens after unlock.
             .setAuthenticationRequired(true)
