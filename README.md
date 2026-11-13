@@ -9,6 +9,14 @@ recommendation shows its evidence grade and citation.
   bridge (`CoreBridge`: JNI on Android, the C ABI on iOS). Bridge ops are declared once in `shared/src/ffi/ops.rs`.
 - `iosApp/`: the iOS app around that framework. See `ios/README.md`.
 
+## Install
+
+[Releases](https://github.com/tuschla/lollop/releases) carry the Android APK
+(arm64, updates install over earlier releases) and the iOS `.ipa` for SideStore
+(`ios/README.md`). `scripts/release.sh 0.2.0` cuts one: it sets the version in
+`app-version.xcconfig`, bumps the build number, tags `v0.2.0` and pushes; the
+tag runs `.github/workflows/release.yml`.
+
 ## Build
 
 ```sh
@@ -20,8 +28,11 @@ Needs rustup (it installs the toolchain and targets in `rust-toolchain.toml`), c
 the Android NDK, the JDK in `.java-version` and the Android SDK (`scripts/lib/env.sh`
 finds them). Plugin, library and SDK versions are in `android/gradle/libs.versions.toml`,
 the app version in `app-version.xcconfig`. Set `MILESTONE_KEYSTORE`, `MILESTONE_KS_PASS`
-and `MILESTONE_KS_ALIAS` to sign a release; without them the release APK is signed with
-the debug key. The app id and package are still `app.milestone`.
+and `MILESTONE_KS_ALIAS` to sign a release (`scripts/sign-release.sh`); without them the
+release APK is signed with the debug key. Releases are signed with the release key, which
+lives in the repo secrets and, for the owner, in `~/.local/share/lollop/`. Android only
+updates an app signed with the same key, so that key must never be lost or replaced. The
+app id and package are still `app.milestone`.
 
 ## Test
 

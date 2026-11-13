@@ -1,0 +1,131 @@
+name: Release
+
+# A GitHub Release for each version tag (scripts/release.sh makes them): the
+# Android APK signed with the release key, and the unsigned iOS .ipa that
+# SideStore signs on install. The tag must name the version in
+# app-version.xcconfig.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The release key's certificate. Android installs an update only over an APK
+  # signed with the same key, so a release signed with any other key fails here.
+  RELEASE_CERT_SHA256: 90981d36354f4aee22594fb45c810d7aa00624e26857bdb5fccc36296ee7a8fe
+
+jobs:
+  version:
+    name: Tag matches app-version.xcconfig
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - id: version
+        run: |
+          version=$(sed -n 's/^MARKETING_VERSION *= *//p' app-version.xcconfig)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match MARKETING_VERSION $version in app-version.xcconfig"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android APK (release key)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: ./.github/actions/setup
+        with:
+          cargo-ndk: "true"
+
+      - name: Release APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Release R8 keep check
+        run: scripts/check-release-r8.sh
+
+      - name: Sign with the release key
+        env:
+          MILESTONE_KEYSTORE_BASE64: ${{ secrets.MILESTONE_KEYSTORE_BASE64 }}
+          MILESTONE_KS_PASS: ${{ secrets.MILESTONE_KS_PASS }}
+          MILESTONE_KS_ALIAS: ${{ secrets.MILESTONE_KS_ALIAS }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          export MILESTONE_KEYSTORE="$RUNNER_TEMP/release.jks"
+          base64 -d <<<"$MILESTONE_KEYSTORE_BASE64" > "$MILESTONE_KEYSTORE"
+          apk=$(scripts/sign-release.sh --release)
+          rm "$MILESTONE_KEYSTORE"
+          . scripts/lib/env.sh
+          "$(build_tool apksigner)" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          grep -q "certificate SHA-256 digest: $RELEASE_CERT_SHA256" "$RUNNER_TEMP/certs.txt" \
+            || { echo "::error::the APK isn't signed with the release key"; exit 1; }
+          mkdir -p build/release
+          cp "$apk" "build/release/lollop-$VERSION.apk"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lollop-apk
+          path: build/release/
+          retention-days: 7
+          if-no-files-found: error
+
+  ios:
+    name: iOS app
+    needs: version
+    uses: ./.github/workflows/ios-app.yml
+
+  publish:
+    name: Publish the release
+    needs: [version, android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: lollop-*
+          path: build/release
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd build/release
+          mv lollop-unsigned.ipa "lollop-$VERSION-unsigned.ipa"
+          sha256sum "lollop-$VERSION.apk" "lollop-$VERSION-unsigned.ipa" > SHA256SUMS
+          cat SHA256SUMS
+          previous=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "**Android:** install \`lollop-$VERSION.apk\` (arm64). Updates install over earlier releases."
+            echo
+            echo "**iOS:** sideload \`lollop-$VERSION-unsigned.ipa\` with SideStore, which signs it with your Apple ID (see ios/README.md)."
+            echo
+            if [ -n "$previous" ]; then
+              echo "## Changes since $previous"
+              echo
+              git log --no-merges --pretty='- %s' "$previous..$GITHUB_REF_NAME"
+            else
+              echo "First release."
+            fi
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "lollop $VERSION" --notes-file notes.md \
+            "lollop-$VERSION.apk" "lollop-$VERSION-unsigned.ipa" SHA256SUMS

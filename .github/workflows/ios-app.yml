@@ -3,7 +3,8 @@ name: iOS app
 # The iOS app (iosApp/, a SwiftUI host around android/lollop-ios's `Lollop`
 # framework, and its widget extension LollopWidgets): an .ipa to sideload
 # (ios/README.md), the extension's tests in a simulator, and a launch smoke test
-# in a simulator. Runs on pushes to main that can change the app, and by hand.
+# in a simulator. Runs on pushes to main that can change the app, by hand, and
+# from release.yml (which publishes the .ipa).
 # The repo is public, so the macOS jobs cost no minutes.
 on:
   push:
@@ -28,6 +29,7 @@ on:
       - ".github/actions/**"
       - ".github/workflows/ios-app.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

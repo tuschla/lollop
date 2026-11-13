@@ -288,14 +288,16 @@ Installing on an iPhone with SideStore and a free Apple Account (the
    → Developer Mode on (iOS 16+; the phone restarts). Install LocalDevVPN from
    the App Store and connect it, open SideStore, sign in, and in My Apps tap
    the "7 DAYS" counter next to SideStore to finish its setup.
-2. Download the app: on the phone, open the latest successful "iOS app" run
-   under the repo's Actions tab (signed in to GitHub: artifact downloads need
-   an account even on a public repo) and download `lollop-unsigned-ipa`. Files
-   unzips it to `lollop-unsigned.ipa` when tapped. From a computer:
-   `gh run download --repo tuschla/lollop -n lollop-unsigned-ipa`, then copy
-   the `.ipa` to the phone (or install it with iloader).
+2. Download the app: on the phone, open the latest release
+   (https://github.com/tuschla/lollop/releases) and download
+   `lollop-<version>-unsigned.ipa`. Between releases, the latest successful
+   "iOS app" run under the repo's Actions tab has the current build as the
+   artifact `lollop-unsigned-ipa` (signed in to GitHub: artifact downloads need
+   an account even on a public repo; Files unzips it when tapped). From a
+   computer: `gh release download --repo tuschla/lollop --pattern '*.ipa'`,
+   then copy the `.ipa` to the phone (or install it with iloader).
 3. With LocalDevVPN connected and on Wi-Fi, SideStore → My Apps → `+` → pick
-   `lollop-unsigned.ipa`. SideStore asks what to do with the app extension:
+   the `.ipa`. SideStore asks what to do with the app extension:
    pick "Keep App Extensions (Register App ID for Each Extension)" (without the
    extension there are no widgets, no Live Activities and no control; "Use Main
    Profile" signs the extension with the app's profile, which WidgetKit may

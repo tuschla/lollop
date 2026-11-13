@@ -11,8 +11,7 @@
 # Outputs:
 #   android/app/build/outputs/apk/debug/app-debug.apk                        (debug-signed, installable)
 #   android/app/build/outputs/apk/release/lollop-release.apk                 (minified arm64-v8a APK,
-#       signed with $MILESTONE_KEYSTORE / $MILESTONE_KS_PASS / $MILESTONE_KS_ALIAS when set; the
-#       env var names predate the lollop rename and are kept so existing signing setups work)
+#       signed by scripts/sign-release.sh: the release key when $MILESTONE_KEYSTORE is set)
 #   android/app/build/outputs/apk/release/lollop-release-debugsigned.apk     (same APK signed with the
 #       DEBUG key when no keystore is set: sideload/testing only, never distributable)
 #
@@ -32,8 +31,6 @@ for arg in "$@"; do
   esac
 done
 
-APKSIGNER="$(build_tool apksigner)"
-
 if [[ $RUN_TESTS == 1 ]]; then
   echo "==> Rust core: test"
   cargo test --locked
@@ -50,21 +47,7 @@ echo "==> Release R8 keep check"
 scripts/check-release-r8.sh
 
 echo "==> Signing release APK"
-REL_DIR=android/app/build/outputs/apk/release
-if [[ -n "${MILESTONE_KEYSTORE:-}" ]]; then
-  "$APKSIGNER" sign \
-    --ks "$MILESTONE_KEYSTORE" --ks-pass "pass:$MILESTONE_KS_PASS" --ks-key-alias "$MILESTONE_KS_ALIAS" \
-    --out "$REL_DIR/lollop-release.apk" \
-    "$REL_DIR/app-release-unsigned.apk"
-  SIGNED_APK="$REL_DIR/lollop-release.apk"
-else
-  "$APKSIGNER" sign \
-    --ks ~/.android/debug.keystore --ks-pass pass:android \
-    --out "$REL_DIR/lollop-release-debugsigned.apk" \
-    "$REL_DIR/app-release-unsigned.apk"
-  SIGNED_APK="$REL_DIR/lollop-release-debugsigned.apk"
-  echo "WARNING: release APK signed with the debug keystore — not distributable"
-fi
+SIGNED_APK="$(scripts/sign-release.sh)"
 
 echo "==> Done"
 ls -la android/app/build/outputs/apk/debug/app-debug.apk "$SIGNED_APK"

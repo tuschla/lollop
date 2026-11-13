@@ -57,9 +57,9 @@ android {
     //     arm64-v8a APK. F-Droid builds APKs from source (no AAB support).
     //   • Play Store → `./gradlew bundleRelease` = an AAB; Play splits it
     //     per-device (density + language), no manual ABI splits needed.
-    // Any published build MUST be signed with a real keystore supplied through
-    // MILESTONE_KEYSTORE (see scripts/build.sh); the debug-key fallback is for
-    // local sideload/testing only and is not distributable.
+    // Any published build MUST be signed with the release key
+    // (scripts/sign-release.sh; GitHub Releases: .github/workflows/release.yml);
+    // the debug-key fallback is for local sideload/testing only.
 
     compileOptions {
         // Core-library desugaring backports the java.time API (kotlinx-datetime
