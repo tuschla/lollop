@@ -40,7 +40,7 @@ app id and package are still `app.milestone`.
 cargo test                                                    # core
 cd android && ./gradlew :lollop:testAndroidHostTest           # JVM + Robolectric UI tests on the real core
 cd android && ./gradlew :lollop:verifyRoborazziAndroidHostTest # screenshots (baselines are local, not in git)
-cd android && ./gradlew :lollop:compileKotlinIosArm64         # the shared module's iOS build (any host)
+cd android && ./gradlew :lollop:compileKotlinIosArm64         # the shared module's iOS build (macOS only; skipped on Linux)
 scripts/qa-emulator.sh                                        # on-device smoke: seeded log, set flow, monkey (CI's emulator job)
 scripts/emulator-scenarios.sh                                 # on-device scenarios (AVD e34)
 scripts/emu-scenarios/surfaces.sh                             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37)
