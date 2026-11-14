@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
  * RunTrackingService, iOS's CoreLocation tracker) writes and the UI observes.
  * Living here rather than inside the Composable is what lets a run keep recording
  * while the screen is off or the app is backgrounded: the recorder owns the
- * location stream, the screen just renders this state.
+ * location stream, the screen only renders this state.
  *
  * Every flow is read-only; state changes only through the commands below. The
  * recording-engine state (tracking, locating, armed, the preview fix, a failed
@@ -98,7 +98,7 @@ object RunSession {
 
     // Live elapsed MOVING time (seconds): the accumulated duration of MOVING legs
     // only, pause-bridge legs AND sub-[CoreConstants.MIN_MOVING_SPEED_MPS] standing-still legs are
-    // excluded, exactly as the core's of-record `moving_duration_min` excludes them -
+    // excluded, exactly as the core's of-record `moving_duration_min` excludes them,
     // so this live figure matches the saved run's moving-time duration/pace instead of
     // freezing at a pause then JUMPING the pause span back in on resume. Driven by
     // each fix's own MONOTONIC per-leg dt (elapsedRealtimeNanos), NOT wall-clock
@@ -679,7 +679,7 @@ internal class RollingPace {
     }
 
     /** Canonical minutes per km over the current window, or NaN when the window
-     *  holds too little time or ground to be meaningful. */
+     *  holds too little time or ground for a pace. */
     fun paceMinPerKm(): Double =
         if (spanMs < ROLLING_PACE_MIN_SHOW_SPAN_MS || meters < ROLLING_PACE_MIN_SHOW_METERS) Double.NaN
         else (spanMs / 60_000.0) / (meters / 1000.0)

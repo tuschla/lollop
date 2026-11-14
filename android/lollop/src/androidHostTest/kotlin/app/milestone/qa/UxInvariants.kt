@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
  * tap targets, and layout that collapses at a larger font scale.
  *
  * It reads the Compose semantics tree (what accessibility services and the user
- * actually perceive), never the source, so it stays honest about the shipped UI.
+ * perceive), never the source, so it checks the UI as shipped.
  * Each [Violation] names the offending node's path so a failure points straight
  * at the widget.
  */

@@ -20,7 +20,7 @@ fn delts_are_not_folded_into_side_delts() {
     assert!(resolve_muscle("rear delts").is_some());
     // ...but the front delt is a distinct head and generic "delts" spans all
     // three: neither carries a Table 1 row, so both fall through to None
-    // (the honest no-landmark fallback), never borrowing Side delts.
+    // (the no-landmark fallback), never borrowing Side delts.
     assert!(resolve_muscle("front delt").is_none());
     assert!(resolve_muscle("delts").is_none());
 

@@ -8,7 +8,7 @@ use crate::schema::{AdjustmentCall, Recommended};
 use crate::strength::LiftGoal;
 
 /// Push one evidence-cited row, dropping `MarketingMyth`-graded claims (HARD
-/// RULE 2, myths are never programmed or surfaced).
+/// RULE 2: myths are never programmed or surfaced).
 pub(in crate::app) fn push_guidance<T, K>(
     rows: &mut Vec<GuidanceView>,
     section: &str,

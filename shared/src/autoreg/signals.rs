@@ -1,4 +1,4 @@
-//! Per-signal readiness states: the KB-honest readiness summary. No composite
+//! Per-signal readiness states for the readiness summary. No composite
 //! score exists in the KB, so none is emitted (HARD RULE 1); each row restates
 //! the verdict of the rule that reads the signal.
 
@@ -20,7 +20,7 @@ use crate::strength::LiftGoal;
 /// Which picker/summary group a readiness signal belongs to. `RedFlag` is the
 /// medical-referral / hard-stop block (Pain, Illness, RED-S, cardiac, bone
 /// stress) that shells must visually fence off from the routine `Metric`
-/// signals, the fence is data-driven from here, not a shell-side predicate.
+/// signals; the fence is data-driven from here, not a shell-side predicate.
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -72,7 +72,7 @@ pub struct SignalState {
     pub state: String,
     /// Registry claim of the rule whose threshold judged the state. `None`
     /// when the row is a plain factual echo (a recorded-only signal with no
-    /// gating rule, or an explicit all-clear), those judge nothing, so they
+    /// gating rule, or an explicit all-clear): those judge nothing, so they
     /// carry no evidence tag.
     pub claim: Option<ClaimId>,
     /// Whether the displayed reading is dated on the shell's local today (true
@@ -123,7 +123,7 @@ pub fn signal_states_in(
                 wellness_collecting,
             );
             // A stale row keeps its grade and citation; only the state text
-            // admits there is no current reading.
+            // says there is no current reading.
             let stale_row = stale
                 .iter()
                 .any(|i| i.signal == signal && i.observed_at == input.observed_at);

@@ -245,7 +245,7 @@ fn low_wrapped_next_session_still_blanks_under_a_safety_hold() {
 
 #[test]
 fn downgrade_caps_a_run_item_not_just_a_note() {
-    // A running plan + an HRV downgrade must actually cap the run target.
+    // A running plan + an HRV downgrade must cap the run target.
     let app = Engine;
     let mut model = Model::default();
     app.update(
@@ -425,7 +425,7 @@ fn an_unlocated_tendon_report_still_eases_every_lift() {
 #[test]
 fn cap_rpe_on_a_day_it_cannot_change_does_not_mark_it_adjusted() {
     // The e1RM gate's load cut and RPE cap touch no run: on a run day the
-    // session is a genuine no-op, so no "adjusted" chip and no item note.
+    // session is a no-op, so no "adjusted" chip and no item note.
     let (app, mut model) = planned_on(running_profile(), [], MON);
     let before = app.view(&model).next_session.expect("today's run");
     app.update(e1rm_drop(MON), &mut model).expect_only_render();

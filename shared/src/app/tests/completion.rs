@@ -873,7 +873,7 @@ fn shown_or(kg: f64) -> impl Fn(&PrescriptionView) -> f64 {
 fn following_the_shown_reduced_load_completes_an_anchored_deload_day() {
     // planned_strength_model(true) anchors Back Squat from a logged e1RM, so the
     // deloaded item carries a real (reduced) load. Logging exactly the shown
-    // session — the reduced sets at the reduced load — must complete it, not leave
+    // session (the reduced sets at the reduced load) must complete it, not leave
     // it stuck because the bar stayed at the un-reduced prescribed load.
     let (app, mut model) = planned_strength_model(true);
     app.update(
@@ -942,7 +942,7 @@ fn a_deload_expiring_midweek_keeps_an_already_done_day_done() {
         "Monday completes on the shown deload session"
     );
     // Advance to Wednesday: today's deload has aged out, but Monday sits inside
-    // its window, so Monday must stay done — not flip to missed.
+    // its window, so Monday must stay done and not flip to missed.
     set_today(&app, &mut model, POS_MON + 2);
     assert!(
         app.view(&model).review_adjustments.is_empty(),
@@ -1191,7 +1191,7 @@ fn a_done_deload_row_shows_the_folded_sets_and_load() {
 fn stacked_deloads_take_the_single_deepest_cut_not_compounded() {
     // Two simultaneous 50 % deloads (an RPE-load gap and the MRV sign cluster
     // in one check-in) reduce the 5-set squat to 3 (the single deepest cut),
-    // never 2 (sequential compounding) — otherwise the hero would show the
+    // never 2 (sequential compounding). Otherwise the hero would show the
     // item done at 2 sets while the next day's judgement needs 3 (a
     // done→missed flip). Both the display fold and the completion judgement
     // share one composition.
@@ -1362,7 +1362,7 @@ fn session_done_carries_run_numbers_and_says_of_plan_when_short() {
 fn week_plan_marks_a_fully_logged_day_done() {
     // Today = MON. A session is done only when EVERY prescribed exercise has its
     // prescribed SETS logged (each qualifying: same movement + reps + load, RPE
-    // never gates). The hero KEEPS every item — a done exercise stays flagged
+    // never gates). The hero KEEPS every item: a done exercise stays flagged
     // `done` (the shell collapses it); the day reads done and the hero advances
     // only when all exercises' sets are logged.
     let (app, mut model) = planned_strength_model(false);
@@ -1607,7 +1607,7 @@ fn a_past_day_completes_from_its_own_prescription_when_logged_later() {
     );
     assert!(before.len() > 1, "Monday prescribes several exercises");
 
-    // Log Monday's work retroactively at local noon on Monday — the timestamp
+    // Log Monday's work retroactively at local noon on Monday, the timestamp
     // the shell's `planDayObservedAt` sends for a back-dated plan day.
     let mut id = 0u64;
     for (ex, sets) in &before {

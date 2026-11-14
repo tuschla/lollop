@@ -11,8 +11,8 @@ license = "AGPL-3.0-only"
 crux_core = "0.20"
 serde = "1.0.228"
 
-# Lint policy shared by every member (`[lints] workspace = true`). Kept lean:
-# only lints the tree is clean under, so `-D warnings` stays meaningful.
+# Lint policy shared by every member (`[lints] workspace = true`): only lints
+# the tree is already clean under, so a `-D warnings` failure points at new code.
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

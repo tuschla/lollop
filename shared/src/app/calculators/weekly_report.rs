@@ -292,8 +292,8 @@ pub(in crate::app) fn build_weekly_report(
     rows
 }
 
-/// Week-over-week increase vs the training-age cap (running-031). Only
-/// meaningful with a prior week to ratio against; skipped when THIS week is the
+/// Week-over-week increase vs the training-age cap (running-031). Needs a
+/// prior week to ratio against; skipped when THIS week is the
 /// planned recovery week (a cut is expected, not a violation).
 fn push_increase_row(rows: &mut Vec<GuidanceView>, age_years: f64, week: &WeekRuns) {
     if week.recovery_this_week {
@@ -359,7 +359,7 @@ fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
 /// Daniels weekly-share caps (running-016/018/019): the long-run share plus
 /// the T/I shares, each run classified by its workout-type tag or (untagged)
 /// its average %HRmax. A correctly executed tempo counts as threshold, never
-/// interval, volume — one average %HRmax per run cannot be split into zones,
+/// interval, volume: one average %HRmax per run cannot be split into zones,
 /// so the tag governs when present. Each exceeded cap gets its own row.
 /// Returns whether a long-run row was pushed.
 fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_km: f64) -> bool {
@@ -477,7 +477,7 @@ fn push_easy_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// tag or average heart rate says so (`classify_hard_run`), when it sits on a
 /// planned quality day (running-012 allows the session-goal count for plan
 /// design), or when its average pace is at/faster than the athlete's threshold
-/// pace — so runs without a heart-rate strap count too.
+/// pace, so runs without a heart-rate strap count too.
 fn push_quality_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     let offset = week.offset;
     let quality = &week.hard_runs;
@@ -540,7 +540,7 @@ fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, pp: Option<&PlanProfile>, 
 /// A "long run" is the week's LONGEST run AND ≥25% of a full-week basis: the
 /// planned weekly km, else the trailing-7-day total. For a PURE LIFTER (lifts
 /// programmed, running not configured) an incidental jog is not a programmed
-/// long run, so it counts only when real running history certifies it —
+/// long run, so it counts only when real running history certifies it;
 /// otherwise the 25% test is self-referential (25% of the jog's own distance)
 /// and would flag a recovery jog near leg day. A configured runner (or an
 /// unknown profile) keeps the week's-longest rule.
@@ -585,7 +585,7 @@ fn spaced_run_times(model: &Model, pp: Option<&PlanProfile>, week: &WeekRuns) ->
 /// hinge-pattern set at or above `strength::HEAVY_PCT_1RM` %1RM. Hard runs are the week's
 /// quality runs (tag, heart rate, plan slot or pace); the long run is the
 /// week's LONGEST run that also clears 25% of a full-week volume basis
-/// ([`spaced_run_times`]) — a short Z1 recovery jog is neither hard nor long.
+/// ([`spaced_run_times`]). A short Z1 recovery jog is neither hard nor long.
 fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: &WeekRuns) {
     let model = cx.model;
     let offset = week.offset;

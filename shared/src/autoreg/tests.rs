@@ -136,7 +136,7 @@ fn state_of(inputs: &[ReadinessInput]) -> String {
 
 /// Locks the displayed "why" (`signal_states`) to the SAME named thresholds
 /// the adjustment rules fire on. Both sides read one set of constants,
-/// so they cannot desync; this test additionally pins the state text to the
+/// so they cannot desync; this test also pins the state text to the
 /// rule outcome at each band boundary, so re-inlining a literal on either
 /// side (reintroducing the drift hazard) breaks a build.
 #[test]
@@ -1285,7 +1285,7 @@ fn decoupling_ignored_for_short_efforts() {
     }];
     assert!(
         adjustments(&short).is_empty(),
-        "decoupling from a ≤20 min effort is invalid - never acted on"
+        "decoupling from a ≤20 min effort is invalid, never acted on"
     );
     let long = vec![ReadinessInput {
         effort_min: Some(45.0),
@@ -1303,7 +1303,7 @@ fn decoupling_ignored_for_short_efforts() {
         !adjustments(&untracked)
             .iter()
             .any(|r| r.value == Adjustment::DowngradeSession),
-        "untracked-duration decoupling is not known-valid - never acted on"
+        "untracked-duration decoupling is not known-valid, never acted on"
     );
 }
 
@@ -1377,8 +1377,8 @@ fn derived(inputs: &[ReadinessInput], signal: ReadinessSignal) -> Option<Readine
 
 #[test]
 fn below_minimum_checkins_emits_no_signal_only_a_collecting_status() {
-    // A fresh user: 4 check-in days < MIN (7). No fabricated z: an honest
-    // "collecting baseline - 4 of 7" status instead (HR1).
+    // A fresh user: 4 check-in days < MIN (7). No fabricated z: a
+    // "collecting baseline, 4 of 7" status instead (HR1).
     let checkins: Vec<CheckinInput> = (0..4)
         .map(|d| checkin(d, Some(3), Some(3), Some(3)))
         .collect();
@@ -1400,7 +1400,7 @@ fn wellness_composite_z_is_derived_from_history_and_feeds_the_rule() {
     // soreness 4 / mood 3): goodness = (2 + (6−4) + 3)/3 = 2.33, well below the
     // ~4 baseline → a strong negative z computed by the CORE, no user z entry.
     // Two consecutive suppressed days arm the autoreg-030 downgrade (a single
-    // day would not — WELLNESS-001 never vetoes one day).
+    // day would not: WELLNESS-001 never vetoes one day).
     // Baseline composites alternate 4.33 (5/2/4) and 3.67 (4/3/4): mean 4.0.
     let mut checkins: Vec<CheckinInput> = (0..6)
         .map(|d| {
@@ -1467,7 +1467,7 @@ fn one_off_hrv_morning_does_not_trip_autoreg_028_via_the_rolling_mean() {
 #[test]
 fn four_of_seven_suppressed_hrv_days_trip_autoreg_028() {
     // Four of the trailing seven mornings suppressed: the 7-day rolling mean
-    // crosses the SWC lower bound and the downgrade fires - the sustained
+    // crosses the SWC lower bound and the downgrade fires. This is the sustained
     // suppression the gate is meant to catch (vs the single off morning). The
     // baseline is matured (22 reading-days spanning 21 days) so the channel emits.
     let ms = [
@@ -1523,7 +1523,7 @@ fn hrv_baseline_not_mature_after_twelve_readings_in_one_week() {
         out.collecting
             .iter()
             .any(|b| b.signal == ReadinessSignal::HrvLnRmssd),
-        "the channel reports an honest collecting status"
+        "the channel reports a collecting status"
     );
 }
 
@@ -1572,7 +1572,7 @@ fn wellness_goodness_is_the_mean_of_the_answered_five_items() {
     assert!((wellness_goodness(&bad).unwrap() - 2.6).abs() < 1e-9);
 
     // Mean is over ANSWERED items only: a legacy 3-item check-in (no fatigue
-    // / stress) scores exactly as it always has — replay-equivalent.
+    // / stress) scores exactly as it always has (replay-equivalent).
     let three = CheckinInput {
         sleep_quality: Some(2), // 2
         soreness: Some(4),      // 6-4 = 2
@@ -1583,7 +1583,7 @@ fn wellness_goodness_is_the_mean_of_the_answered_five_items() {
     assert!((wellness_goodness(&three).unwrap() - 7.0 / 3.0).abs() < 1e-9);
 
     // A single new item still scores (reverse of fatigue 5 = 1.0): never
-    // dropped, so a genuinely bad lone reading can still trip the floor.
+    // dropped, so a bad lone reading can still trip the floor.
     let fatigue_only = CheckinInput {
         fatigue: Some(5),
         ..Default::default()
@@ -1876,7 +1876,7 @@ fn rpe_above_target_strips_a_coexisting_e1rm_load_increase() {
     // Symmetrized autoreg-044: a first-set RPE +2 over target is its
     // own ReduceLoadPct, an objective within-session decline. It must strip a
     // coexisting e1RM-increase load-add (ratio 1.06 → IncreaseLoadPct) so the
-    // session is never cut and loaded up in the same breath.
+    // session is never both cut and loaded up.
     let inputs = vec![
         input(ReadinessSignal::Rpe, 2.0),
         input(ReadinessSignal::EstimatedOneRm, 1.06),
@@ -2090,7 +2090,7 @@ fn worsening_after_24h_is_reactive() {
 
 #[test]
 fn streak_enters_on_a_pre_dip_baseline() {
-    // A varying pre-dip baseline (real SD), then a MILD dip to mood 4 — only
+    // A varying pre-dip baseline (real SD), then a MILD dip to mood 4, only
     // ~0.75 below the pre-dip mean. Scored against the PAST-ONLY baseline the
     // dip crosses z ≤ −1 and the streak enters and holds; a leave-one-out
     // baseline would fold the dip days into the mean and never flag them. A
@@ -2126,7 +2126,7 @@ fn hrv_needs_four_readings() {
     // HRV emits only with ≥ HRV_MIN_WEEKLY_READINGS readings inside the trailing
     // rolling window (autoreg-047). 21 matured reading-days but a sparse recent
     // week (only three in the trailing seven days after a gap) → no HRV input,
-    // but an honest collecting(have/need) status; a fourth recent reading tips
+    // but a collecting(have/need) status; a fourth recent reading tips
     // it over and the channel emits.
     let make = |days: Vec<i64>| -> Vec<CheckinInput> {
         days.into_iter()
@@ -2147,7 +2147,7 @@ fn hrv_needs_four_readings() {
     assert_eq!(status.have, 3, "three readings sit in the trailing window");
     assert_eq!(
         status.need, HRV_MIN_WEEKLY_READINGS,
-        "the honest target is the weekly-reading minimum"
+        "the status target is the weekly-reading minimum"
     );
     let dense: Vec<i64> = (0..18).chain(24..28).collect();
     let out2 = derive_readiness(&make(dense), 0, None);
@@ -2179,8 +2179,8 @@ fn a_one_ms_change_after_a_flat_week_is_not_an_artifact() {
 fn checkin_signal_expires_without_a_recent_reading() {
     // Six baseline mornings ~60 bpm then a +10 elevated morning on day 6, with
     // NO check-in since; today is day 9 (three days later). The stale RHR
-    // reading must not drive a verdict — it is set aside as `stale`, no
-    // train-block — and its state row reads "out of date".
+    // reading must not drive a verdict: it is set aside as `stale` (no
+    // train-block), and its state row reads "out of date".
     let build = || -> Vec<CheckinInput> {
         let mut c: Vec<CheckinInput> = (0..6).map(|d| rhr_checkin(d, 60.0)).collect();
         c.push(rhr_checkin(6, 70.0));
@@ -2444,7 +2444,7 @@ fn a_sustained_hrv_suppression_is_measured_against_the_frozen_baseline() {
 fn an_hrv_verdict_expires_against_today_after_check_ins_stop() {
     // The newest HRV reading IS the suppressed morning, so the
     // global-newest recency bound (g - day == 0) never expires it. With a
-    // clock the verdict is additionally bounded by today; once today is more
+    // clock the verdict is also bounded by today; once today is more
     // than HRV_RECENCY_DAYS past the newest reading, the channel goes silent.
     let checkins = sustained_hrv_suppression_checkins();
     let newest_day = 29;

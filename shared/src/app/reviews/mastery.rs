@@ -45,7 +45,7 @@ pub(in crate::app) struct Mastery {
     pub(in crate::app) kind: MasteryKind,
 }
 
-/// The e1RM a set supports when it can estimate one reliably — the same gate
+/// The e1RM a set supports when it can estimate one reliably, by the same gate
 /// the plan anchors use: not a hold, not a calisthenics rung on a calisthenics
 /// profile, ≤10 effective reps, not an isolation lift (strength-006). `facts`
 /// is what the set's name says ([`SetIndex::facts`]).

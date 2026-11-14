@@ -194,7 +194,7 @@ fun LogSetEditor(
     // lift re-seeds from its last set, and the loop counts/edits today's sets.
     recentLifts: List<LiftResultView> = emptyList(),
     // Display unit for the weight field. The WIRE value is always kg (the core is
-    // SI); lb is a pure display edge — prefill converts kg→lb, Save converts lb→kg.
+    // SI); lb is a pure display edge: prefill converts kg→lb, Save converts lb→kg.
     weightUnit: WeightUnit = WeightUnit.Kg,
     // Seed the stamp to a plan day's local noon when logging a PAST prescribed
     // session from the week strip; null falls back to now. Chip stays editable.
@@ -225,7 +225,7 @@ fun LogSetEditor(
     // highlighted reps/RPE) so the editor fabricates no entry (HARD RULE 1).
     val seed = remember(initial, rx, weightUnit) { freshSetSeed(initial, rx, weightUnit) }
     // The entry fields. Reps keep a logged count past the tap range (a 60-rep
-    // air-squat set): it is saved as is; the row just won't highlight it. Effort
+    // air-squat set): it is saved as is; the row doesn't highlight it. Effort
     // is a per-set self-report: a NEW set starts unrated (the coach's target is
     // only a hint on the scale), an untouched Save logs it unrated (0.0, which the
     // core reads as "not recorded"), and it is never carried into the next set.
@@ -235,7 +235,7 @@ fun LogSetEditor(
     // Hold mode follows the CURRENT exercise: a prescribed hold rung, OR editing an
     // existing hold set while its exercise is unchanged ([sameExercise], the match
     // Save resolves the name with). Renaming an edited hold set to a barbell lift
-    // drops hold mode (so it can't emit a "Bench — 30 s hold" row or pollute the
+    // drops hold mode (so it can't emit a "Bench - 30 s hold" row or pollute the
     // Bench e1RM with a phantom 1-rep set).
     val holdMode = exerciseKey in holdSet ||
         (initial?.hold_sec != null && sameExercise(fields.exercise, initial.exercise))
@@ -274,7 +274,7 @@ fun LogSetEditor(
     // close on Save.
     val loop = initial == null && initialObservedAt == null
     // "Done for now" with an entered-but-unlogged set asks first: log it, discard it, or
-    // keep editing. A clean editor (an untouched re-seed) just closes.
+    // keep editing. A clean editor (an untouched re-seed) closes without asking.
     var confirmDone by rememberSaveable { mutableStateOf(false) }
     // Undo for the newest loop save: its entry id and summary line, whether it was
     // a one-tap warm-up, and whether it started the running rest (only then does

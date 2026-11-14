@@ -15,19 +15,19 @@ use super::*;
 use crate::app::plan_views::{HrAnchor, TargetBand, band_for, resolve_target};
 
 mod oracle {
-    /// KB extracted/07-data-harvesting.md:158 — Tanaka 2001: `208 − 0.7·age`.
+    /// KB extracted/07-data-harvesting.md:158: Tanaka 2001, `208 − 0.7·age`.
     /// (04-running.md:65 restates it.)
     pub fn tanaka(age: f64) -> f64 {
         208.0 - 0.7 * age
     }
 
-    /// 07-data-harvesting.md:163 and 04-running.md:54 — Karvonen:
+    /// 07-data-harvesting.md:163 and 04-running.md:54: Karvonen,
     /// `target = HRrest + frac·(HRmax − HRrest)`.
     pub fn karvonen(rest: f64, max: f64, frac: f64) -> f64 {
         rest + (max - rest) * frac
     }
 
-    /// 04-running.md:464-467 — Daniels band table (%VO2max, %HRmax).
+    /// 04-running.md:464-467: Daniels band table (%VO2max, %HRmax).
     /// Returns (vo2_lo, vo2_hi, hr_lo, hr_hi); Repetition (04:468) is ">100%
     /// VO2max", "use pace, not HR".
     pub fn band_row(band: crate::schema::VdotBand) -> (f64, Option<f64>, Option<(f64, f64)>) {
@@ -41,17 +41,17 @@ mod oracle {
         }
     }
 
-    /// 07-data-harvesting.md:172 — `VO2 = −4.60 + 0.182258·v + 0.000104·v²`, v m/min.
+    /// 07-data-harvesting.md:172: `VO2 = −4.60 + 0.182258·v + 0.000104·v²`, v m/min.
     pub fn vo2(v: f64) -> f64 {
         0.000104 * v * v + 0.182258 * v - 4.60
     }
 
-    /// 07-data-harvesting.md:173 — fraction of VO2max sustainable for t min.
+    /// 07-data-harvesting.md:173: fraction of VO2max sustainable for t min.
     pub fn pct_max(t_min: f64) -> f64 {
         0.8 + 0.2989558 * (-0.1932605 * t_min).exp() + 0.1894393 * (-0.012778 * t_min).exp()
     }
 
-    /// 07-data-harvesting.md:174 — `VDOT = VO2(v)/%max(t)`, v = d/t.
+    /// 07-data-harvesting.md:174: `VDOT = VO2(v)/%max(t)`, v = d/t.
     pub fn vdot(d_m: f64, t_s: f64) -> f64 {
         let t_min = t_s / 60.0;
         vo2(d_m / t_min) / pct_max(t_min)
@@ -87,7 +87,7 @@ mod oracle {
         1000.0 / speed_for_vo2(vdot * pct / 100.0) * 60.0
     }
 
-    /// 07-data-harvesting.md:185 — Riegel exponent by weekly volume:
+    /// 07-data-harvesting.md:185: Riegel exponent by weekly volume:
     /// 100+ km ≈ 1.04; 60–100 ≈ 1.06; 30–60 ≈ 1.09; <30 ≈ 1.12. (Grids avoid
     /// the exact shared boundaries 30/60/100, which the KB leaves ambiguous.)
     pub fn riegel_exponent(weekly_km: f64) -> f64 {
@@ -99,12 +99,12 @@ mod oracle {
         }
     }
 
-    /// 07-data-harvesting.md:185 — `t2 = t1·(d2/d1)^k`.
+    /// 07-data-harvesting.md:185: `t2 = t1·(d2/d1)^k`.
     pub fn riegel(t1: f64, d1: f64, d2: f64, k: f64) -> f64 {
         (d2.ln() - d1.ln()).mul_add(k, t1.ln()).exp()
     }
 
-    /// 04-running.md:427-428 (running-039) — midpoint when the two methods
+    /// 04-running.md:427-428 (running-039): midpoint when the two methods
     /// agree within ~2%, else the (low, high) span. Returns (low, high, agreed).
     pub fn equivalency(a: f64, b: f64) -> (f64, f64, bool) {
         let (lo, hi) = if a < b { (a, b) } else { (b, a) };
@@ -116,20 +116,20 @@ mod oracle {
         }
     }
 
-    /// 02-strength-power.md:54 — Epley `load×(1+reps/30)`.
+    /// 02-strength-power.md:54: Epley, `load×(1+reps/30)`.
     pub fn epley(w: f64, r: f64) -> f64 {
         w + w * r / 30.0
     }
-    /// 02-strength-power.md:54 — Brzycki `load/(1.0278−0.0278×reps)` (the KB's
+    /// 02-strength-power.md:54: Brzycki, `load/(1.0278−0.0278×reps)` (the KB's
     /// 4-decimal rounding of 37/36 and 1/36).
     pub fn brzycki_kb(w: f64, r: f64) -> f64 {
         w / (1.0278 - 0.0278 * r)
     }
-    /// 02-strength-power.md:54 — Lombardi `load×reps^0.10`.
+    /// 02-strength-power.md:54: Lombardi, `load×reps^0.10`.
     pub fn lombardi(w: f64, r: f64) -> f64 {
         w * (0.10 * r.ln()).exp()
     }
-    /// 02-strength-power.md:76 — RPE 6–10 ↔ RIR 4–0, RPE 10 = 0 RIR.
+    /// 02-strength-power.md:76: RPE 6–10 ↔ RIR 4–0, RPE 10 = 0 RIR.
     pub fn rir_of_rpe(rpe: f64) -> f64 {
         4.0 - (rpe - 6.0)
     }
@@ -139,12 +139,12 @@ mod oracle {
     pub const MASTERS_G_PER_KG: (f64, f64) = (1.2, 1.6);
     pub const DEFICIT_G_PER_KG: (f64, f64) = (1.8, 2.7);
 
-    /// 04-running.md:395 — MAF cap `180 − age` (no adjustment).
+    /// 04-running.md:395: MAF cap `180 − age` (no adjustment).
     pub fn maf(age: f64) -> f64 {
         180.0 - age
     }
 
-    /// 04-running.md:32 (running-003) — Z1 <~82 %HRmax, Z2 ~82–88, Z3 >~88;
+    /// 04-running.md:32 (running-003): Z1 <~82 %HRmax, Z2 ~82–88, Z3 >~88;
     /// 07-data-harvesting.md:191 Lucia TRIMP weights the zones 1/2/3.
     pub fn lucia_weight(pct_hr_max: f64) -> f64 {
         if pct_hr_max < 82.0 {
@@ -554,8 +554,8 @@ fn race_prediction_identity_and_monotonicity() {
         assert_eq!(v.predicted, Some(oracle::clock(t)));
     }
     // Faster recent race → faster (never slower) predictions. Each METHOD is
-    // monotone, so the band centre (Riegel + Daniels)/2 — identical under both
-    // running-039 shapes (midpoint or span) — is monotone; the individual
+    // monotone, so the band centre (Riegel + Daniels)/2 (identical under both
+    // running-039 shapes, midpoint or span) is monotone; the individual
     // bounds are monotone while the agree/range shape is unchanged (switching
     // from a span to its midpoint legitimately lowers the upper bound).
     // Longer goal → slower bounds; more weekly volume → never slower.
@@ -1661,7 +1661,7 @@ fn training_load_matches_lucia_trimp_and_ewma_oracle() {
 
 #[test]
 fn training_load_decays_through_rest_days_up_to_today() {
-    // 07:201-204: CTL/ATL are EWMAs of DAILY load — a rest day is a day of
+    // 07:201-204: CTL/ATL are EWMAs of DAILY load. A rest day is a day of
     // zero load, so fatigue decays while you rest. The card's figures carry
     // no "as of" date, so they read as today's.
     let last = 20_100;

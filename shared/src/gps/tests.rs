@@ -169,8 +169,8 @@ fn splits_mid_run_stop_does_not_inflate_split_pace() {
     // 300 s standstill spliced in mid-first-km (after ~556 m): the stopped
     // leg (0 m over 300 s, below the 0.5 m/s auto-pause floor) must be
     // excluded from split 1's TIME, so its pace matches the other full
-    // splits (the run's moving pace) instead of reading ~5 min slower -
-    // consistent with `moving_duration_min` on the same detail sheet.
+    // splits (the run's moving pace) instead of reading ~5 min slower.
+    // `moving_duration_min` on the same detail sheet excludes the stop too.
     let mut track: Vec<GpsPoint> = (0..=5).map(|i| pt(0.0, i as f64 * 0.001, i * 30)).collect();
     // Standstill: same position as fix 5, 300 s later.
     track.push(pt(0.0, 0.005, 5 * 30 + 300));
@@ -414,7 +414,7 @@ fn decimation_preserves_the_interval_vi_verdict() {
 fn decimation_preserves_distance_within_one_percent() {
     // Total distance is the storage-heaviest figure users see; thinning must
     // not move it more than ±1 % at strides 2 and 3. Uses realistic sub-metre
-    // GPS jitter (0.000_004 ≈ 0.44 m), a real good-fix running track barely
+    // GPS jitter (0.000_004 ≈ 0.44 m): a real good-fix running track barely
     // wanders between 1 s samples, so thinning to a 2–3 s cadence keeps the
     // path length. (The heavier 0.000_03/0.000_01 wobble the VI fixtures use
     // is a deliberate per-second speed-swing stress case, whose fixed-freq

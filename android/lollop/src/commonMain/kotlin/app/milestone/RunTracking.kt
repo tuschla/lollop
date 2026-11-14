@@ -475,7 +475,7 @@ fun RunTrackingScreen(
         // logCaptured(ownsSaving = true); every early exit below releases it.
         if (!RunSession.claimSaving()) return
         // Committing to end the session: suppress the locate-restart effect so the
-        // service doesn't re-acquire while we finish.
+        // service doesn't re-acquire while the stop and save run.
         exiting = true
         // ATOMIC start: a rotation can cancel `scope` before the first dispatch, and
         // a dropped body would strand the claim. Main-pinned like [logCaptured].
@@ -528,7 +528,7 @@ fun RunTrackingScreen(
     }
 
     // Perform one Finish-review action: the pure [finishTransition] picks the next step
-    // and at most one side effect; this only applies it. Resume just unpauses the
+    // and at most one side effect; this only applies it. Resume only unpauses the
     // still-running service (same sidecar, same run), Save hands off to the existing
     // stop → save path, Discard happens only from the confirm step.
     fun onFinishAction(action: FinishAction) {
@@ -734,7 +734,7 @@ fun RunTrackingScreen(
                     }
                     // Degraded-state surfacing: location off = loud warn row; a GPS
                     // start failure / denied notifications = an inline notice. Each
-                    // carries an inline action so the state is actionable, not a dead end.
+                    // carries its fix as an inline action (Open settings, Try again).
                     if (!locationOn) LocationOffNotice(onOpenSettings = { tracker.openLocationSettings(ctx) })
                     if (locateFailed && locationOn && !tracking && !armed && (!unsavedCapture || resumeWaiting)) {
                         InlineNotice(

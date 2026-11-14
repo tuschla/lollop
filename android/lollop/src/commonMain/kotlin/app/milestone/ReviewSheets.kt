@@ -136,8 +136,8 @@ fun SessionReviewSheet(
             LabeledSwitchRow(stringResource(Res.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it }
             if (hasDecoupling) {
                 HalfPercentField(Res.string.log_field_decoupling_drift, driftPct) { driftPct = it }
-                // The core only judges drift on a cool, steady, easy effort; leave
-                // this on for a genuine easy run.
+                // The core only judges drift on a cool, steady, easy effort; this
+                // switch records whether the run was one.
                 LabeledSwitchRow(stringResource(Res.string.log_switch_cool_steady), coolSteady) { coolSteady = it }
             }
             LabeledSwitchRow(stringResource(Res.string.log_switch_easy_intensity), hasEasyIntensity) { hasEasyIntensity = it }
@@ -236,8 +236,8 @@ fun WeeklyCheckinSheet(
     var worseSleep by rememberSaveable { mutableStateOf(false) }
     var signWeeks by rememberSaveable { mutableStateOf<Double?>(null) }
     // Every answer starts unanswered: the screens select neither No nor Yes and
-    // the counts no number, so a disabled Save is honest about why. A quiet week
-    // is sent explicitly with "Nothing to report this week".
+    // the counts no number, so Save stays disabled until the user answers. A quiet
+    // week is sent explicitly with "Nothing to report this week".
     var reds by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var bonePain by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var compulsive by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -462,7 +462,7 @@ private fun WeekSessionCountScale(
 private enum class YesNo { No, Yes, Unanswered }
 
 /**
- * A humanely-framed clinical screen: the question as the primary line, a
+ * A clinical screen in plain words: the question as the primary line, a
  * sentence explaining what a "yes" means (so a medical-deferral trigger never reads
  * as a cryptic toggle), and a neutral "No | Yes" segmented answer. [checked] null
  * selects neither (unanswered; Save then reports nothing for it). The wire value

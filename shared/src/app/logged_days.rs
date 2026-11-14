@@ -22,7 +22,7 @@ const SESSION_CHAIN_GAP_SEC: i64 = 3 * 3_600;
 /// inherits the previous set's session day when that set is at most
 /// [`SESSION_CHAIN_GAP_SEC`] earlier (chaining transitively), so a late
 /// session that crosses midnight scores as ONE day.
-/// The single attribution pass every `view()` shares — the completion counts and
+/// The single attribution pass every `view()` shares: the completion counts and
 /// the per-day plan-snapshot cutoff both read it, so no rescan per rendered day.
 pub(super) fn attribute_session_days(sets: &[LoggedSet], offset: i64) -> Vec<Option<i64>> {
     let mut order: Vec<usize> = (0..sets.len())

@@ -1805,7 +1805,7 @@ fn calisthenics_rungs_advance_on_two_top_of_band_sessions() {
 }
 
 /// A 67-year-old hybrid athlete: the 2:1 running cadence for older athletes
-/// (04-running.md:361-362) and no age cap on lifting intensity —
+/// (04-running.md:361-362) and no age cap on lifting intensity:
 /// "moderate–heavy loads appropriate" (08-individualization-safety.md:603;
 /// the KB states no other masters load rule, :597-604).
 #[test]

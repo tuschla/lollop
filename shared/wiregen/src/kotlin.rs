@@ -14,9 +14,9 @@
 //!   so is a struct variant's flattened struct, in its field's place.
 //! - Types only the shell writes (reached from an event or an op input, not
 //!   from an output) take Kotlin property names and only serde's defaults;
-//!   every other type keeps the wire names and defaults every field, as the
-//!   views always did. `f32` is `Double` in a type the shell writes, so the
-//!   shell's figures reach the log at full precision.
+//!   every other type keeps the wire names and defaults every field. `f32` is
+//!   `Double` in a type the shell writes, so the shell's figures reach the log
+//!   at full precision.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;

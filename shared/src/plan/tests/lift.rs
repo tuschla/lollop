@@ -58,7 +58,7 @@ fn unanchored_lift_uses_the_conservative_rir_end() {
 fn unanchored_power_lifts_get_actionable_prescriptions() {
     // Power carries no KB numeric RIR and an unanchored lift has
     // no e1RM to take a percentage of. On a POWER day it is a calibration set
-    // the athlete can execute (one set of 5 at RPE 8, STR-E1RM-CHECK-001) —
+    // the athlete can execute (one set of 5 at RPE 8, STR-E1RM-CHECK-001),
     // never "50 % of an unknown e1RM". On a strength-base day it is the
     // max-strength band by RIR (STR-BASE-POWER-001).
     let p = Profile {
@@ -604,7 +604,7 @@ fn max_strength_week_has_two_sessions_at_or_above_80pct() {
 fn power_profile_with_no_anchors_gets_executable_work_and_a_jump() {
     // A novice Power user with an empty log sees a
     // strength-weighted week (two strength days, one power day), every lift
-    // actionable (RIR or a calibration RPE — never a bare % of nothing), and
+    // actionable (RIR or a calibration RPE, never a bare % of nothing), and
     // the power day opens with a countermovement jump within the contact cap.
     let mut p = base_profile();
     p.lift_goal = LiftGoal::Power;
@@ -715,7 +715,7 @@ fn depth_jump_absent_below_1_5x_bw() {
 #[test]
 fn depth_jump_gate_reads_only_the_barbell_back_squat() {
     // PLYO-PREREQ-001 names the back squat: a hack, goblet, split or
-    // Smith-machine squat at 1.6× BW never unlocks depth jumps.
+    // Smith-machine squat at 1.6× BW never qualifies for depth jumps.
     let mut p = base_profile();
     p.lift_goal = LiftGoal::Power;
     p.bodyweight_kg = Some(80.0);
@@ -731,7 +731,7 @@ fn depth_jump_gate_reads_only_the_barbell_back_squat() {
         "Smith machine squat",
         "Smith machine back squat",
     ] {
-        assert!(!depth_jumps(squat), "{squat} unlocked depth jumps");
+        assert!(!depth_jumps(squat), "{squat} qualified for depth jumps");
     }
     assert!(depth_jumps("Barbell back squat"));
 }

@@ -802,7 +802,7 @@ pub fn pct_1rm_leaving_rir(reps: u8, rir: u8) -> f64 {
 
 /// This week's %1RM inside a day's cited band, progressed across the load
 /// weeks of a block (File 02 strength-014, STR-PCTPROG-001: +2.5 % load per
-/// successful week for the lower body, +1 % for the upper body — the low,
+/// successful week for the lower body, +1 % for the upper body; the low,
 /// conservative end of each band). Week 1 opens at the band low; each later
 /// week multiplies by `(1 + inc)`, clamped to the band high, so a compliant
 /// lifter's load rises week over week instead of repeating week 1.
@@ -836,7 +836,7 @@ pub(crate) const FULL_CREDIT_DAYS: i64 = 30;
 /// Working-load credit for a lift anchor whose movement has not been trained
 /// for `days_since_trained` days. Full credit inside [`FULL_CREDIT_DAYS`]; past
 /// that the resistance re-entry bracket for that many weeks off
-/// (REENTRY-001, File 08 Table 3.4b: 4–8 wk → 70 %); past 8 weeks `None` — the
+/// (REENTRY-001, File 08 Table 3.4b: 4–8 wk → 70 %); past 8 weeks `None`: the
 /// KB gives no fraction and directs a fresh, novice-style start, so the anchor
 /// is dropped. Strength losses over 1–2 months are modest, never a reset to
 /// zero (DETRAIN-STR-001, Bosquet 2013), which is why this never tapers to 0.

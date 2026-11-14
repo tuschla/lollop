@@ -222,7 +222,7 @@ fn build_environment_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
         let text = match env {
             Environment::Heat => {
                 // The KB day range is optional; without it the clause is
-                // dropped rather than printing an invented figure (HARD RULE 1).
+                // dropped, never filled with an invented figure (HARD RULE 1).
                 let acclimatize = m
                     .value
                     .acclimatization_days

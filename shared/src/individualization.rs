@@ -1,6 +1,6 @@
 //! Individualization & load-management core (knowledge-base File 08).
 //!
-//! Rules for tailoring the program to training age and for
+//! Rules for adjusting the program to training age and for
 //! scaling load up/down or re-entering after a layoff. Safety deferrals from
 //! File 08 §5 live in the evidence registry + `schema::SafetyTier`; this module
 //! holds the *non-safety* individualization arithmetic.
@@ -18,7 +18,7 @@ use crate::schema::{
 /// Training age classified by *progression history*, not self-label (indiv-001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrainingAge {
-    /// Progresses load essentially every session (~first 3-6 months).
+    /// Progresses load almost every session (~first 3-6 months).
     Novice,
     /// Progresses week-to-week.
     Intermediate,
@@ -130,8 +130,8 @@ pub fn strength_defaults(age: TrainingAge) -> Recommended<StrengthDefaults> {
 pub enum VolumeSensitivity {
     /// Novice: largest marginal return per added set (indiv-006 ~+1.12 ES).
     High,
-    /// Intermediate: middling return, between novice and advanced — its own
-    /// honest tier, never collapsed into the novice "high" bucket.
+    /// Intermediate: middling return, between novice and advanced. A tier of
+    /// its own, never collapsed into the novice "high" bucket.
     Moderate,
     /// Advanced: smallest marginal return per added set (indiv-006 ~+0.70 ES).
     Low,
@@ -293,7 +293,7 @@ pub struct ReentryRamp {
     /// Length of the ramp window in days (`ramp_weeks.1 × 7`).
     pub ramp_days: i64,
     /// `true` while the window is still running (`t < ramp_days`); `false`
-    /// once it has ended — the layoff then no longer shapes any load.
+    /// once it has ended, when the layoff no longer shapes any load.
     pub active: bool,
 }
 
@@ -333,13 +333,13 @@ pub struct RunReEntry {
     pub volume_frac: f64,
     /// Length of the ramp back to the prior volume in days (0 under a week).
     pub ramp_days: i64,
-    /// `true` while the ramp still runs; `false` once it ended — the break
-    /// then no longer shapes the weekly volume.
+    /// `true` while the ramp still runs; `false` once it ended, when the
+    /// break no longer shapes the weekly volume.
     pub active: bool,
     /// The long run is built up again (2+ weeks off): runs from before the
     /// break no longer count as demonstrated long-run capacity.
     pub rebuild_long_run: bool,
-    /// 4+ weeks off: single runs are judged almost as for a beginner — every
+    /// 4+ weeks off: single runs are judged almost as for a beginner. Every
     /// run's spike ceiling (RUN-SPIKE-001) rests only on the runs logged since
     /// the return, never on a run from before the break.
     pub near_novice_spike: bool,

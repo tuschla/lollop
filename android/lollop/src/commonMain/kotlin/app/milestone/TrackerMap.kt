@@ -242,7 +242,7 @@ internal fun TrackerMapFrame(
         }
         if (showMap && showOverlays && located) {
             // The tile attribution: a bare legal caption on the tiles, only while tiles
-            // actually render; its ink follows the map's own ground (dark under the dark
+            // render; its ink follows the map's own ground (dark under the dark
             // tile filter and placeholder), not the screen chrome.
             Text(
                 stringResource(Res.string.track_map_attribution),

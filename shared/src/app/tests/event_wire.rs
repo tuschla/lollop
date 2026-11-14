@@ -24,7 +24,7 @@ fn android_wire_form_deserializes_with_optionals_omitted() {
     }
 
     // SetProfile carries no optionals, but pin its snake_case field contract
-    // too, a renamed field here silently drops the profile on replay. The
+    // too: a renamed field here silently drops the profile on replay. The
     // retired `endurance_intensity_pct_vo2max` key is deliberate: older logs
     // still carry it, and an unknown key must not break replay.
     let profile = r#"{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"TenK","concurrent_goal":"Strength","weekly_sets":14,"running_days_per_week":4,"running_km_per_week":45.0,"advanced":false,"endurance_intensity_pct_vo2max":75.0}}"#;
@@ -219,7 +219,7 @@ fn set_profile_planning_fields_round_trip() {
 /// HARD RULE 3 at the wire level: the shell's red-flag readiness buttons must
 /// never be silently dropped on replay. Each safety signal's Kotlin `.name`
 /// string (`WireTypes.kt::ReadinessSignal`) must deserialize to the matching
-/// variant, a rename on either side would make the FFI swallow the event
+/// variant; a rename on either side would make the FFI swallow the event
 /// (deserialize error → cleared output) and leave a red-flag session
 /// un-blocked. Pin the safety signals' exact wire names.
 #[test]
@@ -307,7 +307,7 @@ fn checkin_wire_without_fatigue_stress_still_replays() {
     }
 
     // Replay-equivalence: the old-format log and the same log with fatigue /
-    // stress explicitly null produce byte-identical ViewModels — the fields
+    // stress explicitly null produce byte-identical ViewModels: the fields
     // are inert when unanswered (wellness_goodness averages answered items).
     let app = Engine;
     let mut m_old = Model::default();
@@ -327,10 +327,10 @@ fn checkin_wire_without_fatigue_stress_still_replays() {
 
 #[test]
 fn readiness_signal_wire_names_match_the_shell_contract() {
-    // Each `ReadinessSignal` serialises to its bare variant name, and the
+    // Each `ReadinessSignal` serializes to its bare variant name, and the
     // Android shell sends that exact string as the event's `signal`
     // field (WireTypes.kt `ReadinessSignal`). Renaming a variant here would
-    // compile clean but silently drop every readiness submission for it -
+    // compile clean but silently drop every readiness submission for it,
     // including the medical-referral flags at the top of the safety ladder.
     // This locks the wire names so such a rename fails here instead.
     for signal in ReadinessSignal::ALL {

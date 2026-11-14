@@ -2,8 +2,8 @@ package app.milestone
 
 /**
  * Result of [EventLog.load] / [EventLog.read]: the surviving replayable lines plus
- * whether this is a genuinely fresh install. [freshInstall] is true ONLY when the
- * log file never existed, a log that exists but compacted to zero surviving lines
+ * whether this is a fresh install. [freshInstall] is true ONLY when the log
+ * file never existed: a log that exists but compacted to zero surviving lines
  * (the user cleared all their data) is a RETURNING user, and the caller must not
  * re-seed the onboarding profile over their deliberate empty state. [maxEntryId]
  * is the largest `entry_id` any intact line carries (0 when none).

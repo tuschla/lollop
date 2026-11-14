@@ -1,5 +1,5 @@
 //! Run-derived metrics shared by the reducer and the view builders: the
-//! per-view [`RunFacts`] (realised distance/time per run), the 30-day spike
+//! per-view [`RunFacts`] (realized distance/time per run), the 30-day spike
 //! baseline, the run content key and the memoized QC'd-track record.
 
 use crate::app::model::LoggedRun;
@@ -21,7 +21,7 @@ pub(super) fn longest_logged_run_km(facts: &RunFacts) -> Option<f64> {
 }
 
 /// Per-view facts about `model.runs`, index-aligned with it: each run's content
-/// key, its memoized QC'd track (GPS runs only) and its realised distance and
+/// key, its memoized QC'd track (GPS runs only) and its realized distance and
 /// moving time (QC'd track when present, else the hand-entered scalars). Built
 /// once per `view()` so no consumer re-hashes or re-walks a track.
 pub(super) struct RunFacts {

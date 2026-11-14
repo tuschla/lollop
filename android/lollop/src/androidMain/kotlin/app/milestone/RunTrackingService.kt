@@ -46,8 +46,8 @@ import com.google.android.gms.location.Priority
 
 /**
  * Foreground service that streams location fixes into [RunSession] with an
- * ongoing notification. Because it runs as a `location`-typed foreground service
- * - not a Composable's callback: tracking continues when the screen turns off
+ * ongoing notification. It runs as a `location`-typed foreground service, not a
+ * Composable's callback, so tracking continues when the screen turns off
  * or the app is backgrounded. Started/stopped from the UI while it is visible,
  * so foreground-location permission is sufficient (no background-location grant).
  *
@@ -342,8 +342,8 @@ class RunTrackingService : Service() {
         }
         // NOT_STICKY: if the OS kills us mid-run it must not recreate the service
         // with a null intent, that path skips startForeground() and crashes the
-        // process on API 26+. A killed run simply ends rather than silently
-        // resurrecting without UI/permission context.
+        // process on API 26+. A killed run ends; it is not recreated without
+        // UI/permission context.
         return START_NOT_STICKY
     }
 
@@ -703,7 +703,7 @@ private class FusedEngine(ctx: Context) : LocationEngine {
                 // (the MONOTONIC boot-timebase), NOT wall-clock `time`: an NTP step
                 // mid-batch can reorder fixes sorted by `time`, and that timebase is
                 // exactly the one RunSession.add uses for its per-leg dt, so sorting
-                // by it keeps live figures and replay honest.
+                // by it keeps live figures and replay in agreement.
                 val batch = result.locations.sortedBy { it.elapsedRealtimeNanos }
                 for (loc in batch) onFix(loc, batch.size)
             }

@@ -1,7 +1,7 @@
 //! The strength plan: next session and anchors (memoized, preserved across
 //! regeneration, RIR fallback), anchor liveness under continued training,
 //! non-catalog isolation gating, the display-unit plate grid, the power-day
-//! velocity cue, prefill targets and honest calisthenics session titles.
+//! velocity cue, prefill targets and calisthenics session titles.
 
 use super::*;
 use crate::exercise::{is_isolation_lift, movement_pattern, same_movement};
@@ -73,7 +73,7 @@ fn anchor_survives_while_same_movement_training_continues() {
         "continued training must hold the anchored load near full, got {bridged}"
     );
     // Control: with no bridging work the 50-day-old anchor is scaled to the
-    // 4–8 wk detraining credit (70 %, DETRAIN-STR-001) — modest, never zero.
+    // 4–8 wk detraining credit (70 %, DETRAIN-STR-001): reduced, never zero.
     let lapsed = lapsed.expect("a 50-day-old anchor is scaled, not dropped");
     assert!(
         lapsed < bridged && lapsed >= (bridged * 0.70 - 2.5),
@@ -314,7 +314,7 @@ fn calisthenics_days_are_titled_honestly() {
             day.session_type,
             SessionType::Lift(LiftSessionType::Calisthenics)
         );
-        // Honest, user-facing title — not a borrowed barbell "Heavy day".
+        // The title names the session type, not a borrowed barbell "Heavy day".
         assert_eq!(day.title, "Calisthenics");
     }
 }
@@ -336,7 +336,7 @@ fn plan_views_are_memoized_across_unrelated_events() {
     // The week strip, the next session and the program summary are a pure
     // function of the history, profile, readiness inputs, date and block
     // position. An event touching none of them (a protein calculation) must not
-    // re-synthesize the week — that is eight `plan::synthesize` passes, each with
+    // re-synthesize the week: that is eight `plan::synthesize` passes, each with
     // its own anchor derivation over the whole history.
     let (app, mut model) = planned_strength_model(true);
     for (ex, kg) in [("Back Squat", 100.0), ("Bench press", 60.0)] {
@@ -434,7 +434,7 @@ fn plan_leads_with_an_anchored_prescription() {
     assert!(load > 0.0, "load must be positive: {load}");
     assert!(
         !sq.anchored_on.is_empty(),
-        "the honesty line names the e1RM"
+        "the anchored_on line names the e1RM"
     );
     assert!(
         sq.evidence.grade.is_some(),

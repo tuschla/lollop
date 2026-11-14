@@ -29,8 +29,8 @@ class PanicResetTest {
 
     @Test
     fun plainPanicIsAnErrorButNotAReset() {
-        // The bridge was NOT replaced, so the shell keeps the last good view rather
-        // than replaying the log — isCorePanicReset must be false here.
+        // The bridge was NOT replaced, so the shell keeps the last good view and
+        // does not replay the log: isCorePanicReset must be false here.
         assertTrue(isCoreErrorEnvelope(plainPanic))
         assertFalse(isCorePanicReset(plainPanic))
     }

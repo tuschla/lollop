@@ -22,9 +22,9 @@ pub(super) fn build_running_guidance(pp: &PlanProfile, rows: &mut Vec<GuidanceVi
 fn push_goal_week_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
     let gp = running::goal_week_plan(p.goal_distance, p.advanced);
     // C25K carries no long-run share (running-025 defines no long run for
-    // C25K), so drop the "long run …%" fragment when the share is zero rather
-    // than printing a misleading "long run 0–0%". The goal distance renders as
-    // a human label, not the raw Debug enum name.
+    // C25K), so drop the "long run …%" fragment when the share is zero (no
+    // misleading "long run 0–0%"). The goal distance renders as a human
+    // label, not the raw Debug enum name.
     let hard = if gp.value.quality_per_week.1 == 0 {
         "none".to_string()
     } else {
@@ -61,8 +61,8 @@ fn push_intensity_rows(rows: &mut Vec<GuidanceView>) {
         &ql,
     );
 
-    // Default to the base-phase distribution (pyramidal), the sound starting
-    // point before a mesocycle phase is chosen.
+    // Default to the base-phase distribution (pyramidal) until a mesocycle
+    // phase is chosen.
     let id = running::distribution_for_phase(MesoPhase::Base);
     push_guidance(
         rows,
@@ -216,8 +216,8 @@ fn push_session_rx_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
         &vo2,
     );
 
-    // running-021 hill sprints, strength-flavoured running work, most
-    // relevant to a power-goal athlete who runs.
+    // running-021 hill sprints (strength-like running work), shown only to a
+    // power-goal athlete who runs.
     if matches!(p.lift_goal, LiftGoal::Power) {
         let hills = running::hill_sprint_rx();
         push_guidance(
@@ -312,8 +312,8 @@ fn push_recovery_and_taper_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
 
 fn push_pace_correction_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // running-041 environment pace-correction triggers, when the profile
-    // states conditions. Only trigger flags are evidence-stated, no
-    // correction magnitudes exist in the KB, so none are shown.
+    // states conditions. Only trigger flags are evidence-stated; the KB has no
+    // correction magnitudes, so none are shown.
     if p.env_temp_c.is_some() || p.env_altitude_m.is_some() {
         let pc = running::pace_correction_triggers(
             p.env_temp_c.unwrap_or(0.0),

@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Screenshot-regression baselines for the key screens in light + dark, captured
+ * Screenshot-regression baselines in light + dark, captured
  * from the REAL app on the Robolectric host JVM.
  *
  *   ./gradlew :lollop:recordRoborazziAndroidHostTest   # (re)record baselines after an

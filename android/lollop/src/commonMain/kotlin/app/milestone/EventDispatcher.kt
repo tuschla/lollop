@@ -117,8 +117,8 @@ internal object EventDispatcher {
         queue.channel.trySend(m).onFailure { PlatformLog.w("EventDispatcher", "queue closed, unit dropped", it) }
     }
 
-    /** Run [body] as ONE exclusive turn of the serial consumer — no queued event
-     *  interleaves with its sends — and publish its non-null result in queue order. */
+    /** Run [body] as ONE exclusive turn of the serial consumer (no queued event
+     *  interleaves with its sends) and publish its non-null result in queue order. */
     suspend fun exclusive(body: suspend () -> ViewModel?): ViewModel? {
         val done = CompletableDeferred<ViewModel?>()
         val sent = queue.channel.trySend(Block(body, done))

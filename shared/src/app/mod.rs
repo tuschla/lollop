@@ -844,8 +844,8 @@ fn guidance_section(
     let all = model
         .profile()
         .map(|p| {
-            // Feed the km-gated safety/hybrid guards the athlete's real
-            // recent volume, not just the stated setup figure.
+            // The km-gated safety/hybrid guards read the larger of the stated
+            // setup figure and the athlete's measured recent volume.
             let recent_weekly = model
                 .today_epoch_day
                 .and_then(|today| cx.run_anchors_on(today).recent_weekly_km);

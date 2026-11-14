@@ -142,7 +142,7 @@ claim_group! {
     // statement precedent (knowledge-base/autoreg-citation-provenance-resolution.md).
     #[kb_only]
     STR_SESSION_BALANCE_001 => claim(
-        "A lift day should COVER distinct movement patterns (squat / hinge / horizontal push / horizontal pull) rather than stacking one, because multi-joint compounds do not fully activate every muscle; session STRUCTURE (full-body vs split, exact exercise count) is not itself the adaptation driver at equated volume, so balance is a sensible default, not a mandate.",
+        "A lift day should cover distinct movement patterns (squat / hinge / horizontal push / horizontal pull) instead of stacking one, because multi-joint compounds do not fully activate every muscle. At equated volume, session structure (full-body vs split, exact exercise count) does not itself drive adaptation, so balance is a default: a running-focused lifter may keep a leg-heavy emphasis.",
         Moderate,
         &[
             "Schoenfeld, Grgic, Haun, Itagaki & Helms 2019, Sports 7(7):177 (PMID 31336594; multi-joint EMG under-activates some muscles -> cover the patterns)",

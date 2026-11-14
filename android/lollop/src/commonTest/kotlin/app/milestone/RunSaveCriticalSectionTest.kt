@@ -29,11 +29,11 @@ class RunSaveCriticalSectionTest : PlatformTest() {
      * (a) The cancellation scenario: the calling scope is cancelled while [send] (the JNI
      * persist) is still suspended. The persist must still complete, and the sidecar
      * clear + session reset, sequenced inside the same `NonCancellable` block, must
-     * BOTH run so a rotation can't strand an already-persisted run. Crucially the
+     * BOTH run so a rotation can't strand an already-persisted run. The
      * cancellation must NOT be routed to the failure path (that is the double-log
-     * bug); it re-throws instead. The `finish` navigation is deliberately best-effort
-     * (its `NonCancellable` block may be skipped once the caller is cancelled) -
-     * harmless, because `resetSession` already emptied the session.
+     * bug); it re-throws instead. The `finish` navigation is best-effort (its
+     * `NonCancellable` block may be skipped once the caller is cancelled), which is
+     * harmless because `resetSession` already emptied the session.
      */
     @Test
     fun cancellationMidSendCompletesPersistAndTeardownAndNeverTakesFailurePath() = runTest {

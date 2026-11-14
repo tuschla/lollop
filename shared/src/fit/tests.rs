@@ -101,7 +101,7 @@ fn a_chained_oversized_header_is_rejected_without_panicking() {
     // A complete FIT file followed by a chained 14-byte header whose
     // header_size byte is 0xFF: fitparser slices input[0..0xFF-2] on that
     // second header and panics. Validating every header position (not just the
-    // first) must stop before fitparser sees it — salvaging the real file's
+    // first) must stop before fitparser sees it and keep the real file's
     // fixes rather than aborting or panicking.
     let mut bytes = fixture("Activity.fit");
     bytes.extend_from_slice(&[
@@ -242,7 +242,7 @@ fn happy_path_extracts_a_real_gps_and_hr_track() {
     assert_eq!(first.hr_bpm, Some(77));
 
     // This real device file records NO `gps_accuracy` field on its record
-    // messages, so accuracy is honestly unknown, `None`, never a
+    // messages, so accuracy is unknown, `None`, never a
     // fabricated figure. (See `synthetic_gps_accuracy_field_flows_through`
     // for the present-field path.)
     assert!(
@@ -336,8 +336,8 @@ fn sentinel_position_value_yields_no_fix() {
     // fitparser normally strips FIT invalid sentinels before we see them,
     // but `fix_from_record` guards defensively (like the gps_accuracy
     // guard). Feed it a raw record directly: a `position_lat`/`position_long`
-    // carrying the SInt32 invalid sentinel (`i32::MAX`) must yield NO fix -
-    // without the guard it converts to ~180° and injects a multi-thousand-km
+    // carrying the SInt32 invalid sentinel (`i32::MAX`) must yield NO fix.
+    // Without the guard it converts to ~180° and injects a multi-thousand-km
     // phantom fix into distance/pace/splits.
     let sentinel_lat = record(vec![
         field("timestamp", 253, Value::UInt32(1_500_000_000)),

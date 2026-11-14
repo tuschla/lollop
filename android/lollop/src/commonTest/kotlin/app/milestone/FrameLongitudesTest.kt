@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
  * [frameLongitudes] frames a route's longitude span for auto-zoom. The naive
  * min/max it replaces stretches a bounding box the "long way" around the globe
  * for any track crossing ±180°, zooming out to the whole world. These cases pin
- * the antimeridian handling and the honest fallbacks (osmdroid reads a `west >
+ * the antimeridian handling and the plain fallbacks (osmdroid reads a `west >
  * east` pair as a dateline-crossing box, so a tight crossing box is valid).
  */
 class FrameLongitudesTest {
@@ -33,7 +33,7 @@ class FrameLongitudesTest {
     fun genuinelyWideTrackKeepsHonestBox() {
         // Points spread across a real >180° range that shifting does NOT tighten
         // (−100, 0, +100 → raw span 200; shifting the −100 to 260 gives span 260,
-        // wider still): the run really is that wide, so keep the honest naive box
+        // wider still): the run really is that wide, so keep the naive box
         // rather than fabricating a bogus tight crossing frame.
         val b = frameLongitudes(listOf(-100.0, 0.0, 100.0))
         assertEquals(-100.0, b.west, 1e-9)

@@ -262,8 +262,7 @@ fn manual_run_has_no_split_verdict() {
 fn explicit_review_split_wins_over_track_fallback() {
     // GPS run finishes faster than it starts (a negative split), so the
     // track-derived fallback would not fire pacing feedback. An explicit
-    // positive figure on the review must still win and fire it, proving the
-    // review value takes precedence over the derived fallback.
+    // positive figure on the review must still win and fire it.
     let app = Engine;
     let mut model = Model::default();
     let points = vec![

@@ -302,7 +302,7 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
     }
     val textWidth = size.width - Space.Screen.dp * 2
     var avail = size.height - Space.Screen.dp * 2 - actionRow - titleH - Space.Sm.dp
-    // A wrapped title keeps its second line before the overline: the title is the key fact.
+    // A wrapped title keeps its second line before the overline: the title names the day.
     val titleLine = Type.Title.height(2, fontScale) - titleH
     val secondTitle = linesOf(face.title, Type.Title, textWidth, fontScale) > 1 && avail - titleLine >= caption
     if (secondTitle) avail -= titleLine
@@ -386,7 +386,7 @@ private fun lineLayout(size: DpSize, fontScale: Float, face: WidgetFace, actions
     // The row centres its text in a launcher row taller than the step (a 2×1 of
     // ~95 dp shows the 72 dp step), so the text keeps only a Space.Sm margin.
     val text = size.height - Space.Sm.dp * 2
-    // A title that wraps keeps its second line (it is the key fact); the status
+    // A title that wraps keeps its second line (it names the day); the status
     // line gets what is left.
     val titleLines = if (linesOf(face.title, Type.BodyBold, textWidth, fontScale) > 1 && text >= Type.BodyBold.height(2, fontScale)) 2 else 1
     val room = text - Type.BodyBold.height(titleLines, fontScale)

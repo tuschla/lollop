@@ -680,7 +680,7 @@ fn plates_per_side_greedy_kg_and_lb() {
 #[test]
 fn rir_item_carries_last_set_and_a_suggested_load() {
     // An effort-prescribed lift shows the athlete's last top
-    // set from a prior day and starts from its weight — one plate step up
+    // set from a prior day and starts from its weight: one plate step up
     // here, because 60 kg × 8 @ RPE 7 beat the 5-rep / 3-RIR target by 3 reps
     // (STR-LOADPROG-001).
     let app = Engine;
@@ -950,7 +950,7 @@ fn stale_pr_does_not_revive_on_a_light_set() {
     let app = Engine;
     let mut model = Model::default();
     // A Monday far enough out that a 400-day-old PR keeps a positive (dated)
-    // timestamp — a non-positive stamp reads as undated and skips decay.
+    // timestamp (a non-positive stamp reads as undated and skips decay).
     let mon = 403_i64;
     app.update(Event::SetProfile(strength_profile()), &mut model)
         .expect_only_render();
@@ -1002,7 +1002,7 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         assert!(
             card.anchored_on
                 .starts_with("Estimated max 100 kg (your recent best)"),
-            "the logged best stays honest: {}",
+            "anchored_on still names the logged best: {}",
             card.anchored_on
         );
     }

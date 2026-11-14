@@ -55,7 +55,7 @@ fn amend_set_edits_fields_in_place_keeping_the_id() {
 
 #[test]
 fn amend_after_delete_is_a_no_op_never_resurrects() {
-    // Full prevention: amend is a STRICT update. Log→Delete→Amend must leave
+    // Amend is a STRICT update. Log→Delete→Amend must leave
     // the set deleted; an amend whose target no longer exists adds nothing
     // (a fresh row would resurrect the deleted entry).
     let app = Engine;

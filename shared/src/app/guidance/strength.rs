@@ -193,10 +193,9 @@ fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<G
         &pm,
     );
 
-    // Surface the actual phase-by-phase prescription for the athlete's model, so
-    // the periodization label above becomes an actionable mesocycle plan. Only
-    // Linear and Block have phase tables in the source; DUP does not, so it is
-    // left as the label only.
+    // The phase-by-phase prescription for the athlete's model, under the
+    // periodization label above. Only Linear and Block have phase tables in
+    // the source; DUP does not, so it is left as the label only.
     let fmt_phase = |rx: &strength::PhaseRx| -> String {
         let mut parts = Vec::new();
         if let Some(pct) = rx.pct_1rm {
@@ -301,8 +300,8 @@ fn push_load_progression_row(
 }
 
 fn push_prilepin_row(lr: &Recommended<strength::LoadingRx>, rows: &mut Vec<GuidanceView>) {
-    // Prilepin volume ceiling at the midpoint of the goal's loading intensity -
-    // the reps/set + optimal-total governor that keeps quality high per zone.
+    // Prilepin volume ceiling at the midpoint of the goal's loading intensity:
+    // the reps/set and optimal-total governor that keeps rep quality high per zone.
     // Kept adjacent to the other Strength rows (before the Power block below) so
     // the section stays contiguous: the shell suppresses a repeated section
     // header only for consecutive same-section rows.
@@ -328,7 +327,7 @@ fn push_prilepin_row(lr: &Recommended<strength::LoadingRx>, rows: &mut Vec<Guida
 fn push_power_row(p: &Profile, age: individualization::TrainingAge, rows: &mut Vec<GuidanceView>) {
     // Plyometric foot-contact ceiling, only relevant when the goal is Power.
     // Placed after all Strength rows so the "Power" section forms its own
-    // contiguous block rather than splitting Strength in two.
+    // contiguous block and does not split Strength in two.
     if p.lift_goal == LiftGoal::Power {
         let plyo = strength::plyo_foot_contact_cap(age);
         push_guidance(

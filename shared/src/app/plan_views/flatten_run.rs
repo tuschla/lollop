@@ -131,8 +131,8 @@ pub(super) fn flatten_run_prescription(
         RunIntensity::ThreeZone(ThreeZone::Z2) => "Zone 2 (steady)".into(),
         RunIntensity::ThreeZone(ThreeZone::Z3) => "Zone 3 (hard)".into(),
     };
-    // Rep-structured runs lead with the honest "N × <rep> · <pace>";
-    // continuous runs keep the whole-session "<vol> · <pace>".
+    // Rep-structured runs lead with "N × <rep> · <pace>"; continuous runs keep
+    // the whole-session "<vol> · <pace>".
     let run_volume = r.repeats.is_none().then(|| RunAmount::of(r.volume));
     let head = match &rep_volume {
         Some(rv) => format!("{rep_count} × {rv}"),
@@ -164,10 +164,9 @@ pub(super) fn flatten_run_prescription(
 }
 
 /// The why? basis of a run whose numbers were set by a rule other than its
-/// workout's own. A long run held by the 30-day-longest-run ceiling rather
-/// than the weekly share states that rule honestly (HARD RULE 2) instead of
-/// the generic claim statement, no invented numbers, only what the KB entries
-/// state.
+/// workout's own. A long run held by the 30-day-longest-run ceiling, not the
+/// weekly share, states that rule (HARD RULE 2) in place of the generic claim
+/// statement, with only the numbers the KB entries state.
 fn run_basis(rx: &Rx) -> Option<String> {
     let spike_pct = crate::running::SPIKE_FRAC * 100.0;
     let window_days = crate::running::SPIKE_WINDOW_DAYS;
@@ -193,7 +192,7 @@ fn run_basis(rx: &Rx) -> Option<String> {
                 .to_string(),
         ),
         // The anchoring run is now older than the 30-day window, so its
-        // credit is tapering (DETRAIN-001) rather than dropping off a cliff.
+        // credit tapers with age (DETRAIN-001) instead of ending at the edge.
         RxBasis::Detrained => Some(
             "Distance stays near your recent long run, then steps down as that run gets older, \
              since endurance fades slowly after a couple of weeks. Log a new long run to reset it."

@@ -358,7 +358,7 @@ internal fun EditorSheet(
         }
     }
     // The guards above already kept a dirty or locked sheet up; by the time this
-    // fires the hide is committed, so it just finishes the close.
+    // fires the hide is committed, so it only finishes the close.
     AppSheet(onDismiss = { guard.release(); onClosed() }, sheetState = sheetState, sheetGesturesEnabled = !guard.locked) {
         Column(Modifier.fillMaxWidth().imePadding()) {
             CompositionLocalProvider(LocalEditorGuard provides guard) { content(close) }

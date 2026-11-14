@@ -103,9 +103,9 @@ fn weight_lb_profile_renders_pounds_in_the_lift_summary() {
 #[test]
 fn logging_a_set_echoes_raw_input_alongside_derived_metrics() {
     // The view carries the set exactly as logged, not only the derived e1RM: a
-    // lifter must see what they actually did (weight × reps @ RPE), which the
-    // shell renders beside the coaching metrics. Locks that echo contract, a
-    // fractional plate load must survive to the view unrounded.
+    // lifter must see what they did (weight × reps @ RPE), which the shell
+    // renders beside the coaching metrics. This locks that echo contract: a
+    // fractional plate load must reach the view unrounded.
     let app = Engine;
     let mut model = Model::default();
 

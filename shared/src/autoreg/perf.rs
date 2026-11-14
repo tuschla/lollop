@@ -1,7 +1,7 @@
 //! The e1RM rule (autoreg-006/007/022): its thresholds, the manual
 //! `EstimatedOneRm` gate, and logged sets → per-lift performance.
 //!
-//! The Strong-graded performance backbone (AUTOREG-RIR-001, Helms 2018) reads
+//! The Strong-graded performance gate (AUTOREG-RIR-001, Helms 2018) reads
 //! the user's logged sets, not a hand-typed ratio: each lift's top-set e1RM is
 //! compared against that lift's best over the previous 14 local days.
 
@@ -214,7 +214,7 @@ pub(super) fn perf_adjustments(perf: &[MovementPerf]) -> Vec<AdjustmentCall> {
 }
 
 /// e1RM-driven load gate (both directions).
-/// autoreg-022: e1RM at fixed RPE down >10% for **≥2 consecutive sessions** →
+/// autoreg-022: e1RM at fixed RPE down >10% for ≥2 consecutive sessions →
 /// deload (volume −40–50%, load −5–10%, 1 wk). `EstimatedOneRm` carries the
 /// ratio today ÷ baseline (< 0.90 = >10% drop) and `streak` the consecutive
 /// sessions the drop has held; a single-session drop never deloads: it falls

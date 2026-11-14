@@ -84,8 +84,8 @@ internal fun RunCard(r: RunResultView, nowMillis: Long, selected: Boolean = fals
             )
             DateBadge(runDateChip(r, nowMillis))
         }
-        // A GPS run with no usable fixes has no measurable zone/pace/distance -
-        // surface the core's plain-language reason instead of an empty structure.
+        // A GPS run with no usable fixes has no measurable zone/pace/distance:
+        // show the core's plain-language reason instead of an empty structure.
         if (r.distance_km <= 0.0) {
             if (r.summary.isNotBlank()) Text(r.summary, color = OnBgBody, style = Type.Body)
             if (r.citation.isNotBlank()) Text(citationLabel(r.citation), color = OnBgFaint, style = Type.Caption)

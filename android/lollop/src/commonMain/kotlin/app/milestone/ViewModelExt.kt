@@ -100,7 +100,7 @@ internal fun ViewModel.openLiftTarget(): Pair<SessionPlanView, PrescriptionView>
     return started to (firstOpenItem(started.items) ?: started.items.last())
 }
 
-/** The first not-done item of a session — the "Today's plan" prefill target and
+/** The first not-done item of a session: the "Today's plan" prefill target and
  *  the hero's next-open item. Null when every item is done (next_session keeps
  *  done items, so the shell picks the open one). */
 internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =

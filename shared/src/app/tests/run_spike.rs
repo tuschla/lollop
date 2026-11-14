@@ -7,7 +7,7 @@ use super::*;
 fn spike_summary_explains_a_missing_baseline_vs_a_real_jump() {
     // The spike gate errs safe with no history, so the first run trips it. Its
     // summary must not claim a ">10%" jump over a baseline that does not exist;
-    // a later run that genuinely exceeds the prior longest gets the ">10%"
+    // a later run that exceeds the prior longest gets the ">10%"
     // wording. Both still set spike_flag, only the wording differs.
     let app = Engine;
     let mut model = Model::default();
@@ -25,7 +25,7 @@ fn spike_summary_explains_a_missing_baseline_vs_a_real_jump() {
     assert_eq!(vm.runs[0].distance_km, 5.0);
     assert!(
         vm.runs[0].spike_note.contains("No earlier run"),
-        "spike_note should carry the honest reason, got: {}",
+        "spike_note should carry the reason, got: {}",
         vm.runs[0].spike_note
     );
 
@@ -65,7 +65,7 @@ fn manual_run_spike_baseline_reads_a_prior_gps_runs_derived_distance() {
     // the track), so a later manual run's spike gate only sees a real baseline
     // if `run_metrics::spike_km` reconstructs the GPS run's distance from its fixes.
     // If that derivation regressed to the stored 0.0, the baseline would be 0,
-    // the safe-with-no-history gate would fire, and this 1 km run would flag -
+    // the safe-with-no-history gate would fire, and this 1 km run would flag,
     // so asserting NO spike pins the GPS branch of the fold.
     let app = Engine;
     let mut model = Model::default();
@@ -92,7 +92,7 @@ fn gps_spike_baseline_is_derived_from_prior_runs() {
     let one_km = || vec![gps(0.0, 0), gps(0.01, 400)];
 
     // Run 1: ~1.11 km with no history. The core spike gate errs safe with no
-    // baseline, so this first run is flagged, expected and intentional.
+    // baseline, so this first run is flagged on purpose.
     app.update(log_run_track(one_km(), 0.0, 0.0, 0, 0), &mut model)
         .expect_only_render();
     assert!(app.view(&model).runs[0].spike_flag);
@@ -140,8 +140,8 @@ fn run_view_carries_structured_spike_baseline_flag() {
 
 #[test]
 fn run_view_carries_full_spike_gate_evidence() {
-    // The row carries grade/confidence/safety_critical/contested, not just the
-    // citation: parity with the other evidence-bearing view structs.
+    // The row carries grade/confidence/safety_critical/contested as well as
+    // the citation, like the other evidence-bearing view structs.
     let app = Engine;
     let mut model = Model::default();
     app.update(log_run(12.0, 60.0, 70.0, 10.0, 0, 0), &mut model)

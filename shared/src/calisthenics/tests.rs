@@ -220,7 +220,7 @@ fn skill_ladders_are_leave_rir_and_hold_biased() {
 #[test]
 fn eccentric_rungs_leave_rir() {
     // CAL-EFAIL-SAFE-001: eccentric ("Negative"/"negative") rungs are never
-    // trained to momentary failure — they must leave reps in reserve. Covers
+    // trained to momentary failure; they must leave reps in reserve. Covers
     // "Negative pull-up", "Negative Nordic curl", "Negative muscle-up".
     for l in LADDERS.iter() {
         for t in l.tiers {
@@ -263,7 +263,7 @@ fn rir_band_never_drops_toward_failure_as_a_ladder_gets_harder() {
     );
     // Strength / power goals and every novice band. (A hypertrophy goal
     // takes self-limiting rungs to 0–1 while an eccentric leave-RIR rung
-    // below them keeps 1–2 — CAL-EFAIL-SAFE-001 — so it is exempt.)
+    // below them keeps 1–2 (CAL-EFAIL-SAFE-001), so it is exempt.)
     for (goal, novice) in [
         (LiftGoal::MaxStrength, false),
         (LiftGoal::Power, false),

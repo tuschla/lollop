@@ -281,8 +281,8 @@ internal fun weekdaysLine(mask: Int?, days: Int): String = when {
     else -> weekdaysLabel(mask)
 }
 
-/** The honest Both-week split for the athlete's available days: the lift days
- *  they chose and the run days the engine will actually schedule, saying so when
+/** The Both-week split for the athlete's available days: the lift days they
+ *  chose and the run days the engine will schedule, saying so when
  *  the lifting-leads run cap leaves some days as rest (HYB-RUNCAP-001). */
 @Composable
 internal fun hybridSplitText(totalDays: Int, liftDays: Int, lead: BothPriority?): String {

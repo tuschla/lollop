@@ -107,7 +107,7 @@ internal object ActiveRunStore : AppFeature {
 
     /**
      * Read every recorded fix back, tolerating a torn/partial last line (a line
-     * half-written when the process died just fails to parse and is skipped),
+     * half-written when the process died fails to parse and is skipped),
      * with the indices of the fixes that opened a segment. Blocking file read:
      * call off the main thread.
      */

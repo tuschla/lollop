@@ -35,7 +35,7 @@ fn with_exported_fixes<R>(
 
 /// The GPX document of the run's exported fixes ([`with_exported_fixes`]);
 /// empty when there are none. The document carries `observed_at` as the run's
-/// logged-at stamp, so re-importing it is recognised as this run.
+/// logged-at stamp, so re-importing it is recognized as this run.
 pub(crate) fn export_run_gpx(model: &Model, entry_id: u64, observed_at: i64) -> String {
     with_exported_fixes(model, entry_id, observed_at, |track, seg_starts, km| {
         let label = format!("Run {}", fmt_km_or_mi(km, DistanceUnit::Km));

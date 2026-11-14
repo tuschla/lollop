@@ -214,7 +214,7 @@ pub struct LiftResultView {
     /// Reps in reserve implied by the session RPE.
     pub rir: f64,
     /// True when the set carried a recorded RPE (`rpe > 0`). When false the
-    /// e1RM/%1RM are scored as reps-to-failure and the RIR is not meaningful,
+    /// e1RM/%1RM are scored as reps-to-failure and the RIR carries no information,
     /// so a shell omits the RIR caption.
     #[serde(default)]
     pub rpe_recorded: bool,
@@ -262,8 +262,8 @@ pub struct E1rmRangeView {
 
 /// The CTL/ATL/TSB fitness–fatigue bookkeeping over the logged history,
 /// flattened for shells (File 07 impulse-response; LOAD-PMC-001). Daily load
-/// is a Lucia 3-zone TRIMP from each dated, HR-carrying run, the method
-/// string states exactly what was counted so the shell never has to guess.
+/// is a Lucia 3-zone TRIMP from each dated, HR-carrying run; the method
+/// string states what was counted.
 /// Bookkeeping only: TSB is NOT a validated performance predictor (the claim
 /// statement carries that caveat).
 #[derive(Serialize, Deserialize, Wire, Debug, Default, Clone, PartialEq)]
@@ -354,7 +354,7 @@ pub struct ViewModel {
     /// The single resolved coaching message: a weekly-check-in safety concern,
     /// a run-spike warning, or one takeaway on the latest session (from the
     /// session review, or derived from the logged sets/runs of a completed
-    /// plan day — no form needed), or a new personal best. `None` when nothing
+    /// plan day without one), or a new personal best. `None` when nothing
     /// applies.
     pub feedback: Option<FeedbackView>,
     /// Always-available evidence-cited reference defaults (profile-independent).
@@ -397,8 +397,8 @@ pub struct ViewModel {
     /// when bodyweight + a squat e1RM are known. Empty otherwise.
     #[serde(default)]
     pub lift_audit: Vec<GuidanceView>,
-    /// Raw calculator inputs echoed back so shells rehydrate their forms after a
-    /// log replay / process death, keeping the core the single source of truth.
+    /// Raw calculator inputs echoed back so shells rehydrate their forms from the
+    /// core after a log replay / process death.
     /// Each is a sibling of its result field above; `None`/empty until queried.
     /// (`race_prediction` echoes its inputs inline; these cover the Vec-result
     /// calculators.)
@@ -422,8 +422,8 @@ pub struct ViewModel {
     /// ±5 % noise band); `None` when nothing decisive.
     pub trend: Option<AdjustmentView>,
     /// feedback-040 provisional framing: present while fewer than ~14 distinct
-    /// days of logged data exist, recommendations are population defaults
-    /// still converging on the user.
+    /// days of logged data exist; until then recommendations are population
+    /// defaults not yet fitted to the user.
     pub provisional: Option<AdjustmentView>,
     /// Which autoregulation signal source is active given the submitted
     /// readiness data (autoreg-047/048 graceful fallback): HRV rolling,
@@ -448,9 +448,9 @@ pub struct ViewModel {
     /// can rehydrate the check-in sheet. `None` until any check-in exists;
     /// whether it is today's is `checked_in_today`.
     pub latest_checkin: Option<CheckinInput>,
-    /// Honest "collecting your baseline" status for each check-in channel that
-    /// has readings but not yet enough history to emit a z-score/delta, so the
-    /// shell shows honesty, never a fabricated number (HARD RULE 1). Empty once
+    /// "Collecting your baseline" status for each check-in channel that has
+    /// readings but not yet enough history to emit a z-score/delta, so the
+    /// shell shows progress, never a fabricated number (HARD RULE 1). Empty once
     /// every channel is either baseline-ready (its derived signal appears in
     /// `readiness_summary`) or has no data.
     #[serde(default)]
@@ -788,9 +788,9 @@ pub struct SessionDoneItemView {
 }
 
 /// One check-in channel still collecting its baseline (`app/mod.rs` `baseline_status`):
-/// an honest progress row shown in place of a derived signal until enough
-/// history exists. Carries NO evidence tag: it asserts no training claim, it
-/// states the absence of one (HARD RULE 2 is about recommendations).
+/// a progress row shown in place of a derived signal until enough history
+/// exists. Carries NO evidence tag: it makes no training claim (HARD RULE 2
+/// is about recommendations).
 #[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct BaselineStatusView {
     /// The signal this baseline feeds, e.g. `"WellnessZ"`.
@@ -1157,8 +1157,8 @@ pub struct PrescriptionView {
     #[serde(default)]
     pub hold_high_sec: u16,
     /// External ADDED load for a calisthenics item (`Some(0.0)` = pure
-    /// bodyweight; `Some(x)` = weighted rung). `None` for barbell lifts and
-    /// runs — those use `load_kg`.
+    /// bodyweight; `Some(x)` = weighted rung). `None` for barbell lifts (their
+    /// load is `load_kg`) and runs.
     pub added_kg: Option<f64>,
     /// The honesty line for a load, e.g. `"e1RM 120.0 kg (your logged best)"`.
     /// Empty when RIR-prescribed or a run.
@@ -1208,7 +1208,7 @@ pub struct PrescriptionView {
     #[serde(default)]
     pub sets_done: u8,
     /// Every same-movement set attributed to this item's session day, in
-    /// chronological order — qualifying and non-qualifying (warm-ups / below
+    /// chronological order: qualifying and non-qualifying (warm-ups / below
     /// target), each flagged. Empty for runs and days outside the plan window.
     #[serde(default)]
     pub logged_sets: Vec<ItemSetView>,
@@ -1241,7 +1241,7 @@ pub struct PrescriptionView {
     /// warm-up.
     pub run_structure: Option<RunStructureView>,
     /// The bold name line of a lift / calisthenics face (`"Back squat"`): the
-    /// `summary` up to its `": "` / `" — "`. Empty for runs and the return check.
+    /// `summary` up to its `": "`. Empty for runs and the return check.
     #[serde(default)]
     pub face_name: String,
     /// The prescription line under `face_name` (`"5×3 @ 85 kg · ~2 reps
@@ -1565,7 +1565,7 @@ pub struct RacePredictionView {
     pub notes: Vec<GuidanceView>,
     /// The raw inputs this prediction was computed from, echoed back so a shell
     /// can rehydrate its form after a log replay instead of falling back to a
-    /// hardcoded default (single source of truth stays the core).
+    /// hardcoded default.
     #[serde(default)]
     pub recent_distance_m: f64,
     #[serde(default)]
@@ -1608,7 +1608,7 @@ pub struct ProteinFigureView {
     /// High end of the daily target, grams. `0.0` when `refused`.
     pub high_g_per_day: f64,
     /// `true` when a deficit target was refused (RED-S / low-energy-availability
-    /// signal present, safety-022), no g/day figure is offered.
+    /// signal present, safety-022): no g/day figure is offered.
     pub refused: bool,
     /// Low end of the graded g/kg band the grams come from. `0.0` when `refused`.
     #[serde(default)]
@@ -1749,9 +1749,9 @@ pub struct GuidanceView {
 }
 
 /// The core-owned pacing verdict for a run's measured split (feedback-016/017;
-/// FB-PACING-001). Carries everything a shell needs to render the chip -
-/// verdict, label, coaching copy, and the full evidence tag, so the ~3%
-/// threshold (`feedback::POSITIVE_SPLIT_FLAG_PCT`) never leaks into shell code.
+/// FB-PACING-001). Carries what a shell needs to render the chip (verdict,
+/// label, coaching copy, evidence tag), so the ~3% threshold
+/// (`feedback::POSITIVE_SPLIT_FLAG_PCT`) stays out of shell code.
 #[derive(Serialize, Deserialize, Wire, Debug, Clone, PartialEq)]
 pub struct SplitVerdictView {
     /// `"fade"` (back half >3% slower), `"even"` (within ±3%), or
@@ -1785,7 +1785,7 @@ pub struct IntervalVerdictView {
     pub kind: PaceVariability,
     /// Short chip label, e.g. `"INTERVAL · VI 1.7"` / `"STEADY · VI 1.0"`.
     pub label: String,
-    /// Evidence-backed copy explaining the differentiation honestly.
+    /// Evidence-backed copy explaining the verdict.
     pub message: String,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
@@ -1811,10 +1811,10 @@ pub struct RunSplitView {
     /// partial split's pace is normalized to a full unit so it stays comparable).
     pub pace: String,
     /// The same normalized seconds-per-km/mile figure `pace` is formatted from,
-    /// as whole seconds — the numeric pace a shell needs to draw a splits bar
-    /// chart without re-parsing the `m:ss` string. Both are derived from one
-    /// value at the construction site, so `pace == fmt_mss(seconds_per_unit)`
-    /// is guaranteed.
+    /// as whole seconds: the numeric pace a shell needs to draw a splits bar
+    /// chart without re-parsing the `m:ss` string. Both come from one value at
+    /// the construction site, so `pace == fmt_mss(seconds_per_unit)` always
+    /// holds.
     #[serde(default)]
     pub seconds_per_unit: u32,
     /// Cumulative track distance at the END of this split, in km (both the km
@@ -1857,8 +1857,8 @@ pub struct RunResultView {
     pub avg_hr_bpm: Option<f64>,
     /// True when this run's distance spikes >10% over the recent longest.
     pub spike_flag: bool,
-    /// Why the spike gate fired, phrased honestly (empty when it did not). A
-    /// first run with no baseline says so rather than claiming a ">10%" jump.
+    /// Why the spike gate fired (empty when it did not). A first run with no
+    /// baseline says so instead of claiming a ">10%" jump.
     pub spike_note: String,
     /// Core-owned pacing verdict + chip data for a GPS track's second-half
     /// slowdown (feedback-016/017). `None` for a hand-entered run, a track too
@@ -1873,8 +1873,8 @@ pub struct RunResultView {
     /// hard-session checks honor it as the session's declared goal. USER DATA,
     /// carries no evidence of its own. `None` = untagged.
     pub workout_type: Option<WorkoutType>,
-    /// One-line run recap. For a MEASURED run this is internal/citation-only -
-    /// never rendered; the shell builds unit-aware labels (`runDistLabel` /
+    /// One-line run recap. For a MEASURED run this is internal/citation-only and
+    /// never rendered: the shell builds unit-aware labels (`runDistLabel` /
     /// `runPaceLabel`), so the hardcoded `km` here never reaches a mi-preferring
     /// user. Only the zero-distance fallback ("GPS signal too poor to measure
     /// this run", no unit) is surfaced, in `RunCard`.
@@ -1902,8 +1902,8 @@ pub struct RunResultView {
     /// Structured form of the spike-baseline provenance, so no shell scrapes it
     /// from `spike_note` (`contains("no prior run")`). `true` when a
     /// prior 30-day baseline distance exists to gauge this run against; `false`
-    /// for a first run with no baseline (the spike gate then errs safe). Only
-    /// meaningful when `spike_flag`.
+    /// for a first run with no baseline (the spike gate then errs safe). Read
+    /// it only when `spike_flag` is set.
     #[serde(default)]
     pub spike_has_baseline: bool,
     /// Whole-session effort, CR-10 (0–10), as rated by the athlete

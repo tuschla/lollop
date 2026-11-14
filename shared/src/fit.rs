@@ -162,8 +162,8 @@ pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
 ///
 /// `fitparser` reads `header_size` as a raw wire byte (validated only as `> 12`)
 /// and slices `input[0..header_size - 2]`, so a crafted oversized value (e.g.
-/// `0xFF` on a short file) panics on an out-of-bounds range — caught by the FFI
-/// firewall, but the user sees a generic panic toast and a stack is logged. The
+/// `0xFF` on a short file) panics on an out-of-bounds range. The FFI firewall
+/// catches it, but the user sees a generic panic toast and a stack is logged. The
 /// FIT spec fixes `header_size` at 12 or 14 and stamps `.FIT` at bytes 8..12, so
 /// reject anything else up front. (A 14-byte header carries a header CRC in
 /// bytes 12..14; its correctness is `fitparser`'s job, not ours.)

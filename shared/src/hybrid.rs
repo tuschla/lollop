@@ -7,7 +7,7 @@
 //!
 //! Interference is quality-specific and modest (Schumann 2022): explosive power
 //! is attenuated most, maximal lower-body strength lightly (in men, HYB-SEX-001),
-//! whole-muscle hypertrophy essentially spared.
+//! whole-muscle hypertrophy largely spared.
 
 use crate::evidence::claims;
 use crate::schema::Recommended;
@@ -149,7 +149,7 @@ pub fn capped_lower_weekly_sets(weekly_sets: u32, cap: &LowerLiftCap, min_sets: 
 
 /// Weekly lifting-session dose to retain in a running-priority plan (File 10
 /// hybrid-010; CONC-RE-001). Strength training improves running economy 2–8 %
-/// and does not harm VO2max, keep 2–3 sessions/week. Returns (min, max).
+/// and does not harm VO2max, so keep 2–3 sessions/week. Returns (min, max).
 pub fn maintenance_lift_sessions() -> Recommended<(u8, u8)> {
     Recommended::new(
         (MAINTENANCE_LIFT_SESSIONS_MIN, MAINTENANCE_LIFT_SESSIONS_MAX),
@@ -287,7 +287,7 @@ const COMBINED_RAMP_CAP_FRAC: f64 = 0.10;
 /// within the cap.
 ///
 /// NOTE: the ACWR "sweet spot" (0.8–1.3) from this rule is deliberately NOT
-/// encoded, it is the hard-blocked `LOAD-ACWR-001` myth (mathematically
+/// encoded: it is the hard-blocked `LOAD-ACWR-001` myth (mathematically
 /// coupled; see `running.rs`). Only the ≤10 %/wk ramp is enforced.
 /// HYB-PROG-001 (Moderate, safety-critical, contested CQ-05).
 pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommended<Option<bool>> {

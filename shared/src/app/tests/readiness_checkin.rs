@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
     // The acceptance path: a fresh user does one morning check-in (sleep 2
-    // / soreness 4 / mood 3). Today must show an honest "collecting baseline"
+    // / soreness 4 / mood 3). Today must show a "collecting baseline"
     // state and NO derived readiness signal, never a made-up z-score, and
     // the user is never asked to enter one.
     let app = Engine;
@@ -21,7 +21,7 @@ fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
     let echo = vm.latest_checkin.expect("checkin echoed");
     assert_eq!(echo.sleep_quality, Some(2));
     assert_eq!(echo.soreness, Some(4));
-    // Honest collecting status, no derived WellnessZ row yet.
+    // Collecting status, no derived WellnessZ row yet.
     let status = vm
         .baseline_status
         .iter()
@@ -40,7 +40,7 @@ fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
 
 #[test]
 fn a_floor_morning_before_the_baseline_is_very_low_not_below_normal() {
-    // Day 1, a catastrophic check-in (sleep 1 / soreness 5 / mood 1): the
+    // Day 1, the worst possible check-in (sleep 1 / soreness 5 / mood 1): the
     // absolute floor fires the single-day hold, but with "building your
     // baseline, 1 of 7" beside it there is no normal to be below yet.
     let app = Engine;
@@ -165,7 +165,7 @@ fn checkins_and_old_readiness_logs_coexist() {
 
 #[test]
 fn medical_red_flags_surface_referral_tier_through_the_view() {
-    // The Android shell can now submit the medical-referral signals
+    // The Android shell submits the medical-referral signals
     // (Illness/RedS/CardiacRedFlag/BoneStress). Lock the full event→view
     // contract those buttons depend on: each must raise the top
     // `MedicalReferral` tier and block training, so the SafetyBanner shows a

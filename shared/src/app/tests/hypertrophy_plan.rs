@@ -127,7 +127,7 @@ fn program_card_shows_delivered_sets_per_muscle() {
         "{:?}",
         row("Triceps")
     );
-    // No Table 4 exercise trains the rear delts: the note says so plainly.
+    // No Table 4 exercise trains the rear delts, and the note says so.
     assert!(
         prog.muscle_volume_note.contains("rear delts"),
         "{}",
@@ -185,7 +185,7 @@ fn planner_ramp_equals_plan_ramp() {
 }
 
 /// The first `exercise` card of a hypertrophy week planned from `start` after
-/// `sets` — `(kg, reps, rpe, epoch day)` — of it.
+/// `sets` of it, each `(kg, reps, rpe, epoch day)`.
 fn hyp_card(
     profile: Profile,
     exercise: &str,

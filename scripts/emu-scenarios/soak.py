@@ -27,7 +27,7 @@ from parse import distance, duration
 
 
 def hav(a, b):
-    """Great-circle metres between two fixes: the script's measure of the fed route."""
+    """Great-circle meters between two fixes: the script's measure of the fed route."""
     la1, la2 = math.radians(a["lat"]), math.radians(b["lat"])
     dla, dlo = la2 - la1, math.radians(b["lon"] - a["lon"])
     h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2

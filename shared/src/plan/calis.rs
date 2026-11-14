@@ -73,7 +73,7 @@ struct Ctx<'a> {
 /// One full-body / upper / lower calisthenics day:
 /// 1. on a Power goal, ballistic items FIRST while fresh (CAL-POWER-001): a jump
 ///    ladder on lower-body days, an explosive push-up ladder on upper-body days;
-/// 2. skill work (≤2 items, upper-body days only — CAL-TEMPLATE-001);
+/// 2. skill work (≤2 items, upper-body days only; CAL-TEMPLATE-001);
 /// 3. pattern items so every plane trains ≥2×/wk (CAL-FREQ-VOL-002): upper days
 ///    carry horizontal push, one vertical-push-family item (dip and vertical
 ///    push alternate by upper-day ordinal), vertical pull and horizontal pull;

@@ -115,9 +115,9 @@ jobs:
           cat SHA256SUMS
           previous=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
           {
-            echo "**Android:** install \`lollop-$VERSION.apk\` (arm64). Updates install over earlier releases."
+            echo "Android: install \`lollop-$VERSION.apk\` (arm64). Updates install over earlier releases."
             echo
-            echo "**iOS:** sideload \`lollop-$VERSION-unsigned.ipa\` with SideStore, which signs it with your Apple ID (see ios/README.md)."
+            echo "iOS: sideload \`lollop-$VERSION-unsigned.ipa\` with SideStore, which signs it with your Apple ID (see ios/README.md)."
             echo
             if [ -n "$previous" ]; then
               echo "## Changes since $previous"

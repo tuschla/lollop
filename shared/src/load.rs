@@ -145,7 +145,7 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
 }
 
 /// Daniels race-time prediction: the finish time (seconds) over `distance_m`
-/// that a runner of the given `vdot` would run. Inverts [`vdot`], for a fixed
+/// that a runner of the given `vdot` would run. Inverts [`vdot`]: for a fixed
 /// distance, `vdot(d, t)` is strictly decreasing in `t` (a slower time implies a
 /// lower VDOT), so a bisection on time converges to the unique matching finish.
 /// Pair with [`riegel_predict`] and combine via `running::race_equivalency` so a
@@ -164,7 +164,7 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
     if !distance_m.is_finite() || distance_m <= 0.0 {
         return 0.0;
     }
-    let mut lo = 1.0; // 1 s - faster than any real finish
+    let mut lo = 1.0; // 1 s, faster than any real finish
     // At 24 m/min `daniels_vo2` is negative (its root is ~24.9 m/min), so the
     // VDOT there is below any positive target; a fixed cap would return the
     // cap itself for a slow walker's marathon. 2.5 s per metre = 24 m/min.

@@ -48,7 +48,7 @@ import java.util.Locale
  * starts from a clean slate.
  *
  * Seeding writes the exact ndjson wire form [app.milestone.Core] itself persists
- * (`event.toJson().toString()` per line — see `DurableCore.apply`), so a scenario is
+ * (`event.toJson().toString()` per line; see `DurableCore.apply`), so a scenario is
  * indistinguishable from a real user's history: [Core.restore] replays it through
  * JNI on launch, no shell-side shortcut.
  */

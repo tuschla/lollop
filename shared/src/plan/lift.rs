@@ -116,7 +116,7 @@ pub(super) fn main_lifts(anchors: &LiftAnchors) -> Vec<String> {
 /// - Power, strong athlete: the classic Heavy → Power → Hypertrophy week
 ///   (strength-023).
 /// - Power, novice or below the ~1.5×BW squat benchmark (`power_base`):
-///   Heavy → Power → HeavyVolume — two heavy days and one power day, because
+///   Heavy → Power → HeavyVolume: two heavy days and one power day, because
 ///   weaker athletes gain jump/sprint performance about as much from heavy
 ///   strength work and far more 1RM (STR-BASE-POWER-001).
 ///
@@ -210,7 +210,7 @@ pub(super) fn lift_session(
     // Accessories COVER the other core movement patterns on the same full-body
     // day (STR-SESSION-BALANCE-001, Moderate): `lift_names` was built
     // pattern-balanced by `main_lifts`, so scheduling ALL of it keeps each
-    // session balanced; each lift carries its own honest set-face via
+    // session balanced; each lift carries its own set face via
     // `lift_prescription`. On a power day a logged Olympic derivative moves to
     // the front, right after the jumps (strength-031: placed early).
     let mut order: Vec<&String> = lift_names.iter().collect();
@@ -294,7 +294,7 @@ pub(super) fn full_body_weekly_sets(
 /// is 1-based. Progression across the block:
 /// - Strength/power goals ramp the %1RM inside each day's cited band
 ///   (`strength::pct_for_week`, STR-PCTPROG-001: +2.5 %/wk lower body, +1 %/wk
-///   upper body) and HOLD the week-1 set count — intensity, not hypertrophy
+///   upper body) and HOLD the week-1 set count: intensity, not hypertrophy
 ///   volume, is the strength lever (STR-INTENT-001), so the MRV set ramp
 ///   (HYP-SETRAMP-001) stays hypertrophy-only.
 /// - A hypertrophy-emphasis lift keeps the volume ramp / RIR walk-down.
@@ -479,7 +479,7 @@ impl<'a> DoseCtx<'a> {
     /// day rests per its emphasis (180 s), never per the goal band minimum. A
     /// hypertrophy-emphasis set rests per the EXERCISE CLASS (HYP-REST-002:
     /// 120 s heavy compounds, 90 s otherwise, catalog-unknown treated as a
-    /// moderate compound), not the 30 s floor of the hypertrophy loading band —
+    /// moderate compound), not the 30 s floor of the hypertrophy loading band:
     /// a heavy compound cannot hold ≥90% of its first-set reps on 30 s.
     fn rest_sec(&self) -> u16 {
         let hypertrophy_emphasis = if self.dup {
@@ -681,7 +681,7 @@ fn olympic_dose() -> LiftDose {
 }
 
 /// An unanchored lift on a power day has no e1RM to take a percentage of, so
-/// it is a calibration set the athlete can execute — work up to one set of 5
+/// it is a calibration set the athlete can execute: work up to one set of 5
 /// at RPE 8 (a 3–6 rep test set, STR-E1RM-CHECK-001). Logging it anchors every
 /// later load. Never "50 % of an unknown e1RM".
 fn calibration_dose() -> LiftDose {
@@ -780,9 +780,9 @@ fn ballistic_sets() -> u8 {
     (contacts / BALLISTIC_REPS as u16).clamp(1, u8::MAX as u16) as u8
 }
 
-/// The ballistic opener's exercise: a bodyweight countermovement jump — or,
-/// once a non-novice has a squat e1RM of ≥1.5× bodyweight (PLYO-PREREQ-001,
-/// safety gate), a low-box depth jump.
+/// The ballistic opener's exercise: a bodyweight countermovement jump or, once
+/// a non-novice has a squat e1RM of ≥1.5× bodyweight (PLYO-PREREQ-001, safety
+/// gate), a low-box depth jump.
 fn ballistic_exercise(profile: &Profile, anchors: &LiftAnchors, ta: TrainingAge) -> &'static str {
     if ta != TrainingAge::Novice && squat_benchmark_met(profile, anchors) {
         "Depth jump (low box)"

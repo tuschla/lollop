@@ -895,7 +895,7 @@ fn sub_1km_baseline_tempo_becomes_an_easy_duration() {
     assert_eq!(claim_of(tempo), claims::RUN_SPIKE_001);
 }
 
-/// A spike ceiling with no honest distance (a 0.05 km stated longest run)
+/// A spike ceiling below the 1 km distance minimum (a 0.05 km stated longest run)
 /// turns every quality slot into an easy run under RUN-SPIKE-001, race pace
 /// included.
 #[test]

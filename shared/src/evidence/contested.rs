@@ -44,7 +44,7 @@ macro_rules! contested_questions {
         }
 
         /// Contested questions (File 09). Engine holds a default lean while
-        /// open. `question` is a plain phrase read as "experts disagree on …";
+        /// open. `question` is a plain phrase read as "no agreement yet on …";
         /// `engine_default` says what the app does meanwhile. The KB source of
         /// each row is kept in a comment, never in the shown text.
         pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
@@ -209,10 +209,10 @@ contested_questions! {
     },
     // File 02 local CQ-01.
     CQ_F02_01 {
-        question: "whether fixed percentages or effort-based loading (reps left) works better; both work, with a small, uncertain edge for effort-based loading",
+        question: "whether fixed percentages or effort-based loading (reps left) works better",
         engine_default: "fixed percentages for beginners or when effort isn't rated; effort-based loading for intermediate and advanced lifters and tiring phases",
         other_side: Some(
-            "Head to head, fixed percentages and effort-based loading come out effectively equal when effort is matched, with only a small, non-significant edge for effort-based loading (Helms 2018; Graham & Cleather 2019/2021).",
+            "Head to head, both work: fixed percentages and effort-based loading come out about equal when effort is matched, with only a small, non-significant edge for effort-based loading (Helms 2018; Graham & Cleather 2019/2021).",
         ),
     },
     // File 02 local CQ-03 (strength-011).
@@ -224,7 +224,7 @@ contested_questions! {
     },
     // File 02 local CQ-04.
     CQ_F02_04 {
-        question: "how well the conjugate (Westside) method works; it has a strong practice record but little trial evidence",
+        question: "how well the conjugate (Westside) method works",
         engine_default: "an option for advanced lifters only (2–3+ years of barbell training), never the default",
         other_side: Some(
             "The conjugate/Westside method has a strong competitive track record among elite powerlifters (Louie Simmons, Westside Barbell), despite little direct trial evidence.",

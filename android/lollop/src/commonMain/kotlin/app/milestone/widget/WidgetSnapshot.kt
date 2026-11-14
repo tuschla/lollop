@@ -97,7 +97,7 @@ internal data class WidgetSnapshot(
     val sessionDone: Boolean = false,
     /** Today's session has an open run item: the widget offers Track run. */
     val trackable: Boolean = false,
-    /** [WidgetDayKind.Rest] only: today is a plan rest day (else simply no session today). */
+    /** [WidgetDayKind.Rest] only: today is a plan rest day (else no session today). */
     val restDay: Boolean = false,
     val next: WidgetNext? = null,
     /** This plan week, planned vs done (planned 0 = nothing to count). */

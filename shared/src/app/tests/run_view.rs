@@ -335,7 +335,7 @@ fn run_view_differentiates_interval_from_steady_same_average() {
     assert_eq!(s.kind, PaceVariability::Steady, "{}", s.label);
     assert_eq!(i.kind, PaceVariability::Interval, "{}", i.label);
     assert!(vi(&i) > vi(&s), "{} vs {}", i.label, s.label);
-    // Honestly graded Weak (flat-ground GOVSS/NGP simplification).
+    // Graded Weak (flat-ground GOVSS/NGP simplification).
     assert_eq!(i.evidence.grade, Some(EvidenceGrade::Weak));
     assert!(
         i.evidence.citation.contains("Skiba"),
@@ -439,7 +439,7 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
     assert!(gpx.contains("lon=\"1\""), "true seg-2 coord kept");
 
     // WITHOUT the boundary over these SAME true coords, the QC gate rejects
-    // the ~1853 m/s bridge as a teleport and drops ALL of segment 2 with it -
+    // the ~1853 m/s bridge as a teleport and drops ALL of segment 2 with it,
     // so distance collapses to segment 1 alone (~0.445 km) and the relocated
     // half of the run is LOST. The boundary is exactly what lets the core keep
     // segment 2 (real distance) while still excluding the bridge.

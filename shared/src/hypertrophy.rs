@@ -238,8 +238,8 @@ pub const MAX_WEEKLY_SET_INCREMENT: u8 = 4;
 ///
 /// Steps are capped at [`MAX_WEEKLY_SET_INCREMENT`] (+4 sets/week, hyp-001
 /// upper increment; hyp-011 no-abrupt-jump SAFETY guard), so a short block
-/// with a wide MEV→MRV span tops out below MRV rather than jumping to it -
-/// hyp-011: never jump straight to MRV.
+/// with a wide MEV→MRV span tops out below MRV (hyp-011: never jump straight
+/// to MRV).
 pub fn weekly_set_ramp(mev: u8, mrv: u8, weeks: u8) -> Recommended<Vec<u8>> {
     let ramp = if weeks == 0 {
         Vec::new()

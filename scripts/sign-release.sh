@@ -39,7 +39,7 @@ elif [[ $REQUIRE_RELEASE_KEY == 1 ]]; then
 else
   SIGNED="$REL_DIR/lollop-release-debugsigned.apk"
   "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-pass pass:android --out "$SIGNED" "$UNSIGNED"
-  echo "WARNING: release APK signed with the debug keystore — not distributable" >&2
+  echo "WARNING: release APK signed with the debug keystore: not distributable" >&2
 fi
 "$APKSIGNER" verify "$SIGNED"
 echo "$SIGNED"

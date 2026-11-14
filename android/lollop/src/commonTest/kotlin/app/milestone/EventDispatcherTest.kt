@@ -18,7 +18,7 @@ import kotlin.test.assertSame
 /**
  * The process-lifetime [EventDispatcher] consumer: it must survive a throwing
  * send, publish every result in order, and surface every core outcome the user
- * must hear about through [EventDispatcher.notices] — including one raised while
+ * must hear about through [EventDispatcher.notices], including one raised while
  * no Activity is collecting.
  *
  * The process's send path is a [Sink] of the test's: the dispatcher's units reach

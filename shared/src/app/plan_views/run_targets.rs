@@ -1,5 +1,5 @@
 //! Numeric execution targets for run prescriptions: every planned run
-//! reads as something a runner can follow — a pace range from the athlete's
+//! reads as something a runner can follow: a pace range from the athlete's
 //! current race fitness (running-007 VDOT bands, running-041 freshness), a
 //! heart-rate range when HRmax is known (measured, else the Tanaka estimate),
 //! and an effort cue (the session's RPE band; the talk test when nothing is

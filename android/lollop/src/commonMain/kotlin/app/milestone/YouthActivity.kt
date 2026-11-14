@@ -74,7 +74,7 @@ private const val ActivityMinutesMin = 1.0
  * vigorous and muscle-and-bone strengthening days against theirs, where the
  * minutes came from, this week's logged activities (each removable, with Undo)
  * and "Log activity". Every target comes from the core's view; a met target
- * reads "· Reached", an unmet one is just a count (no streaks, no red).
+ * reads "· Reached", an unmet one shows only the count (no streaks, no red).
  * The evidence sits behind the card's one "?".
  */
 @Composable

@@ -6,7 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [lib]
-# `cdylib` is the Android `libshared.so`; `lib` serves tests and the workspace.
+# `cdylib` is the Android `libshared.so`; `lib` is what the tests, examples and
+# `wiregen` link.
 # The iOS core is a `staticlib` built with `cargo rustc --crate-type staticlib
 # --features c-abi` (scripts/build-ios-core.sh), which replaces this list for
 # that one build: Cargo has no per-target crate types, and an Apple `cdylib`

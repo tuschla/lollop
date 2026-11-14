@@ -105,7 +105,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
     }
 
     let Some(lm) = hypertrophy::resolve_muscle(&q.muscle) else {
-        // No landmarks for this muscle: say so plainly rather than guess. The
+        // No landmarks for this muscle: the row says so, with no guessed figures. The
         // note itself is the RP landmark framing, so it is graded from that claim.
         let note = Recommended::new((), claims::HYP_LANDMARKS_001);
         push_guidance(
@@ -125,7 +125,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
         return (rows, None, Vec::new());
     };
 
-    // Landmarks row, landmarks are a raw engine value, not a Recommended, so
+    // Landmarks row: landmarks are a raw engine value, not a Recommended, so
     // wrap them in their HYP-LANDMARKS-001 evidence (ExpertOpinion) to grade it.
     let landmarks = Recommended::new((), claims::HYP_LANDMARKS_001);
     push_guidance(
@@ -139,7 +139,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
     );
 
     // `weeks == 0` is degenerate: the ramp is empty and there is no schedule to
-    // show, so stop after the landmarks context rather than emit empty rows.
+    // show, so stop after the landmarks context (no empty rows).
     if q.weeks == 0 {
         return (rows, None, Vec::new());
     }
@@ -292,7 +292,7 @@ fn push_dose_rows(
     );
 
     // hypertrophy-004: warn when the implied per-session dose exceeds the ~11
-    // fractional-set ceiling, redistribute to another session, not more sets.
+    // fractional-set ceiling and point to another session.
     let over_cap = hypertrophy::per_session_over_cap(freq.value.per_session.1);
     if over_cap.value {
         push_guidance(
@@ -309,8 +309,7 @@ fn push_dose_rows(
     (rir_vals, freq.value)
 }
 
-/// hypertrophy-013/039 rest prescriptions per exercise class, so the plan
-/// states how long to rest, not only how much to lift. Returns the
+/// hypertrophy-013/039 rest prescriptions per exercise class. Returns the
 /// (heavy compound, isolation) windows, s.
 fn push_rest_rows(rows: &mut Vec<GuidanceView>, section: &str) -> [(u16, u16); 2] {
     let mut windows = [(0, 0); 2];
@@ -543,8 +542,8 @@ fn protein_bodyweight(kg: f64, weight_lb: bool) -> String {
 }
 
 /// Build absolute daily protein target rows by scaling each graded g/kg range by
-/// the athlete's bodyweight. Multiplying a graded g/kg bound by bodyweight is
-/// honest arithmetic, the grade travels with the underlying claim via
+/// the athlete's bodyweight. The multiplication adds no claim of its own: the
+/// grade travels with the underlying claim via
 /// [`push_guidance`] (HARD RULE 2). No general/default protein number is
 /// invented: if neither goal context is selected (or bodyweight is non-positive)
 /// the section is empty (HARD RULE 1).
@@ -562,8 +561,8 @@ pub(in crate::app) fn build_protein_targets(
     // Structured g/day figures paralleling the prose rows (see `ProteinFigureView`).
     let mut figures = Vec::new();
 
-    // Cannot derive g/day from a non-positive bodyweight, say nothing rather
-    // than emit a nonsensical or zero target.
+    // No g/day from a non-positive bodyweight: emit nothing (a zero target
+    // would be meaningless).
     if q.bodyweight_kg <= 0.0 {
         return (rows, figures);
     }
@@ -618,8 +617,8 @@ pub(in crate::app) fn build_protein_targets(
                 figures.push(fig(ProteinTargetKind::Deficit, (lo, hi), false, rows.len()));
             }
             None => {
-                // safety-022: the deficit is refused, not silently omitted -
-                // the user sees why, cited to the RED-S deferral.
+                // safety-022: a refused deficit is shown, never silently
+                // omitted; the row says why and cites the RED-S deferral.
                 push_guidance(&mut rows, "Protein", DEFICIT_REFUSAL.to_string(), &r);
                 figures.push(fig(
                     ProteinTargetKind::Deficit,

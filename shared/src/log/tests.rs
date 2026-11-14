@@ -668,8 +668,8 @@ fn delete_skips_an_invalid_phantom_log_and_cancels_the_real_row() {
     // A valid legacy row, a phantom invalid LogSet sharing its (id 0, time), then
     // a DeleteEntry. `update` drops the invalid line (it never becomes a row) and
     // the delete removes the ONE real row. Compaction must pair the delete with
-    // the VALID row, not the phantom — else the deleted set resurrects after
-    // compaction. The inert invalid line survives (a no-op on replay).
+    // the VALID row, not the phantom; otherwise the deleted set resurrects
+    // after compaction. The inert invalid line survives (a no-op on replay).
     let valid = log_set("Bench", 100.0, 5, 8.0, 100);
     let invalid = log_set("Bench", -5.0, 5, 8.0, 100);
     let delete = Event::DeleteEntry {
@@ -800,7 +800,7 @@ fn trim_run(id: u64, observed_at_fallback: i64, from: i64, until: i64) -> Event 
 #[test]
 fn trim_lines_survive_compaction_alongside_the_base_log() {
     // Base LogRunTrack + two trims (no delete/clear): every trim line survives
-    // and the base stays alive — replay is sequential slicing, nothing inert.
+    // and the base stays alive; replay is sequential slicing, nothing inert.
     let events = vec![
         run_track_id(7_200_001, 0),
         trim_run(7_200_001, 0, 0, 300),
@@ -883,8 +883,8 @@ fn a_run_delete_drops_its_pair_across_other_run_lines() {
 
 #[test]
 fn an_orphan_trim_survives_compaction_alone() {
-    // A trim is NEVER a Rule-3 trigger, so — unlike an unmatched amend/delete,
-    // which are dropped alone — an orphan trim (no surviving base log) is left
+    // A trim is NEVER a Rule-3 trigger. Unlike an unmatched amend/delete,
+    // which is dropped alone, an orphan trim (no surviving base log) is left
     // in place and replays as an inert no-op. Pins the "not a trigger" face.
     let lone = vec![trim_run(7_200_007, 0, 100, 300)];
     assert_eq!(

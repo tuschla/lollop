@@ -156,7 +156,7 @@ pub enum Event {
         /// set. 0 = no id (matched on `observed_at` instead).
         #[serde(default)]
         entry_id: u64,
-        /// Timed-hold duration, seconds — `Some` for a static/hold set (a
+        /// Timed-hold duration, seconds: `Some` for a static/hold set (a
         /// calisthenics lever/plank/dead-hang rung), `None` for a reps×load set.
         #[serde(skip_serializing_if = "Option::is_none")]
         hold_sec: Option<u16>,
@@ -305,7 +305,7 @@ pub enum Event {
     },
     /// Trim a GPS run's recorded head/tail: keep only the fixes whose per-point
     /// `observed_at` lies in `[keep_from_sec, keep_until_sec]` (inclusive,
-    /// absolute unix seconds — decimation-agnostic). The run's identity
+    /// absolute unix seconds, independent of decimation). The run's identity
     /// (`entry_id`, `observed_at`) is UNCHANGED; every derived figure re-derives
     /// from the sliced track at `view()`. Matches like `DeleteEntry`/`AmendRun`.
     TrimRunTrack {

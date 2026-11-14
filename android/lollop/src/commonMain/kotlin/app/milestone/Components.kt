@@ -133,7 +133,7 @@ internal fun Modifier.chipPadding(): Modifier = padding(horizontal = Space.Md.dp
 
 /**
  * One compact Reference row (02-coach §6): the claim title + its citation
- * line. Deliberately NOT an EvidenceCard, the full graded card already
+ * line. Deliberately NOT an EvidenceCard: the full graded card is already
  * rendered wherever the claim was recommended; Reference only lists sources.
  */
 @Composable

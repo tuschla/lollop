@@ -239,8 +239,8 @@ fn medical_clearance_clears_only_the_parq_gate() {
     };
     assert!(onboarding_gates(&cleared).is_empty());
     // …but pregnancy keeps deferring autonomous prescription regardless
-    // (safety-045: provider clearance AND individualization, the engine
-    // still must not autonomously prescribe/progress load).
+    // (safety-045: clearance from a doctor or midwife AND individualization;
+    // the engine still must not autonomously prescribe/progress load).
     let pregnant_cleared = HealthScreen {
         pregnant: true,
         medically_cleared: true,

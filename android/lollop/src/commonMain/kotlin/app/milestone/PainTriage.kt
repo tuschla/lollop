@@ -112,7 +112,7 @@ fun PainTriageSheet(
         danger = true,
     ) {
         Text(
-            // Honest for BOTH core outcomes: a red-flag report becomes a hold, a
+            // True for BOTH core outcomes: a red-flag report becomes a hold, a
             // tolerable one a modify-and-monitor adjustment.
             stringResource(Res.string.log_pain_intro),
             color = OnBgMuted,

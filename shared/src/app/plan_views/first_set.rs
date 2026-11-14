@@ -15,7 +15,7 @@ use crate::app::view_types::{AdjustmentView, PlanIntensity, SessionStatus};
 use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind};
 
 /// Per-item performance autoregulation on TODAY's session, from the item's own
-/// logged sets (the Strong-graded backbone, AUTOREG-RIR-001):
+/// logged sets (Strong-graded, AUTOREG-RIR-001):
 /// - the first qualifying work set's RPE minus the item's target RPE → a load
 ///   change on THAT item's remaining sets (autoreg-001/002/004/005);
 /// - the item-scoped e1RM-gate recs already in `recommended` (today's top set
@@ -204,7 +204,7 @@ fn item_cues(it: &mut PlanItem, cx: &FirstSetCtx) -> Vec<ItemCue> {
                 reduce_percent_intensity(&mut it.intensity, 1.0 - bar / kg);
             }
             // Re-judge the logged sets at the cut load: the user followed
-            // the coach, so a set at the cut load is a full set.
+            // the cut, so a set at the cut load is a full set.
             rejudge_at_load(it, bar, weight_lb);
         } else {
             reduce_percent_intensity(&mut it.intensity, cut);

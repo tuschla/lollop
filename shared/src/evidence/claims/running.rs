@@ -73,9 +73,9 @@ claim_group! {
     // The deployable, HR-free differentiator that fits the app's existing GPS
     // track: a flat-ground GOVSS / Normalized-Graded-Pace simplification. The
     // convex 4th-power step makes an interval session score above its own
-    // average speed (variability index > 1). Graded WEAK/ExpertOpinion
-    // honestly: Skiba's GOVSS is a self-published, non-peer-reviewed white
-    // paper, and the app has no elevation → no grade adjustment (normalized
+    // average speed (variability index > 1). Graded Weak because Skiba's
+    // GOVSS is a self-published, non-peer-reviewed white paper, and the app
+    // has no elevation → no grade adjustment (normalized
     // *speed*, not power). `gps::track_variability_index` computes it.
     // See the KB file's caveats.
     RUN_INTERVAL_VI_001 => claim(

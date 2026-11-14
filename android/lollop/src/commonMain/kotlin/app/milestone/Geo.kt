@@ -49,7 +49,7 @@ internal fun movingLegKm(km: Double, dtSec: Double): Double? {
 /**
  * One route fix reduced to what the trim preview needs: its absolute
  * epoch-second timestamp, the cumulative haversine distance (km) and the cumulative
- * MOVING seconds from the track start up to this point. PREVIEW figures ONLY — the
+ * MOVING seconds from the track start up to this point. PREVIEW figures ONLY: the
  * of-record distance/duration are always re-derived in the core after a trim event.
  */
 data class TimedTrackPoint(val timeSec: Long, val cumKm: Double, val movingSec: Double)

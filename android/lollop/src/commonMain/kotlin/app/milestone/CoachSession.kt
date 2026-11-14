@@ -91,12 +91,12 @@ internal fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     }
 
     // Guided setup: shown once on a true fresh install instead of auto-seeding
-    // an opinionated profile. Saveable so it survives rotation mid-setup; gated
-    // additionally by a persisted "onboarding_done" flag so a skip doesn't re-prompt
+    // an opinionated profile. Saveable so it survives rotation mid-setup; also
+    // gated by a persisted "onboarding_done" flag so a skip doesn't re-prompt
     // on the next launch (first-run only, per the plan).
     val showSetupState = rememberSaveable { mutableStateOf(false) }
     // When non-null the guided setup opens PRE-FILLED from this draft (the Profile
-    // "Re-run guided setup" row seeds it from the current profile). null = a genuine
+    // "Re-run guided setup" row seeds it from the current profile). null = a
     // first-run pass. Drives the onboarding-flag behaviour at the call site: only a
     // first-run pass (null) touches the onboarding pref on complete/skip.
     val setupInitialState = rememberSaveable(stateSaver = jsonSaver(Event.SetProfile.serializer().nullable)) {
@@ -262,7 +262,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
     if (pending == null || !isTop) return
     // A run started since boot owns the sidecar now (Start truncated the
     // interrupted one): resuming would replace its live track and discarding would
-    // delete its crash-recovery file, so both just drop the stale offer.
+    // delete its crash-recovery file, so both only drop the stale offer.
     AppDialog(
         onDismiss = { /* deliberate choice required */ },
         title = { Text(stringResource(Res.string.main_resume_run_title)) },

@@ -1,4 +1,4 @@
-//! Calisthenics (bodyweight) resistance modality — data tables + pure rules
+//! Calisthenics (bodyweight) resistance modality: data tables + pure rules
 //! (knowledge-base `extracted/11-calisthenics.md`; source reports in
 //! `knowledge-base/calisthenics/`).
 //!
@@ -30,7 +30,7 @@ use TierTarget::{HoldSec, Reps};
 /// must leave reps in reserve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailurePolicy {
-    /// Failure allowed — the movement fails safely (push-up, dip, squat, row).
+    /// Failure allowed: the movement fails safely (push-up, dip, squat, row).
     SelfLimiting,
     /// Leave at least this many reps in reserve (safety_critical set).
     LeaveRir(u8),
@@ -56,10 +56,10 @@ pub struct Tier {
     pub load_claim: crate::evidence::ClaimId,
     /// Failure policy at this rung (CAL-EFAIL-SAFE-001).
     pub failure: FailurePolicy,
-    /// Pike/HSPU/handstand/planche rungs — pain-free loaded wrist extension
+    /// Pike/HSPU/handstand/planche rungs: pain-free loaded wrist extension
     /// (CAL-INJURY-WRIST-001).
     pub wrist_gate: bool,
-    /// Planche/front-lever/back-lever rungs — tendon rate-limit
+    /// Planche/front-lever/back-lever rungs: tendon rate-limit
     /// (CAL-TENDON-001).
     pub straight_arm: bool,
 }
@@ -106,14 +106,14 @@ pub struct CalisTemplate {
 }
 
 impl TierTarget {
-    /// Band top — the tier-advance trigger (reps or hold seconds).
+    /// Band top: the tier-advance trigger (reps or hold seconds).
     pub fn top(&self) -> u16 {
         match *self {
             Reps { high, .. } => high as u16,
             HoldSec { high, .. } => high,
         }
     }
-    /// Band floor — reset target after a tier advance.
+    /// Band floor: reset target after a tier advance.
     pub fn floor(&self) -> u16 {
         match *self {
             Reps { low, .. } => low as u16,
@@ -179,8 +179,8 @@ static HORIZONTAL_PUSH_TIERS: &[Tier] = &[
     mk("Decline push-up",        reps(5, 8),  false, Some((0.70, 0.74)), PUSHUP, SelfLimiting, false, false),
     mk("Pseudo-planche push-up", reps(5, 8),  false, None,               INF,    SelfLimiting, false, false),
     mk("Archer push-up",         reps(5, 8),  true,  None,               INF,    SelfLimiting, false, false),
-    // One-arm work leaves reps in reserve (§2.8: failure discouraged on
-    // skill/lever/one-arm work — form breakdown and connective-tissue risk).
+    // One-arm work leaves reps in reserve (§2.8 discourages failure on
+    // skill/lever/one-arm work: form breakdown and connective-tissue risk).
     mk("One-arm push-up",        reps(3, 8),  true,  None,               INF,    LeaveRir(1),  false, false),
 ];
 
@@ -283,7 +283,7 @@ static CORE_TIERS: &[Tier] = &[
     mk("Dragon flag",         reps(3, 6),   false, None, INF, SelfLimiting, false, false),
 ];
 
-// §3.3 skill row — Handstand balance (skill track). All rungs wrist-gated.
+// §3.3 skill row: Handstand balance (skill track). All rungs wrist-gated.
 #[rustfmt::skip]
 static HANDSTAND_TIERS: &[Tier] = &[
     mk("Wall walk",               hold(5, 15),  false, None, INF, LeaveRir(1), true, false),
@@ -326,7 +326,7 @@ static BACK_LEVER_TIERS: &[Tier] = &[
 ];
 
 // §3.10 Muscle-up (dynamic combination skill track; the rung-0 prereq GATE is
-// NOT a tier — it is the ladder's `gate` ([`MUSCLE_UP_GATE`], judged by
+// NOT a tier; it is the ladder's `gate` ([`MUSCLE_UP_GATE`], judged by
 // [`count_gate_met`]), applied when the calisthenics anchors are built).
 #[rustfmt::skip]
 static MUSCLE_UP_TIERS: &[Tier] = &[
@@ -646,7 +646,7 @@ pub fn equipment_substitution() -> Recommended<()> {
 }
 
 /// Tier-advance trigger (CAL-PROG-TRIGGER-001, contested CQ-F11-01): fires after
-/// 2 consecutive qualifying sessions — the calisthenics analogue of the
+/// 2 consecutive qualifying sessions, the calisthenics analogue of the
 /// strength 2-for-2 rule (STR-2FOR2-001).
 pub fn tier_advance_met(qualifying_consecutive_sessions: u8) -> Recommended<bool> {
     Recommended::new(
@@ -690,7 +690,7 @@ pub fn count_gate_met(best_single_set_reps: impl IntoIterator<Item = u8>) -> Rec
 
 /// Novice effort band on every non-ballistic rep rung (File 03 hypertrophy-020,
 /// HYP-RIR-ACC-001: novices start well short of failure and calibrate against
-/// it), the engine's novice RIR floor and one above — the same "2–3 reps left"
+/// it), the engine's novice RIR floor and one above: the same "2–3 reps left"
 /// a novice sees on weights. It still leaves ≥1–2 RIR on the leave-RIR set
 /// (CAL-EFAIL-SAFE-001), so a novice's ladder never asks for MORE effort on a
 /// harder rung.
@@ -747,7 +747,7 @@ pub fn rir_band(
         FailurePolicy::Ballistic => None,
         FailurePolicy::SelfLimiting => Some(if tier.target.is_timed() {
             // A self-limiting TIMED rung (dead hang, plank, hollow) is held to
-            // near-failure unconditionally — never compare hold seconds against
+            // near-failure unconditionally; never compare hold seconds against
             // the rep threshold.
             Recommended::new((0, 1), claims::CAL_INTENSITY_FLOOR_001)
         } else if novice {
@@ -836,8 +836,8 @@ pub fn advance_top(tier: &Tier, goal: LiftGoal, loaded: bool) -> u16 {
 const STRENGTH_GOAL_SKIP_REPS: u16 = 16;
 
 /// Multi-rung skip threshold (CAL-PLACE-001, contested CQ-F11-01): reps at or
-/// above 1.5× the working band top — or `STRENGTH_GOAL_SKIP_REPS` on a
-/// strength/power goal, where such a set has become an endurance stimulus —
+/// above 1.5× the working band top (or `STRENGTH_GOAL_SKIP_REPS` on a
+/// strength/power goal, where such a set has become an endurance stimulus)
 /// mean the rung is far too easy, so the plan steps more than one rung after a
 /// single session. Only for unloaded self-limiting rep rungs: never on
 /// straight-arm, leave-RIR, timed or ballistic work (tendon and failure-safety
@@ -927,7 +927,7 @@ pub fn load_step_kg(
 }
 
 /// Effective system load (kg) for a MEASURED-fraction rung:
-/// `mid(fraction) × bodyweight + added_kg`. `None` for inferred rungs — never
+/// `mid(fraction) × bodyweight + added_kg`. `None` for inferred rungs: never
 /// surface an invented number (CAL-LOAD-INFERRED-001).
 pub fn effective_load_kg(tier: &Tier, bodyweight_kg: f64, added_kg: f64) -> Option<f64> {
     tier.bw_fraction

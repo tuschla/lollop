@@ -44,7 +44,7 @@ internal fun utcOffsetSec(atEpochSec: Long = AppClock.nowSec()): Long =
     TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochSeconds(atEpochSec)).totalSeconds.toLong()
 
 /**
- * Friendly log date for a history card from a unix-seconds stamp, in whole local
+ * The log date for a history card from a unix-seconds stamp, in whole local
  * days within a week ("Today", "Yesterday", "3 days ago", the wording DateUtils
  * uses), a date ("Jul 15") from a week back. In the app's language with Latin
  * digits ([appLocale]), not the device's. Empty for an undated entry.

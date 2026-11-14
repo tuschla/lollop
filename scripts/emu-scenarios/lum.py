@@ -1,7 +1,7 @@
 """Mean luma (0-255) of a raw `screencap` (no -p) read on stdin.
 
 The API 29+ raw format is a 16-byte header (width, height, pixel format,
-colour space as little-endian u32) followed by RGBA_8888 rows. Samples every
+color space as little-endian u32) followed by RGBA_8888 rows. Samples every
 8th pixel of the band between 15 % and 85 % of the height (skipping status and
 navigation bars). Prints "<mean> <width>x<height>".
 """

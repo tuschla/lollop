@@ -198,12 +198,12 @@ pub enum LiftSessionType {
     Repetition,
     Accessory,
     /// A bodyweight (calisthenics) day: leverage-tier ladders, not %1RM
-    /// barbell loading, titled honestly rather than borrowing a barbell
-    /// heavy/power/volume label.
+    /// barbell loading, titled as a bodyweight day, never with a borrowed
+    /// barbell heavy/power/volume label.
     Calisthenics,
     /// A uniform full-body strength day (novice linear progression, or a day
     /// prescribed by effort rather than undulating %1RM): titled by what it
-    /// actually prescribes ("Strength day"), never a borrowed DUP label.
+    /// prescribes ("Strength day"), never a borrowed DUP label.
     FullBody,
 }
 
@@ -351,7 +351,7 @@ pub enum LiftIntensity {
     /// Reps in reserve, 0–10.
     Rir(u8),
     /// A ballistic bodyweight movement (jumps): every rep at maximal intent
-    /// (jump as high as possible), no load and no effort target — the stimulus
+    /// (jump as high as possible), no load and no effort target: the stimulus
     /// is the intent itself (STR-POWER-SELECT-001).
     MaxIntent,
 }
@@ -571,7 +571,7 @@ pub struct CalisthenicsPrescription {
     /// "never to failure", STR-PWR-001), so the view renders that cue instead.
     pub rir: (u8, u8),
     pub rest_sec: u16,
-    /// Added external load, kg — `Some` only on a ladder's weighted rung.
+    /// Added external load, kg; `Some` only on a ladder's weighted rung.
     pub added_kg: Option<f64>,
     /// The rung accepts external load (one of the ladder's `weighted_rungs`), even while
     /// the suggested load is 0 kg, so the shell shows the added-load field.
@@ -953,7 +953,7 @@ impl PainArea {
 /// Neck-check illness classification (File 06). Encoded in a
 /// [`ReadinessInput`] whose `signal == ReadinessSignal::Illness`, this decodes
 /// the numeric `value` convention (0 = none, 1 = above-neck, ≥2 = below-neck /
-/// any fever) into a self-documenting category, the autoregulation layer
+/// any fever) into a self-documenting category; the autoregulation layer
 /// branches on the enum, never on raw float literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IllnessSeverity {
@@ -1016,8 +1016,8 @@ pub struct HealthScreen {
     /// gates are cleared by unsetting their own flag once resolved (e.g.
     /// safety-048 injury: "resume general programming only upon clearance" →
     /// the shell clears `injury_or_rehab`); pregnancy (safety-045) requires
-    /// provider clearance AND individualization, so the engine keeps deferring
-    /// autonomous prescription for the whole pregnancy.
+    /// clearance from a doctor or midwife AND individualization, so the engine
+    /// keeps deferring autonomous prescription for the whole pregnancy.
     #[serde(default)]
     pub medically_cleared: bool,
     /// Currently pregnant (File 08 safety-045/046/047).
@@ -1486,7 +1486,7 @@ pub enum PainRegion {
 }
 
 /// A user-declared factual label for a logged run's intent (steady, easy,
-/// interval, tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
+/// interval, tempo, long, recovery). This is user data, like an exercise name: it is
 /// NOT a knowledge-base claim and carries NO [`ClaimId`]. It is deliberately
 /// *not* wrapped in [`Recommended`]: nothing here recommends anything. Beyond
 /// storage and display it is read only as the effort the user declared
@@ -1520,8 +1520,9 @@ pub enum WorkoutType {
     LongRun,
     /// Sustained comfortably-hard effort.
     Tempo,
-    /// Reps-plus-recovery structure (hand-entered/treadmill intervals have no
-    /// GPS track, so the measured VI verdict cannot see them, this labels them).
+    /// Reps-plus-recovery structure. Hand-entered and treadmill intervals
+    /// have no GPS track, so the measured VI verdict cannot see them; this
+    /// tag labels them.
     Interval,
 }
 
@@ -1545,7 +1546,7 @@ mod tests {
     #[should_panic(expected = "MarketingMyth claim LOAD-ACWR-001 must never back a recommendation")]
     fn recommended_new_rejects_marketing_myths_unconditionally() {
         // HARD RULE 2 at the constructor choke point: deliberately NOT gated
-        // on `debug_assertions` must also pass under `cargo test --release`.
+        // on `debug_assertions`, so it must also hold under `cargo test --release`.
         let _ = Recommended::new(0u8, claims::LOAD_ACWR_001);
     }
 

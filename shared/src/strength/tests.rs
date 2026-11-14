@@ -110,7 +110,7 @@ fn periodization_by_training_age() {
         periodization_model(TrainingAge::Advanced).value,
         PeriodizationModel::Block
     );
-    // strength-010 is a Moderate, uncontested synthesis (STR-MODEL-001) -
+    // strength-010 is a Moderate, uncontested synthesis (STR-MODEL-001):
     // its grade must not be inflated to PERIOD-001's Strong.
     let m = periodization_model(TrainingAge::Novice);
     assert_eq!(m.grade(), EvidenceGrade::Moderate);
@@ -154,7 +154,7 @@ fn est_pct_from_reps_clamps_domain_edges_and_estimates() {
     // A true 1RM reads as its own 100 %, not the Epley inverse's 96.77 %
     // (the known r=1 discontinuity is clamped; File 02 strength-005).
     assert_eq!(est_pct_1rm(1, 0.0), 100.0);
-    // The reps==0 sentinel returns 0.0 in ALL builds — no debug_assert
+    // The reps==0 sentinel returns 0.0 in ALL builds: no debug_assert
     // panics before it (this test compiles/runs in debug too).
     assert_eq!(est_pct_1rm(0, 0.0), 0.0);
     // The Epley inverse governs ≥2 reps: 100 / (1 + 2/30) = 93.75 %.

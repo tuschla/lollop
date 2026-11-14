@@ -328,7 +328,7 @@ sealed interface Event {
          */
         @SerialName("entry_id") val entryId: Long = EntryIds.next(),
         /**
-         * Timed-hold duration, seconds — `Some` for a static/hold set (a
+         * Timed-hold duration, seconds: `Some` for a static/hold set (a
          * calisthenics lever/plank/dead-hang rung), `None` for a reps×load set.
          */
         @SerialName("hold_sec") @EncodeDefault(EncodeDefault.Mode.NEVER) val holdSec: Int? = null,
@@ -562,7 +562,7 @@ sealed interface Event {
     /**
      * Trim a GPS run's recorded head/tail: keep only the fixes whose per-point
      * `observed_at` lies in `[keep_from_sec, keep_until_sec]` (inclusive,
-     * absolute unix seconds — decimation-agnostic). The run's identity
+     * absolute unix seconds, independent of decimation). The run's identity
      * (`entry_id`, `observed_at`) is UNCHANGED; every derived figure re-derives
      * from the sliced track at `view()`. Matches like `DeleteEntry`/`AmendRun`.
      */
@@ -1696,7 +1696,7 @@ data class CheckinInput(
 
 /**
  * A user-declared factual label for a logged run's intent (steady, easy,
- * interval, tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
+ * interval, tempo, long, recovery). This is user data, like an exercise name: it is
  * NOT a knowledge-base claim and carries NO [`ClaimId`]. It is deliberately
  * *not* wrapped in [`Recommended`]: nothing here recommends anything. Beyond
  * storage and display it is read only as the effort the user declared
@@ -1721,8 +1721,9 @@ enum class WorkoutType {
     /** Sustained comfortably-hard effort. */
     Tempo,
     /**
-     * Reps-plus-recovery structure (hand-entered/treadmill intervals have no
-     * GPS track, so the measured VI verdict cannot see them, this labels them).
+     * Reps-plus-recovery structure. Hand-entered and treadmill intervals
+     * have no GPS track, so the measured VI verdict cannot see them; this
+     * tag labels them.
      */
     Interval,
     ;
@@ -2109,8 +2110,8 @@ data class HealthScreen(
      * gates are cleared by unsetting their own flag once resolved (e.g.
      * safety-048 injury: "resume general programming only upon clearance" →
      * the shell clears `injury_or_rehab`); pregnancy (safety-045) requires
-     * provider clearance AND individualization, so the engine keeps deferring
-     * autonomous prescription for the whole pregnancy.
+     * clearance from a doctor or midwife AND individualization, so the engine
+     * keeps deferring autonomous prescription for the whole pregnancy.
      */
     val medically_cleared: Boolean = false,
     /** Currently pregnant (File 08 safety-045/046/047). */
@@ -2457,7 +2458,7 @@ data class ViewModel(
      * The single resolved coaching message: a weekly-check-in safety concern,
      * a run-spike warning, or one takeaway on the latest session (from the
      * session review, or derived from the logged sets/runs of a completed
-     * plan day — no form needed), or a new personal best. `None` when nothing
+     * plan day without one), or a new personal best. `None` when nothing
      * applies.
      */
     val feedback: FeedbackView? = null,
@@ -2520,8 +2521,8 @@ data class ViewModel(
      */
     val lift_audit: List<GuidanceView> = emptyList(),
     /**
-     * Raw calculator inputs echoed back so shells rehydrate their forms after a
-     * log replay / process death, keeping the core the single source of truth.
+     * Raw calculator inputs echoed back so shells rehydrate their forms from the
+     * core after a log replay / process death.
      * Each is a sibling of its result field above; `None`/empty until queried.
      * (`race_prediction` echoes its inputs inline; these cover the Vec-result
      * calculators.)
@@ -2551,8 +2552,8 @@ data class ViewModel(
     val trend: AdjustmentView? = null,
     /**
      * feedback-040 provisional framing: present while fewer than ~14 distinct
-     * days of logged data exist, recommendations are population defaults
-     * still converging on the user.
+     * days of logged data exist; until then recommendations are population
+     * defaults not yet fitted to the user.
      */
     val provisional: AdjustmentView? = null,
     /**
@@ -2586,9 +2587,9 @@ data class ViewModel(
      */
     val latest_checkin: CheckinInput? = null,
     /**
-     * Honest "collecting your baseline" status for each check-in channel that
-     * has readings but not yet enough history to emit a z-score/delta, so the
-     * shell shows honesty, never a fabricated number (HARD RULE 1). Empty once
+     * "Collecting your baseline" status for each check-in channel that has
+     * readings but not yet enough history to emit a z-score/delta, so the
+     * shell shows progress, never a fabricated number (HARD RULE 1). Empty once
      * every channel is either baseline-ready (its derived signal appears in
      * `readiness_summary`) or has no data.
      */
@@ -3033,7 +3034,7 @@ data class LiftResultView(
     val rir: Double = 0.0,
     /**
      * True when the set carried a recorded RPE (`rpe > 0`). When false the
-     * e1RM/%1RM are scored as reps-to-failure and the RIR is not meaningful,
+     * e1RM/%1RM are scored as reps-to-failure and the RIR carries no information,
      * so a shell omits the RIR caption.
      */
     val rpe_recorded: Boolean = false,
@@ -3139,8 +3140,8 @@ data class RunResultView(
     /** True when this run's distance spikes >10% over the recent longest. */
     val spike_flag: Boolean = false,
     /**
-     * Why the spike gate fired, phrased honestly (empty when it did not). A
-     * first run with no baseline says so rather than claiming a ">10%" jump.
+     * Why the spike gate fired (empty when it did not). A first run with no
+     * baseline says so instead of claiming a ">10%" jump.
      */
     val spike_note: String = "",
     /**
@@ -3163,8 +3164,8 @@ data class RunResultView(
      */
     val workout_type: WorkoutType? = null,
     /**
-     * One-line run recap. For a MEASURED run this is internal/citation-only -
-     * never rendered; the shell builds unit-aware labels (`runDistLabel` /
+     * One-line run recap. For a MEASURED run this is internal/citation-only and
+     * never rendered: the shell builds unit-aware labels (`runDistLabel` /
      * `runPaceLabel`), so the hardcoded `km` here never reaches a mi-preferring
      * user. Only the zero-distance fallback ("GPS signal too poor to measure
      * this run", no unit) is surfaced, in `RunCard`.
@@ -3204,8 +3205,8 @@ data class RunResultView(
      * Structured form of the spike-baseline provenance, so no shell scrapes it
      * from `spike_note` (`contains("no prior run")`). `true` when a
      * prior 30-day baseline distance exists to gauge this run against; `false`
-     * for a first run with no baseline (the spike gate then errs safe). Only
-     * meaningful when `spike_flag`.
+     * for a first run with no baseline (the spike gate then errs safe). Read
+     * it only when `spike_flag` is set.
      */
     val spike_has_baseline: Boolean = false,
     /**
@@ -3254,9 +3255,9 @@ enum class ThreeZone {
 
 /**
  * The core-owned pacing verdict for a run's measured split (feedback-016/017;
- * FB-PACING-001). Carries everything a shell needs to render the chip -
- * verdict, label, coaching copy, and the full evidence tag, so the ~3%
- * threshold (`feedback::POSITIVE_SPLIT_FLAG_PCT`) never leaks into shell code.
+ * FB-PACING-001). Carries what a shell needs to render the chip (verdict,
+ * label, coaching copy, evidence tag), so the ~3% threshold
+ * (`feedback::POSITIVE_SPLIT_FLAG_PCT`) stays out of shell code.
  */
 @Serializable
 data class SplitVerdictView(
@@ -3317,7 +3318,7 @@ data class IntervalVerdictView(
     val kind: PaceVariability = PaceVariability.Interval,
     /** Short chip label, e.g. `"INTERVAL · VI 1.7"` / `"STEADY · VI 1.0"`. */
     val label: String = "",
-    /** Evidence-backed copy explaining the differentiation honestly. */
+    /** Evidence-backed copy explaining the verdict. */
     val message: String = "",
     /** Evidence grade, e.g. `"Strong"`; `""` for a row that asserts no claim. */
     @Serializable(with = EvidenceGradeOrNoneSerializer::class) val grade: EvidenceGrade? = null,
@@ -3366,10 +3367,10 @@ data class RunSplitView(
     val pace: String = "",
     /**
      * The same normalized seconds-per-km/mile figure `pace` is formatted from,
-     * as whole seconds — the numeric pace a shell needs to draw a splits bar
-     * chart without re-parsing the `m:ss` string. Both are derived from one
-     * value at the construction site, so `pace == fmt_mss(seconds_per_unit)`
-     * is guaranteed.
+     * as whole seconds: the numeric pace a shell needs to draw a splits bar
+     * chart without re-parsing the `m:ss` string. Both come from one value at
+     * the construction site, so `pace == fmt_mss(seconds_per_unit)` always
+     * holds.
      */
     val seconds_per_unit: Int = 0,
     /**
@@ -3571,7 +3572,7 @@ data class RacePredictionView(
     /**
      * The raw inputs this prediction was computed from, echoed back so a shell
      * can rehydrate its form after a log replay instead of falling back to a
-     * hardcoded default (single source of truth stays the core).
+     * hardcoded default.
      */
     val recent_distance_m: Double = 0.0,
     val recent_time_sec: Double = 0.0,
@@ -3586,8 +3587,8 @@ data class RacePredictionView(
 /**
  * The CTL/ATL/TSB fitness–fatigue bookkeeping over the logged history,
  * flattened for shells (File 07 impulse-response; LOAD-PMC-001). Daily load
- * is a Lucia 3-zone TRIMP from each dated, HR-carrying run, the method
- * string states exactly what was counted so the shell never has to guess.
+ * is a Lucia 3-zone TRIMP from each dated, HR-carrying run; the method
+ * string states what was counted.
  * Bookkeeping only: TSB is NOT a validated performance predictor (the claim
  * statement carries that caveat).
  */
@@ -3817,7 +3818,7 @@ data class ReadinessSignalView(
  * Which picker/summary group a readiness signal belongs to. `RedFlag` is the
  * medical-referral / hard-stop block (Pain, Illness, RED-S, cardiac, bone
  * stress) that shells must visually fence off from the routine `Metric`
- * signals, the fence is data-driven from here, not a shell-side predicate.
+ * signals; the fence is data-driven from here, not a shell-side predicate.
  */
 @Serializable
 enum class SignalGroup {
@@ -3915,9 +3916,9 @@ data class SignalGroupView(
 
 /**
  * One check-in channel still collecting its baseline (`app/mod.rs` `baseline_status`):
- * an honest progress row shown in place of a derived signal until enough
- * history exists. Carries NO evidence tag: it asserts no training claim, it
- * states the absence of one (HARD RULE 2 is about recommendations).
+ * a progress row shown in place of a derived signal until enough history
+ * exists. Carries NO evidence tag: it makes no training claim (HARD RULE 2
+ * is about recommendations).
  */
 @Serializable
 data class BaselineStatusView(
@@ -4222,8 +4223,8 @@ data class PrescriptionView(
     val hold_high_sec: Int = 0,
     /**
      * External ADDED load for a calisthenics item (`Some(0.0)` = pure
-     * bodyweight; `Some(x)` = weighted rung). `None` for barbell lifts and
-     * runs — those use `load_kg`.
+     * bodyweight; `Some(x)` = weighted rung). `None` for barbell lifts (their
+     * load is `load_kg`) and runs.
      */
     val added_kg: Double? = null,
     /**
@@ -4288,7 +4289,7 @@ data class PrescriptionView(
     val sets_done: Int = 0,
     /**
      * Every same-movement set attributed to this item's session day, in
-     * chronological order — qualifying and non-qualifying (warm-ups / below
+     * chronological order: qualifying and non-qualifying (warm-ups / below
      * target), each flagged. Empty for runs and days outside the plan window.
      */
     val logged_sets: List<ItemSetView> = emptyList(),
@@ -4330,7 +4331,7 @@ data class PrescriptionView(
     val run_structure: RunStructureView? = null,
     /**
      * The bold name line of a lift / calisthenics face (`"Back squat"`): the
-     * `summary` up to its `": "` / `" — "`. Empty for runs and the return check.
+     * `summary` up to its `": "`. Empty for runs and the return check.
      */
     val face_name: String = "",
     /**
@@ -4745,7 +4746,7 @@ data class ProteinFigureView(
     val high_g_per_day: Double = 0.0,
     /**
      * `true` when a deficit target was refused (RED-S / low-energy-availability
-     * signal present, safety-022), no g/day figure is offered.
+     * signal present, safety-022): no g/day figure is offered.
      */
     val refused: Boolean = false,
     /** Low end of the graded g/kg band the grams come from. `0.0` when `refused`. */

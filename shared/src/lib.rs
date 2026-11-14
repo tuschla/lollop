@@ -2,26 +2,25 @@
 //! shell renders. The rules below are referenced throughout this crate by
 //! number ("HARD RULE 1" and so on); `planning/CLAUDE.md` holds the full list.
 //!
-//! **HARD RULE 1 — the knowledge base is authoritative.** Nothing enters the
-//! engine that the knowledge base does not state. No invented thresholds, no
-//! extrapolated bands, no fabricated inputs: an unanswered item stays absent
-//! rather than being filled with a plausible default, and where the KB gives no
-//! number the engine states the gap instead of inventing one.
+//! HARD RULE 1: the knowledge base is authoritative. Nothing enters the
+//! engine that the knowledge base does not state. An unanswered item stays
+//! absent instead of being filled with a plausible default, and where the KB
+//! gives no number the engine states the gap instead of inventing one.
 //!
-//! **HARD RULE 2 — every recommendation carries its evidence.** A value that
+//! HARD RULE 2: every recommendation carries its evidence. A value that
 //! advises the athlete travels as `Recommended<T>` tagged with its `ClaimId`
 //! (`Recommended::new`), whose registry entry holds the grade and citation, so
 //! a shell can always show how strongly a number is backed and which claim
 //! produced it. When two claims could face a figure, the badge names the one
-//! that actually set it. A claim graded `MarketingMyth` is hard-blocked: it can
-//! never reach a prescription.
+//! that set it. A claim graded `MarketingMyth` is hard-blocked: it can never
+//! reach a prescription.
 //!
-//! **HARD RULE 3 — safety overrides goals.** The engine never programs through
-//! injury, under-fuelling or a medical red flag. Safety gates run before and
-//! above any goal logic, and `schema::SafetyTier` orders competing signals. A
-//! blocking tier blanks the prescription rather than softening it.
+//! HARD RULE 3: safety overrides goals. The engine never programs through
+//! injury, under-fueling or a medical red flag. Safety gates run before any
+//! goal logic, and `schema::SafetyTier` orders competing signals. A blocking
+//! tier blanks the prescription; it does not soften it.
 //!
-//! **Determinism.** The core holds no clock, no randomness and no IO. Time
+//! Determinism: the core holds no clock, no randomness and no IO. Time
 //! enters only as event data (`observed_at`, the shell's `SetToday` epoch-day
 //! and UTC offset), so the same event log always replays to the same view.
 

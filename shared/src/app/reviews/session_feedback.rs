@@ -610,7 +610,7 @@ pub(in crate::app) fn feedback_message(m: &MessageCtx) -> String {
             "You reported feeling driven to train even when tired, sore or unwell. Keep the planned rest days, and see a doctor or sports psychologist.".to_string()
         }
         FeedbackCategory::ConcernEnergy => {
-            "You reported a sign that your body may be short on energy (missed or irregular periods, lower sex drive or fewer morning erections). See a doctor or sports dietitian soon to check whether you eat enough for your training.".to_string()
+            "You reported a sign that your body may be short on energy (missed or irregular periods, lower sex drive or fewer morning erections). See a doctor or registered dietitian soon to check whether you eat enough for your training.".to_string()
         }
         FeedbackCategory::DangerousProgression => spike_message(m),
         FeedbackCategory::IntensityDiscipline => intensity_message(m),

@@ -293,7 +293,7 @@ pub(crate) fn is_upper_body(name: &str) -> bool {
 
 /// Whether a lift is an Olympic weightlifting derivative (clean / snatch /
 /// jerk variants, high pulls, jump shrugs). Only ever programmed when the
-/// athlete already logs one — the skill prerequisite.
+/// athlete already logs one (the skill prerequisite).
 pub(crate) fn is_olympic_derivative(name: &str) -> bool {
     with_name_tokens(name, |t| {
         ["clean", "snatch", "jerk", "high pull", "jump shrug"]

@@ -840,7 +840,7 @@ fun ProteinForm(
     }
     // `fresh` is the keypad replace-buffer flag: a first digit REPLACES the seed
     // instead of appending, and it re-arms on re-activate (tapping the field). It must
-    // NOT gate which value Compute emits — re-activating after typing would otherwise
+    // NOT gate which value Compute emits: re-activating after typing would otherwise
     // send the seed while the field shows the typed value. `untouchedSinceOpen` tracks
     // that separately: true only until the FIRST real edit (digit/backspace/chip), never
     // re-armed on activate, so Compute keys off it to emit the displayed value once touched.
@@ -854,7 +854,7 @@ fun ProteinForm(
     // keypad range (Profile and setup use the same), so a weight accepted there is
     // accepted here.
     // An untouched prefill is wire-valid by construction (`bwComputeKg` emits `seedKg`
-    // verbatim), so display rounding must not red it out — gate validity on that path.
+    // verbatim), so display rounding must not red it out; gate validity on that path.
     val bwBounds = bodyweightBounds(weightUnit)
     val bwParsed = bwText.toDoubleOrNull()
     val bwValid = (untouchedSinceOpen && seedKg != null) ||
@@ -869,8 +869,8 @@ fun ProteinForm(
         KeypadValueField(
             stringResource(Res.string.log_field_bodyweight), weightSuffix(weightUnit), bwText,
             active = keypadOpen,
-            // An empty field is an invitation, not an error: the hint asks for
-            // the weight and Compute stays off until one is typed.
+            // An empty field shows no error: the hint asks for the weight and
+            // Compute stays off until one is typed.
             invalid = bwText.isNotBlank() && !bwValid,
             min = bwBounds.start, max = bwBounds.endInclusive, decimals = 1,
             adjustments = plateSteps(weightUnit),
@@ -970,7 +970,7 @@ fun HrZonesForm(
                 style = Type.Caption,
             )
         }
-        // Resting HR unlocks Karvonen (heart-rate-reserve) zones. Off → the
+        // A resting HR enables Karvonen (heart-rate-reserve) zones. Off → the
         // core falls back to age-only %HRmax, so this stays optional.
         LabeledSwitchRow(stringResource(Res.string.log_switch_use_rhr), useRhr) { useRhr = it; onKeypad(false) }
         if (useRhr) {

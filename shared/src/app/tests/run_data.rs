@@ -767,7 +767,7 @@ fn cap3_flagged(profile: Profile, history: impl IntoIterator<Item = Event>) -> b
 #[test]
 fn easy_run_near_leg_day_is_not_treated_as_a_long_run() {
     // A heavy squat Mon 20:00 and the easy 5 km Tue 08:00 are ~12 h apart, but
-    // the 5 km run is 29% of a partial-week total only — it is NOT the week's
+    // the 5 km run is 29% of a partial-week total only. It is NOT the week's
     // longest run, so it must not trip the heavy-leg/long-run CAP-3 spacing flag.
     // The actual long run (8 km, Sat) is 5 days from the squat, well clear.
     let squat = heavy_squat(4 * DAY_SEC + 20 * 3600); // Mon evening

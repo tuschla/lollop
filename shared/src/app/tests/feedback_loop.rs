@@ -550,7 +550,7 @@ fn spike_run_is_never_praised_as_longest() {
     assert!(!fb.message.contains("Longest run"), "{}", fb.message);
     assert_eq!(fb.category, FeedbackCategory::DangerousProgression);
 
-    // Within the 10 % rule, the longest run in 90 days is praised.
+    // Within the 10 % rule, the longest run in 90 days is reported.
     let mut ok = Model::default();
     set_today(&app, &mut ok, 100);
     app.update(log_run(11.5, 69.0, 70.0, 0.0, 60 * DAY_SEC, 1), &mut ok)
@@ -965,8 +965,8 @@ fn came_up_short_compares_the_loads_as_shown() {
     assert!(lighter.contains(" instead of "), "{lighter}");
 }
 
-/// A day where every set came up short of its reps (items `done_short`) is
-/// never praised as having hit the target reps.
+/// A day where every set came up short of its reps (items `done_short`)
+/// never reads as having hit the target reps.
 #[test]
 fn a_day_of_short_sets_is_not_praised_as_hitting_the_target_reps() {
     let app = Engine;

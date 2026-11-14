@@ -194,8 +194,8 @@ class RunArmingTest {
 
     @Test
     fun signalLostIsSuppressedWhenNotRecording() {
-        // Not tracking → the signalLost flag can't surface (it is only meaningful for
-        // an in-progress recording); a fresh lock shows instead.
+        // Not tracking → the signalLost flag can't surface (it only applies to an
+        // in-progress recording); a fresh lock shows instead.
         assertEquals(
             TrackerPill.FreshLock,
             pillState(hasPermission = true, locationOn = true, tracking = false, paused = false, armed = false, signalLost = true, freshLock = true, requirePrecise = false, requireMoving = false),

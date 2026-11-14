@@ -27,7 +27,7 @@ struct LiftArm {
     anchored_sets: usize,
     /// The "why?" basis; `None` keeps the claim statement.
     basis: Option<Vec<BasisPiece>>,
-    /// The "why?" `improves` line: an honest ENGINE data-need (which input
+    /// The "why?" `improves` line: an ENGINE data-need (which input
     /// would sharpen this load), never a training claim (HARD RULE 1). It
     /// overrides the claim-keyed default so a prescription card carries the
     /// full 3-part disclosure like adjustment/guidance cards do.
@@ -125,9 +125,9 @@ pub(super) fn flatten_lift_prescription(
 /// derate (detraining, layoff re-entry ramp, or an e1RM drop; never stacked),
 /// and the shown percent is cut by the same derate, reduced from the planned
 /// one, so the label states the share of the e1RM the load is. The e1RM
-/// itself stays the logged value (honest `anchored_on`). A >8 wk layoff's
-/// pre-layoff anchor never reaches this arm: it is set aside and the lift
-/// prescribed by RIR.
+/// itself stays the logged value, so `anchored_on` shows what was logged.
+/// The pre-layoff anchor of a layoff over 8 wk never reaches this arm: it is
+/// set aside and the lift prescribed by RIR.
 fn percent_arm(
     l: &crate::schema::LiftPrescription,
     p: f32,

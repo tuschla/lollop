@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full build for the lollop app, the ONE entry point for building anything.
+# Full build for the lollop app, the one entry point for building anything.
 #
 #   scripts/build.sh            # everything: core tests → Android tests → debug + release APKs
 #   scripts/build.sh --no-tests # same, skipping cargo test + gradle unit tests (quick rebuild)

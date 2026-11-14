@@ -181,9 +181,9 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         &pap,
     );
 
-    // Grouped with the Strength rows above (not the Hypertrophy block below) so
-    // the section runs stay contiguous, reference cards are labelled per-section,
-    // and a stray out-of-order Strength row reads as an orphan.
+    // Grouped with the Strength rows above (not the Hypertrophy block below):
+    // reference cards are labelled per section, so an out-of-order Strength
+    // row would read as an orphan.
     let mf = individualization::maintenance_frequency_per_week();
     push_guidance(
         rows,

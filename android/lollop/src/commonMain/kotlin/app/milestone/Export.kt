@@ -38,11 +38,11 @@ internal fun gpxFileName(runStartEpochSec: Long, zone: TimeZone = TimeZone.curre
 private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 // Full-data export / import: the whole event log is the source of truth, so a
-// backup is just the compacted NDJSON, and a restore replaces the log wholesale
+// backup is the compacted NDJSON, and a restore replaces the log wholesale
 // and lets the core replay it ([AppRuntime.requestReboot]). Kept out of the OS auto-backup
 // (see res/xml/backup_rules.xml) so the user moves it deliberately.
 
-/** Cap on a whole import candidate, from what the app really writes. A backup is
+/** Cap on a whole import candidate, from what the app writes. A backup is
  *  the compacted log, and every GPS run is one LogRunTrack line of up to
  *  [CoreConstants.TRACK_DECIMATION_CAP] fixes: one year of a hybrid athlete recording at the
  *  tracker's screen-off cadence (1 fix / 4 s) exports to about 11.7 MiB (146 GPS
@@ -122,9 +122,9 @@ internal expect suspend fun readPickedBackup(ctx: PlatformContext, file: String)
  *
  * Peak memory stays one buffered line (at most [maxLine]) plus the accumulated
  * valid lines: the whole file is NEVER materialized as bytes, so a mistaken large
- * non-log pick fails gracefully instead of transiently holding ~3× its size and
+ * non-log pick is refused instead of transiently holding ~3× its size and
  * running out of memory. A content provider may report an unknown size (statSize
- * == -1), so the running byte bound — not a declared-size pre-check — is what stops
+ * == -1), so the running byte bound, not a declared-size pre-check, is what stops
  * an oversized or endless stream; a binary file trips the variant check on its first
  * garbage line (or the line cap), well before [max].
  */

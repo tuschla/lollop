@@ -8,7 +8,7 @@
 //! unwind, no firewall), so the import's peak per input byte times that cap is
 //! its worst case.
 //!
-//! `PARSER_FUZZ_ALLOC_MB=<n>` additionally measures an n-MB file (slow in debug).
+//! `PARSER_FUZZ_ALLOC_MB=<n>` also measures an n-MB file (slow in debug).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};

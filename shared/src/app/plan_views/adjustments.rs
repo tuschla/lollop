@@ -115,8 +115,8 @@ pub(super) fn review_windows(model: &Model, today: i64, offset: i64) -> Vec<Revi
 /// - a `Deload { weeks }` from a check-in dated D0 is active on `[D0, D0 + 7·weeks)`,
 ///   so a deload aging out today still governs a day it covered;
 /// - every other recommendation (e.g. an HRV `DowngradeSession`) is active from
-///   the check-in's day through the last day it was in force — the span
-///   today's view applied it over. A check-in cleared by the undated
+///   the check-in's day through the last day it was in force (the span
+///   today's view applied it over). A check-in cleared by the undated
 ///   `ClearWeeklyCheckin` has no known end and stays in force through today.
 ///
 /// An undated review has no start: its recommendations apply on any day up to
@@ -204,8 +204,8 @@ pub(super) fn completion_recs_for_day<'a>(
 
 /// Cap RPE by raising reps-in-reserve on a structured RIR target. `CapRpe(d)`
 /// adds `d` reps of reserve (planned RPE − d), clamped to [0, 10]. Returns the
-/// reserve the numeric prefill (`target_rpe`) should map from — a single value's
-/// cap, or a band's new HIGH (conservative) bound — or `None` when nothing
+/// reserve the numeric prefill (`target_rpe`) maps from: a single value's cap,
+/// or a band's new HIGH (conservative) bound. Returns `None` when nothing
 /// changed (a prose / hold / %e1RM item, or a cap that moved no rung). For a
 /// band both ends shift up by `d` (the low end never left above the new high),
 /// so the top-end (hardest) rung is always brought within the cap.
@@ -245,16 +245,15 @@ pub(in crate::app) fn annotate_and_rejudge(
 }
 
 /// Fold the active (non-blocking) readiness adjustments INTO today's session,
-/// or an active head cold into an upcoming day's session (the key safety
-/// composition): a load cut, an RPE cap, or a
-/// downgrade modifies the shown items so the plan never renders a top-end above
-/// what readiness allows. Blocking holds never reach here (handled upstream by
-/// `train_blocked`). Each applied adjustment carries its own evidence. The
-/// items already carry the numeric fold of `recommended` ([`fold_item_numbers`],
-/// applied by [`flatten_session`]); this annotates each affected item, applies
-/// the RPE cap and the easy/pain-free rewrites, re-judges completion and marks
-/// the session adjusted. `today` carries today's call wording when `ns` is
-/// today's session.
+/// or an active head cold into an upcoming day's session: a load cut, an RPE
+/// cap, or a downgrade modifies the shown items so the plan never renders a
+/// top-end above what readiness allows. Blocking holds never reach here
+/// (handled upstream by `train_blocked`). Each applied adjustment carries its
+/// own evidence. The items already carry the numeric fold of `recommended`
+/// ([`fold_item_numbers`], applied by [`flatten_session`]); this annotates each
+/// affected item, applies the RPE cap and the easy/pain-free rewrites,
+/// re-judges completion and marks the session adjusted. `today` carries
+/// today's call wording when `ns` is today's session.
 pub(super) fn annotate_adjustments(
     ns: &mut PlanRow,
     recommended: &[AdjustmentCall],
@@ -445,8 +444,8 @@ fn note_deload(
 
 /// `CapRpe`: the effort pass moved RIR targets (single value AND calisthenics
 /// bands) off the STRUCTURED field; the session is "adjusted" ONLY when a rung
-/// actually moved (a holds-only / prose / %e1RM session is a genuine no-op, not
-/// an "adjusted" chip over an unchanged top-end — HARD RULE 3).
+/// moved. A holds-only / prose / %e1RM session is a no-op and gets no
+/// "adjusted" chip over an unchanged top-end (HARD RULE 3).
 fn note_rpe_cap(items: &mut [PlanItem], eased: &[u8]) -> bool {
     let mut any_changed = false;
     for (it, &d) in items.iter_mut().zip(eased) {

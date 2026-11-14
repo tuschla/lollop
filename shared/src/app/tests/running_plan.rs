@@ -31,7 +31,7 @@ fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
     // running-005 / RUN-KARVONEN-001: %HRR ≈ %VO2R ≈ %VO2max, never %HRmax. At
     // HRmax 190 / RHR 50 the Easy band's %HRR fractions (59–74% VO2max) give
     // 133–154 bpm; reusing the %HRmax band fractions (65–79%) as %HRR would
-    // render ~141–161 bpm — ~8 bpm too hot for the low-RHR cohort this targets.
+    // render ~141–161 bpm, ~8 bpm too hot for the low-RHR cohort this targets.
     let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: Some(50.0),
@@ -628,7 +628,7 @@ fn longest_run_anchor_tapers_past_the_window_instead_of_a_cliff() {
     assert!((l30.unwrap() - 21.1).abs() < 1e-9, "day 30 full: {l30:?}");
     assert!(!d30);
 
-    // Day 31: retained, tapered by one slope-day (21.1 × 27/28 = 20.346…) -
+    // Day 31: retained, tapered by one slope-day (21.1 × 27/28 = 20.346…):
     // a ~0.75 km step, NOT a 21.1 → None cliff. Detraining-adjusted.
     let (l31, _, d31) = anchor(31);
     let want31 = 21.1 * 27.0 / 28.0;

@@ -9,11 +9,11 @@ use crate::{load, running};
 /// Build a graded heart-rate-zone table from age: the Tanaka HRmax estimate plus
 /// the five Daniels %HRmax training bands mapped to absolute bpm ranges
 /// (`running::vdot_band_hr_pct`, running-007). The HRmax rows carry the Tanaka
-/// formula's own claim RUN-HRMAX-001 (Moderate, ±10–11 bpm individual SEE), citing the VDOT
-/// claim here would overstate the formula's evidence; the %HRmax band rows are
+/// formula's own claim RUN-HRMAX-001 (Moderate, ±10–11 bpm individual SEE); citing the VDOT
+/// claim here would overstate the formula's evidence. The %HRmax band rows are
 /// Daniels tables (RUN-VDOT-001, Moderate). No training numbers are invented
 /// (HARD RULE 1/2). A non-positive or implausible age yields a single
-/// explanatory row rather than a bogus HRmax. Alongside the rows it returns the
+/// explanatory row and no HRmax. Alongside the rows it returns the
 /// structured HRmax figure and one [`HrZoneBandView`] per band row, so a shell
 /// draws the zone table from numbers.
 pub(in crate::app) fn build_hr_zones(
@@ -28,7 +28,7 @@ pub(in crate::app) fn build_hr_zones(
     // trusted (`running::plausible_measured_hr_max`).
     let measured = running::plausible_measured_hr_max(measured_hr_max);
 
-    // HRmax from age is only meaningful for a realistic adult/junior age; refuse
+    // HRmax from age is only valid for a realistic adult/junior age; refuse
     // to emit a fabricated maximum outside that range. A measured max bypasses
     // the age requirement (it needs no age).
     if measured.is_none() && !running::tanaka_age_in_range(q.age_years) {
@@ -130,7 +130,7 @@ fn push_hr_max_row(
 
 /// running-005: HR-method preference by resting HR. Below RHR 55 the
 /// %HRmax and Karvonen methods diverge → prefer Karvonen; ≥70 they
-/// converge; 55–69 the KB states no rule (said honestly).
+/// converge; 55–69 the KB states no rule, and the row says so.
 /// Returns the resting HR when Karvonen targets are selected.
 fn push_hr_method_row(rows: &mut Vec<GuidanceView>, resting_hr_bpm: Option<f64>) -> Option<f64> {
     resting_hr_bpm.and_then(|rhr| {
@@ -148,7 +148,7 @@ fn push_hr_method_row(rows: &mut Vec<GuidanceView>, resting_hr_bpm: Option<f64>)
             ),
             running::HrMethodPreference::Unstated => (
                 format!(
-                    "Resting HR {rhr:.0} is between 55 and 69. The research gives no preference here, so zones use % of HRmax"
+                    "Resting HR {rhr:.0} is between 55 and 69, where no rule picks one way of setting zones, so zones use % of HRmax"
                 ),
                 false,
             ),
@@ -187,7 +187,7 @@ fn push_band_rows(
             format!("{bpm_lo:.0}–{bpm_hi:.0} bpm")
         };
         // Karvonen (%HRR) targets per band when the preference selected them.
-        // %HRR ≈ %VO2R ≈ %VO2max (Swain & Leutholtz 1997), NOT %HRmax — so the
+        // %HRR ≈ %VO2R ≈ %VO2max (Swain & Leutholtz 1997), NOT %HRmax, so the
         // reserve fraction is the band's %VO2max, never its %HRmax bound, or the
         // range reads ~7–10 bpm too hot for exactly the low-RHR cohort this
         // preference targets (running-005 formula: RHR + frac·(HRmax − RHR)).
@@ -203,7 +203,7 @@ fn push_band_rows(
             .unwrap_or_default();
         // An open-ended VO2max ceiling (Repetition is ">100 %VO2max") renders as
         // a floor. A pace-governed band (Interval/Repetition) drops the bpm
-        // figure entirely — HR lags on short reps, so a bpm target there would
+        // figure entirely: HR lags on short reps, so a bpm target there would
         // read as prescriptive when only pace governs. The %VO2max anchor rides
         // in the why? basis, off the face.
         let vo2_seg = match vo2_hi {

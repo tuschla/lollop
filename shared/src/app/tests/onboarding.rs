@@ -5,9 +5,9 @@ use super::*;
 
 #[test]
 fn pregnancy_screen_gates_the_view_at_medical_referral() {
-    // safety-045: SAFE-PREG-001 actually emitted, visible as a Safety
-    // guidance row, MedicalReferral tier, train blocked: plus the
-    // safety-047 avoid-list row.
+    // safety-045: SAFE-PREG-001 is emitted as a Safety guidance row
+    // (MedicalReferral tier, training blocked), plus the safety-047
+    // avoid-list row.
     let app = Engine;
     let mut model = Model::default();
     app.update(

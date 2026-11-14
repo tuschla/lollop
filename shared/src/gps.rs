@@ -254,8 +254,8 @@ pub fn track_positive_split_pct(points: &[GpsPoint], segment_starts: &[u32]) -> 
     ))
 }
 
-/// One completed (or final partial) split of a run track. Purely descriptive -
-/// a measurement of the run, not a recommendation, so it carries no evidence tag
+/// One completed (or final partial) split of a run track. Descriptive: a
+/// measurement of the run, not a recommendation, so it carries no evidence tag
 /// (same standing as [`track_positive_split_pct`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunSplit {
@@ -523,7 +523,7 @@ fn qc_pass(points: &[GpsPoint], segment_starts: &[u32]) -> QcFixes {
     let bounds = segment_bounds(segment_starts, points.len());
     let is_boundary = |i: usize| bounds.binary_search(&i).is_ok();
     let mut out: Vec<GpsPoint> = Vec::with_capacity(points.len());
-    // Segment-start indices REMAPPED to positions in the QC'd output, a boundary
+    // Segment-start indices REMAPPED to positions in the QC'd output. A boundary
     // fix may itself be dropped, so the first survivor at/after it opens the new
     // segment. Passed on to the segment-aware track metrics and the GPX export
     // so a pause + relocation is neither summed nor drawn across.

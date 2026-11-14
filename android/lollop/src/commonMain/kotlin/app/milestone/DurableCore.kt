@@ -185,8 +185,8 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     }
 
     // Append-only, newline-delimited event log. The crux core holds all state in
-    // memory only, so we persist the event *stream* (not the derived model) and
-    // rebuild by replaying it. Each line is one event's exact serde wire JSON.
+    // memory only, so the shell persists the event *stream* (not the derived model) and
+    // rebuilds by replaying it. Each line is one event's exact serde wire JSON.
     private var log: AppPath? = null
 
     // The native core holds all state in memory for the whole process lifetime,
@@ -197,7 +197,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     /**
      * Point the core at the event log [file] and replay it to rebuild state. Safe to
      * call on every Activity creation: replay runs only on the first call per
-     * process. Returns true only on a genuinely FRESH INSTALL: the log file
+     * process. Returns true only on a FRESH INSTALL: the log file
      * never existed, so the caller may seed a default profile + onboarding. A
      * log that exists but compacts to zero surviving lines (a returning user who
      * cleared everything) returns false: replaying "nothing left" is their real
@@ -286,8 +286,8 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
     }
 
     // The last ViewModel that decoded cleanly. If a later core call comes back as
-    // a panic-firewall error envelope, we return this instead of an all-default
-    // blank one, a blank would silently wipe a live DO-NOT-TRAIN hold (HARD RULE 3).
+    // a panic-firewall error envelope, this is returned instead of an all-default
+    // blank one: a blank would silently wipe a live DO-NOT-TRAIN hold (HARD RULE 3).
     private var lastGoodView: ViewModel? = null
 
     // A prior [send] append that failed mid-write may have left a torn
@@ -331,7 +331,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         }
         // A serde-rejected event answers no bytes, a core panic an {"error":...}
         // object, and a null is an answer that couldn't be allocated.
-        // None is persisted: the line would just be re-dropped on every replay.
+        // None is persisted: the line would be dropped again on every replay.
         if (!isAccepted(response)) {
             PlatformLog.e("Core", "event rejected: ${event::class.simpleName}")
             return Applied.Rejected
@@ -431,7 +431,7 @@ open class DurableCore(private val bridge: CoreBridge) : SynchronizedObject(), C
         // arrives as the plain error envelope handled below.
         val text = bytes.decodeToString()
         // The FFI panic firewall returns {"error":{...}} on a core panic. With
-        // ignoreUnknownKeys that would decode into an all-default ViewModel -
+        // ignoreUnknownKeys that would decode into an all-default ViewModel:
         // train_blocked=false, safety_tier=null, silently blanking safety state.
         if (isCoreErrorEnvelope(text)) {
             val detail = if (AppProcess.debuggable) ": $text" else ""

@@ -72,7 +72,7 @@ const LOAD_GRID_EPS: f64 = 1e-10;
 /// Round a working load DOWN onto the profile's display-unit plate grid, then
 /// return it in kg (the wire unit). kg users get the 2.5 kg grid; lb users the
 /// 5 lb grid (2.5 lb below 50 lb, where micro-plates are standard). Rounding
-/// DOWN — never nearest — guarantees the rendered load never exceeds the
+/// DOWN (never nearest) guarantees the rendered load never exceeds the
 /// prescribed %1RM, and rounding on the DISPLAY grid means a lb user never sees
 /// a fractional-lb load no US plate combination can make (the wire stays kg).
 /// The grade still travels with the underlying %1RM claim.
@@ -167,7 +167,7 @@ pub(crate) fn floor_added_load_kg(kg: f64, weight_lb: bool) -> f64 {
 /// split is exact for every grid load; a remainder below the smallest plate is
 /// dropped (never an invented plate). Empty at or below the bar, and for a
 /// non-finite or implausible load (more than `MAX_PLATES_PER_SIDE` plates
-/// would be needed — no real sleeve holds that), so a corrupt wire weight can
+/// would be needed; no real sleeve holds that), so a corrupt wire weight can
 /// never blow up the view.
 pub(crate) fn plates_per_side(load_kg: f64, weight_lb: bool) -> Vec<f64> {
     const MAX_PLATES_PER_SIDE: f64 = 20.0;

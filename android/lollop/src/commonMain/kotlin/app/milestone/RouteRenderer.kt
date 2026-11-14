@@ -497,9 +497,9 @@ internal data class LonBounds(val west: Double, val east: Double)
  * exceeds 180° the box has almost certainly wrapped the long way, so re-measure
  * with every negative longitude shifted +360 (−179 → 181, one degree from 179) and
  * keep whichever framing is tighter. The tighter shifted bounds are then wrapped
- * back into [−180, 180); if the shifted span isn't actually smaller the track
- * genuinely covers a huge range (not a dateline artefact) and the honest naive box
- * is kept, never a broken zoom.
+ * back into [−180, 180); if the shifted span isn't smaller the track covers a
+ * huge range (not a dateline artefact) and the naive box is kept, never a broken
+ * zoom.
  */
 internal fun frameLongitudes(lons: List<Double>): LonBounds {
     if (lons.isEmpty()) return LonBounds(0.0, 0.0)

@@ -550,7 +550,7 @@ sc_lowmem() {
 sc_update() {
   local S=update m0 m1 u r x ok
   reset_app || { check FAIL $S "seeded boot" "Today never rendered"; return; }
-  # Kilometres: the seed's profile states no unit, so its first boot gives it the
+  # Kilometers: the seed's profile states no unit, so its first boot gives it the
   # en-US locale's, mi; a reset to the locale's would show.
   set_distance_unit km
   open_set_editor && editor_fill && tap_log_set; close_editor

@@ -1,13 +1,14 @@
 //! Tone lint over every string the core renders (the `copy_invariants` view
 //! sweep; references verbatim and dormant fields skipped), enforcing
 //! `planning/design/writing.md`: neutral and factual, like a tool. The rules
-//! are objective markers of that voice: exclamation
-//! marks, emojis, "we/us/our", a hype/AI word list, rhetorical question
+//! are objective markers of that voice: exclamation marks, emojis,
+//! "we/us/our", a hype and AI-vocabulary word list, rhetorical question
 //! openers ("First time? Pick…"), stock phrases ("Let's", "Ready to", "It's
-//! important to note") and em dashes in sentences (a lone `—` no-value
-//! placeholder is fine). The word lists and the lint's own cases are
-//! `tests/fixtures/copy_tone.json`, which the Android twin `CopyToneTest.kt`
-//! reads too.
+//! important to note", "serves as", "plays a role", "I hope this helps"),
+//! placeholder text ("[insert", "TODO"), "not just X but Y" parallels and em
+//! dashes in sentences (a lone `—` no-value placeholder is fine). The word
+//! lists and the lint's own cases are `tests/fixtures/copy_tone.json`, which
+//! the Android twin `CopyToneTest.kt` reads too.
 
 use std::sync::LazyLock;
 
@@ -35,11 +36,22 @@ struct Flagged {
     rule: String,
 }
 
+/// A negative parallel: a `first` phrase with a `then` word later in the same
+/// sentence.
+#[derive(Deserialize)]
+struct Parallel {
+    label: String,
+    first: Vec<String>,
+    then: Vec<String>,
+}
+
 /// `tests/fixtures/copy_tone.json`.
 #[derive(Deserialize)]
 struct ToneRules {
     hype: Vec<Phrase>,
     stock_phrases: Vec<Phrase>,
+    placeholders: Vec<String>,
+    parallels: Vec<Parallel>,
     terms: Vec<Term>,
     clean: Vec<String>,
     flagged: Vec<Flagged>,
@@ -69,6 +81,25 @@ fn is_emoji(c: char) -> bool {
 /// text.
 fn has_phrase(n: &str, p: &str) -> bool {
     n.match_indices(p).any(|(i, _)| is_word_at(n, i, p))
+}
+
+/// Whether normalized `n` has a `first` phrase of `p` followed by one of its
+/// `then` words before the sentence ends (`. `, a newline or the end).
+fn has_parallel(n: &str, p: &Parallel) -> bool {
+    p.first.iter().any(|f| {
+        n.match_indices(f.as_str()).any(|(i, _)| {
+            if !is_word_at(n, i, f) {
+                return false;
+            }
+            let rest = &n[i + f.len()..];
+            let end = [rest.find(". "), rest.find('\n')]
+                .into_iter()
+                .flatten()
+                .min()
+                .unwrap_or(rest.len());
+            p.then.iter().any(|t| has_phrase(&rest[..end], t))
+        })
+    })
 }
 
 /// A sentence (string start, after `. ` or a newline) that opens with a short
@@ -122,6 +153,16 @@ fn tone_violations(s: &str) -> Vec<String> {
     for p in &RULES.stock_phrases {
         if p.forms.iter().any(|f| has_phrase(&n, f)) {
             v.push(format!("tone: stock phrase `{}`", p.label));
+        }
+    }
+    for p in &RULES.placeholders {
+        if has_phrase(&n, p) {
+            v.push(format!("tone: placeholder `{p}`"));
+        }
+    }
+    for p in &RULES.parallels {
+        if has_parallel(&n, p) {
+            v.push(format!("tone: parallel `{}`", p.label));
         }
     }
     if has_word(&straight, "Ready to") {

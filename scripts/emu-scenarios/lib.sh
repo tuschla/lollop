@@ -560,7 +560,7 @@ _shade_find() { wdump "$1" && wfind "$1" "$2" "$3" >/dev/null; }
 # ROW: when the node is missing, expand the collapsed notification whose title
 # starts with ROW first (below API 36 an ongoing notification sits collapsed
 # under others, actions hidden). Last resort: OCR the first word of TEXT on the
-# shade screenshot (shots/NAME.png) — on API 37 a counting-down chronometer in
+# shade screenshot (shots/NAME.png). On API 37 a counting-down chronometer in
 # the shade keeps the UI from going idle, and uiautomator then leaves the shade
 # window out of the dump.
 tap_shade() {
@@ -801,7 +801,7 @@ API=0
 boot_emulator() {
   local avd="$1" logf="$2" mem="${3:-}"
   if adb_ get-state >/dev/null 2>&1; then
-    log "$SERIAL already online — using it"
+    log "$SERIAL already online: using it"
   else
     [[ -x "$EMULATOR" ]] || die "emulator not found at $EMULATOR"
     "$EMULATOR" -list-avds | grep -qx "$avd" || die "AVD '$avd' not found (create it with avdmanager)"
@@ -810,7 +810,7 @@ boot_emulator() {
     # ("hasReadColorBufferDma"), which breaks screencap and restarts system_server.
     ! grep -qx 'target=android-0' "$HOME/.android/avd/$avd.ini" ||
       die "$HOME/.android/avd/$avd.ini has target=android-0: set it to the image's API (e.g. target=android-37.0)"
-    [[ -e /dev/kvm ]] || log "WARNING: /dev/kvm missing — the emulator will be very slow"
+    [[ -e /dev/kvm ]] || log "WARNING: /dev/kvm missing: the emulator will be very slow"
     log "booting AVD $avd on port ${SERIAL#emulator-}"
     # The emulator finds the AVD's system image through ANDROID_SDK_ROOT, not its
     # own install path; a stale environment value would point it at another SDK.

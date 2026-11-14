@@ -34,7 +34,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 
 /**
  * Completion-UI scenario tests: per-set, criteria-aware completion driven through
- * the REAL core over JNI, asserting what the user sees — slot fills, the
+ * the REAL core over JNI, asserting what the user sees: slot fills, the
  * "Log set k of N" progression, done-collapse, End/Reopen, and the below-target
  * treatment of a warm-up.
  *

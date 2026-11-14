@@ -187,7 +187,7 @@ claim_group! {
     ),
     #[kb_only]
     ADH_RATIONALE_001 => claim(
-        "Explaining the reason behind each change to a plan supports people's sense of choice and wellbeing; programs that give a meaningful rationale are associated with larger benefits.",
+        "Explaining the reason behind each change to a plan supports people's sense of choice and wellbeing; programs that explain their reasons are associated with larger benefits.",
         Moderate,
         &[
             "Ntoumanis et al. 2021, Health Psychol Rev 15(2):214-244 (self-determination theory interventions meta-analysis)",

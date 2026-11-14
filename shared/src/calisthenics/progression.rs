@@ -23,7 +23,7 @@ pub(crate) trait RungSet {
 }
 
 /// A calisthenics rung placement (`Event::SetCalisthenicsRung`): the athlete
-/// chose this rung for a ladder — at setup (their starting rung) or via the
+/// chose this rung for a ladder, at setup (their starting rung) or via the
 /// plan item's Easier / Harder choice. Replayed with the logged sets, in time
 /// order, by [`build_anchors`].
 // `Serialize`: the plan-cache fingerprint (`memo::fingerprint`) only.
@@ -133,7 +133,7 @@ fn metric<S: RungSet>(timed: bool, s: &S) -> u32 {
 /// or on the first session after a placement). The effort test follows
 /// CAL-RIR-ACC-001: high-rep, hold and ballistic rungs advance on reps/hold
 /// alone; other rungs need the last set rated at [`MAX_QUALIFYING_RPE`] or
-/// under — an unrated set only counts when it beats the top by
+/// under; an unrated set only counts when it beats the top by
 /// [`UNRATED_MARGIN`].
 fn judge_rung<S: RungSet>(
     l: &Ladder,
@@ -262,7 +262,7 @@ fn gate_best<S: RungSet>(matched: &[(LadderId, u8, &S)], g: &GateRung) -> u8 {
 }
 
 /// Per-ladder calisthenics tier state (the calisthenics analogue of the lift
-/// anchors), REPLAYED in time order from logged sets and rung placements — a
+/// anchors), REPLAYED in time order from logged sets and rung placements: a
 /// state machine, not a monotone max (KB calis-progression §2.2):
 ///
 /// - each session's rung is the rung with the most sets that local day (ties →
@@ -271,8 +271,8 @@ fn gate_best<S: RungSet>(matched: &[(LadderId, u8, &S)], g: &GateRung) -> u8 {
 /// - a session at the current rung, an easier rung, or the rung the plan would
 ///   have prescribed (advance / skip / regress / re-entry) moves the ladder
 ///   there; a HARDER rung moves it only when a set reached that rung's band
-///   floor (self-placement, CAL-PLACE-001) — one failed exploratory attempt is
-///   ignored;
+///   floor (self-placement, CAL-PLACE-001), so one failed exploratory attempt
+///   is ignored;
 /// - a placement sets the rung outright from its time on, in timestamp order
 ///   even inside a session (sets logged after an Easier / Harder choice count
 ///   at the chosen rung); an undated placement starts the straight-arm

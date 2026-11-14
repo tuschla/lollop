@@ -79,7 +79,7 @@ struct CardLayout: Hashable {
     /// `widgetLayout`): a line under the title (or the hero), the hero (a run's
     /// distance, the next session), the overline, the week block, then more lines,
     /// a statement's large title last. The hero comes before the overline: an iOS
-    /// card is shorter than Android's two rows, and the hero is the day's key fact.
+    /// card is shorter than Android's two rows, and the hero is what the day holds.
     /// Ranking the candidates in this order and taking the first that fits gives
     /// what Android's greedy pass gives.
     var rank: Int {

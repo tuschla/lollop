@@ -2334,7 +2334,7 @@ fn pregnancy_hold_then_return() {
         bodyweight_kg: Some(64.0),
         ..hybrid()
     };
-    // Forty weeks pregnant, then the provider's all-clear eight weeks
+    // Forty weeks pregnant, then the doctor or midwife's all-clear eight weeks
     // postpartum: 336 days held (SAFE-PREG-001).
     let (from, days) = if std::env::var_os("LONG_HORIZON_FULL").is_some() {
         (120, 730)

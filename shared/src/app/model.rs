@@ -27,9 +27,9 @@ pub(super) struct LoggedSet {
     /// another. A row an old build logged without an id carries the one its
     /// `observed_at` gives (`event::entry::row_id`).
     pub(super) entry_id: u64,
-    /// Timed-hold duration, seconds — `Some` for a static/hold set (plank,
+    /// Timed-hold duration, seconds: `Some` for a static/hold set (plank,
     /// dead hang, lever), `None` for a reps×load set. History renders a hold row
-    /// as "<name> — <s> s hold".
+    /// as "<name> - <s> s hold".
     pub(super) hold_sec: Option<u16>,
 }
 
@@ -163,9 +163,9 @@ pub struct Model {
     /// by the per-day recompute of a past day (see [`RetractedInput`]); wiped
     /// with `inputs` by `ClearReadiness`.
     pub(super) retracted_inputs: Vec<RetractedInput>,
-    /// Morning check-ins: a RETAINED multi-day history of raw
-    /// human observations. NOT cleared by `ClearReadiness`; the whole point is
-    /// a rolling baseline the core normalizes into z-scores/deltas/streaks.
+    /// Morning check-ins: a RETAINED multi-day history of raw observations,
+    /// the rolling baseline the core normalizes into z-scores/deltas/streaks.
+    /// NOT cleared by `ClearReadiness`.
     pub(super) checkins: Vec<CheckinInput>,
     /// `RestartHrvBaseline`: HRV readings logged before this unix second are
     /// ignored by the derivation (a new device / timing). Reset by `ClearCheckins`.
@@ -206,8 +206,8 @@ pub struct Model {
     /// `ClearWeeklyCheckin` since the last weekly check-in: none is in force.
     pub(super) weekly_checkin_cleared: bool,
     /// The last race-time prediction query, if requested. Stored as the raw
-    /// inputs so the two-method estimate is re-derived in `view` (like a logged
-    /// run), keeping the core deterministic and the prediction reproducible.
+    /// inputs so the two-method estimate is re-derived in `view`, like a logged
+    /// run.
     pub(super) race_query: Option<RaceQuery>,
     /// The last hypertrophy-mesocycle volume-plan query, if requested. Stored as
     /// the raw inputs so the graded per-week plan is re-derived in `view`.

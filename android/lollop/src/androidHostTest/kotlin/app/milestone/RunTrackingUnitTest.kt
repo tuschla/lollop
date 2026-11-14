@@ -63,7 +63,7 @@ class RunTrackingUnitTest {
     @Test
     fun nearAntipodalSegmentIsFiniteNotNaN() {
         // On a near-antipodal leg the haversine `h` can round a hair past
-        // 1.0, and Math.asin(x > 1) is NaN — which would poison live distance. The
+        // 1.0, and Math.asin(x > 1) is NaN, which would poison live distance. The
         // asin-input clamp (h.coerceAtMost(1.0)) keeps the result finite.
         // An exactly antipodal pair (~half the Earth's circumference apart) is the edge.
         val a = GpsPoint(0.0, 0.0, 0, 5.0)
@@ -162,7 +162,7 @@ class RunTrackingUnitTest {
         // session token so the service's captured generation diverges and a location
         // result queued on the main looper stands down instead of resurrecting a ghost
         // run + sidecar. Recording a fix (add) and recovering a run (restore) keep the
-        // SAME session identity — only a reset ends a session — so the service's stream,
+        // SAME session identity (only a reset ends a session), so the service's stream,
         // whose captured token equals the value at start, keeps recording across them.
         RunSession.reset()
         val g0 = RunSession.generation
@@ -822,7 +822,7 @@ class RunTrackingUnitTest {
         val p1 = GpsPoint(52.5200, 13.4050, 0, 5.0)
         val p2 = GpsPoint(52.5203, 13.4050, 10, 5.0)
         // Each run resets to a FRESH backing array, so these two snapshots hold the
-        // same fixes on distinct arrays — the transitivity-breaking case.
+        // same fixes on distinct arrays: the transitivity-breaking case.
         RunSession.reset()
         RunSession.add(p1, 0L)
         RunSession.add(p2, 10_000_000_000L)

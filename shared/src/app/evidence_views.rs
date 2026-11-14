@@ -434,16 +434,15 @@ pub(super) fn grade_note_str(
     let Some(cq) = contested_ref.map(crate::evidence::ContestedId::question) else {
         return base;
     };
-    // Honour the deck's "here's both sides" promise: name the open question
-    // AND say what the app does meanwhile, rather than dangling a bare topic
-    // label.
+    // Name the open question and say what the app does until it is settled
+    // (the copy deck's "both sides" rule).
     let mut s = format!(
-        "{base} Contested: experts disagree on {}. The plan's default: {}.",
+        "{base} Contested: no agreement yet on {}. The plan's default: {}.",
         cq.question, cq.engine_default
     );
     // When the KB supplies an attributable opposing reference, show one
     // contradicting side. Left off entirely when the CQ has no KB-sourced
-    // opposing cite (`other_side` is None) - never a fabricated "other view".
+    // opposing cite (`other_side` is None); never a fabricated "other view".
     if let Some(other) = cq.other_side {
         s.push_str(" Another view: ");
         s.push_str(other);
@@ -455,7 +454,7 @@ pub(super) fn grade_note_str(
 /// lacks or would sharpen. Keyed by claim, this describes the ENGINE's own
 /// data needs, never training advice, so it carries no evidence tag and
 /// invents no claim (HARD RULE 1-safe by construction; every string is reviewed
-/// against that bar). `None` when nothing would genuinely improve the estimate.
+/// against that bar). `None` when nothing would improve the estimate.
 pub(super) fn improves_for(claim: ClaimId) -> Option<&'static str> {
     Some(match claim {
         claims::RUN_HRMAX_001 => {

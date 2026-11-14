@@ -4,7 +4,7 @@
 //! signals it decides *which* feedback category to emit; the app renders the
 //! copy for it.
 //!
-//! The overriding rule is feedback-042: **safety gates run first**. Any
+//! The overriding rule is feedback-042: safety gates run first. Any
 //! CONCERN_INJURY / CONCERN_BEHAVIOR / CONCERN_RECOVERY (and the dangerous
 //! single-session progression warning) short-circuits execution evaluation and
 //! suppresses every competing praise/progression message in the same cycle

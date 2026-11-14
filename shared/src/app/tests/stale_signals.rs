@@ -72,7 +72,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
     set_today(&app, &mut stale_pain, today);
     assert!(
         app.view(&stale_pain).hold_reason.is_some(),
-        "a stale pain report must still hold - safety never expires"
+        "a stale pain report must still hold: safety never expires"
     );
 }
 

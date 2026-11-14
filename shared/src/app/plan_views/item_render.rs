@@ -277,8 +277,8 @@ pub(super) fn derate_reason(cause: crate::plan::DerateCause) -> String {
 
 /// Round a working load DOWN onto the profile's display-unit plate grid
 /// (`round_load_grid`), dropping it to `None` when it collapses to 0. A sub-grid
-/// anchor — or a real anchor cut below a loadable weight by a readiness/re-entry
-/// derate — must never render "@ 0"; the item is prescribed by effort instead
+/// anchor (or a real anchor cut below a loadable weight by a readiness/re-entry
+/// derate) must never render "@ 0"; the item is prescribed by effort instead
 /// (mirroring the non-positive-e1RM guard in `build_plan_anchors`).
 pub(super) fn round_load_or_drop(kg: f64, weight_lb: bool) -> Option<f64> {
     let r = round_load_grid(kg, weight_lb);
@@ -309,8 +309,8 @@ impl PlanIntensity {
 }
 
 /// Re-render an item's `intensity_label` from its (just-mutated) structured
-/// `intensity`, then rebuild the one-line summary — the single sync point every
-/// adjustment routes through so the label never drifts from the numbers.
+/// `intensity`, then rebuild the one-line summary. Every adjustment routes
+/// through this one sync point, so the label never drifts from the numbers.
 /// A `Prose` target keeps its verbatim label.
 pub(super) fn resync_intensity(it: &mut PlanItem, weight_lb: bool) {
     if let Some(label) = it.intensity.label() {

@@ -7,7 +7,7 @@
                         utc_offset_sec (moving figures: the core's, via
                         shared/examples/track_figures)
   canon LOG             every event re-serialized with sorted keys, one per line,
-                        in log order (SetToday — the shell clock — dropped)
+                        in log order (SetToday, the shell clock, dropped)
   event KIND KEY=VALUE...
                         one KIND event line: the first KIND line of the core's
                         wire fixture (FIXTURE, which the wire gates keep in the

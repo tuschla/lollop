@@ -95,7 +95,7 @@ claim_group! {
     )
     .review(6),
     AUTOREG_PACE_RETEST_001 => claim(
-        "When your pace at the same heart rate improves by a meaningful amount for 2–3 weeks, re-test and raise your threshold pace; the exact size of a meaningful change is not established.",
+        "When your pace at the same heart rate improves by a worthwhile amount for 2–3 weeks, re-test and raise your threshold pace; how big a worthwhile change is has not been established.",
         Moderate,
         &[
             CITE_DANIELS_2022,

@@ -148,7 +148,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
         // cutout. The insets belong on the full-screen container, which lives
         // here at the call site, not inside GuidedSetup's own content.
         Box(Modifier.fillMaxSize().background(BgTop).statusBarsPadding().navigationBarsPadding().displayCutoutPadding()) {
-            // A re-run (setupInitial != null) must NOT touch the onboarding pref -
+            // A re-run (setupInitial != null) must NOT touch the onboarding pref:
             // it's a returning user reviewing their answers, not first-run onboarding.
             val firstRun = session.setupInitial == null
             GuidedSetup(
@@ -193,7 +193,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
             onFinish = {
                 // The run save routes through EventDispatcher.exclusive,
                 // so the consumer already published the saved model in queue order and
-                // the model collector re-seeds session.model — nothing to publish here.
+                // the model collector re-seeds session.model. Nothing to publish here.
                 session.showTracker = false
             },
             onLogRunManually = {

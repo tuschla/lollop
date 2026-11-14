@@ -499,7 +499,7 @@ pub fn deload_cadence(conservative: bool) -> Recommended<DeloadCadence> {
 
 /// Prescription band for a single run workout. Rules running-014 … running-022.
 ///
-/// Every band side is `Option`: `None` means the KB states NO bound there -
+/// Every band side is `Option`: `None` means the KB states NO bound there;
 /// open sides are never filled with invented numbers. `pct_hr_max` is the
 /// %HRmax band as fractions; `pct_hrr_max` is a Karvonen %HRR ceiling where the
 /// KB states one (Recovery only); `pct_slower_than_mp` anchors pace relative to
@@ -806,10 +806,10 @@ pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
 /// many times the average run-day distance.
 pub const DAILY_AVG_RUN_MULTIPLE: f64 = 2.0;
 
-/// Average distance per RUN day — the KB reading of "daily average" for the
+/// Average distance per RUN day, the KB reading of "daily average" for the
 /// long-run guardrail (running-016): weekly volume over the days actually run,
-/// not calendar days. The single source shared by the plan's long-run
-/// decision and the weekly report so the two never disagree.
+/// not calendar days. The plan's long-run decision and the weekly report both
+/// read it, so the two never disagree.
 pub fn daily_avg_run_km(weekly_km: f64, n_run_days: usize) -> f64 {
     weekly_km / n_run_days.max(1) as f64
 }
@@ -1292,7 +1292,7 @@ pub enum HrMethodPreference {
 
 /// HR-method selection (running-005 → RUN-KARVONEN-001, Moderate): prefer
 /// Karvonen (%HRR) below RHR 55 where the methods diverge; at RHR ≥70 they
-/// converge and either is acceptable. The KB gives NO rule for RHR 55–69 -
+/// converge and either is acceptable. The KB gives NO rule for RHR 55–69, so
 /// that range returns [`HrMethodPreference::Unstated`] rather than an invented
 /// default. Formulas (verbatim): %HRmax target = HRmax×%; Karvonen target =
 /// ((HRmax−RHR)×%)+RHR (the latter is `load::karvonen_target_hr`).
@@ -1678,7 +1678,7 @@ pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
 /// Graded verdict for whether a run's variability index marks it interval-like
 /// (`true`) or steady (`false`). Carries the RUN-INTERVAL-VI-001 evidence so a
 /// shell renders it with the same grade chip / why? chrome as any other
-/// recommendation, the differentiation is descriptive but still evidence-cited.
+/// recommendation: the verdict is descriptive but still cites evidence.
 pub fn interval_verdict(variability_index: f64) -> Recommended<bool> {
     Recommended::new(
         variability_index >= INTERVAL_VI_THRESHOLD,

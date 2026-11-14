@@ -787,7 +787,7 @@ private fun DaysStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
         ScrollableScaleRow(liftOptions.toList(), liftSplit, { "$it" }, label = splitQ) { d ->
             update { it.copy(liftSplit = d) }
         }
-        // Honest split: what the engine will actually schedule.
+        // The split the engine will schedule; the run cap can leave some days as rest.
         Text(hybridSplitText(totalDays, liftSplit, a.bothPriority), color = OnBgMuted, style = Type.Caption)
     }
     Spacer(Modifier.size(Space.Sm.dp))

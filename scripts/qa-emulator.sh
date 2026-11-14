@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # On-device UI/UX smoke QA on a headless emulator. Complements the host-JVM
-# Robolectric suite (scripts/build.sh runs that): this exercises the REAL APK on a
-# REAL Android runtime, so it catches what the JVM shadow can't — actual rendering,
-# the packaged arm64/x86_64 libshared.so, and process-level crashes/ANRs.
+# Robolectric suite (scripts/build.sh runs that): this runs the real APK on a
+# real Android runtime, so it catches what the JVM shadows can't: the actual
+# rendering, the packaged arm64/x86_64 libshared.so, and process-level crashes/ANRs.
 #
 #   scripts/qa-emulator.sh [--avd e34] [--port 5580]
 #

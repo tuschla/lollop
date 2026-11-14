@@ -52,7 +52,7 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
     let calis = model.profile().is_some_and(Profile::uses_calisthenics);
     // Exclude two kinds of set from every %1RM/e1RM/Prilepin audit row: a
     // Calisthenics profile's leverage-rung ladder work (rep-max-at-tier, not
-    // %1RM — CAL-E1RM-001), and ANY timed hold (a hold has no e1RM regardless of
+    // %1RM; CAL-E1RM-001), and ANY timed hold (a hold has no e1RM regardless of
     // profile), so a weighted hold never fabricates a Prilepin/%1RM audit row.
     let include = |s: &LoggedSet| {
         s.hold_sec.is_none() && (!calis || crate::calisthenics::tier_by_name(&s.exercise).is_none())

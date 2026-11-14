@@ -7,11 +7,11 @@ import androidx.compose.ui.graphics.luminance
  * The theme-varying decorative token set: ground/surface, on-ground text tones, and
  * the one interactive accent. Selecting a theme (visual-design-system.md §9) swaps
  * this whole map. Semantic [StatusColors] (evidence/danger/warn/HR-zone) are *not*
- * here, they stay fixed across every theme so safety and evidence signaling never
+ * here: they stay fixed across every theme so safety and evidence signaling never
  * shift meaning with a cosmetic choice.
  *
  * Contrast contract (WCAG 2.2 SC 1.4.3, enforced by ThemeContrastTest): every
- * on-ground text tone — [onBgBody], [onBgMuted] AND [onBgFaint] — clears 4.5:1 on
+ * on-ground text tone ([onBgBody], [onBgMuted] AND [onBgFaint]) clears 4.5:1 on
  * [bgTop], [bgElevated] and [bgSunken], and on-accent text ([bgTop]) clears 4.5:1
  * on [accent]. [onBgFaint] is still used as text (overlines, captions), so it is
  * tuned to the AA floor rather than kept as a decorative-only tone. [warnText] is

@@ -18,10 +18,10 @@ use crate::schema::{CheckinInput, ReadinessInput, ReadinessSignal};
 
 /// Minimum number of distinct check-in days before a rolling baseline is
 /// trustworthy enough to emit a z-score / delta for the wellness composite and
-/// resting-HR channels. Below this the core reports an honest "collecting
-/// baseline" state instead of a fabricated number (HARD RULE 1). It is about the
-/// width a wellness SWC band (baseline ± 0.5 SD) needs — roughly a week of
-/// readings. HRV is held to a stricter, longer maturity gate: see
+/// resting-HR channels. Below this the core reports a "collecting baseline"
+/// state instead of a fabricated number (HARD RULE 1). A week of readings is
+/// roughly what a wellness SWC band (baseline ± 0.5 SD) needs. HRV is held to
+/// a stricter, longer maturity gate: see
 /// `HRV_BASELINE_CALENDAR_DAYS` and `HRV_MIN_BASELINE_READING_DAYS`.
 pub(super) const MIN_BASELINE_CHECKINS: usize = 7;
 
@@ -33,7 +33,7 @@ const HRV_BASELINE_CALENDAR_DAYS: i64 = 21;
 
 /// Distinct reading-days the `HrvLnRmssd` baseline needs inside its 30-day
 /// window before it emits: 4 readings/week × 3 weeks, the KB's minimum cadence
-/// over the minimum span (autoreg-047). Below this the channel reports an honest
+/// over the minimum span (autoreg-047). Below this the channel reports a
 /// "collecting (have/need)" status (HARD RULE 1) rather than a not-yet-trustworthy
 /// number. The 7-day rolling *window* ([`HRV_ROLLING_DAYS`]) is unchanged; this
 /// is the baseline-maturity gate, not the averaging window.
@@ -43,7 +43,7 @@ const HRV_MIN_BASELINE_READING_DAYS: usize = 12;
 /// from the newest reading (deterministic; no clock). The KB puts the subjective
 /// wellness baseline at a rolling 7–14-day window; 14 is its upper bound. The
 /// boundary is EXCLUSIVE (`newest − day < N`), i.e. 14 inclusive days. HRV and
-/// resting-HR need a longer individual baseline — see
+/// resting-HR need a longer individual baseline; see
 /// [`LONG_BASELINE_WINDOW_DAYS`].
 const BASELINE_WINDOW_DAYS: i64 = 14;
 
@@ -81,7 +81,7 @@ pub(crate) const HRV_ROLLING_DAYS: i64 = 7;
 /// Recency window (LOCAL days) for the derived RHR-delta and wellness-z channels:
 /// a check-in signal older than this many days no longer drives a verdict (the
 /// user has not checked in recently). HRV is not routed through this per-reading
-/// gate — it reads a trailing rolling window and carries its own recency bound
+/// gate: it reads a trailing rolling window and carries its own recency bound
 /// (`HRV_RECENCY_DAYS`, against both today and the newest check-in). `1` = today
 /// or yesterday counts as current.
 pub(super) const CHECKIN_RECENCY_DAYS: i64 = 1;
@@ -95,7 +95,7 @@ const WELLNESS_ABS_FLOOR: f64 = 2.0;
 
 /// Normalized value forced onto a catastrophic-floor reading: the single-day
 /// wellness downgrade trigger (`WellnessZ ≤ −1.5`, autoreg-030), so a floored
-/// morning drives the SAME downgrade a genuine z ≤ −1.5 would, no new rule.
+/// morning drives the SAME downgrade a computed z ≤ −1.5 would, no new rule.
 const WELLNESS_FLOOR_Z: f64 = WELLNESS_SINGLE_DAY_Z;
 
 /// How the core normalizes a channel's raw daily value against its baseline.
@@ -158,8 +158,8 @@ pub enum BaselineKind {
     Suspended,
 }
 
-/// One channel that has some check-in data but not yet a trustworthy baseline -
-/// surfaced honestly ("collecting your baseline") rather than as a fabricated z.
+/// One channel that has some check-in data but not yet a trustworthy baseline,
+/// shown as "collecting your baseline" instead of a fabricated z.
 pub struct BaselineStatus {
     pub signal: ReadinessSignal,
     pub have: usize,
@@ -168,8 +168,8 @@ pub struct BaselineStatus {
 }
 
 /// Result of [`derive_readiness`]: synthetic `ReadinessInput`s to feed the
-/// existing rules, the honest still-collecting status of any channel that has
-/// readings but hasn't reached its baseline minimum, and `stale` — gated
+/// existing rules, the still-collecting status of any channel that has
+/// readings but hasn't reached its baseline minimum, and `stale`: gated
 /// channels whose newest reading is older than `CHECKIN_RECENCY_DAYS`. Stale
 /// inputs are NOT fed to the rules; the shell passes them to
 /// [`signal_states_in`](super::signal_states_in) to render an "out of date" row.
@@ -273,7 +273,7 @@ fn per_day_series(
 
 /// When a channel emits: `need` distinct reading-days (wellness / RHR use
 /// [`MIN_BASELINE_CHECKINS`]; HRV is held to the stricter
-/// [`HRV_MIN_BASELINE_READING_DAYS`]); `min_span_days` additionally requires
+/// [`HRV_MIN_BASELINE_READING_DAYS`]); `min_span_days` also requires
 /// the readings to span at least that many LOCAL days (newest − oldest), since
 /// enough reading-days packed into too short a window is still maturing;
 /// `recency = Some(today_local_day)` routes a newest reading older than
@@ -362,7 +362,7 @@ fn derive_channel(
             // HRV_MIN_WEEKLY_READINGS readings inside the trailing window; a
             // sparser week (e.g. one reading after a long gap) is untrustworthy,
             // so the channel emits nothing. The row must not vanish silently: an
-            // honest "collecting (have/need)" status shows it is still gathering.
+            // explicit "collecting (have/need)" status shows it is still gathering.
             if count < HRV_MIN_WEEKLY_READINGS {
                 out.collecting.push(BaselineStatus {
                     signal: spec.signal,
@@ -404,7 +404,7 @@ impl Scorer<'_> {
 
     /// Pre-streak baseline `(mean, sd)` over the days STRICTLY BEFORE `idx`,
     /// frozen at streak entry so every in-streak day is measured against the
-    /// baseline as it stood before the deviation began — a sustained shift can
+    /// baseline as it stood before the deviation began; a sustained shift can
     /// never absorb itself into its own baseline. A chronic RHR elevation
     /// therefore keeps arming the autoreg-040 downgrade and the autoreg-041
     /// stop band until the 30-day window contains only elevated days (~30

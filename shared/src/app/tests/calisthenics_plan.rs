@@ -67,7 +67,7 @@ fn push_rung_after_two_qualifying_days(reports: &[ReadinessInput]) -> String {
 fn calisthenics_plan_advances_a_rung_then_pain_suppresses_it() {
     let (app, mut model) = planned_calisthenics();
     // Two distinct qualifying days at Full push-up (rung 4): 3×8 @ RPE 8 (RIR
-    // 2). Both are PAST days so nothing is logged TODAY — today's tile keeps
+    // 2). Both are PAST days, so nothing is logged TODAY and today's tile keeps
     // showing the prescribed push rung (a logged-today rung drops off the tile).
     for day in [MON - 2, MON - 1] {
         for _ in 0..3 {
@@ -92,7 +92,7 @@ fn calisthenics_plan_advances_a_rung_then_pain_suppresses_it() {
     // A tolerable (non-blocking) tendon-pain report DATED YESTERDAY (MON-1)
     // suppresses difficulty progression. It is in today's prescribing
     // history (cutoff MON-1), so it governs today's rung. (A report dated TODAY
-    // would NOT rewrite today's already-shown rung — the day-stability rule, covered by
+    // would NOT rewrite today's already-shown rung: the day-stability rule, covered by
     // the completion suite.)
     app.update(
         Event::SubmitReadiness(ReadinessInput {
@@ -237,7 +237,7 @@ fn calisthenics_safety_cues_surface_as_graded_rows() {
     let breath = row("Keep breathing through every hold");
     assert_eq!(breath.evidence.grade, Some(EvidenceGrade::Moderate));
     assert!(breath.evidence.safety_critical);
-    // Plain language — no internal gate codes or engine jargon.
+    // Plain language: no internal gate codes or engine jargon.
     for g in &vm.lift_audit {
         let s = &g.summary;
         assert!(
@@ -492,8 +492,8 @@ fn calisthenics_ladder_work_is_absent_from_the_prilepin_audit() {
 fn calisthenics_weighted_handoff_is_leave_rir_and_safety_critical() {
     let (app, mut model) = planned_calisthenics();
     // A weighted Full pull-up (rung 4, a weighted rung; actual added load):
-    // reclassified to weighted work — leave RIR, safety_critical, "+ N kg"
-    // in the summary (CAL-EFAIL-SAFE-001).
+    // reclassified to weighted work, it leaves RIR, is safety_critical and shows
+    // "+ N kg" in the summary (CAL-EFAIL-SAFE-001).
     app.update(
         log_set("Full pull-up", 10.0, 5, 8.0, (MON - 1) * DAY_SEC),
         &mut model,

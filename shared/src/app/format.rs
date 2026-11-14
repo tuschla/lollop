@@ -126,8 +126,8 @@ pub(super) fn weight_suffix(lb: bool) -> &'static str {
     if lb { "lb" } else { "kg" }
 }
 
-/// A canonical kg figure (an absolute load OR a load increment — the conversion
-/// is linear so both are correct) expressed in the profile's display unit:
+/// A canonical kg figure (an absolute load OR a load increment; the conversion
+/// is linear, so both are correct) expressed in the profile's display unit:
 /// pounds when `lb`, otherwise the kg value unchanged. Precision is left to the
 /// call site.
 pub(super) fn weight_num(kg: f64, lb: bool) -> f64 {
@@ -136,7 +136,7 @@ pub(super) fn weight_num(kg: f64, lb: bool) -> f64 {
 
 /// Format a weight figure in the profile's unit, rounded once to that unit's
 /// display precision (lb: whole or .5; kg: whole or one decimal) plus a spaced
-/// unit suffix — e.g. "92.5 kg" / "264.5 lb". Sites that fix a different
+/// unit suffix, e.g. "92.5 kg" / "264.5 lb". Sites that fix a different
 /// precision (`{:.0}`, `+{:.1}`, or a glued suffix) use `weight_num` +
 /// `weight_suffix` directly to hold that precision.
 pub(super) fn fmt_weight(kg: f64, lb: bool) -> String {
@@ -245,7 +245,7 @@ pub(super) fn fmt_clock(sec: f64) -> String {
 
 /// Plain mid-sentence name for a race distance in km: the race's name at a
 /// standard race distance ([`GoalDistance::named_at_km`]), "1K" at one
-/// kilometre (the same tolerance), otherwise "N km" with one decimal only when
+/// kilometer (the same tolerance), otherwise "N km" with one decimal only when
 /// the distance is not whole.
 pub(super) fn race_distance_label(km: f64) -> String {
     if let Some(name) = GoalDistance::named_at_km(km).and_then(GoalDistance::race_name) {

@@ -131,7 +131,7 @@ fun ComposeTestRule.launchAppExpectingSetup() {
  * action reaches the core on its own JNI thread and the new model arrives on a
  * later main-looper turn, which Compose's idling cannot see; so wait (polling
  * the semantics tree, which also idles the looper) for the expected count, then
- * assert — on timeout the assertion reports the real count.
+ * assert. On timeout the assertion reports the real count.
  */
 fun ComposeTestRule.assertCountEventually(matcher: SemanticsMatcher, count: Int, timeoutMs: Long = 10_000) {
     try {

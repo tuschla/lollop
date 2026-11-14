@@ -274,8 +274,8 @@ fun <T> OptionList(
 /**
  * Label + enum picker as a tap-row that expands into a full-width [OptionList].
  * The header row (label left, current value + chevron right) is a ≥48dp
- * whole-row tap target; opening it reveals every option at once with the same
- * generous targets, and picking one collapses the list. [display] is the
+ * whole-row tap target; opening it reveals every option at once, each a ≥48dp
+ * row, and picking one collapses the list. [display] is the
  * on-screen text; callers serialize only the value's `.name`.
  */
 @Composable
@@ -610,7 +610,7 @@ fun <T> ScrollableScaleRow(
                     .then(
                         // Record the anchor cell's content-space centre. Scroll is 0
                         // on the first layout pass, so positionInParent is the intrinsic
-                        // position we scroll toward.
+                        // position the row scrolls toward.
                         if (opt == anchor) {
                             Modifier.onGloballyPositioned {
                                 anchorCenter = (it.positionInParent().x + it.size.width / 2f).toInt()

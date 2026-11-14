@@ -18,7 +18,7 @@ use crate::schema::Rx;
 const TABLE_ROW_CUE: &str = "use a sturdy table edge";
 
 /// Load is the leverage tier (never a settable bar weight), so `load_kg` stays
-/// `None`; a MEASURED-fraction rung surfaces its honest %BW line (and an
+/// `None`; a MEASURED-fraction rung surfaces its %BW line (and an
 /// effective-kg estimate when bodyweight is known) in `anchored_on`, and inferred
 /// rungs surface no number (CAL-LOAD-INFERRED-001).
 pub(super) fn flatten_calisthenics_prescription(
@@ -90,7 +90,7 @@ pub(super) fn flatten_calisthenics_prescription(
     let (lead, clauses) = calis_summary(&sh, &intensity, weight_lb);
 
     // Numeric prefill targets: hold band in seconds for a timed rung, and the
-    // RPE mapped from the conservative (further-from-failure) end — the higher
+    // RPE mapped from the conservative (further-from-failure) end: the higher
     // RIR bound for a dynamic band, the tier's leave-RIR for a clean hold. A
     // ballistic item has no RPE target (power work states no numeric RIR).
     let (hold_low_sec, hold_high_sec) = if timed { (lo, hi) } else { (0u16, 0u16) };
@@ -209,7 +209,7 @@ fn calis_anchored_on(
                 .unwrap_or("");
             let pct = format!("~{}%", fmt_frac_pct_range(flo, fhi));
             // The push/pull/dip ladders load the hands; the squat ladder loads the
-            // working (stance/front) leg — never mislabel a leg share "at the hands".
+            // working (stance/front) leg. Never label a leg share "at the hands".
             let site = if c.ladder == crate::schema::LadderId::Squat {
                 "on the working leg"
             } else {
@@ -307,7 +307,7 @@ fn calis_basis(
         )
     };
     // CAL-INTENSITY-FLOOR-001: an easy high-rep rung must approach failure,
-    // while harder leave-RIR rungs stop short — say why this one asks for less.
+    // while harder leave-RIR rungs stop short. Say why this one asks for less.
     if !loaded && !timed && !c.ballistic && c.rir.0 == 0 && cal::easy_rung(c.ladder, c.tier) {
         basis.push_str(
             " Easy versions like this only build muscle when taken close to your limit, so this \
@@ -469,10 +469,10 @@ fn calis_rung_view(ladder: crate::schema::LadderId, rung: u8, available: bool) -
 }
 
 /// Every ladder with its rungs for a `Calisthenics` profile (empty otherwise):
-/// the setup rung picker and the Log chooser. The current rung is the replayed
-/// anchor through today, moved to the nearest rung the equipment allows
-/// (CAL-EQUIP-001) — the rung the plan actually prescribes — with the placed
-/// rung and a plain-language note when it had to move.
+/// the setup rung picker and the Log chooser. The current rung is the one the
+/// plan prescribes: the replayed anchor through today, moved to the nearest
+/// rung the equipment allows (CAL-EQUIP-001). When it had to move, the placed
+/// rung and a plain-language note come with it.
 pub(in crate::app) fn build_calisthenics_ladders(cx: &ViewCtx) -> Vec<CalisLadderView> {
     use crate::calisthenics as cal;
     let Some(profile) = cx.model.profile().filter(|p| p.uses_calisthenics()) else {

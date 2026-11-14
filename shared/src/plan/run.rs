@@ -54,8 +54,7 @@ pub(super) fn effective_weekly_km(profile: &Profile, anchors: &Anchors) -> f64 {
 }
 
 /// Shortest run prescribed as a distance, km. Below it (a sub-1 km walk-jog
-/// baseline or share) no honest distance exists, so the run is prescribed in
-/// minutes instead.
+/// baseline or share) the run is prescribed in minutes instead.
 const MIN_DISTANCE_KM: f64 = 1.0;
 
 /// Floor a prescribed distance to the plan's resolution: 0.5 km at or above
@@ -83,9 +82,9 @@ fn spike_ceiling_km(baseline: f64) -> f64 {
 /// Cap a prescribed run DISTANCE (km) at the RUN-SPIKE-001 threshold over the
 /// demonstrated (or, before any log, stated) 30-day-longest baseline. When the
 /// ceiling drops below [`MIN_DISTANCE_KM`] (a sub-1 km walk-jog baseline) no
-/// honest distance exists, so this returns `None` and the caller falls back to
-/// a DURATION. With no baseline (`None`) the distance is unchanged: the
-/// log-time flag handles a first run honestly.
+/// distance at or above that minimum fits under it, so this returns `None` and
+/// the caller falls back to a DURATION. With no baseline (`None`) the distance
+/// is unchanged: the log-time flag judges a first run.
 pub(super) fn cap_km_to_spike(km: f64, longest_recent_km: Option<f64>) -> Option<f64> {
     match longest_recent_km {
         Some(baseline) if baseline > 0.0 => {
@@ -765,7 +764,7 @@ impl DayCtx {
     }
 
     /// The RUN-SPIKE-001 ceiling over a positive sub-1 km baseline leaves no
-    /// honest distance for any run.
+    /// run a distance of at least [`MIN_DISTANCE_KM`].
     fn no_distance(&self) -> bool {
         cap_km_to_spike(MIN_DISTANCE_KM, self.baseline).is_none()
     }
@@ -807,8 +806,9 @@ enum QualityDay {
     /// No size fits the week's km: the kind's rule cites the easy run, and
     /// the session's warm-up and cool-down stay counted in the week.
     Unsized,
-    /// The RUN-SPIKE-001 ceiling leaves no honest distance: that rule cites
-    /// the easy run, and the week counts none of it.
+    /// The RUN-SPIKE-001 ceiling leaves no distance of at least
+    /// [`MIN_DISTANCE_KM`]: that rule cites the easy run, and the week counts
+    /// none of it.
     NoDistance,
 }
 
@@ -1460,7 +1460,8 @@ fn soft_volume(rx: &RunWorkoutRx, ctx: &DayCtx, km: f64) -> RunVolume {
     }
 }
 
-/// Which KB rule set the long-run distance decides the honest face citation.
+/// Which KB rule set the long-run distance; it decides the evidence face's
+/// citation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LongRunBind {
     /// The weekly share (30 % under 64 km/wk, else 25 %) governed. →

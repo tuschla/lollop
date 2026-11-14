@@ -56,7 +56,7 @@ pub(in crate::app) fn review_age_days(
 /// Whether a week-scoped review adjustment has aged out: a `Deload { weeks }`
 /// expires after `7 × weeks` days; a single-day call (the autoreg-028
 /// single-day HRV `DowngradeSession`) after its own day. Defer and every other
-/// adjustment never expire here — protective rows (Defer/Stop/RestDay and the
+/// adjustment never expire here: protective rows (Defer/Stop/RestDay and the
 /// safety-flag feedback) are exempt by design. An undated or clockless review
 /// (`age == None`) never expires.
 pub(in crate::app) fn review_adjustment_expired(adj: &Adjustment, age: Option<i64>) -> bool {

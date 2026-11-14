@@ -53,7 +53,7 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
 
 /// The placements in force for a prescription built from history through local
 /// day `through`: every placement dated up to the NEXT day (the day being
-/// prescribed) — an Easier / Harder choice applies to that same day's item —
+/// prescribed; an Easier / Harder choice applies to that same day's item),
 /// plus undated ones.
 pub(in crate::app) fn calis_placements_through(model: &Model, through: i64) -> Vec<CalisPlacement> {
     let offset = model.today_utc_offset_sec;

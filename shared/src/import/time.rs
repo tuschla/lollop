@@ -304,7 +304,7 @@ fn read_iso_stamp(s: &str) -> Option<IsoStamp> {
 }
 
 /// A read position in a stamp's bytes. Only ASCII is ever matched, so a
-/// multi-byte character simply fails the match it sits in.
+/// multi-byte character fails the match it sits in.
 struct Cursor<'a> {
     s: &'a [u8],
     i: usize,

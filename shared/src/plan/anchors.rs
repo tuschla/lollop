@@ -22,7 +22,7 @@ pub struct Anchors {
     /// supersedes it.
     pub(crate) stated_longest_in_window: bool,
     /// Per-ladder calisthenics tier state replayed from logged sets (empty for
-    /// a `Weights` profile). A dynamic ladder with no logged rung is simply
+    /// a `Weights` profile). A dynamic ladder with no logged rung is
     /// absent (the plan starts it at rung 0); a skill track is absent until a
     /// rung is logged (opt-in, never force-fed).
     pub(crate) calisthenics: Vec<CalisAnchor>,

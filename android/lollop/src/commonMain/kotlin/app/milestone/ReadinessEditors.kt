@@ -295,8 +295,8 @@ fun MorningCheckinSheet(
     var dirty by rememberSaveable { mutableStateOf(false) }
 
     // Optional watch numbers behind toggles: a check-in without a watch sends
-    // neither, and the core simply won't derive that channel, honest, never
-    // fabricated. A toggle starts on when the last check-in carried that number
+    // neither, and the core derives nothing for that channel (no value is
+    // invented). A toggle starts on when the last check-in carried that number
     // (the user has the watch), but only today's own reading fills the field;
     // an empty field sends nothing.
     var hasRhr by rememberSaveable { mutableStateOf(echo?.resting_hr_bpm != null) }

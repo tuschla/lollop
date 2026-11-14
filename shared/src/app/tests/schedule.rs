@@ -435,7 +435,7 @@ fn no_missed_session_nudge_while_a_hold_is_active() {
             .any(|n| n.summary.starts_with("Missed Monday's"))
     };
     assert!(has_nudge(&app, &model), "Monday was missed");
-    // Flu reported: training is on hold, so no make-up suggestion.
+    // Flu reported: training is paused, so no make-up suggestion.
     app.update(
         Event::SubmitReadiness(ReadinessInput {
             signal: ReadinessSignal::Illness,

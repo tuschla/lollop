@@ -739,8 +739,8 @@ fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
     // The morning check-in wire shape (raw human items + optional watch
     // numbers) must survive the Bridge exactly as the shell emits it; a field
     // drift would silently drop the check-in on replay. One check-in is far
-    // below the baseline minimum, so the view must carry an honest
-    // "collecting baseline" status, never a fabricated z.
+    // below the baseline minimum, so the view must carry a "collecting
+    // baseline" status, never a fabricated z.
     let event = json!({
         "SubmitCheckin": {
             "observed_at": 1_700_000_000,
@@ -764,7 +764,7 @@ fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
         .expect("latest_checkin object");
     assert_eq!(echo["sleep_quality"], 2);
     assert_eq!(echo["soreness"], 4);
-    // Honest collecting-baseline status is present (no z was fabricated).
+    // The collecting-baseline status is present (no z was fabricated).
     let status = view["baseline_status"]
         .as_array()
         .expect("baseline_status array");

@@ -123,7 +123,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
     // A GPS run whose fixes all fail the QC gates has no measurable route:
     // distance/duration collapse to 0, which would otherwise render as a
     // "0.0km @ -" entry *and* trip the spike gate against a phantom baseline.
-    // Report the signal problem honestly instead of fabricating a null run.
+    // Report the signal problem instead of a zero-distance run.
     if gps && track.len() < 2 {
         return RunCard {
             view: unmeasurable_gps_view(r, hr_pct_max),
@@ -172,7 +172,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunCard {
 
     // Interval-vs-steady differentiation (RUN-INTERVAL-VI-001): the variability
     // index (normalized speed ÷ average speed) rates a reps-plus-recovery run
-    // above a steady run of the *same average pace*. GPS-only, a hand-entered
+    // above a steady run of the *same average pace*. GPS-only: a hand-entered
     // run has no per-point speed series to compute it from.
     let variability_index = if gps {
         gps::track_variability_index(track, seg_starts)
@@ -254,8 +254,8 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
         interval: None,
         workout_type: r.meta.workout_type,
         summary: "GPS signal too poor to measure this run".to_string(),
-        // No measurable distance → the spike gate never ran; carry an
-        // empty evidence tag rather than citing a claim that was not used.
+        // No measurable distance → the spike gate never ran, so no claim was
+        // used and the evidence tag stays empty.
         evidence: EvidenceTagView::default(),
         has_gpx: false,
         observed_at: r.observed_at,
@@ -272,8 +272,8 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
 }
 
 fn displayed_zone(hr_pct_max: f64, session_rpe: Option<u8>) -> Option<ThreeZone> {
-    // Zone is a heart-rate classification (File 04). With no HR sample we do not
-    // fabricate one, report it as unknown rather than defaulting to Z1.
+    // Zone is a heart-rate classification (File 04). With no HR sample the
+    // zone is unknown (`None`), never a default Z1.
     let has_hr = hr_pct_max > 0.0;
     let zone = running::classify_three_zone(hr_pct_max);
     // running-018 (RUN-TEMPO-001): tempo work is rated RPE 6–7. A session the
@@ -384,8 +384,7 @@ pub(in crate::app) fn split_verdict_view(split_pct: f64) -> SplitVerdictView {
 /// (RUN-INTERVAL-VI-001). The `interval`/`steady` cutoff lives in exactly one
 /// place, `running::interval_verdict` / `running::INTERVAL_VI_THRESHOLD`, so a
 /// shell renders `kind`/`label`/`message` verbatim and never re-derives it. The
-/// copy is honest about the grade: this is the flat-ground GOVSS/NGP
-/// simplification, deliberately Weak-graded.
+/// VI is the flat-ground GOVSS/NGP simplification, deliberately Weak-graded.
 pub(in crate::app) fn interval_verdict_view(vi: f64) -> IntervalVerdictView {
     let r = running::interval_verdict(vi);
     // The interval/steady cutoff is an engine heuristic with no cited threshold.

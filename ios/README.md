@@ -127,7 +127,7 @@ The other seams (`expect` in commonMain, actual per platform):
 | `currentAppLocale`, `screenHeightDp`, `currentPlatformContext` | `appLocale(LocalConfiguration.locales)`, `Configuration.screenHeightDp`, `LocalContext` | `appLocale()`, the Compose view's height, the process context |
 | `localInstantSeconds` | `java.util.Calendar` (lenient across a DST gap) | `NSCalendar` (same rule) |
 | `shareCoachSummary` | `ACTION_SEND` chooser | `UIActivityViewController` (popover on iPad) |
-| `RouteLayer`, `FullScreenMapDialog` (RunMap.kt); `LiveMapSurface` via `newLiveMapSurface` (TrackerMap.kt) | osmdroid `MapView` with the common Compose `RoutePainter` (RoutePainter.kt) as its overlay; the full-screen map's dialog window with transparent bars | MKMapView in a `UIKitView`: OSM tiles through `OsmTileOverlay`/`OsmTileRenderer` (User-Agent = bundle identifier, 2 connections, a 128 MB disk cache that honours the server's cache headers, dark themes desaturate + invert each tile with Android's colour matrix, "© OpenStreetMap" caption); the route drawn in Compose over a passive map (the same `RoutePainter` as Android, the app owns the camera so tiles and route never part); the tracker's route as MKPolyline casing + accent lines, blip and start ring as annotations |
+| `RouteLayer`, `FullScreenMapDialog` (RunMap.kt); `LiveMapSurface` via `newLiveMapSurface` (TrackerMap.kt) | osmdroid `MapView` with the common Compose `RoutePainter` (RoutePainter.kt) as its overlay; the full-screen map's dialog window with transparent bars | MKMapView in a `UIKitView`: OSM tiles through `OsmTileOverlay`/`OsmTileRenderer` (User-Agent = bundle identifier, 2 connections, a 128 MB disk cache that honors the server's cache headers, dark themes desaturate + invert each tile with Android's color matrix, "© OpenStreetMap" caption); the route drawn in Compose over a passive map (the same `RoutePainter` as Android, the app owns the camera so tiles and route never part); the tracker's route as MKPolyline casing + accent lines, blip and start ring as annotations |
 
 `commonTest` pins the formatting and date output to Android's (`FormattingTest`,
 `DateFormatsTest`) and drives the engine on a scripted core and a real log file
@@ -256,7 +256,7 @@ changing those drawables.
 public repo) on every push to `main` that touches the app, and by hand
 (`gh workflow run ios-app.yml`). Three jobs:
 
-- **.ipa**: `xcodegen generate`, `xcodebuild -configuration Release
+- `.ipa`: `xcodegen generate`, `xcodebuild -configuration Release
   -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, checks that `PlugIns/LollopWidgets.appex`
   is embedded with a widget extension Info.plist, signs the framework, the
   extension and the app ad hoc (`codesign -s -`) with the App Group entitlement
@@ -265,11 +265,11 @@ public repo) on every push to `main` that touches the app, and by hand
   30 days). The ad-hoc signature only carries the entitlement: SideStore reads an
   app's App Groups from the signed binaries and re-signs everything with the
   Apple Account (see below).
-- **Widget extension tests**: `LollopWidgetsTests` in an iPhone simulator,
+- Widget extension tests: `LollopWidgetsTests` in an iPhone simulator,
   without the Kotlin framework: the day rule and the midnight roll-over, the
   line fitting, the App Group lookup, the activity content, and renders of every
   widget family and state and of the activities (artifact `widget-renders`).
-- **Launch smoke test**: a Debug build for an iPhone simulator, installed and
+- Launch smoke test: a Debug build for an iPhone simulator, installed and
   launched; the job fails if the app writes a crash report or isn't running
   30 s after launch, if the extension isn't embedded, or if the app didn't write
   the widget payload to its App Group container. The extension's code then
@@ -349,20 +349,20 @@ hands it; the text and the decisions come from the same common Kotlin as
 Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 `countdownText`, the notification strings).
 
-- **Data**: the common `WidgetSurfaces` feature hands every change of the
+- Data: the common `WidgetSurfaces` feature hands every change of the
   widget inputs (published model, distance unit, theme, dark mode, recording,
   time zone or clock change) to `IosWidgetSurface` (iosMain), which builds the
   payload of commonMain `widget/IosSurfacePayload.kt`: the widget faces for the
   snapshot's day and for any other day ("Open lollop to update"), each with its
   body lines already cut for every slot count, the short form of a long lead
-  line with its width in em, the week strip's glyphs and colour roles, the
+  line with its width in em, the week strip's glyphs and color roles, the
   buttons' icons; the control's faces with their SF Symbols; the day the faces
-  hold (start and end in its time zone); and the colours for the light and dark
+  hold (start and end in its time zone); and the colors for the light and dark
   appearance. `Surfaces.swift` writes it to `widget-today.json` in the App Group
   container and reloads the widgets and controls (`WidgetCenter`,
   `ControlCenter`). Without a group container (the extension dropped at install)
   the widgets show the bundled `fallback.json` ("Open lollop to update").
-- **Generated contract**: the Swift payload types and payload version
+- Generated contract: the Swift payload types and payload version
   (`Shared/SurfacePayload.swift`), the type and spacing tokens
   (`LollopWidgets/WidgetTheme.swift`), the English `Shared/en.lproj/Localizable.strings`
   the widget, control and App Intents name by resource key, `fallback.json`, the
@@ -370,7 +370,7 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
   (make-assets.py's icon list) are written from the Kotlin by android/lollop's
   `GeneratedSourcesTest`, which fails when a committed file differs. Regenerate:
   `LOLLOP_WRITE_GENERATED=1 ./gradlew :lollop:testAndroidHostTest --tests app.milestone.GeneratedSourcesTest --rerun`.
-- **Day rule**: as Android's. The timeline shows the snapshot's face while the
+- Day rule: as Android's. The timeline shows the snapshot's face while the
   reader's clock is within its day and in its time zone, and the stale face
   after (an entry at the day's end); a snapshot marked stale holds no day. The
   app writes a new one when it publishes a model for the new day.
@@ -409,7 +409,7 @@ Apple offers no other API (extensions).
 | Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | Done: URL scheme `lollop://open/<dest>` (widget links, activities) and `OpenLollopIntent` (control, small widget's button) |
 | Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LollopIosOpen` |
 | Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`AppRuntime.requestReboot`; the boot turn resets the core through the `reset` op), as on Android; a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
-| Battery optimisation exemption prompt | None needed |
+| Battery optimization exemption prompt | None needed |
 | Paper theme with the system (Material You) accent | iOS has no wallpaper palette: Paper uses its own accent (`platformAccent` is null) and Profile hides the "Use system accent" row (`platformHasDynamicAccent` = false, `ProfilePlatform.kt`), as on Android < 12. Profile's Live Updates notice is hidden too. |
 | Per-app language (`AppLocale.kt`) | Per-app language in iOS Settings (`CFBundleLocalizations`) |
 

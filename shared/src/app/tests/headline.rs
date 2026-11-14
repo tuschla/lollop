@@ -162,7 +162,7 @@ fn headline_ignores_a_neutral_review_verdict_and_keeps_the_prescription() {
     // A VBT "Hold" verdict (bar speed inside the ±0.06 m/s band) is a
     // graded "no change" call carrying no real Adjustment. `model.review` is
     // a persisted singleton, so it must NOT displace the prescription
-    // headline — the next session leads, and the neutral row still renders.
+    // headline: the next session leads, and the neutral row still renders.
     let (app, mut model) = planned_strength_model(true);
     app.update(
         Event::SubmitReview(SessionReview {

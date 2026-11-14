@@ -62,7 +62,7 @@ fn load_figures(model: &Model, facts: &RunFacts) -> Option<LoadFigures> {
         counted += 1;
     }
     // Logged lift sets never contribute load: no KB HR-free load formula (above).
-    // Count each distinct lifting DAY as one skipped session, not one per set — a
+    // Count each distinct lifting DAY as one skipped session, not one per set: a
     // "session" is a day of training, so a 20-set day is one skipped session.
     let lift_days: std::collections::BTreeSet<i64> = model
         .sets

@@ -63,7 +63,7 @@ fn training_load_day_loop_is_bounded_against_a_mis_unit_timestamp() {
     app.update(log_run_at(10.0, 60.0, 75.0, 1_700_000_000), &mut model)
         .expect_only_render(); // ~2023, seconds
     app.update(log_run_at(10.0, 60.0, 75.0, 1_700_000_000_000), &mut model)
-        .expect_only_render(); // milliseconds - off by 1000×
+        .expect_only_render(); // milliseconds: off by 1000×
 
     // view() returns (no unbounded loop) and the window is capped, never the
     // ~19.7M-day raw span between the two stamps.
@@ -159,7 +159,7 @@ fn weekly_report_runs_the_volume_system_over_the_latest_week() {
 #[test]
 fn weekly_report_does_not_flag_the_planned_rebound_off_a_recovery_week() {
     // With a plan, the week after the PLANNED recovery week must ratio against the
-    // last LOAD week, not the deloaded one — the athlete's own logged rebound off a
+    // last LOAD week, not the deloaded one: the athlete's own logged rebound off a
     // recovery week is expected, not an over-cap violation. Without a plan the same
     // +43% rebound is still flagged (behavior unchanged).
     let app = Engine;
@@ -298,7 +298,7 @@ fn backdated_run_weekly_report_matches_in_order_logging() {
     // Reference: two runs logged oldest-first.
     let mut in_order = Model::default();
     // WEEK == 604 800 s; day 70 and day 77 are both Thursdays, so they fall
-    // in consecutive Mon–Sun local weeks either way — this asserts weekly
+    // in consecutive Mon–Sun local weeks either way. This asserts weekly
     // aggregation is independent of LOG order, not of the week convention.
     let prev_week_at = 10 * WEEK + 1000;
     let cur_week_at = 11 * WEEK + 1000;
@@ -338,7 +338,7 @@ fn weekly_report_groups_a_full_mon_sun_week() {
     // The legacy Thu-00:00-UTC bucket splits this week (Thursday falls
     // mid-week), isolating the Sunday run in its own "week". With local-week
     // buckets both runs share a week, so the 10 km Monday run is the week's
-    // long run - not the 6 km Sunday run alone.
+    // long run, not the 6 km Sunday run alone.
     let app = Engine;
     let mut model = Model::default();
     // Noon: a run counts in the week it STARTED, so 00:00 would be Sunday's.

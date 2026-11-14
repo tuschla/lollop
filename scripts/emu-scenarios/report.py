@@ -22,7 +22,7 @@ fails = [r for r in rows if r[0] == "FAIL"]
 if fails:
     w("## Failures\n")
     for r in fails:
-        w(f"- **{r[1]} · {r[2]}** — {r[3]}")
+        w(f"- **{r[1]} · {r[2]}**: {r[3]}")
     w("")
 w("## Checks by scenario\n")
 order = []

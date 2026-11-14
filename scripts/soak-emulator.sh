@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Long-term on-device soak test: hunts crashes, ANRs, leaks and tracking bugs that
-# only show over a long session on a REAL Android runtime.
+# only show over a long session on a real Android runtime.
 #
 #   (a) seeded monkey passes restricted to the app (several seeds, chunked so
 #       the app is relaunched if a stray event ever leaves it), each followed by a

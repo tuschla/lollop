@@ -322,8 +322,8 @@ fn decoupling_gated_and_banded() {
 
 #[test]
 fn recovery_concern_respects_duration_condition() {
-    // Two signals over half a week is a "single noisy night" territory -
-    // the gate must NOT fire (feedback-036 duration condition).
+    // Two signals over half a week is "single noisy night" territory: the
+    // gate must NOT fire (feedback-036 duration condition).
     let short = SafetySignals {
         screen: SafetyScreen {
             overtraining_signal_count: 2,

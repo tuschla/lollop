@@ -299,7 +299,7 @@ fn implicit_layoff(
 ///
 /// `eff_day` maps a session's day onto the day its age is counted from (a
 /// declared layoff dates pre-layoff sessions at the return day, so the break
-/// itself never ages them — the re-entry ramp replaces that decay,
+/// itself never ages them; the re-entry ramp replaces that decay,
 /// REENTRY-RAMP-001). `work_frac` is the working fraction in force on a day
 /// (the ramp), against which an unrated set is judged as speed work or not.
 fn score_sessions(

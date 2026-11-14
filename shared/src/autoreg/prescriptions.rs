@@ -172,7 +172,7 @@ pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<
 pub(super) const HRV_MIN_WEEKLY_READINGS: usize = 4;
 
 /// Which signal source drives autoregulation given data availability
-/// (File 06 autoreg-047/048; graceful fallback).
+/// (File 06 autoreg-047/048; fallback order when data is missing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoregSource {
     /// HRV available (today, or ≥4 recent readings) → 7-day rolling HRV gate.
@@ -185,7 +185,7 @@ pub enum AutoregSource {
 }
 
 /// Select the autoregulation signal source from availability (File 06
-/// autoreg-047/048; AUTOREG-FALLBACK-001, ExpertOpinion, safety-critical -
+/// autoreg-047/048; AUTOREG-FALLBACK-001, ExpertOpinion, safety-critical:
 /// missing data must degrade conservatively, never progress blind). HRV is
 /// usable when a reading exists today or ≥4 recent readings back a 7-day
 /// rolling baseline.
@@ -313,7 +313,7 @@ pub fn unexplained_decline_rest_defer(
 
 /// File 06 autoreg-042 NFOR cluster: unexplained performance decrement ≥2
 /// weeks with ≥2 wellness domains suppressed → mandatory recovery block plus a
-/// "consult a professional" escalation. Graded ExpertOpinion by File 06 -
+/// "consult a professional" escalation. Graded ExpertOpinion by File 06:
 /// never inflated to the Strong File 08 rule above, yet safety-critical.
 /// AUTOREG-NFOR-001.
 pub fn nfor_cluster_defer(

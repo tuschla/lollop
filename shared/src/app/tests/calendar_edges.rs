@@ -911,8 +911,8 @@ fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
             r.title
         );
     }
-    // (Repeating the plan week after held weeks is the conservative,
-    // factual ADH-PROGRESS-001 call; only the make-up nudge is wrong.)
+    // (Repeating the plan week after held weeks is the ADH-PROGRESS-001 rule
+    // and stays; only the make-up nudge is wrong.)
     for n in &vm.consistency.as_ref().expect("a plan").notes {
         assert!(!n.summary.starts_with("Missed"), "{}", n.summary);
     }

@@ -42,7 +42,7 @@ const NO_LOAD_WORK_SHARE: f64 = 0.9;
 /// caller has matched movement (`same_movement`); RPE never gates. Any set of
 /// one rep (or one hold second) or more can count: a short set still fills its
 /// slot. `fold` is the adjustment picture shown for that day: a load cut
-/// lowers the bar to what the user actually saw, and a downgrade/modify day
+/// lowers the bar to what the user saw, and a downgrade/modify day
 /// (`load_dropped`) removes the load bar entirely. With a prescribed load, a
 /// set within one plate step ([`load_grid_step_kg`]) of it is full work and
 /// one at ≥80 % of it is lighter work. Without a prescribed load the bar is
@@ -136,14 +136,15 @@ impl ItemSetView {
 /// by before the suggested start steps up one plate.
 const STEP_UP_SURPLUS_REPS: f64 = 2.0;
 
-/// Give every barbell/dumbbell lift item its `last_set` — the top working set
+/// Give every barbell/dumbbell lift item its `last_set`, the top working set
 /// (heaviest; then most reps; then latest) of the most recent PRIOR session
-/// day of the same movement — and, when the item prescribes no load (an
-/// effort target), a `suggested_load_kg` from it: the weight as logged, or one
-/// plate step up once that set beat the target by [`STEP_UP_SURPLUS_REPS`],
-/// never a jump above +10 % (`MAX_LOAD_STEP_FRAC`). An unrated or open-ended
-/// set counts only its reps (a lower bound). A set with fewer reps in the tank
-/// than today's target is lightened to that target on the Epley model
+/// day of the same movement. When the item prescribes no load (an effort
+/// target), it also gets a `suggested_load_kg` from that set: the weight as
+/// logged, or one plate step up once that set beat the target by
+/// [`STEP_UP_SURPLUS_REPS`], never a jump above +10 % (`MAX_LOAD_STEP_FRAC`).
+/// An unrated or open-ended set counts only its reps (a lower bound). A set
+/// with fewer reps in the tank than today's target is lightened to that target
+/// on the Epley model
 /// (strength-005), and the movement's one working-load derate (or, without an
 /// anchor, the detraining credit for the time since the set, DETRAIN-STR-001)
 /// scales it. Past the 8-week horizon or inside a declared >8 wk re-entry
@@ -386,8 +387,8 @@ fn ended_early(model: &Model, exercise: &str, epoch_day: i64) -> bool {
 
 /// The week-loop-invariant context for [`flatten_session`]: the clock reference,
 /// the plan start day, the model, the display unit, and the once-per-view set/run
-/// session-day attribution — so the per-day call carries only the `epoch_day`,
-/// snapshot, and adjustment fold that actually vary.
+/// session-day attribution. The per-day call carries only the `epoch_day`,
+/// snapshot, and adjustment fold, which vary.
 #[derive(Clone, Copy)]
 pub(super) struct FlattenCtx<'a> {
     pub(super) today: i64,
@@ -670,9 +671,9 @@ pub(super) fn flatten_session(
             epoch_day.min(judge_day),
         );
     }
-    // Fill each item's completion from the judged day's logs — only meaningful
-    // inside the plan window (a pre-plan or future day has nothing logged
-    // against it), so the flags stay their flattened defaults elsewhere.
+    // Fill each item's completion from the judged day's logs inside the plan
+    // window only: a pre-plan or future day has nothing logged against it, so
+    // there the flags keep their flattened defaults.
     let judged = epoch_day >= start && epoch_day <= today && judge_day <= today;
     if judged {
         for (rx, it) in s.prescriptions.iter().zip(items.iter_mut()) {
@@ -786,12 +787,14 @@ fn judge_lift_item(it: &mut PlanItem, judge: &DayJudge, ctx: &FlattenCtx) {
     it.done = sets_done >= required_sets(it.sets, fold.vol_frac) || it.ended_early;
 }
 
-/// Each of a day's chronological same-movement sets credited ([`set_credit`]),
-/// not-yet-taken step of the set screen's warm-up ramp
-/// ([`crate::strength::warm_up_ramp`]) for the load shown that day, else the
-/// suggested start (the set screen's `load_kg ?: suggested_load_kg`): within
-/// half a plate step of the step's load, at most its reps. Each step is taken
-/// once, so a day holds at most as many warm-ups as the ramp has steps.
+/// Each of a day's chronological same-movement sets credited ([`set_credit`]).
+/// Before the first work set, a set that matches a not-yet-taken step of the
+/// set screen's warm-up ramp ([`crate::strength::warm_up_ramp`]) is a warm-up
+/// and not counted. The ramp is built for the load shown that day, else the
+/// suggested start (the set screen's `load_kg ?: suggested_load_kg`); a set
+/// matches a step within half a plate step of its load, at most its reps. Each
+/// step is taken once, so a day holds at most as many warm-ups as the ramp has
+/// steps.
 fn day_credits(
     it: &PrescriptionView,
     day_sets: &[&LoggedSet],

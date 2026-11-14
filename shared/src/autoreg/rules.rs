@@ -96,7 +96,7 @@ pub(super) enum RhrVerdict {
     /// ≥ downgrade band for ≥2 days: hold progression.
     Hold,
     /// One stop-level morning with no illness report: likely noise (alcohol,
-    /// heat, a bad night) — an easier day plus an illness check, not rest.
+    /// heat, a bad night): an easier day plus an illness check, not rest.
     Spike,
     /// Stop level on ≥2 consecutive mornings, or with an illness report: rest.
     Rest,
@@ -617,8 +617,8 @@ pub fn safety_tier_of(calls: &[AdjustmentCall]) -> Option<SafetyTier> {
 }
 
 /// Whether auto load-adds are withheld today (autoreg-044 / autoreg-029): any
-/// recovery-suppression signal (wellness — even a single low day: §5 "proceed,
-/// cap top-end, do NOT add load" —, soreness, HRV, resting HR, active pain or
+/// recovery-suppression signal (wellness, even a single low day per §5 "proceed,
+/// cap top-end, do NOT add load"; soreness, HRV, resting HR, active pain or
 /// illness), an objective performance decline (velocity-loss stop, e1RM drop,
 /// aerobic decoupling, a hard first set), or the high-load-block HRV
 /// saturation guard. The plan-side per-item first-set rule strips its

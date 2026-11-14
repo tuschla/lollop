@@ -251,9 +251,9 @@ pub(super) fn meet_taper_reaches(days_to_meet_from_week_start: i64, lift_days: &
 /// `days_to_meet_from_week_start` = meet day − this week's Monday; each
 /// session's own distance is that minus its `day` offset. Lift sessions only;
 /// runs and rest days are untouched. For a lift session `d` days out:
-/// - `d ≤ 2` (meet day and the 2 days before): no lifting — the KB peak ends
+/// - `d ≤ 2` (meet day and the 2 days before): no lifting; the KB peak ends
 ///   with 2–7 days of reduced work/cessation (STR-PEAK-001).
-/// - `3 ≤ d ≤ 14`: the taper — volume cut ~41 % (8–14 days out) then ~60 %
+/// - `3 ≤ d ≤ 14`: the taper. Volume cut ~41 % (8–14 days out) then ~60 %
 ///   (3–7 days out), intensity and frequency held (TAPER-001, strength-026);
 ///   heavy deadlifts stop inside 10 days (STR-DLPEAK-001: last heavy pull 10–14
 ///   days out) and heavy squat/bench inside 4 days (strength-029: ~4–5 days).

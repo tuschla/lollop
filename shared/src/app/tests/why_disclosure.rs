@@ -163,10 +163,10 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
 
     // Word-level no-prescriptive-language guard, mirroring the HR-zones why
     // test. Bans specific exercise names + volume/intensity prescriptions.
-    // ("set" singular / "rir" / "e1rm" are the engine's own honest vocabulary
-    // on a lift card: a logged set and the RIR method are what the data-need
-    // is *about*, not a prescription to train, so they are not banned; the
-    // singular/plural split keeps "set" from tripping on "sets".)
+    // ("set" singular, "rir" and "e1rm" are not banned: on a lift card a
+    // logged set and the RIR method are what the data need is *about*, not a
+    // prescription to train. The singular/plural split keeps "set" from
+    // tripping on "sets".)
     let assert_data_need = |improves: &str| {
         assert!(
             !improves.is_empty(),

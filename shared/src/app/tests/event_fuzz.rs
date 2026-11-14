@@ -1367,7 +1367,7 @@ fn fit_fixture(name: &str) -> Vec<u8> {
 /// Every float the view carries, with its field path, through a serde
 /// `Serializer` that discards everything else: an `Option::None` never
 /// reaches `serialize_f64`, so a non-finite value is told apart from an
-/// honest absence (both are `null` in the JSON).
+/// absent value (both are `null` in the JSON).
 #[derive(Default)]
 struct FloatWalk {
     path: Vec<&'static str>,

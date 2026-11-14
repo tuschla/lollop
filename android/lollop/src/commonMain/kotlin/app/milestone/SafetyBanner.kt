@@ -288,8 +288,8 @@ private fun SafetyBanner(
     onAddDetails: () -> Unit,
     onResolveHold: (HoldResolutionView) -> Unit,
 ) {
-    // Proportional safety: the pinned red banner is reserved for a genuine
-    // training block. A non-blocking safety_tier (e.g. HrvTrend) is handled by
+    // Proportional safety: the pinned red banner is reserved for a training
+    // block (`train_blocked`). A non-blocking safety_tier (e.g. HrvTrend) is handled by
     // the amber Today card, not here, and the under-18 pause by YouthHoldCard.
     if (!model.train_blocked || action == HoldAction.CheckAge) return
     val tier = model.safety_tier
