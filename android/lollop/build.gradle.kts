@@ -86,7 +86,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         iosMain.dependencies {
-            implementation(libs.jetbrains.lifecycle.runtime.compose.ios)
             // BackHandler (PlatformUi.ios.kt): the UIKit back gesture.
             implementation(libs.compose.ui.backhandler)
         }
@@ -108,7 +107,6 @@ kotlin {
             implementation(libs.androidx.glance.appwidget)
         }
         getByName("androidHostTest") {
-            kotlin.srcDir(repoRootConstant("app.milestone"))
             dependencies {
                 implementation(libs.junit)
                 implementation(libs.kotlinx.coroutines.test)
@@ -147,6 +145,8 @@ val generateComposeResources = tasks.register<GenerateComposeResources>("generat
 }
 
 kotlin.sourceSets.getByName("androidMain").kotlin.srcDir(generateComposeResources.flatMap { it.idsDir })
+
+androidHostTestRepoRootConstant("app.milestone")
 
 compose.resources {
     packageOfResClass = "app.milestone.resources"

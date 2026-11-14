@@ -1,5 +1,6 @@
 package app.milestone.qa
 
+import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -283,23 +284,31 @@ class RatingScaleTest {
         assertTrue(rule.onAllNodes(hasContentDescription(", 100 kg", substring = true)).fetchSemanticsNodes().isNotEmpty())
     }
 
-    /** On a German phone the chip reads English (the app's language) in the
-     *  region's day-first order, never a German month name. */
+    /** On a German-only phone (device locale list [de-DE]) the chip reads
+     *  English (the app's language) in the region's day-first order, never a
+     *  German month name. */
     @Test
     fun theDateChipUsesTheAppLanguageInTheRegionsOrder() {
-        Locale.setDefault(Locale.GERMANY)
-        val zone = ZoneId.systemDefault()
-        val day = Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate().minusDays(40)
-        val epochSec = day.atTime(12, 0).atZone(zone).toEpochSecond()
-        rule.setContent {
-            MilestoneTheme {
-                ObservedAtRow(epochSec, withTime = false) {}
+        val deviceLocales = LocaleList.getDefault()
+        // The whole list: Locale.setDefault alone puts de-DE in front of the
+        // sandbox's en-US, and the app takes that English entry.
+        LocaleList.setDefault(LocaleList(Locale.GERMANY))
+        try {
+            val zone = ZoneId.systemDefault()
+            val day = Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate().minusDays(40)
+            val epochSec = day.atTime(12, 0).atZone(zone).toEpochSecond()
+            rule.setContent {
+                MilestoneTheme {
+                    ObservedAtRow(epochSec, withTime = false) {}
+                }
             }
+            val expected = localizedDayFormatter("MMMd", Locale.Builder().setLanguage("en").setRegion("DE").build()).format(day.toKotlinLocalDate())
+            val german = localizedDayFormatter("MMMd", Locale.GERMANY).format(day.toKotlinLocalDate())
+            assertTrue("\"$expected\" is not the German \"$german\"", expected != german)
+            val found = rule.onAllNodes(hasText(expected), useUnmergedTree = true).fetchSemanticsNodes()
+            assertTrue("date chip reads \"$expected\"", found.isNotEmpty())
+        } finally {
+            LocaleList.setDefault(deviceLocales)
         }
-        val expected = localizedDayFormatter("MMMd", Locale.Builder().setLanguage("en").setRegion("DE").build()).format(day.toKotlinLocalDate())
-        val german = localizedDayFormatter("MMMd", Locale.GERMANY).format(day.toKotlinLocalDate())
-        assertTrue("\"$expected\" is not the German \"$german\"", expected != german)
-        val found = rule.onAllNodes(hasText(expected), useUnmergedTree = true).fetchSemanticsNodes()
-        assertTrue("date chip reads \"$expected\"", found.isNotEmpty())
     }
 }

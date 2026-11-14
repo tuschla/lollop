@@ -4,7 +4,7 @@
 # real Android runtime, so it catches what the JVM shadows can't: the actual
 # rendering, the packaged arm64/x86_64 libshared.so, and process-level crashes/ANRs.
 #
-#   scripts/qa-emulator.sh [--avd e34] [--port 5580]
+#   scripts/qa-emulator.sh [--avd e37] [--port 5582]
 #
 # Boots the AVD headless on the port unless emulator-<port> is already online
 # (CI's emulator: --port 5554), builds + installs the debug APK, seeds a log,

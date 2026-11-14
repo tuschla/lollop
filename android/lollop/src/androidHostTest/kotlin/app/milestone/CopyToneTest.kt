@@ -19,8 +19,8 @@ import org.w3c.dom.Element
  *  emojis, "we/us/our", a hype and AI-vocabulary word list, rhetorical question openers
  *  ("First time? Pick…"), stock phrases ("Let's", "Ready to", "It's important to note",
  *  "serves as", "plays a role", "I hope this helps"), placeholder text ("[insert",
- *  "TODO"), "not just X but Y" parallels and em dashes in sentences (a lone `—` no-value
- *  placeholder is fine).
+ *  "TODO"), "not just X but Y" parallels, em dashes in sentences (a lone `—` no-value
+ *  placeholder is fine) and curly quotes or apostrophes (the app writes straight ones).
  *
  *  The word lists (hype, stock phrases, placeholders, parallels, terms) and the lint's own
  *  clean/flagged cases are `shared/tests/fixtures/copy_tone.json`, which the core's twin
@@ -109,6 +109,8 @@ class CopyToneTest {
         for (p in parallels) if (hasParallel(n, p)) v += "parallel `${p.label}`"
         if (Regex("""\bReady to\b""").containsMatchIn(straight)) v += "stock phrase `Ready to`"
         if ('—' in s && s.trim() != "—") v += "em dash in a sentence"
+        // Checked on `s`: the word rules above match `’` as `'`.
+        if (s.any { it in "\u2018\u2019\u201C\u201D" }) v += "curly quote"
         for ((term, say) in terms) if (phrase(term).containsMatchIn(n)) v += "term `$term` (say $say)"
         return v
     }

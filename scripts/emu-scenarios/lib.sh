@@ -25,10 +25,12 @@ SEED_DAY="2026-09-20"
 RUN_DAY="2026-09-21"
 REST_DAY="2026-09-22"
 LIFT_DAY="2026-09-23"
-# The AVD and console port the scripts boot unless told otherwise (a dedicated
-# port, so a run never talks to an emulator open on the default 5554).
-AVD="e34"
-PORT=5580
+# The AVD and console port every script boots unless told otherwise (a dedicated
+# port, so a run never talks to an emulator open on the default 5554). e37 runs
+# the API 37 image the app compiles against, and surfaces.sh's Live Update checks
+# need API 36+. For an Android 14 pass: --avd e34 --port 5580.
+AVD="e37"
+PORT=5582
 KEEP_EMU=0
 # Scenario phase markers: mark() writes them to the device log (scan_logcat.py
 # attributes logcat lines by them) and to $OUT/.phase (current_phase).

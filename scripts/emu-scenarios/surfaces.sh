@@ -55,8 +55,6 @@ set -uo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
-AVD="e37"
-PORT=5582
 APK="$REPO_ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 ONLY="links tile widget run guided rest toggle"
 

@@ -343,7 +343,7 @@
     <!-- Glossary -->
     <string name="main_glossary_title">Glossary</string>
     <string name="main_glossary_search_hint">Search terms</string>
-    <string name="main_glossary_no_match">No term matches “%1$s”</string>
+    <string name="main_glossary_no_match">No term matches \"%1$s\"</string>
     <string name="main_explain">Explain %1$s</string>
     <string name="main_glossary_e1rm_term">e1RM / estimated max</string>
     <string name="main_glossary_e1rm_def">Estimated 1-rep max: the heaviest single rep you could likely do, worked out from the weight and reps of a set you logged.</string>
@@ -382,7 +382,7 @@
     <string name="main_glossary_maf_term">MAF</string>
     <string name="main_glossary_maf_def">Maximum Aerobic Function (Maffetone): an easy aerobic heart-rate cap, often estimated as about 180 minus your age. One method for pacing base work; measured lactate thresholds are an alternative.</string>
     <string name="main_glossary_pap_term">PAP / PAPE</string>
-    <string name="main_glossary_pap_def">Post-Activation Potentiation (Enhancement): a heavy “primer” set can briefly sharpen a following explosive effort, so the two are paired with a short rest between.</string>
+    <string name="main_glossary_pap_def">Post-Activation Potentiation (Enhancement): a heavy \"primer\" set can briefly sharpen a following explosive effort, so the two are paired with a short rest between.</string>
     <string name="main_glossary_reds_term">RED-S / LEA</string>
     <string name="main_glossary_reds_def">RED-S (Relative Energy Deficiency in Sport) is the health harm from under-eating over time: not eating enough to cover training plus daily needs. LEA (Low Energy Availability) is the research name for that under-eating. The app pauses training and tells you to see a doctor or registered dietitian.</string>
 

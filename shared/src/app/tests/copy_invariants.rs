@@ -275,7 +275,7 @@ fn string_violations(key: &str, s: &str, lb: bool) -> Vec<String> {
         v.push("spacing: control whitespace".into());
     }
     let count = |c: char| s.chars().filter(|&x| x == c).count();
-    for (o, c) in [('(', ')'), ('[', ']'), ('“', '”')] {
+    for (o, c) in [('(', ')'), ('[', ']')] {
         if count(o) != count(c) {
             v.push(format!("bracket: unbalanced `{o}{c}`"));
         }

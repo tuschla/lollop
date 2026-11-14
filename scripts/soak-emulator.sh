@@ -18,8 +18,8 @@
 #   (e) a summary report ($OUT/REPORT.md) with PASS/FAIL checks.
 #
 #   scripts/soak-emulator.sh [options]
-#     --serial S            adb serial (default emulator-5580)
-#     --avd NAME            AVD booted when the serial is offline (default e34)
+#     --serial S            adb serial (default emulator-5582)
+#     --avd NAME            AVD booted when the serial is offline (default e37)
 #     --out DIR             output directory, wiped per run (default /tmp/Soak/run)
 #     --apk PATH            APK to install (default: the debug APK)
 #     --seeds "A B C"       monkey seeds (default "42 1337 9001")

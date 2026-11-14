@@ -19,7 +19,7 @@ workspace = true
 
 [dependencies]
 crux_core = { workspace = true }
-fitparser = "0.11.0"
+fitparser = "0.12.0"
 serde = { workspace = true, features = ["derive"] }
 # Already linked through crux_core (its `JsonFfiFormat` is serde_json), so the
 # FFI error envelope and FIT payload use it directly at no size cost.

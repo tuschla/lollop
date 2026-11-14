@@ -99,7 +99,8 @@
   "Letters, digits and underscore",
   "Bodyweight leverage: tuck, then straddle",
   "See a doctor or physio.",
-  "See a doctor, a registered dietitian or a mental-health professional."
+  "See a doctor, a registered dietitian or a mental-health professional.",
+  "+ Add \"Dumbbell curl\" · Don't log it twice"
  ],
  "flagged": [
   {"text": "Nice run!", "rule": "exclamation"},
@@ -128,6 +129,9 @@
   {"text": "Ready to train", "rule": "`Ready to`"},
   {"text": "It's important to note the cap", "rule": "`It's important to note`"},
   {"text": "Easy run — keep it short", "rule": "em dash"},
+  {"text": "+ Add “Dumbbell curl”", "rule": "curly quote"},
+  {"text": "A ‘primer’ set", "rule": "curly quote"},
+  {"text": "Don’t log it twice", "rule": "curly quote"},
   {"text": "Training is on hold", "rule": "`on hold`"},
   {"text": "A crucial week", "rule": "`crucial`"},
   {"text": "This pivotal block", "rule": "`pivotal`"},

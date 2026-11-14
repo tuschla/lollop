@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # `expect ... eval '<check>'` evaluates the check when expect runs it.
 # shellcheck disable=SC2016
-# Deterministic on-device scenario suite for lollop (app.milestone) on the AVD
-# `e34`: system-state changes a host JVM can't reproduce, each with explicit
+# Deterministic on-device scenario suite for lollop (app.milestone) on an
+# emulator: system-state changes a host JVM can't reproduce, each with explicit
 # PASS/FAIL checks and captured evidence (UI-tree XML, screenshots, event logs).
 #
 #   locale      per-app locale switches while open and mid-editor (de-DE, ar RTL,
@@ -24,7 +24,7 @@
 #               dalvik.vm.heapgrowthlimit (zygote restarted, proven by HeapProbe)
 #
 #   scripts/emulator-scenarios.sh [--only "locale time ..."] [--keep-emulator]
-#                                 [--regen-seed] [--avd e34] [--port 5580]
+#                                 [--regen-seed] [--avd e37] [--port 5582]
 #                                 [--apk PATH] [--out DIR]
 #
 # --only takes scenario names separated by spaces or commas.

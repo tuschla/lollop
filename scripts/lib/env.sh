@@ -30,16 +30,18 @@ export GRADLE_MAX_WORKERS=2
 
 build_tool() {
   local dir
-  for dir in $(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V -r); do
+  for dir in $(printf '%s\n' "$ANDROID_HOME"/build-tools/* | sort -V -r); do
     if [[ -x "$dir/$1" ]]; then
       echo "$dir/$1"
       return 0
     fi
   done
-  echo "$1 not found under $ANDROID_HOME/build-tools: $(ls "$ANDROID_HOME"/build-tools 2>/dev/null | tr '\n' ' ')" >&2
+  echo "$1 not found under $ANDROID_HOME/build-tools: $(cd "$ANDROID_HOME/build-tools" 2>/dev/null && printf '%s ' *)" >&2
   return 1
 }
 
 gradle_build_dir_init() {
+  # ${project.name} is Gradle's, written as is.
+  # shellcheck disable=SC2016
   printf 'allprojects { layout.buildDirectory.set(file("%s/${project.name}")) }\n' "$2" >"$1"
 }

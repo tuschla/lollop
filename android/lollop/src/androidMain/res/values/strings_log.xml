@@ -339,7 +339,7 @@
     <!-- Spoken state of a warm-up step already logged today. -->
     <string name="log_warmup_done_state">logged</string>
     <!-- A typed exercise the app doesn't know yet -->
-    <string name="log_add_exercise">+ Add “%1$s”</string>
+    <string name="log_add_exercise">+ Add \"%1$s\"</string>
     <!-- Log chooser: reopen today's session after Finish -->
     <string name="log_chooser_resume">Resume session: %1$s</string>
     <!-- Logged-at chip -->

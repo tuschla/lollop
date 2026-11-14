@@ -5,10 +5,11 @@
 //! "we/us/our", a hype and AI-vocabulary word list, rhetorical question
 //! openers ("First time? Pick…"), stock phrases ("Let's", "Ready to", "It's
 //! important to note", "serves as", "plays a role", "I hope this helps"),
-//! placeholder text ("[insert", "TODO"), "not just X but Y" parallels and em
-//! dashes in sentences (a lone `—` no-value placeholder is fine). The word
-//! lists and the lint's own cases are `tests/fixtures/copy_tone.json`, which
-//! the Android twin `CopyToneTest.kt` reads too.
+//! placeholder text ("[insert", "TODO"), "not just X but Y" parallels, em
+//! dashes in sentences (a lone `—` no-value placeholder is fine) and curly
+//! quotes or apostrophes (the app writes straight ones). The word lists and the
+//! lint's own cases are `tests/fixtures/copy_tone.json`, which the Android
+//! twin `CopyToneTest.kt` reads too.
 
 use std::sync::LazyLock;
 
@@ -170,6 +171,10 @@ fn tone_violations(s: &str) -> Vec<String> {
     }
     if s.contains('—') && s.trim() != "—" {
         v.push("tone: em dash in a sentence".into());
+    }
+    // Checked on `s`: the word rules above match `’` as `'`.
+    if s.contains(['\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}']) {
+        v.push("tone: curly quote".into());
     }
     for t in &RULES.terms {
         if has_phrase(&n, &t.term) {

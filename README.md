@@ -42,10 +42,13 @@ cd android && ./gradlew :lollop:testAndroidHostTest           # JVM + Robolectri
 cd android && ./gradlew :lollop:verifyRoborazziAndroidHostTest # screenshots (baselines are local, not in git)
 cd android && ./gradlew :lollop:compileKotlinIosArm64         # the shared module's iOS build (macOS only; skipped on Linux)
 scripts/qa-emulator.sh                                        # on-device smoke: seeded log, set flow, monkey (CI's emulator job)
-scripts/emulator-scenarios.sh                                 # on-device scenarios (AVD e34)
-scripts/emu-scenarios/surfaces.sh                             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37)
+scripts/emulator-scenarios.sh                                 # on-device scenarios
+scripts/emu-scenarios/surfaces.sh                             # widget, QS tile, open intents, Live Updates, session reminder
 cd android && ./gradlew :core-bridge:linuxX64Test             # Kotlin/Native bridge to the core's C ABI (iOS)
 ```
+
+The device scripts boot AVD `e37` (API 37) on console port 5582; `--avd` and
+`--port` pick another.
 
 ## Privacy
 

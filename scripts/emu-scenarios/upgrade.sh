@@ -21,7 +21,7 @@
 #      sidecar and saves it once.
 #
 #   scripts/emu-scenarios/upgrade.sh --old OLD.apk [--mid MID.apk] --new NEW.apk
-#                                    [--avd e34] [--port 5580] [--keep-emulator]
+#                                    [--avd e37] [--port 5582] [--keep-emulator]
 #
 # Outputs: ~/.cache/emu-upgrade/<avd>/<YYYYmmdd-HHMMSS>/ (REPORT.md, checks.tsv,
 # logcat.txt, shots/, ui/, logs/). Clock pinned to Mon 2026-09-21 08:00
