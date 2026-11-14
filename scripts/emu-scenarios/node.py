@@ -14,6 +14,10 @@ argv: [within ID] mode [text] [anchor]
                    grandparent or children) is checked/selected, 1 when not, 2 when
                    absent. The grandparent: a navigation rail item (landscape) wraps
                    its label one level deeper than a bottom-bar item.
+  tab TEXT         print "cx cy x1 y1 x2 y2 TEXT" of the bottom-bar or rail item
+                   holding the first node labelled exactly TEXT: the label or its
+                   nearest ancestor that is clickable or selected (the selected item
+                   is not clickable); exit 1 when absent.
   overflow         print labels whose text node's bounds exceed the screen width or
                    have zero/negative width (clipped/off-screen text), one per line.
   scroll           print "x1 y1 x2 y2" of the largest vertically scrollable node.
@@ -65,6 +69,19 @@ if mode == "on":
             near = [n, parent.get(n), parent.get(parent.get(n))] + list(n)
             sys.exit(0 if any(m is not None and on(m) for m in near) else 1)
     sys.exit(2)
+
+if mode == "tab":
+    parent = {c: p for p in root.iter() for c in p}
+    for n in root.iter("node"):
+        if want in (n.get("text"), n.get("content-desc")):
+            while n is not None and "true" not in (n.get("clickable"), n.get("selected")):
+                n = parent.get(n)
+            if n is None:
+                sys.exit(1)
+            x1, y1, x2, y2 = bounds(n)
+            print((x1 + x2) // 2, (y1 + y2) // 2, x1, y1, x2, y2, want)
+            sys.exit(0)
+    sys.exit(1)
 
 nodes = list(root.iter("node"))
 W = max((bounds(n)[2] for n in nodes), default=0)

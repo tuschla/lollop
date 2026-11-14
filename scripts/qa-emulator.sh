@@ -55,7 +55,13 @@ log_set_flow() {
   tap_node pre "$(fmt log_primary_set_n_of_n 1 '')" || return 1
   wait_text re "^$(fmt log_primary_set_n_of_n 2 '[0-9]+')\$|^${STR[log_primary_finish_session]}\$" 10 || return 1
   shot set-loop-after-save
-  tap_node eq "${STR[log_primary_finish_session]}" || return 1
+  # With sets left the loop is left through the header's "Done for now"; after the
+  # item's last set the primary reads "Finish session" and that action is gone.
+  if has_text eq "${STR[log_set_done]}"; then
+    tap_node eq "${STR[log_set_done]}" || return 1
+  else
+    tap_node eq "${STR[log_primary_finish_session]}" || return 1
+  fi
   wait_gone eq "${STR[log_field_exercise]}" 10 || return 1
   shot today-after-set
   has_text re "^$(fmt plan_sets_done_cd.one 1 '[0-9]+')\$|^$(fmt plan_sets_done_cd.other 1 '[0-9]+')\$"

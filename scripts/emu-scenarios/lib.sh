@@ -158,14 +158,15 @@ tap_top() {
   read -r -a p <<<"$r"
   tap_xy "${p[0]}" $(( p[3] + 20 ))
 }
-# Bottom-nav item by label: tap the icon above the label (the label's lower edge
-# can sit under the system navigation bar's touch region).
+# Bottom-bar or rail item by label: tap the middle of the item, which is above the
+# label (the label's lower edge can sit under the system navigation bar's touch
+# region). A fixed pixel offset from the label misses the item at a low density.
 tap_nav() {
   local r p
-  r="$(find_node eq "$1")" || { log "no nav item '$1'"; return 1; }
+  r="$(find_node tab "$1")" || { log "no nav item '$1'"; return 1; }
   read -r -a p <<<"$r"
-  tap_xy "${p[0]}" $(( p[3] - 60 > p[1] - 40 ? p[1] - 40 : p[3] - 60 ))
-  wait_for 5 selected "$1"
+  tap_xy "${p[0]}" "${p[1]}"
+  wait_for 5 selected "$1" || { log "nav item '$1' not selected after the tap"; return 1; }
 }
 # selected TEXT: the node labelled TEXT (or its parent, grandparent, a child) is
 # checked or selected.
