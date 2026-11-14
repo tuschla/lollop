@@ -519,6 +519,10 @@ class AccessibilityAuditTest : UiProbeTest() {
             for (label in actionLabels(roots().last(), skipTabs = false)) {
                 if (!tapped.add(label) || label in OVERLAY_SKIP.map { str(it) }) continue
                 val top = roots().last()
+                // An earlier tap can change the window under this list (a time
+                // picker's hour or minute field switches the dial between its hours
+                // and its minutes): a label no longer on it is skipped.
+                if (clickableLabelled(top, label) == null) continue
                 val before = fingerprint()
                 if (!guard("tap $label") { tapLabel(top, label) }) continue
                 settle()
@@ -583,8 +587,11 @@ class AccessibilityAuditTest : UiProbeTest() {
         .filter { it.isNotBlank() }
         .distinct()
 
+    private fun clickableLabelled(root: SemanticsNode, label: String): SemanticsNode? =
+        flatten(root).firstOrNull { it.isVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null && labelOf(it) == label }
+
     private fun tapLabel(root: SemanticsNode, label: String) {
-        val n = flatten(root).first { it.isVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null && labelOf(it) == label }
+        val n = clickableLabelled(root, label) ?: throw NoSuchElementException("no action labelled '$label'")
         node(n).performSemanticsAction(SemanticsActions.OnClick)
     }
 
