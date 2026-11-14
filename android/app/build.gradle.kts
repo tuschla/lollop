@@ -1,4 +1,4 @@
-// The application shell: packages :lollop (all code, resources and manifest
+// The application shell: packages :lollo (all code, resources and manifest
 // components) with the Rust core's jniLibs into the APK. Application id,
 // signing inputs, ABI filters, minification and versioning live here.
 plugins {
@@ -46,8 +46,8 @@ android {
             ndk { abiFilters += abis.getValue("release") }
             isMinifyEnabled = true
             isShrinkResources = true
-            // The app's own keep rules ship with :lollop as consumer rules
-            // (lollop/consumer-rules.pro).
+            // The app's own keep rules ship with :lollo as consumer rules
+            // (lollo/consumer-rules.pro).
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
@@ -85,6 +85,6 @@ androidComponents {
 }
 
 dependencies {
-    implementation(project(":lollop"))
+    implementation(project(":lollo"))
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 }

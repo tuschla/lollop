@@ -84,7 +84,7 @@ pub struct ImportedRun {
     /// Indices into `points` that begin a new recording segment.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub segment_starts: Vec<u32>,
-    /// When the run happened: lollop's own export names the run's logged-at
+    /// When the run happened: lollo's own export names the run's logged-at
     /// stamp, which may follow the last fix by up to a day; any other file is
     /// stamped at its last fix.
     pub observed_at: i64,

@@ -32,7 +32,7 @@ impl Default for RawFix {
 
 /// One run as a file names it: its fixes per recording segment, the sport it
 /// names (verbatim: TCX `<Activity Sport>`, GPX `<trk><type>`; FIT's sport is
-/// gated in [`crate::fit`]) and lollop's own logged-at stamp.
+/// gated in [`crate::fit`]) and lollo's own logged-at stamp.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct RawRun {
     pub(super) segments: Vec<Vec<RawFix>>,

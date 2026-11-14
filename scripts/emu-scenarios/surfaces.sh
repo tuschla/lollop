@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `expect ... eval '<check>'` evaluates the check when expect runs it.
 # shellcheck disable=SC2016
-# On-device checks for lollop's system surfaces (planning/design/
+# On-device checks for lollo's system surfaces (planning/design/
 # visual-design-system.md § 10), each with explicit PASS/FAIL rows and evidence:
 #   links   the app's open intent with dest=today|log|track|log_set (+ an
 #           unknown value), cold start and warm (onNewIntent)
@@ -612,7 +612,7 @@ rest_bg() {
   notif "restbg-$c-count" "$REST_NOTIF_ID" >/dev/null
   end="$(nfield "restbg-$c-count" "r['when']")"
   [[ -n "$end" ]] || { check FAIL $S "$c: countdown posted" "$(cat "$OUT/logs/restbg-$c-count-notif.json")"; return; }
-  # Another app in between, so lollop is not kept as the "previous" app.
+  # Another app in between, so lollo is not kept as the "previous" app.
   adb_ shell am start -a android.settings.SETTINGS >/dev/null; wait_for 5 settings_up; home
   pid0="$(app_pid)"
   t0=$SECONDS
@@ -660,7 +660,7 @@ promo_settings() {
   wait_for 5 settings_up
 }
 # The switch on the "Live updates" row (the intent opens the app's notification
-# settings, whose first switch is "All lollop notifications"); echo "cx cy checked".
+# settings, whose first switch is "All lollo notifications"); echo "cx cy checked".
 promo_switch() {
   wdump "$1" || return 1
   python3 - "$OUT/ui/$1.xml" <<'PY'

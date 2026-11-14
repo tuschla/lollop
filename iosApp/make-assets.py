@@ -2,9 +2,9 @@
 """Render the iOS app icon, launch logo and widget icons from the Android vector drawables.
 
     iosApp/make-assets.py        # rewrites iosApp/iosApp/Assets.xcassets/{AppIcon,LaunchLogo}
-                                 # and iosApp/LollopWidgets/Assets.xcassets/Icon*
+                                 # and iosApp/LolloWidgets/Assets.xcassets/Icon*
 
-Sources (android/lollop/src/androidMain/res):
+Sources (android/lollo/src/androidMain/res):
   mipmap/ic_launcher.xml           the full-square launcher icon (white ground,
                                    black mark): the iOS icon, and recoloured
                                    white on a clear ground for the dark and
@@ -13,7 +13,7 @@ Sources (android/lollop/src/androidMain/res):
                                    the splash marks: the launch screen logo for
                                    the light and dark appearance
   drawable/<icon>.xml              each surface icon (widget-icons.json, generated
-                                   from android/lollop's SurfaceIcon by
+                                   from android/lollo's SurfaceIcon by
                                    GeneratedSourcesTest): the widget buttons, the
                                    notifications' route mark and the tracker's
                                    buttons, as template images of the widget
@@ -32,9 +32,9 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-RES = ROOT / "android/lollop/src/androidMain/res"
+RES = ROOT / "android/lollo/src/androidMain/res"
 ASSETS = ROOT / "iosApp/iosApp/Assets.xcassets"
-WIDGET_ASSETS = ROOT / "iosApp/LollopWidgets/Assets.xcassets"
+WIDGET_ASSETS = ROOT / "iosApp/LolloWidgets/Assets.xcassets"
 # Widget extension image set → Android drawable (24 dp each).
 WIDGET_ICONS = json.loads((ROOT / "iosApp/widget-icons.json").read_text())
 A = "{http://schemas.android.com/apk/res/android}"

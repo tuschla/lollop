@@ -2,7 +2,7 @@
 
 package app.milestone.core
 
-import app.milestone.core.cinterop.lollop_panic_for_test
+import app.milestone.core.cinterop.lollo_panic_for_test
 import kotlin.native.concurrent.ObsoleteWorkersApi
 import kotlin.native.concurrent.TransferMode
 import kotlin.native.concurrent.Worker
@@ -111,7 +111,7 @@ class BridgeTest {
         val log = listOf(PROFILE, setEvent(1), setEvent(2))
         replay(log)
         val before = core.view()!!
-        val answer = json(lollop_panic_for_test(true).take())
+        val answer = json(lollo_panic_for_test(true).take())
         assertEquals("panic_reset", answer.errorKind(), "update-path panic: $answer")
         assertEquals("update", answer.jsonObject["error"]!!.jsonObject["context"]!!.jsonPrimitive.content)
         // The core was replaced: the sets are gone until the shell replays.
@@ -124,7 +124,7 @@ class BridgeTest {
     fun aViewPanicKeepsTheCore() {
         replay(listOf(PROFILE, setEvent(1)))
         val before = core.view()!!
-        val answer = json(lollop_panic_for_test(false).take())
+        val answer = json(lollo_panic_for_test(false).take())
         assertEquals("panic", answer.errorKind(), "view-path panic: $answer")
         assertContentEquals(before, core.view(), "a view panic leaves the model intact")
     }

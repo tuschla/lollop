@@ -21,5 +21,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lollop"
-include(":app", ":lollop", ":lollop-ios", ":core-bridge")
+rootProject.name = "lollo"
+include(":app", ":lollo", ":lollo-ios", ":core-bridge")

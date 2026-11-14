@@ -154,10 +154,10 @@ fn build_safety_guidance(
                 "One of your health answers needs a doctor's OK first. "
             }
             AdjustmentKind::Screen(ScreenGate::Youth) => {
-                "You're under 18, so lollop won't build a plan: strength training at your age needs a coach who can watch your technique. You can still log and track. "
+                "You're under 18, so lollo won't build a plan: strength training at your age needs a coach who can watch your technique. You can still log and track. "
             }
             AdjustmentKind::Screen(ScreenGate::Pregnancy) => {
-                "You're pregnant, so lollop won't plan or increase your training. "
+                "You're pregnant, so lollo won't plan or increase your training. "
             }
             _ => "",
         };

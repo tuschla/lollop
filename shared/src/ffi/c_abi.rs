@@ -1,14 +1,14 @@
 //! The C entry points, feature `c-abi`; the header is
-//! `shared/include/lollop.h` (cbindgen, `shared/cbindgen.toml`).
+//! `shared/include/lollo.h` (cbindgen, `shared/cbindgen.toml`).
 //!
 //! The iOS app links the `staticlib` build of this crate (`libshared.a`,
 //! scripts/build-ios-core.sh) and calls it from Kotlin/Native through cinterop
-//! (`android/core-bridge`). [`lollop_call`] and [`lollop_call_lines`] take an
+//! (`android/core-bridge`). [`lollo_call`] and [`lollo_call_lines`] take an
 //! op's code (`shared::ffi::ops::Op`) and its input and answer it as a
 //! core-owned byte buffer: UTF-8 JSON (GPX text for the GPX export).
 //!
-//! Memory: every [`LollopBytes`] a function returns is owned by the caller and
-//! released with exactly one [`lollop_bytes_free`]. An empty answer is
+//! Memory: every [`LolloBytes`] a function returns is owned by the caller and
+//! released with exactly one [`lollo_bytes_free`]. An empty answer is
 //! `{NULL, 0}`; freeing it is a no-op. Input pointers are borrowed for the
 //! call only.
 
@@ -17,22 +17,22 @@ use std::borrow::Cow;
 use super::bridge::{self, Input};
 
 /// A byte buffer the core allocated and the caller now owns. Release it with
-/// [`lollop_bytes_free`]. `{NULL, 0}` is the empty answer.
+/// [`lollo_bytes_free`]. `{NULL, 0}` is the empty answer.
 #[repr(C)]
-pub struct LollopBytes {
+pub struct LolloBytes {
     pub data: *mut u8,
     pub len: usize,
 }
 
 /// A byte slice the caller owns, borrowed for one call (one line for
-/// [`lollop_call_lines`]).
+/// [`lollo_call_lines`]).
 #[repr(C)]
-pub struct LollopSlice {
+pub struct LolloSlice {
     pub data: *const u8,
     pub len: usize,
 }
 
-impl LollopBytes {
+impl LolloBytes {
     fn from_vec(bytes: Vec<u8>) -> Self {
         if bytes.is_empty() {
             return Self {
@@ -68,25 +68,25 @@ unsafe fn borrow<'a>(data: *const u8, len: usize) -> &'a [u8] {
 /// # Safety
 /// `input` must point to `len` readable bytes (or be null with `len` 0).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_call(op: u32, input: *const u8, len: usize) -> LollopBytes {
+pub unsafe extern "C" fn lollo_call(op: u32, input: *const u8, len: usize) -> LolloBytes {
     // SAFETY: forwarded caller contract.
     let input = unsafe { borrow(input, len) };
-    LollopBytes::from_vec(bridge::call(op, Input::Bytes(Cow::Borrowed(input))))
+    LolloBytes::from_vec(bridge::call(op, Input::Bytes(Cow::Borrowed(input))))
 }
 
 /// Answer op `op` on the `count` lines at `lines`. A line that is not UTF-8
 /// fails the op.
 ///
 /// # Safety
-/// `lines` must point to `count` [`LollopSlice`]s (or be null with `count` 0),
+/// `lines` must point to `count` [`LolloSlice`]s (or be null with `count` 0),
 /// each pointing to its `len` readable bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_call_lines(
+pub unsafe extern "C" fn lollo_call_lines(
     op: u32,
-    lines: *const LollopSlice,
+    lines: *const LolloSlice,
     count: usize,
-) -> LollopBytes {
-    let lines: &[LollopSlice] = if lines.is_null() || count == 0 {
+) -> LolloBytes {
+    let lines: &[LolloSlice] = if lines.is_null() || count == 0 {
         &[]
     } else {
         // SAFETY: the caller's contract above.
@@ -99,17 +99,17 @@ pub unsafe extern "C" fn lollop_call_lines(
             .map(Cow::Borrowed)
             .map_err(|err| err.to_string())
     });
-    LollopBytes::from_vec(bridge::call(op, Input::Lines(&mut read)))
+    LolloBytes::from_vec(bridge::call(op, Input::Lines(&mut read)))
 }
 
-/// Release a buffer a `lollop_*` function returned. A `{NULL, 0}` buffer is a
+/// Release a buffer a `lollo_*` function returned. A `{NULL, 0}` buffer is a
 /// no-op.
 ///
 /// # Safety
-/// `bytes` must come unmodified from a `lollop_*` function and not have been
+/// `bytes` must come unmodified from a `lollo_*` function and not have been
 /// freed before.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lollop_bytes_free(bytes: LollopBytes) {
+pub unsafe extern "C" fn lollo_bytes_free(bytes: LolloBytes) {
     if bytes.data.is_null() {
         return;
     }
@@ -122,8 +122,8 @@ pub unsafe extern "C" fn lollop_bytes_free(bytes: LollopBytes) {
 /// path (`panic`, core kept).
 #[cfg(feature = "test-hooks")]
 #[unsafe(no_mangle)]
-pub extern "C" fn lollop_panic_for_test(reset: bool) -> LollopBytes {
-    LollopBytes::from_vec(bridge::panic_for_test(reset))
+pub extern "C" fn lollo_panic_for_test(reset: bool) -> LolloBytes {
+    LolloBytes::from_vec(bridge::panic_for_test(reset))
 }
 
 #[cfg(test)]

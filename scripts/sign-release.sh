@@ -5,12 +5,13 @@
 #   scripts/sign-release.sh --release   # release key or fail (GitHub Releases)
 #
 # The release key: MILESTONE_KEYSTORE (keystore file), MILESTONE_KS_PASS,
-# MILESTONE_KS_ALIAS (the names predate the lollop rename). The owner's copy is
-# ~/.local/share/lollop/lollop-release.{jks,pass}; CI gets it from the repo
-# secrets. Android installs an update only over an APK signed with the same key.
+# MILESTONE_KS_ALIAS (the names predate the app's renames). The owner's copy is
+# ~/.local/share/lollop/lollop-release.{jks,pass} (named before the lollo
+# rename); CI gets it from the repo secrets. Android installs an update only
+# over an APK signed with the same key.
 # Prints the signed APK's path:
-#   android/app/build/outputs/apk/release/lollop-release.apk               (release key)
-#   android/app/build/outputs/apk/release/lollop-release-debugsigned.apk   (debug key: sideload/testing only)
+#   android/app/build/outputs/apk/release/lollo-release.apk               (release key)
+#   android/app/build/outputs/apk/release/lollo-release-debugsigned.apk   (debug key: sideload/testing only)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib/env.sh
@@ -29,7 +30,7 @@ UNSIGNED="$REL_DIR/app-release-unsigned.apk"
 [[ -f $UNSIGNED ]] || { echo "no $UNSIGNED: run gradlew :app:assembleRelease first" >&2; exit 1; }
 
 if [[ -n "${MILESTONE_KEYSTORE:-}" ]]; then
-  SIGNED="$REL_DIR/lollop-release.apk"
+  SIGNED="$REL_DIR/lollo-release.apk"
   "$APKSIGNER" sign \
     --ks "$MILESTONE_KEYSTORE" --ks-pass "pass:$MILESTONE_KS_PASS" --ks-key-alias "$MILESTONE_KS_ALIAS" \
     --out "$SIGNED" "$UNSIGNED"
@@ -37,7 +38,7 @@ elif [[ $REQUIRE_RELEASE_KEY == 1 ]]; then
   echo "MILESTONE_KEYSTORE is not set: a release must be signed with the release key" >&2
   exit 1
 else
-  SIGNED="$REL_DIR/lollop-release-debugsigned.apk"
+  SIGNED="$REL_DIR/lollo-release-debugsigned.apk"
   "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-pass pass:android --out "$SIGNED" "$UNSIGNED"
   echo "WARNING: release APK signed with the debug keystore: not distributable" >&2
 fi

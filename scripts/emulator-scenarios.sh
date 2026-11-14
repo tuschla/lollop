@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `expect ... eval '<check>'` evaluates the check when expect runs it.
 # shellcheck disable=SC2016
-# Deterministic on-device scenario suite for lollop (app.milestone) on an
+# Deterministic on-device scenario suite for lollo (app.milestone) on an
 # emulator: system-state changes a host JVM can't reproduce, each with explicit
 # PASS/FAIL checks and captured evidence (UI-tree XML, screenshots, event logs).
 #
@@ -586,13 +586,13 @@ sc_update() {
 
 # Profile › Export my data → system picker SAVE into Downloads. Echoes the path.
 export_backup() {
-  local name="lollop-$RUN_DAY.ndjson" i s0=-1 s1
-  adb_ shell "rm -f /sdcard/Download/lollop-*.ndjson"
+  local name="lollo-$RUN_DAY.ndjson" i s0=-1 s1
+  adb_ shell "rm -f /sdcard/Download/lollo-*.ndjson"
   tap_nav "${STR[main_dest_profile]}"
   scroll_to eq "${STR[profile_export_data]}" 10 || return 1
   tap_node eq "${STR[profile_export_data]}"
   wait_text eq SAVE 15 || return 1
-  has_text eq "$name" || log "picker suggests $(node_label pre lollop-)"
+  has_text eq "$name" || log "picker suggests $(node_label pre lollo-)"
   tap_top eq SAVE
   # A large export streams for a while: wait for the file size to settle.
   for i in $(seq 1 60); do
@@ -649,11 +649,11 @@ sc_backup() {
 FIVE="$OUT/seed/five-year.ndjson"
 gen_five_year() {
   [[ -s "$FIVE" && $REGEN -eq 0 ]] && grep -q '^longest_run_km=' "$FIVE.facts" 2>/dev/null && return 0
-  log "generating the 5-year LongHistorySeed log (gradle :lollop:exportLongHistorySeed)"
+  log "generating the 5-year LongHistorySeed log (gradle :lollo:exportLongHistorySeed)"
   gradle_build_dir_init "$OUT/logs/seed.init.gradle.kts" "$HOME/.cache/emuscenarios-build"
   (cd "$REPO_ROOT/android" &&
     ./gradlew --init-script "$OUT/logs/seed.init.gradle.kts" --max-workers="$GRADLE_MAX_WORKERS" -q \
-    :lollop:exportLongHistorySeed --args="$FIVE") >"$OUT/logs/seed-gradle.log" 2>&1
+    :lollo:exportLongHistorySeed --args="$FIVE") >"$OUT/logs/seed-gradle.log" 2>&1
   [[ -s "$FIVE" ]]
 }
 # Background sampler: "Dalvik Heap" / "Native Heap" Heap-Alloc (KB) of the app's

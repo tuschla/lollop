@@ -7,7 +7,7 @@
 #   scripts/build-ios-core.sh                      # the iOS triples, app profile
 #   scripts/build-ios-core.sh x86_64-unknown-linux-gnu  # any triple(s)
 #   scripts/build-ios-core.sh --test-hooks x86_64-unknown-linux-gnu
-#                                                  # test profile + lollop_*_for_test hooks
+#                                                  # test profile + lollo_*_for_test hooks
 #
 # `cargo rustc --crate-type staticlib` replaces shared's [lib] crate types for
 # this one build, so no Apple linker is needed and the Android cdylib build is

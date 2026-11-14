@@ -1,0 +1,87 @@
+import AppIntents
+import Foundation
+#if !LOLLO_WIDGET_EXTENSION
+import Lollo
+#endif
+
+// The App Intents the widgets, the control and the Live Activities run. Compiled
+// into the app and the widget extension: the extension needs the types for its
+// buttons, and the system runs both intents in the app's process (an OpenIntent
+// brings the app to the front; a LiveActivityIntent runs in the app). The calls
+// into the Kotlin app are compiled into the app only. Their text is named by the
+// app's string resource keys, whose English Localizable.strings is generated
+// (en.lproj, GeneratedSourcesTest).
+
+/// A screen a system surface opens: Android's `OpenDest` (`lollo://open/<dest>`);
+/// android/lollo's AppIdentifiersTest checks the cases and the URL against it.
+enum LolloScreen: String, AppEnum {
+    case today
+    case log
+    case track
+    case logSet = "log_set"
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "ios_intent_screen_type"
+    static let caseDisplayRepresentations: [LolloScreen: DisplayRepresentation] = [
+        .today: "main_dest_today",
+        .log: "main_log",
+        .track: "main_plan_item_track",
+        .logSet: "tile_log_set",
+    ]
+
+    /// The destination's wire name ([OpenDest.wire]); an unknown one opens Today.
+    init(wire: String) {
+        self = LolloScreen(rawValue: wire) ?? .today
+    }
+
+    var url: URL { URL(string: "lollo://open/\(rawValue)")! }
+}
+
+/// Open the app at a screen: the control's tap and the small widget's button,
+/// as Android's tile and widget buttons open their destination.
+struct OpenLolloIntent: OpenIntent {
+    static let title: LocalizedStringResource = "ios_intent_open_title"
+
+    @Parameter(title: "ios_intent_open_screen")
+    var target: LolloScreen
+
+    init() {
+        target = .today
+    }
+
+    init(target: LolloScreen) {
+        self.target = target
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        #if !LOLLO_WIDGET_EXTENSION
+        MainViewControllerKt.openUrl(url: target.url.absoluteString)
+        #endif
+        return .result()
+    }
+}
+
+/// The run activity's Pause and Resume: Android's notification actions.
+@available(iOS 17.0, *)
+struct SetRunPausedIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "ios_intent_pause_title"
+
+    @Parameter(title: "ios_intent_paused")
+    var paused: Bool
+
+    init() {
+        paused = true
+    }
+
+    init(paused: Bool) {
+        self.paused = paused
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        #if !LOLLO_WIDGET_EXTENSION
+        LolloSurfaces.shared.setRunPaused(paused: paused)
+        #endif
+        return .result()
+    }
+}

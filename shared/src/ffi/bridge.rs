@@ -291,7 +291,7 @@ impl CoreBridge {
     pub(crate) fn new() -> Self {
         let (jobs, queue) = mpsc::channel::<Job>();
         let started = std::thread::Builder::new()
-            .name("lollop-core".to_owned())
+            .name("lollo-core".to_owned())
             .spawn(move || {
                 let mut session = Session::new();
                 for job in queue {

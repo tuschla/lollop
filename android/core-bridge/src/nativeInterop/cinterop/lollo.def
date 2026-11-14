@@ -1,0 +1,3 @@
+headers = lollo.h
+headerFilter = lollo.h
+package = app.milestone.core.cinterop

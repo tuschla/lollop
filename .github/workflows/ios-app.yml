@@ -1,7 +1,7 @@
 name: iOS app
 
-# The iOS app (iosApp/, a SwiftUI host around android/lollop-ios's `Lollop`
-# framework, and its widget extension LollopWidgets): an .ipa to sideload
+# The iOS app (iosApp/, a SwiftUI host around android/lollo-ios's `Lollo`
+# framework, and its widget extension LolloWidgets): an .ipa to sideload
 # (ios/README.md), the extension's tests in a simulator, and a launch smoke test
 # in a simulator. Runs on pushes to main that can change the app, by hand, and
 # from release.yml (which publishes the .ipa).
@@ -13,8 +13,8 @@ on:
       - "iosApp/**"
       - "app-version.xcconfig"
       - "android/core-bridge/**"
-      - "android/lollop/**"
-      - "android/lollop-ios/**"
+      - "android/lollo/**"
+      - "android/lollo-ios/**"
       - "android/build-logic/**"
       - "android/*.gradle.kts"
       - "android/gradle.properties"
@@ -59,59 +59,59 @@ jobs:
         # SideStore signs the app with the owner's Apple ID when it installs it.
         run: >
           xcodebuild build
-          -project iosApp/lollop.xcodeproj -scheme lollop -configuration Release
+          -project iosApp/lollo.xcodeproj -scheme lollo -configuration Release
           -sdk iphoneos -destination generic/platform=iOS
           -derivedDataPath build/ios-device
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
-      - name: Check the extension and package lollop-unsigned.ipa
+      - name: Check the extension and package lollo-unsigned.ipa
         run: |
-          app=build/ios-device/Build/Products/Release-iphoneos/lollop.app
-          appex="$app/PlugIns/LollopWidgets.appex"
-          test -x "$app/lollop"
-          test -d "$app/Frameworks/Lollop.framework"
-          test -x "$appex/LollopWidgets"
+          app=build/ios-device/Build/Products/Release-iphoneos/lollo.app
+          appex="$app/PlugIns/LolloWidgets.appex"
+          test -x "$app/lollo"
+          test -d "$app/Frameworks/Lollo.framework"
+          test -x "$appex/LolloWidgets"
           plutil -lint "$app/Info.plist" "$appex/Info.plist"
           # The identifiers as iosApp/project.yml set them, read back from the build.
           bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
-          group=$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$app/Info.plist")
+          group=$(/usr/libexec/PlistBuddy -c 'Print :LolloAppGroup' "$app/Info.plist")
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Info.plist")" = com.apple.widgetkit-extension
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist")" = "$bundle.widgets"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$appex/Info.plist")" = "$group"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LolloAppGroup' "$appex/Info.plist")" = "$group"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSSupportsLiveActivities' "$app/Info.plist")" = true
           # Ad-hoc signatures that carry the App Group entitlement, inside out:
           # SideStore reads an app's groups from the signed binaries and registers
           # them for the Apple Account; an unsigned binary has none, and the widget
           # could not read the app's payload. The entitlements files name the group
-          # $(LOLLOP_APP_GROUP), which Xcode fills in when it signs; this build is
+          # $(LOLLO_APP_GROUP), which Xcode fills in when it signs; this build is
           # unsigned, so fill it in here.
           mkdir -p build/entitlements
-          for e in lollop LollopWidgets; do
-            sed "s/\$(LOLLOP_APP_GROUP)/$group/" "iosApp/Entitlements/$e.entitlements" > "build/entitlements/$e.entitlements"
+          for e in lollo LolloWidgets; do
+            sed "s/\$(LOLLO_APP_GROUP)/$group/" "iosApp/Entitlements/$e.entitlements" > "build/entitlements/$e.entitlements"
           done
           for f in "$app"/Frameworks/*.framework; do codesign --force --sign - --timestamp=none "$f"; done
-          codesign --force --sign - --timestamp=none --entitlements build/entitlements/LollopWidgets.entitlements "$appex"
-          codesign --force --sign - --timestamp=none --entitlements build/entitlements/lollop.entitlements "$app"
+          codesign --force --sign - --timestamp=none --entitlements build/entitlements/LolloWidgets.entitlements "$appex"
+          codesign --force --sign - --timestamp=none --entitlements build/entitlements/lollo.entitlements "$app"
           for b in "$appex" "$app"; do
             codesign -d --entitlements - "$b" 2>/dev/null | grep -qF "$group" || { echo "::error::$b has no App Group entitlement"; exit 1; }
           done
           mkdir -p build/ipa/Payload
           cp -R "$app" build/ipa/Payload/
-          (cd build/ipa && zip -qry ../lollop-unsigned.ipa Payload)
-          ls -l build/lollop-unsigned.ipa
-          du -sh "$app" "$app/Frameworks/Lollop.framework" "$appex"
+          (cd build/ipa && zip -qry ../lollo-unsigned.ipa Payload)
+          ls -l build/lollo-unsigned.ipa
+          du -sh "$app" "$app/Frameworks/Lollo.framework" "$appex"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: lollop-unsigned-ipa
-          path: build/lollop-unsigned.ipa
+          name: lollo-unsigned-ipa
+          path: build/lollo-unsigned.ipa
           retention-days: 30
           if-no-files-found: error
 
   widgets:
     name: Widget extension tests (simulator)
     # The extension's model and views without the Kotlin framework, on the fixture
-    # android/lollop's GeneratedSourcesTest writes from the Kotlin payload code: the
+    # android/lollo's GeneratedSourcesTest writes from the Kotlin payload code: the
     # day rule, the line cuts and layouts, the bundled fallback and strings, the App
     # Group lookup, the activity frames, and renders of every widget family, state
     # and activity (artifact `widget-renders`). The test of the payload the app
@@ -127,10 +127,10 @@ jobs:
       - name: Test the extension
         run: |
           mkdir -p build/widget-renders
-          TEST_RUNNER_LOLLOP_RENDER_DIR="$PWD/build/widget-renders" xcodebuild test \
-            -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
+          TEST_RUNNER_LOLLO_RENDER_DIR="$PWD/build/widget-renders" xcodebuild test \
+            -project iosApp/lollo.xcodeproj -scheme LolloWidgetsTests \
             -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets \
-            -skip-testing:LollopWidgetsTests/LollopWidgetsTests/testThePayloadTheAppWroteReads
+            -skip-testing:LolloWidgetsTests/LolloWidgetsTests/testThePayloadTheAppWroteReads
           find build/widget-renders -type f | wc -l
 
       - name: Upload the renders
@@ -162,15 +162,15 @@ jobs:
       - name: Build for the simulator
         run: >
           xcodebuild build
-          -project iosApp/lollop.xcodeproj -scheme lollop -configuration Debug
+          -project iosApp/lollo.xcodeproj -scheme lollo -configuration Debug
           -destination "id=$SIMULATOR_UDID"
           -derivedDataPath build/ios-sim
 
       - name: The app embeds the widget extension
         run: |
-          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
-          appex="$app/PlugIns/LollopWidgets.appex"
-          test -x "$appex/LollopWidgets"
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollo.app
+          appex="$app/PlugIns/LolloWidgets.appex"
+          test -x "$appex/LolloWidgets"
           plutil -lint "$appex/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Info.plist")" = com.apple.widgetkit-extension
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSSupportsLiveActivities' "$app/Info.plist")" = true
@@ -181,12 +181,12 @@ jobs:
         # aborts the process, which leaves a crash report.
         run: |
           xcrun simctl bootstatus "$SIMULATOR_UDID" -b
-          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollo.app
           xcrun simctl install "$SIMULATOR_UDID" "$app"
           out="$PWD/build/smoke"
           mkdir -p "$out"
           xcrun simctl spawn "$SIMULATOR_UDID" log stream --level info --style compact \
-            --predicate 'process == "lollop"' > "$out/app.log" 2>&1 &
+            --predicate 'process == "lollo"' > "$out/app.log" 2>&1 &
           log_pid=$!
           trap 'kill "$log_pid" 2>/dev/null || true' EXIT
           touch "$out/.launched"
@@ -200,33 +200,33 @@ jobs:
           kill -0 "$pid" 2>/dev/null || alive=no
           # ReportCrash may still be writing; give it a moment when the app died.
           [ "$alive" = yes ] || sleep 10
-          crashes=$(find ~/Library/Logs/DiagnosticReports -name 'lollop*' -newer "$out/.launched" 2>/dev/null || true)
+          crashes=$(find ~/Library/Logs/DiagnosticReports -name 'lollo*' -newer "$out/.launched" 2>/dev/null || true)
           if [ -n "$crashes" ] || [ "$alive" = no ]; then
-            echo "::error::lollop (pid $pid) crashed or exited within 30 s of launch"
+            echo "::error::lollo (pid $pid) crashed or exited within 30 s of launch"
             echo "--- stderr"; cat "$out/stderr.txt" || true
             for c in $crashes; do cp "$c" "$out/"; echo "--- $c"; head -c 30000 "$c"; echo; done
             exit 1
           fi
-          echo "lollop is running (pid $pid)"
+          echo "lollo is running (pid $pid)"
 
       - name: The app wrote the widget payload, and the extension reads it
         # Boot publishes a model; the app writes the widget payload into the App
-        # Group container. The extension's code (LollopWidgetsTests) reads that file:
+        # Group container. The extension's code (LolloWidgetsTests) reads that file:
         # it decodes, describes today, and every family draws it.
         run: |
           out="$PWD/build/smoke"
-          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollo.app
           bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
-          group=$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$app/Info.plist")
+          group=$(/usr/libexec/PlistBuddy -c 'Print :LolloAppGroup' "$app/Info.plist")
           container=$(xcrun simctl get_app_container "$SIMULATOR_UDID" "$bundle" "$group")
           test -s "$container/widget-today.json" || { echo "::error::no widget payload in $container"; ls -la "$container"; exit 1; }
           cp "$container/widget-today.json" "$out/"
           python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["current"], "|", d["face"]["title"], "|", d["control"]["label"])' "$out/widget-today.json"
           mkdir -p "$out/widget-renders"
-          TEST_RUNNER_LOLLOP_WIDGET_PAYLOAD="$out/widget-today.json" TEST_RUNNER_LOLLOP_RENDER_DIR="$out/widget-renders" \
-            xcodebuild test -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
+          TEST_RUNNER_LOLLO_WIDGET_PAYLOAD="$out/widget-today.json" TEST_RUNNER_LOLLO_RENDER_DIR="$out/widget-renders" \
+            xcodebuild test -project iosApp/lollo.xcodeproj -scheme LolloWidgetsTests \
             -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets \
-            -only-testing:LollopWidgetsTests/LollopWidgetsTests/testThePayloadTheAppWroteReads
+            -only-testing:LolloWidgetsTests/LolloWidgetsTests/testThePayloadTheAppWroteReads
           ls "$out/widget-renders"
 
       - name: Upload screenshot and logs

@@ -18,7 +18,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable
 /** Applied to the root project; every project reaches it as [rustCore]. */
 class RustCorePlugin : Plugin<Project> {
     override fun apply(project: Project) {
-        check(project == project.rootProject) { "lollop.rust-core is applied to the root project" }
+        check(project == project.rootProject) { "lollo.rust-core is applied to the root project" }
         project.extensions.create("rustCore", RustCore::class.java, project)
     }
 }
@@ -106,7 +106,7 @@ open class RustCore @Inject constructor(private val root: Project) {
 
     /**
      * Links the core's C ABI staticlib into [binary]: test executables get the
-     * test profile with the `lollop_*_for_test` hooks, every other binary the app
+     * test profile with the `lollo_*_for_test` hooks, every other binary the app
      * profile without them. The cinterop klib doesn't carry the archive, so every
      * module that links a binary over it calls this.
      */

@@ -3,8 +3,8 @@ import Foundation
 /// The App Group container the app and its widget extension share: the app writes
 /// the widget payload there, the extension reads it. Compiled into both targets.
 ///
-/// Both entitlements files ask for LOLLOP_APP_GROUP (iosApp/project.yml), which each
-/// bundle's Info.plist carries as `LollopAppGroup`. Signed by Xcode that is the group;
+/// Both entitlements files ask for LOLLO_APP_GROUP (iosApp/project.yml), which each
+/// bundle's Info.plist carries as `LolloAppGroup`. Signed by Xcode that is the group;
 /// SideStore (free Apple Account) registers it as `<group>.<TEAMID>` and signs both
 /// bundles with that one (SideStore's FetchProvisioningProfilesOperation.swift
 /// appends the team ID), so the identifier is looked up at runtime, in this order:
@@ -16,12 +16,12 @@ import Foundation
 /// 3. the group as declared.
 /// A candidate counts only when the system hands out its container.
 enum SharedContainer {
-    /// The group as declared: `LollopAppGroup` in the Info.plist of the bundle this
+    /// The group as declared: `LolloAppGroup` in the Info.plist of the bundle this
     /// file is compiled into (the app, the extension, or the extension's tests).
     static let declaredGroup: String = {
-        guard let group = Bundle(for: BundleMarker.self).object(forInfoDictionaryKey: "LollopAppGroup") as? String,
+        guard let group = Bundle(for: BundleMarker.self).object(forInfoDictionaryKey: "LolloAppGroup") as? String,
               !group.isEmpty
-        else { preconditionFailure("Info.plist lacks LollopAppGroup (LOLLOP_APP_GROUP in iosApp/project.yml)") }
+        else { preconditionFailure("Info.plist lacks LolloAppGroup (LOLLO_APP_GROUP in iosApp/project.yml)") }
         return group
     }()
 
@@ -30,7 +30,7 @@ enum SharedContainer {
     static let payloadFile = "widget-today.json"
 
     /// The container, or nil when the bundle is entitled to no matching group (an
-    /// install that dropped the App Group): the widget then reads "Open lollop to update".
+    /// install that dropped the App Group): the widget then reads "Open lollo to update".
     static let url: URL? = {
         for group in candidateGroups() {
             if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) {

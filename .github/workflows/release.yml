@@ -73,11 +73,11 @@ jobs:
           grep -q "certificate SHA-256 digest: $RELEASE_CERT_SHA256" "$RUNNER_TEMP/certs.txt" \
             || { echo "::error::the APK isn't signed with the release key"; exit 1; }
           mkdir -p build/release
-          cp "$apk" "build/release/lollop-$VERSION.apk"
+          cp "$apk" "build/release/lollo-$VERSION.apk"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: lollop-apk
+          name: lollo-apk
           path: build/release/
           retention-days: 7
           if-no-files-found: error
@@ -100,7 +100,7 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: lollop-*
+          pattern: lollo-*
           path: build/release
           merge-multiple: true
 
@@ -110,14 +110,14 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           cd build/release
-          mv lollop-unsigned.ipa "lollop-$VERSION-unsigned.ipa"
-          sha256sum "lollop-$VERSION.apk" "lollop-$VERSION-unsigned.ipa" > SHA256SUMS
+          mv lollo-unsigned.ipa "lollo-$VERSION-unsigned.ipa"
+          sha256sum "lollo-$VERSION.apk" "lollo-$VERSION-unsigned.ipa" > SHA256SUMS
           cat SHA256SUMS
           previous=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
           {
-            echo "Android: install \`lollop-$VERSION.apk\` (arm64). Updates install over earlier releases."
+            echo "Android: install \`lollo-$VERSION.apk\` (arm64). Updates install over earlier releases."
             echo
-            echo "iOS: sideload \`lollop-$VERSION-unsigned.ipa\` with SideStore, which signs it with your Apple ID (see ios/README.md)."
+            echo "iOS: sideload \`lollo-$VERSION-unsigned.ipa\` with SideStore, which signs it with your Apple ID (see ios/README.md)."
             echo
             if [ -n "$previous" ]; then
               echo "## Changes since $previous"
@@ -127,5 +127,5 @@ jobs:
               echo "First release."
             fi
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "lollop $VERSION" --notes-file notes.md \
-            "lollop-$VERSION.apk" "lollop-$VERSION-unsigned.ipa" SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "lollo $VERSION" --notes-file notes.md \
+            "lollo-$VERSION.apk" "lollo-$VERSION-unsigned.ipa" SHA256SUMS

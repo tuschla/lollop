@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full build for the lollop app, the one entry point for building anything.
+# Full build for the lollo app, the one entry point for building anything.
 #
 #   scripts/build.sh            # everything: core tests → Android tests → debug + release APKs
 #   scripts/build.sh --no-tests # same, skipping cargo test + gradle unit tests (quick rebuild)
@@ -10,9 +10,9 @@
 # Roborazzi driving the real Compose UI over the real Rust core).
 # Outputs:
 #   android/app/build/outputs/apk/debug/app-debug.apk                        (debug-signed, installable)
-#   android/app/build/outputs/apk/release/lollop-release.apk                 (minified arm64-v8a APK,
+#   android/app/build/outputs/apk/release/lollo-release.apk                  (minified arm64-v8a APK,
 #       signed by scripts/sign-release.sh: the release key when $MILESTONE_KEYSTORE is set)
-#   android/app/build/outputs/apk/release/lollop-release-debugsigned.apk     (same APK signed with the
+#   android/app/build/outputs/apk/release/lollo-release-debugsigned.apk      (same APK signed with the
 #       DEBUG key when no keystore is set: sideload/testing only, never distributable)
 #
 # Needs rustup (rust-toolchain.toml), cargo-ndk, the NDK, the JDK and the Android
@@ -40,7 +40,7 @@ echo "==> Android: $([[ $RUN_TESTS == 1 ]] && echo 'unit tests (incl. UI/UX QA) 
 GRADLE_TASKS=(:app:assembleDebug :app:assembleRelease)
 # verifyRoborazziAndroidHostTest compares against the local screenshot
 # baselines (gitignored).
-[[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(:lollop:testAndroidHostTest :lollop:verifyRoborazziAndroidHostTest "${GRADLE_TASKS[@]}")
+[[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(:lollo:testAndroidHostTest :lollo:verifyRoborazziAndroidHostTest "${GRADLE_TASKS[@]}")
 (cd android && ./gradlew -q "${GRADLE_TASKS[@]}")
 
 echo "==> Release R8 keep check"

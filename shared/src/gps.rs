@@ -839,9 +839,9 @@ pub(crate) fn hdop_accuracy_m(hdop: f64) -> Option<f64> {
     (hdop.is_finite() && hdop > 0.0).then_some(hdop * GPX_HDOP_UERE_M)
 }
 
-/// XML namespace of lollop's own GPX extension elements. The importer
+/// XML namespace of lollo's own GPX extension elements. The importer
 /// (`import::gpx`) matches the elements by local name.
-const GPX_LOLLOP_NS: &str = "urn:lollop:gpx:1";
+const GPX_LOLLO_NS: &str = "urn:lollo:gpx:1";
 
 /// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
 /// Connect, Komoot, etc. import), one `<trkseg>` per recording segment at the
@@ -850,7 +850,7 @@ const GPX_LOLLOP_NS: &str = "urn:lollop:gpx:1";
 /// omitted: the shell records no altitude.
 ///
 /// `logged_at` is the run's logged-at stamp (its identity with the entry id).
-/// It is written as `<trk><extensions><lollop:logged_at>` because the track's
+/// It is written as `<trk><extensions><lollo:logged_at>` because the track's
 /// last fix is not that stamp: QC drops a standing-still finish and a trim cuts
 /// the end while the run keeps its stamp. Re-importing the file then stamps the
 /// run as the one it came from, so the importer recognises it as already logged.
@@ -863,11 +863,11 @@ pub fn export_gpx(
     let mut s = String::with_capacity(256 + points.len() * 96);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     s.push_str(
-        "<gpx version=\"1.1\" creator=\"lollop\" \
+        "<gpx version=\"1.1\" creator=\"lollo\" \
          xmlns=\"http://www.topografix.com/GPX/1/1\"",
     );
     if logged_at.is_some() {
-        let _ = write!(s, " xmlns:lollop=\"{GPX_LOLLOP_NS}\"");
+        let _ = write!(s, " xmlns:lollo=\"{GPX_LOLLO_NS}\"");
     }
     s.push_str(">\n");
     s.push_str("  <trk>\n    <name>");
@@ -875,9 +875,9 @@ pub fn export_gpx(
     s.push_str("</name>\n");
     if let Some(at) = logged_at {
         // GPX 1.1 `trkType`: `<extensions>` comes after `<name>`, before `<trkseg>`.
-        s.push_str("    <extensions><lollop:logged_at>");
+        s.push_str("    <extensions><lollo:logged_at>");
         s.push_str(&unix_to_rfc3339_utc(at));
-        s.push_str("</lollop:logged_at></extensions>\n");
+        s.push_str("</lollo:logged_at></extensions>\n");
     }
     for seg in segments(points, segment_starts) {
         if seg.is_empty() {

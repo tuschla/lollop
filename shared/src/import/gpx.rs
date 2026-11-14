@@ -1,10 +1,10 @@
 //! GPX 1.0/1.1 track reader for runs recorded elsewhere (Garmin / Strava /
-//! Komoot exports) and for lollop's own export. Reads only
+//! Komoot exports) and for lollo's own export. Reads only
 //! `<trk>/<trkseg>/<trkpt>`, the lat/lon attributes, the optional `<time>` and
 //! `<hdop>`, an optional heart-rate sample from the common Garmin
 //! TrackPointExtension (`<gpxtpx:hr>`, matched by local name so any namespace
 //! prefix works), the track's `<type>` (Strava/Garmin name the sport there)
-//! and lollop's own `<trk><extensions><lollop:logged_at>` stamp
+//! and lollo's own `<trk><extensions><lollo:logged_at>` stamp
 //! (`gps::export_gpx`). Each `<trk>` is one run. Everything else (waypoints,
 //! routes, metadata) is ignored.
 
@@ -16,7 +16,7 @@ use crate::gps::hdop_accuracy_m;
 
 /// One [`RawRun`] per `<trk>` that holds fixes: its segments (one per
 /// `<trkseg>`; segments mark recording pauses), its own `<type>` as the sport
-/// and lollop's `<lollop:logged_at>` stamp.
+/// and lollo's `<lollo:logged_at>` stamp.
 pub(super) fn parse_gpx_runs(text: &str) -> Result<Vec<RawRun>, Malformed> {
     let mut runs = Vec::new();
     // Every `<trkseg>`'s fix list, by index: a list joins its track's

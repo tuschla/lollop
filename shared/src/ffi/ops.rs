@@ -1,6 +1,6 @@
 //! Every operation the shells call on the core, declared once with what it
 //! takes and answers. Both entry points take an op's code ([`Op::code`]) with
-//! its input: the C ABI's `lollop_call` / `lollop_call_lines` and the JNI's
+//! its input: the C ABI's `lollo_call` / `lollo_call_lines` and the JNI's
 //! `JniCore.call` / `JniCore.callLines`. `shared/wiregen` generates the
 //! shells' `CoreBridge` (one method per op) and the Kotlin wire types the
 //! ops exchange ([`roots`]) from this table; the bridge answers each op

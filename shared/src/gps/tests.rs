@@ -741,11 +741,11 @@ fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
 #[test]
 fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
     // A run logged after its last kept fix (a standing-still finish, a trim):
-    // the document names the stamp in lollop's namespaced track extension.
+    // the document names the stamp in lollo's namespaced track extension.
     let t = relocation_fixture();
     let gpx = export_gpx(&t, "run", &[], Some(1_700_000_000));
-    assert!(gpx.contains(" xmlns:lollop=\"urn:lollop:gpx:1\">"), "{gpx}");
-    let ext = "<extensions><lollop:logged_at>2023-11-14T22:13:20Z</lollop:logged_at></extensions>";
+    assert!(gpx.contains(" xmlns:lollo=\"urn:lollo:gpx:1\">"), "{gpx}");
+    let ext = "<extensions><lollo:logged_at>2023-11-14T22:13:20Z</lollo:logged_at></extensions>";
     let at = gpx.find(ext).expect("the stamp is written");
     assert!(
         at < gpx.find("<trkseg>").unwrap(),

@@ -617,7 +617,7 @@ fn a_ride_named_by_its_file_is_refused_by_name() {
 
 #[test]
 fn a_file_named_logged_at_stamp_is_kept_only_when_it_follows_the_track() {
-    // lollop's own export names the run's logged-at stamp.
+    // lollo's own export names the run's logged-at stamp.
     let points: Vec<GpsPoint> = short_run()
         .iter()
         .map(|f| GpsPoint {
@@ -937,7 +937,7 @@ fn a_route_only_or_a_standing_still_file_ends_in_its_own_reason() {
 }
 
 #[test]
-fn lollops_own_gpx_reads_back_with_its_stamp_times_segments_and_accuracy() {
+fn lollos_own_gpx_reads_back_with_its_stamp_times_segments_and_accuracy() {
     let points: Vec<GpsPoint> = run(400, T0, 10)
         .iter()
         .enumerate()
@@ -1562,9 +1562,10 @@ fn every_document_and_cut_reads_as_the_platform_reader_read_it() {
 
 #[test]
 fn the_logged_at_extension_and_the_tracks_type_are_read_only_where_they_belong() {
-    // A core-shaped export (namespace declared, extension before <trkseg>) plus
-    // a Garmin-style <type> inside <extensions> and a <link><type>: the stamp is
-    // read, the nested types are not the track's sport.
+    // An export from before the lollo rename (the old lollop namespace
+    // declared, extension before <trkseg>) plus a Garmin-style <type> inside
+    // <extensions> and a <link><type>: the stamp is read under the old prefix,
+    // the nested types are not the track's sport.
     let fixes: String = (0..240).step_by(10).map(fix_line).collect();
     let doc = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

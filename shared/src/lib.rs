@@ -1,4 +1,4 @@
-//! lollop's training core: the deterministic, evidence-cited engine every
+//! lollo's training core: the deterministic, evidence-cited engine every
 //! shell renders. The rules below are referenced throughout this crate by
 //! number ("HARD RULE 1" and so on); `planning/CLAUDE.md` holds the full list.
 //!

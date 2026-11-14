@@ -24,6 +24,6 @@ BUILD=$(( $(sed -n 's/^CURRENT_PROJECT_VERSION *= *//p' app-version.xcconfig) + 
 sed -i -e "s/^MARKETING_VERSION *=.*/MARKETING_VERSION = $VERSION/" \
        -e "s/^CURRENT_PROJECT_VERSION *=.*/CURRENT_PROJECT_VERSION = $BUILD/" app-version.xcconfig
 git commit -q -m "Release $VERSION" app-version.xcconfig
-git tag -a "$TAG" -m "lollop $VERSION"
+git tag -a "$TAG" -m "lollo $VERSION"
 git push -q origin main "$TAG"
-echo "pushed $TAG (build $BUILD): https://github.com/tuschla/lollop/actions/workflows/release.yml"
+echo "pushed $TAG (build $BUILD): https://github.com/tuschla/lollo/actions/workflows/release.yml"

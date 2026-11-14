@@ -2,7 +2,7 @@
 //! behind a JSON wire. Every operation is declared once in [`ops`]; two entry
 //! points take an op's code and its input and add no logic of their own: the
 //! Android JNI exports (`Java_app_milestone_core_JniCore_*`, `jni`) and the
-//! C ABI (`lollop_*`, `c_abi`, linked into the iOS app as a staticlib).
+//! C ABI (`lollo_*`, `c_abi`, linked into the iOS app as a staticlib).
 //! `bridge` answers each op. [`constants`] are the Rust constants the shells
 //! read.
 

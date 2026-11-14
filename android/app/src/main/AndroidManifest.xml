@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The application shell: every component, permission and resource lives in
-     :lollop (namespace app.milestone) and merges in from there. -->
+     :lollo (namespace app.milestone) and merges in from there. -->
 <manifest />

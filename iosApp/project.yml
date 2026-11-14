@@ -1,10 +1,10 @@
 # XcodeGen spec of the iOS app. The .xcodeproj is generated, not committed:
 #   brew install xcodegen && xcodegen generate --spec iosApp/project.yml
-# The app is a SwiftUI host (iosApp/LollopIosApp.swift) around the Kotlin
-# framework `Lollop` (android/lollop-ios: the app's Compose UI, the core engine
+# The app is a SwiftUI host (iosApp/LolloIosApp.swift) around the Kotlin
+# framework `Lollo` (android/lollo-ios: the app's Compose UI, the core engine
 # and the Rust core). A build phase runs Gradle, which builds the framework for
 # the configuration and SDK being built and embeds it in the app.
-name: lollop
+name: lollo
 options:
   deploymentTarget:
     iOS: "16.0"
@@ -17,16 +17,16 @@ settings:
   base:
     DEVELOPMENT_LANGUAGE: en
     # The app's identifiers, defined once: the targets' bundle ids below, the App
-    # Group in both entitlements files and Info.plists ($(LOLLOP_APP_GROUP)), and
+    # Group in both entitlements files and Info.plists ($(LOLLO_APP_GROUP)), and
     # through the built Info.plists the CI (.github/workflows/ios-app.yml). An
     # installed app, its container and placed widgets are found by these values.
-    LOLLOP_BUNDLE_ID: app.milestone.lollop
-    LOLLOP_APP_GROUP: group.app.milestone.lollop
+    LOLLO_BUNDLE_ID: app.milestone.lollo
+    LOLLO_APP_GROUP: group.app.milestone.lollo
 targets:
-  lollop:
+  lollo:
     type: application
     platform: iOS
-    # A shared scheme, so `xcodebuild -scheme lollop` works on a fresh checkout.
+    # A shared scheme, so `xcodebuild -scheme lollo` works on a fresh checkout.
     scheme: {}
     sources:
       - path: iosApp
@@ -35,25 +35,25 @@ targets:
       - path: Shared
     dependencies:
       # Embedded in PlugIns/: the widgets, the Live Activities and the control.
-      - target: LollopWidgets
+      - target: LolloWidgets
     settings:
       base:
-        PRODUCT_NAME: lollop
-        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLOP_BUNDLE_ID)"
+        PRODUCT_NAME: lollo
+        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLO_BUNDLE_ID)"
         INFOPLIST_FILE: iosApp/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
         # Where embedAndSignAppleFrameworkForXcode (the build phase below) writes
-        # Lollop.framework: the path Kotlin's direct-integration docs give.
-        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../android/lollop-ios/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
-        OTHER_LDFLAGS: "$(inherited) -framework Lollop"
+        # Lollo.framework: the path Kotlin's direct-integration docs give.
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../android/lollo-ios/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Lollo"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
         # Gradle reads and writes outside the build sandbox.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         # The App Group the widget extension reads the widget payload from.
-        CODE_SIGN_ENTITLEMENTS: Entitlements/lollop.entitlements
+        CODE_SIGN_ENTITLEMENTS: Entitlements/lollo.entitlements
     preBuildScripts:
       - name: Kotlin framework (Gradle)
         # Gradle tracks its own inputs; let it run on every build.
@@ -74,59 +74,59 @@ targets:
           export PATH="$HOME/.cargo/bin:/usr/bin:$PATH"
           unset SDKROOT
           cd "$SRCROOT/../android"
-          ./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode
+          ./gradlew :lollo-ios:embedAndSignAppleFrameworkForXcode
   # The app's one extension (each extension costs a free Apple Account an app ID):
   # the home and lock screen widget, the run's and the rest's Live Activities and
   # the Control Center control. Swift only; it reads what the app writes and
   # never links the Kotlin framework.
-  LollopWidgets:
+  LolloWidgets:
     type: app-extension
     platform: iOS
     sources:
-      - path: LollopWidgets
+      - path: LolloWidgets
       - path: Shared
     settings:
       base:
-        PRODUCT_NAME: LollopWidgets
-        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLOP_BUNDLE_ID).widgets"
-        INFOPLIST_FILE: LollopWidgets/Info.plist
+        PRODUCT_NAME: LolloWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLO_BUNDLE_ID).widgets"
+        INFOPLIST_FILE: LolloWidgets/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_ENTITLEMENTS: Entitlements/LollopWidgets.entitlements
+        CODE_SIGN_ENTITLEMENTS: Entitlements/LolloWidgets.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
         # Shared/ compiles its calls into the Kotlin app only outside the extension.
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLOP_WIDGET_EXTENSION"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLO_WIDGET_EXTENSION"
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
   # The extension's model and views in a simulator, on fixtures.json (the Kotlin
   # payload of every widget state) and the payload the app wrote
-  # (LOLLOP_WIDGET_PAYLOAD), with renders of every family, state and activity
-  # (LOLLOP_RENDER_DIR). No host app.
-  LollopWidgetsTests:
+  # (LOLLO_WIDGET_PAYLOAD), with renders of every family, state and activity
+  # (LOLLO_RENDER_DIR). No host app.
+  LolloWidgetsTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: LollopWidgets
+      - path: LolloWidgets
         excludes:
-          - LollopWidgetsBundle.swift
+          - LolloWidgetsBundle.swift
           - Info.plist
       - path: Shared
-      - path: LollopWidgetsTests
+      - path: LolloWidgetsTests
         excludes:
           - Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLOP_BUNDLE_ID).widgets-tests"
+        PRODUCT_BUNDLE_IDENTIFIER: "$(LOLLO_BUNDLE_ID).widgets-tests"
         GENERATE_INFOPLIST_FILE: YES
         # Merged into the generated one: the App Group SharedContainer reads.
-        INFOPLIST_FILE: LollopWidgetsTests/Info.plist
+        INFOPLIST_FILE: LolloWidgetsTests/Info.plist
         SWIFT_VERSION: "5.0"
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLOP_WIDGET_EXTENSION"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLO_WIDGET_EXTENSION"
 schemes:
-  LollopWidgetsTests:
+  LolloWidgetsTests:
     build:
       targets:
-        LollopWidgetsTests: [test]
+        LolloWidgetsTests: [test]
     test:
       targets:
-        - LollopWidgetsTests
+        - LolloWidgetsTests

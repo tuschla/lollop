@@ -18,9 +18,9 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-MAIN = "android/lollop/src/androidMain"
+MAIN = "android/lollo/src/androidMain"
 KT = f"{MAIN}/kotlin/app/milestone"
-COMMON = "android/lollop/src/commonMain/kotlin/app/milestone"
+COMMON = "android/lollo/src/commonMain/kotlin/app/milestone"
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
 # shell name: (file, Kotlin const name)
@@ -81,7 +81,7 @@ def regex(s):
 lines = []
 q = shlex.quote
 app_id = one(r'applicationId\s*=\s*"([^"]+)"', "android/app/build.gradle.kts", "applicationId")
-namespace = one(r'namespace\s*=\s*"([^"]+)"', "android/lollop/build.gradle.kts", "namespace")
+namespace = one(r'namespace\s*=\s*"([^"]+)"', "android/lollo/build.gradle.kts", "namespace")
 lines.append(f"APP_ID={q(app_id)}")
 
 manifest = ET.parse(os.path.join(ROOT, MAIN, "AndroidManifest.xml")).getroot()

@@ -285,6 +285,6 @@ mark "done"
 kill "$SAMPLER_PID"; wait "$SAMPLER_PID"
 "${SOAK[@]}" memory "$OUT/samples.csv" "$OUT/checks.tsv"
 "${SOAK[@]}" sections "$OUT"
-session_end "lollop on-device soak report"; rc=$?
+session_end "lollo on-device soak report"; rc=$?
 cp "$OUT/REPORT.md" "$(dirname "$OUT")/REPORT-auto.md" || log "REPORT.md not copied to $(dirname "$OUT")/REPORT-auto.md"
 exit $rc

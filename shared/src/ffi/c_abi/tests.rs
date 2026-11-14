@@ -7,18 +7,18 @@ use super::*;
 use crate::ffi::ops::Op;
 
 /// Copy a returned buffer out and free it, as a shell does.
-fn take(bytes: LollopBytes) -> Vec<u8> {
+fn take(bytes: LolloBytes) -> Vec<u8> {
     let out = if bytes.data.is_null() {
         Vec::new()
     } else {
         unsafe { std::slice::from_raw_parts(bytes.data, bytes.len) }.to_vec()
     };
-    unsafe { lollop_bytes_free(bytes) };
+    unsafe { lollo_bytes_free(bytes) };
     out
 }
 
 fn call(op: Op, input: &[u8]) -> Vec<u8> {
-    take(unsafe { lollop_call(op.code(), input.as_ptr(), input.len()) })
+    take(unsafe { lollo_call(op.code(), input.as_ptr(), input.len()) })
 }
 
 fn json(bytes: &[u8]) -> serde_json::Value {
@@ -33,37 +33,37 @@ fn the_view_answers_over_the_c_abi() {
 
 #[test]
 fn a_dropped_or_null_event_is_the_empty_answer() {
-    let dropped = unsafe { lollop_call(Op::Update.code(), b"{\"NoSuchEvent\":1}".as_ptr(), 17) };
+    let dropped = unsafe { lollo_call(Op::Update.code(), b"{\"NoSuchEvent\":1}".as_ptr(), 17) };
     assert!(dropped.data.is_null() && dropped.len == 0);
-    let null = unsafe { lollop_call(Op::Update.code(), std::ptr::null(), 0) };
+    let null = unsafe { lollo_call(Op::Update.code(), std::ptr::null(), 0) };
     assert!(null.data.is_null() && null.len == 0);
-    unsafe { lollop_bytes_free(null) };
+    unsafe { lollo_bytes_free(null) };
 }
 
 #[test]
 fn compact_log_reports_a_torn_tail_by_line_index() {
     let lines = ["\"ClearSets\"", "{\"SetPro"];
-    let slices: Vec<LollopSlice> = lines
+    let slices: Vec<LolloSlice> = lines
         .iter()
-        .map(|l| LollopSlice {
+        .map(|l| LolloSlice {
             data: l.as_ptr(),
             len: l.len(),
         })
         .collect();
     let code = Op::CompactLog.code();
     let verdict = json(&take(unsafe {
-        lollop_call_lines(code, slices.as_ptr(), slices.len())
+        lollo_call_lines(code, slices.as_ptr(), slices.len())
     }));
     assert_eq!(verdict["torn"], serde_json::json!([1]));
     let empty = json(&take(unsafe {
-        lollop_call_lines(code, std::ptr::null(), 0)
+        lollo_call_lines(code, std::ptr::null(), 0)
     }));
     assert_eq!(empty["dropped"], serde_json::json!([]));
-    let bad = [LollopSlice {
+    let bad = [LolloSlice {
         data: [0xff_u8].as_ptr(),
         len: 1,
     }];
-    let failed = json(&take(unsafe { lollop_call_lines(code, bad.as_ptr(), 1) }));
+    let failed = json(&take(unsafe { lollo_call_lines(code, bad.as_ptr(), 1) }));
     assert_eq!(failed["error"]["kind"], "bad_input", "{failed}");
 }
 
@@ -80,7 +80,7 @@ fn ops_answer_errors_and_empties() {
         )
         .is_empty()
     );
-    let unknown = json(&take(unsafe { lollop_call(u32::MAX, std::ptr::null(), 0) }));
+    let unknown = json(&take(unsafe { lollo_call(u32::MAX, std::ptr::null(), 0) }));
     assert_eq!(unknown["error"]["kind"], "bad_input", "{unknown}");
     let lines_as_bytes = json(&call(Op::CompactLog, b"\"ClearSets\""));
     assert_eq!(

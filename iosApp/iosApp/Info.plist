@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>lollop</string>
+	<string>lollo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -60,7 +60,7 @@
 	<!-- Run tracking (RunTracker on CoreLocation): When In Use only; recording
 	     continues with the screen locked through the location background mode. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>lollop records your route while you track a run, to measure distance and pace. Your route stays on this phone.</string>
+	<string>lollo records your route while you track a run, to measure distance and pace. Your route stays on this phone.</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>RunTracking</key>
@@ -71,11 +71,11 @@
 		<string>location</string>
 	</array>
 	<!-- The run's and the rest's Live Activities (Surfaces.swift; drawn by the
-	     LollopWidgets extension), updated from the app, no push. -->
+	     LolloWidgets extension), updated from the app, no push. -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>
-	<!-- lollop://open/<today|log|track|log_set>: Android's OpenDest deep links, from
-	     the widgets and the Live Activities (onOpenURL → LollopIosOpen). -->
+	<!-- lollo://open/<today|log|track|log_set>: Android's OpenDest deep links, from
+	     the widgets and the Live Activities (onOpenURL → LolloIosOpen). -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -83,17 +83,17 @@
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>lollop</string>
+				<string>lollo</string>
 			</array>
 		</dict>
 	</array>
 	<!-- The App Group shared with the widget extension (Shared/SharedContainer.swift),
-	     LOLLOP_APP_GROUP in iosApp/project.yml. -->
-	<key>LollopAppGroup</key>
-	<string>$(LOLLOP_APP_GROUP)</string>
-	<!-- Runs to import, as Android's VIEW/SEND intent filters: "Open in lollop"
+	     LOLLO_APP_GROUP in iosApp/project.yml. -->
+	<key>LolloAppGroup</key>
+	<string>$(LOLLO_APP_GROUP)</string>
+	<!-- Runs to import, as Android's VIEW/SEND intent filters: "Open in lollo"
 	     from Files and the share sheet. iOS copies the file into Documents/Inbox
-	     and hands the app its file URL (onOpenURL → LollopIosOpen). A log backup
+	     and hands the app its file URL (onOpenURL → LolloIosOpen). A log backup
 	     is restored from Profile's file picker, not by opening it. The types and
 	     their declarations below are Kotlin's RunFileType (AppIdentifiersTest). -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>

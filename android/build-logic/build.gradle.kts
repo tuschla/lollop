@@ -12,7 +12,7 @@ dependencies {
 gradlePlugin {
     plugins {
         register("rustCore") {
-            id = "lollop.rust-core"
+            id = "lollo.rust-core"
             implementationClass = "RustCorePlugin"
         }
     }

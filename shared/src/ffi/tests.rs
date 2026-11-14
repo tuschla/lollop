@@ -1124,7 +1124,7 @@ fn the_core_runs_on_the_bridges_thread_whichever_thread_calls() {
     };
     let here = core_thread();
     let there = std::thread::scope(|s| s.spawn(core_thread).join().unwrap());
-    assert_eq!(here, b"lollop-core");
+    assert_eq!(here, b"lollo-core");
     assert_eq!(there, here);
 }
 

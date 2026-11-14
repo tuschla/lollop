@@ -9,13 +9,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.multiplatform) apply false
     alias(libs.plugins.roborazzi) apply false
-    id("lollop.rust-core")
+    id("lollo.rust-core")
 }
 
-// `-Plollop.iosSimulator=<udid>` picks the simulator every module's iOS tests
+// `-Plollo.iosSimulator=<udid>` picks the simulator every module's iOS tests
 // boot (CI passes an iPhone the runner image has); unset keeps the plugin's default.
 subprojects {
     tasks.withType<KotlinNativeSimulatorTest>().configureEach {
-        providers.gradleProperty("lollop.iosSimulator").orNull?.let { device.set(it) }
+        providers.gradleProperty("lollo.iosSimulator").orNull?.let { device.set(it) }
     }
 }

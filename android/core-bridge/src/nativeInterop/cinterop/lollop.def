@@ -1,3 +1,0 @@
-headers = lollop.h
-headerFilter = lollop.h
-package = app.milestone.core.cinterop

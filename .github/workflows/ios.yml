@@ -1,8 +1,8 @@
 name: iOS core
 
 # The core's C ABI for the iOS app (shared/src/ffi/c_abi.rs), its Kotlin/Native
-# bridge (android/core-bridge) and the app's iOS framework (android/lollop-ios
-# over android/lollop). Path-filtered: only changes that can affect them run it.
+# bridge (android/core-bridge) and the app's iOS framework (android/lollo-ios
+# over android/lollo). Path-filtered: only changes that can affect them run it.
 # The repo is public, so the macOS job costs no minutes.
 on:
   push:
@@ -13,8 +13,8 @@ on:
       - "rust-toolchain.toml"
       - ".java-version"
       - "android/core-bridge/**"
-      - "android/lollop/**"
-      - "android/lollop-ios/**"
+      - "android/lollo/**"
+      - "android/lollo-ios/**"
       - "android/build-logic/**"
       - "android/*.gradle.kts"
       - "android/gradle.properties"
@@ -48,7 +48,7 @@ jobs:
       - name: C header is current
         run: |
           cargo install cbindgen --locked --version 0.29.4
-          cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/include/lollop.h --verify
+          cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/include/lollo.h --verify
 
       - name: Build iOS staticlibs (no Apple SDK needed)
         run: |
@@ -61,9 +61,9 @@ jobs:
 
   bridge-macos:
     name: iOS framework link + simulator tests (macOS)
-    # Links the app's `Lollop` framework (:lollop-ios: the app's Kotlin + the
+    # Links the app's `Lollo` framework (:lollo-ios: the app's Kotlin + the
     # release Rust core) for a device, then runs every iOS test suite in a
-    # simulator: the bridge (:core-bridge) and the app's tests (:lollop, among
+    # simulator: the bridge (:core-bridge) and the app's tests (:lollo, among
     # them the event-log engine on a scripted core and on the real core).
     runs-on: macos-latest
     steps:
@@ -80,10 +80,10 @@ jobs:
         working-directory: android
         run: >
           ./gradlew --no-daemon --continue
-          :lollop-ios:linkReleaseFrameworkIosArm64
+          :lollo-ios:linkReleaseFrameworkIosArm64
           :core-bridge:iosSimulatorArm64Test
-          :lollop:iosSimulatorArm64Test
-          -Plollop.iosSimulator="$SIMULATOR_UDID"
+          :lollo:iosSimulatorArm64Test
+          -Plollo.iosSimulator="$SIMULATOR_UDID"
 
       - name: iOS test counts
         if: always()

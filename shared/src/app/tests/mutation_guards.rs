@@ -240,8 +240,8 @@ fn run_progress_at_extreme_days_never_overflows() {
     }
 }
 
-/// M10c: lollop's own GPX export names the run's logged-at stamp
-/// (`<lollop:logged_at>`), so re-importing the file is recognised as the run
+/// M10c: lollo's own GPX export names the run's logged-at stamp
+/// (`<lollo:logged_at>`), so re-importing the file is recognised as the run
 /// it came from (BUGS.md 2026-10-23 B2/B3: "re-imported own GPX was
 /// duplicated (standing or trimmed end)"). The standing Rust guards test
 /// `export_gpx` itself, not that `export_run_gpx` passes the stamp.
@@ -261,7 +261,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
     assert!(vm.runs[0].has_gpx);
     let gpx = export_run_gpx(&m, 7_340_001, logged_at);
     assert!(
-        gpx.contains("<lollop:logged_at>2023-11-16T02:11:20Z</lollop:logged_at>"),
+        gpx.contains("<lollo:logged_at>2023-11-16T02:11:20Z</lollo:logged_at>"),
         "{gpx}"
     );
 }

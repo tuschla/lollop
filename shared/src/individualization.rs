@@ -695,7 +695,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<AdjustmentCall> {
         (
             s.injury_any(),
             ScreenGate::Injury,
-            "You have an injury, recent surgery or ongoing rehab. lollop doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you.",
+            "You have an injury, recent surgery or ongoing rehab. lollo doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you.",
             claims::SAFE_INJURY_001,
         ),
         // safety-011: supervision + technique first; never autonomous maximal

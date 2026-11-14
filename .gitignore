@@ -13,4 +13,4 @@
 aur-check-*.log
 
 # Roborazzi screenshot baselines: local only, recorded with recordRoborazziAndroidHostTest.
-/android/lollop/src/test/screenshots/
+/android/lollo/src/test/screenshots/

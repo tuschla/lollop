@@ -2,11 +2,11 @@
 
 package app.milestone.core
 
-import app.milestone.core.cinterop.LollopBytes
-import app.milestone.core.cinterop.LollopSlice
-import app.milestone.core.cinterop.lollop_bytes_free
-import app.milestone.core.cinterop.lollop_call
-import app.milestone.core.cinterop.lollop_call_lines
+import app.milestone.core.cinterop.LolloBytes
+import app.milestone.core.cinterop.LolloSlice
+import app.milestone.core.cinterop.lollo_bytes_free
+import app.milestone.core.cinterop.lollo_call
+import app.milestone.core.cinterop.lollo_call_lines
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -22,20 +22,20 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.useContents
 
-/** [CoreBridge] over the C entry points (shared/include/lollop.h). Every returned
+/** [CoreBridge] over the C entry points (shared/include/lollo.h). Every returned
  *  buffer is copied into Kotlin memory and freed at once. */
 object NativeCore : CoreCalls() {
     override fun call(op: Int, input: ByteArray): ByteArray =
-        withBytes(input) { data, len -> lollop_call(op.convert(), data, len) }.take()
+        withBytes(input) { data, len -> lollo_call(op.convert(), data, len) }.take()
 
     override fun callLines(op: Int, lines: Array<String>): ByteArray = memScoped {
-        val slices = allocArray<LollopSlice>(lines.size)
+        val slices = allocArray<LolloSlice>(lines.size)
         lines.forEachIndexed { i, line ->
             val bytes = line.encodeToByteArray()
             slices[i].data = if (bytes.isEmpty()) null else allocArrayOf(bytes).reinterpret()
             slices[i].len = bytes.size.convert()
         }
-        lollop_call_lines(op.convert(), slices, lines.size.convert()).take()
+        lollo_call_lines(op.convert(), slices, lines.size.convert()).take()
     }
 }
 
@@ -46,8 +46,8 @@ internal inline fun <R> withBytes(bytes: ByteArray, f: (CPointer<UByteVar>?, ULo
         bytes.usePinned { f(it.addressOf(0).reinterpret(), bytes.size.convert()) }
     }
 
-fun CValue<LollopBytes>.take(): ByteArray {
+fun CValue<LolloBytes>.take(): ByteArray {
     val out = useContents { data?.readBytes(len.convert()) ?: ByteArray(0) }
-    lollop_bytes_free(this)
+    lollo_bytes_free(this)
     return out
 }

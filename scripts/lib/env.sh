@@ -19,12 +19,12 @@ export REPO_ROOT
 
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-$(cat "$REPO_ROOT/.java-version")-openjdk}"
 
-_lollop_sdk=""
+_lollo_sdk=""
 if [[ -f "$REPO_ROOT/android/local.properties" ]]; then
-  _lollop_sdk="$(sed -n 's/^sdk\.dir=//p' "$REPO_ROOT/android/local.properties" | tail -1)"
+  _lollo_sdk="$(sed -n 's/^sdk\.dir=//p' "$REPO_ROOT/android/local.properties" | tail -1)"
 fi
-export ANDROID_HOME="${_lollop_sdk:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}}"
-unset _lollop_sdk
+export ANDROID_HOME="${_lollo_sdk:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}}"
+unset _lollo_sdk
 
 export GRADLE_MAX_WORKERS=2
 

@@ -31,7 +31,7 @@ use shared::wire::{
 
 use crate::{HEADER, Output};
 
-const PATH: &str = "android/lollop/src/commonMain/kotlin/app/milestone/WireTypes.kt";
+const PATH: &str = "android/lollo/src/commonMain/kotlin/app/milestone/WireTypes.kt";
 
 /// Kotlin defaults for fields serde requires (or defaults differently) that
 /// the shell fills in itself: `(owner, wire field, expression)`. An owner is

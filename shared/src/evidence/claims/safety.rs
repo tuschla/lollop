@@ -68,7 +68,7 @@ claim_group! {
     )
     .safety(),
     SAFE_PEDS_001 => claim(
-        "Children and teenagers should train under a qualified coach, with technique and skill ahead of added weight. lollop doesn't plan near-max weights or 1-rep-max tests for them. There is no agreed age cutoff for this.",
+        "Children and teenagers should train under a qualified coach, with technique and skill ahead of added weight. lollo doesn't plan near-max weights or 1-rep-max tests for them. There is no agreed age cutoff for this.",
         Strong,
         &[
             "Lloyd, Faigenbaum et al. 2014 Intl Consensus, BJSM 48:498-505",
@@ -89,7 +89,7 @@ claim_group! {
     )
     .safety(),
     SAFE_INJURY_001 => claim(
-        "lollop doesn't plan rehab. With a current injury under care, recent surgery or ongoing rehab, follow your doctor or physio, and go back to general training only once they clear you. No fixed wait after surgery is established.",
+        "lollo doesn't plan rehab. With a current injury under care, recent surgery or ongoing rehab, follow your doctor or physio, and go back to general training only once they clear you. No fixed wait after surgery is established.",
         // The LOWEST-graded of the File 08 safety rules, yet still
         // safety-critical, conservative by design (File 08 §5.4).
         ExpertOpinion,

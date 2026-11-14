@@ -53,13 +53,13 @@ jobs:
           robolectric: "true"
 
       - name: Unit tests + offline UI/UX QA
-        # :lollop:testAndroidHostTest runs the JVM wire-shape tests AND the
+        # :lollo:testAndroidHostTest runs the JVM wire-shape tests AND the
         # Robolectric UI/UX QA suite (plus the CMP strings parity gate) over the
         # real Rust core. Screenshot baselines are local-only (not in git) and no
         # roborazzi task runs here, so the screenshot tests run their UI and
         # assertions and skip the captures.
         working-directory: android
-        run: ./gradlew --no-daemon :lollop:testAndroidHostTest
+        run: ./gradlew --no-daemon :lollo:testAndroidHostTest
 
   release-r8:
     name: Release APK + R8 keep check
@@ -88,7 +88,7 @@ jobs:
 
       - name: Lint (library + app shell)
         working-directory: android
-        run: ./gradlew --no-daemon :lollop:lint :app:lintDebug
+        run: ./gradlew --no-daemon :lollo:lint :app:lintDebug
 
   deep:
     name: Full-length test modes (weekly)
@@ -116,8 +116,7 @@ jobs:
         working-directory: android
         env:
           A11Y_FULL: "1"
-          LOLLOP_LONG_UI: "1"
-        run: ./gradlew --no-daemon :lollop:testAndroidHostTest --tests '*AccessibilityAuditTest' --tests '*LongHistoryUiTest'
+        run: ./gradlew --no-daemon :lollo:testAndroidHostTest --tests '*AccessibilityAuditTest' --tests '*LongHistoryUiTest'
 
   emulator-smoke:
     name: Android on-device smoke (emulator)

@@ -1,10 +1,10 @@
 import ActivityKit
 import Foundation
-import Lollop
+import Lollo
 import WidgetKit
 
 /// The app's side of its surfaces outside the window (`SurfaceHost` in the Kotlin
-/// framework, android/lollop-ios's LollopSurfaces.kt): it writes the widget payload
+/// framework, android/lollo-ios's LolloSurfaces.kt): it writes the widget payload
 /// to the App Group container and reloads the widgets and the control, and runs
 /// the run's and the rest's Live Activities. The Kotlin side calls it on the main
 /// thread whenever what they show changes.
@@ -16,7 +16,7 @@ final class Surfaces: NSObject, SurfaceHost {
         if #available(iOS 16.2, *) {
             LiveActivities.shared.endLeftovers()
         }
-        LollopSurfaces.shared.install(host: self)
+        LolloSurfaces.shared.install(host: self)
     }
 
     /// The app came to the front: a rest that ran out while it was suspended ends.
@@ -28,13 +28,13 @@ final class Surfaces: NSObject, SurfaceHost {
 
     func publishWidget(json: String) {
         guard let url = SharedContainer.payloadURL else {
-            NSLog("lollop: no App Group container; the widgets show \"Open lollop to update\"")
+            NSLog("lollo: no App Group container; the widgets show \"Open lollo to update\"")
             return
         }
         do {
             try Data(json.utf8).write(to: url, options: .atomic)
         } catch {
-            NSLog("lollop: widget payload not written: \(error)")
+            NSLog("lollo: widget payload not written: \(error)")
             return
         }
         WidgetCenter.shared.reloadAllTimelines()
@@ -71,7 +71,7 @@ final class Surfaces: NSObject, SurfaceHost {
         do {
             return try JSONDecoder().decode(type, from: Data(json.utf8))
         } catch {
-            NSLog("lollop: activity content not read: \(error)")
+            NSLog("lollo: activity content not read: \(error)")
             return nil
         }
     }
@@ -85,19 +85,19 @@ final class Surfaces: NSObject, SurfaceHost {
 final class LiveActivities {
     static let shared = LiveActivities()
 
-    private typealias LollopActivity = Activity<LollopActivityAttributes>
+    private typealias LolloActivity = Activity<LolloActivityAttributes>
 
-    private var run: LollopActivity?
+    private var run: LolloActivity?
     private var lastRun: RunLive?
     private var lastAnchor: Date?
-    private var rest: LollopActivity?
+    private var rest: LolloActivity?
     private var restEnd: Date?
     private var restEndWork: DispatchWorkItem?
 
     /// End the activities a previous run of the app left behind (it was ended by
     /// the system or crashed): a resumed run or rest starts its own.
     func endLeftovers() {
-        let leftovers = LollopActivity.activities
+        let leftovers = LolloActivity.activities
         Task {
             for activity in leftovers {
                 await activity.end(nil, dismissalPolicy: .immediate)
@@ -116,7 +116,7 @@ final class LiveActivities {
         }
         lastRun = frame
         lastAnchor = anchor
-        let content = ActivityContent(state: LollopActivityAttributes.ContentState(run: frame, runAnchor: anchor, rest: nil), staleDate: nil)
+        let content = ActivityContent(state: LolloActivityAttributes.ContentState(run: frame, runAnchor: anchor, rest: nil), staleDate: nil)
         if let run {
             Task { await run.update(content) }
         } else {
@@ -139,7 +139,7 @@ final class LiveActivities {
             endRest()
             return
         }
-        let content = ActivityContent(state: LollopActivityAttributes.ContentState(run: nil, runAnchor: nil, rest: frame), staleDate: frame.end)
+        let content = ActivityContent(state: LolloActivityAttributes.ContentState(run: nil, runAnchor: nil, rest: frame), staleDate: frame.end)
         if let rest {
             Task { await rest.update(content) }
         } else {
@@ -169,12 +169,12 @@ final class LiveActivities {
         }
     }
 
-    private func request(_ content: ActivityContent<LollopActivityAttributes.ContentState>) -> LollopActivity? {
+    private func request(_ content: ActivityContent<LolloActivityAttributes.ContentState>) -> LolloActivity? {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return nil }
         do {
-            return try LollopActivity.request(attributes: LollopActivityAttributes(), content: content, pushType: nil)
+            return try LolloActivity.request(attributes: LolloActivityAttributes(), content: content, pushType: nil)
         } catch {
-            NSLog("lollop: Live Activity not started: \(error)")
+            NSLog("lollo: Live Activity not started: \(error)")
             return nil
         }
     }

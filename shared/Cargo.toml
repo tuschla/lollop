@@ -48,10 +48,10 @@ ffi = []
 # via System.loadLibrary. Off by default: production android builds get the
 # exports through the target cfg, not this feature.
 jni-host = ["dep:jni", "ffi"]
-# The `lollop_*` C ABI (shared/src/ffi/c_abi.rs, header include/lollop.h) the
+# The `lollo_*` C ABI (shared/src/ffi/c_abi.rs, header include/lollo.h) the
 # iOS app links from Kotlin/Native. Off for Android.
 c-abi = ["ffi"]
-# `lollop_panic_for_test` for the Kotlin/Native bridge tests (android/core-bridge).
+# `lollo_panic_for_test` for the Kotlin/Native bridge tests (android/core-bridge).
 # Never in an app build.
 test-hooks = ["c-abi"]
 

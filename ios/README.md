@@ -1,4 +1,4 @@
-# lollop on iOS
+# lollo on iOS
 
 Status: the iOS app (`iosApp/`) is the Android app ported to Compose
 Multiplatform: a SwiftUI host around the shared Compose UI, the core engine
@@ -6,7 +6,7 @@ Multiplatform: a SwiftUI host around the shared Compose UI, the core engine
 extension with the home and lock screen widget, the Live Activities of a run
 and a rest, and the Control Center control. CI builds it as an `.ipa` to
 sideload and launches it in a simulator. The app's Kotlin
-lives in the multiplatform module `android/lollop`, which builds for Android
+lives in the multiplatform module `android/lollo`, which builds for Android
 and iOS. Its `commonMain` holds the app root and boot, every screen (Today,
 History, the Log sheet and its editors, Profile, guided setup, the tracker, run
 detail and trim, the maps), the core engine and event log, the core's wire
@@ -27,28 +27,28 @@ shared/ (Rust core, pure update/view)
   ├─ shared/src/ffi/ops.rs        every bridge op declared once (`Op`)
   ├─ shared/src/ffi/bridge.rs     answers an op on the core's own thread (one implementation)
   │    ├─ ffi/jni.rs              JNI exports Java_app_milestone_core_JniCore_{call,callLines} → libshared.so (Android)
-  │    └─ ffi/c_abi.rs            C ABI lollop_call, lollop_call_lines (feature c-abi)     → libshared.a  (iOS)
-  │                                header: shared/include/lollop.h (cbindgen)
-  └─ shared/wiregen/              generates the Kotlin wire types (lollop's WireTypes.kt) and
+  │    └─ ffi/c_abi.rs            C ABI lollo_call, lollo_call_lines (feature c-abi)       → libshared.a  (iOS)
+  │                                header: shared/include/lollo.h (cbindgen)
+  └─ shared/wiregen/              generates the Kotlin wire types (lollo's WireTypes.kt) and
                                   CoreBridge from the Rust types and the op table
 android/ (the Gradle build of the app, both platforms)
   ├─ core-bridge/
   │    ├─ commonMain  CoreBridge (generated): one method per op in shared/src/ffi/ops.rs
   │    │              (update, view, parseRunFile, runTrack, draftFacts, …), same JSON wire
   │    ├─ jvmMain     JniCore: CoreBridge over the JNI entry points
-  │    ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
+  │    ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollo.h
   │    └─ nativeTest  bridge tests against the core's own golden fixtures (linuxX64 + iOS)
   ├─ build-logic/ RustCore: every cargo build of the core (profiles and triples
   │               from scripts/lib/rust-core.env)
   ├─ app/        application shell: application id, signing, R8, the core's jniLibs
-  ├─ lollop/     the app as a Kotlin Multiplatform module (namespace app.milestone)
+  ├─ lollo/      the app as a Kotlin Multiplatform module (namespace app.milestone)
   │    ├─ commonMain       the app for both platforms: root, screens, core engine
   │    │                   (DurableCore, EventLog), run tracking, generated CMP
   │    │                   resources
   │    ├─ androidMain      Android actuals and what has no iOS twin (the
   │    │                   activity, osmdroid, location service, Glance widget,
   │    │                   tile service, Live Updates, Core.kt)
-  │    ├─ iosMain          iOS actuals (LollopIosRoot, POSIX files, MapKit,
+  │    ├─ iosMain          iOS actuals (LolloIosRoot, POSIX files, MapKit,
   │    │                   CoreLocation, UserNotifications, document pickers, …)
   │    │                   and IosSurfaces.kt: hands the widget payload and the
   │    │                   Live Activity frames (commonMain widget/IosSurfacePayload.kt) to Swift
@@ -57,26 +57,26 @@ android/ (the Gradle build of the app, both platforms)
   │    ├─ iosTest          the iOS tracker, the surface payloads and the engine on
   │    │                   the real core (simulator)
   │    └─ androidHostTest  JVM + Robolectric suite
-  └─ lollop-ios/ the iOS framework `Lollop`: :lollop (with :core-bridge) + the
-                 entry points LollopApp.start(), MainViewController() and
-                 LollopSurfaces (the Swift host of the widgets and activities)
+  └─ lollo-ios/  the iOS framework `Lollo`: :lollo (with :core-bridge) + the
+                 entry points LolloApp.start(), MainViewController() and
+                 LolloSurfaces (the Swift host of the widgets and activities)
 iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, extension, Info.plists, assets)
-  ├─ project.yml            the identifiers once (LOLLOP_BUNDLE_ID app.milestone.lollop,
-  │                         LOLLOP_APP_GROUP group.app.milestone.lollop; the
+  ├─ project.yml            the identifiers once (LOLLO_BUNDLE_ID app.milestone.lollo,
+  │                         LOLLO_APP_GROUP group.app.milestone.lollo; the
   │                         entitlements and Info.plists reference them); targets
-  │                         `lollop` (a build phase runs
-  │                         :lollop-ios:embedAndSignAppleFrameworkForXcode),
-  │                         `LollopWidgets` (the extension, <bundle id>.widgets,
-  │                         embedded in PlugIns/) and `LollopWidgetsTests`
-  ├─ iosApp/LollopIosApp.swift  @main SwiftUI app showing MainViewController()
+  │                         `lollo` (a build phase runs
+  │                         :lollo-ios:embedAndSignAppleFrameworkForXcode),
+  │                         `LolloWidgets` (the extension, <bundle id>.widgets,
+  │                         embedded in PlugIns/) and `LolloWidgetsTests`
+  ├─ iosApp/LolloIosApp.swift   @main SwiftUI app showing MainViewController()
   ├─ iosApp/Surfaces.swift  writes the widget payload, runs the Live Activities
-  ├─ iosApp/Info.plist      document types (GPX/TCX/FIT), lollop:// URLs, location
+  ├─ iosApp/Info.plist      document types (GPX/TCX/FIT), lollo:// URLs, location
   │                         When In Use + background mode, Live Activities,
   │                         launch screen, orientations
   ├─ iosApp/Assets.xcassets app icon (light/dark/tinted) and launch logo
-  ├─ LollopWidgets/         the widget extension (Swift only): widget, Live
+  ├─ LolloWidgets/          the widget extension (Swift only): widget, Live
   │                         Activities, control, icons (Assets.xcassets)
-  ├─ LollopWidgetsTests/    the extension's tests and renders (simulator)
+  ├─ LolloWidgetsTests/     the extension's tests and renders (simulator)
   ├─ Shared/                compiled into the app and the extension: the App Group
   │                         lookup, the activity content, the App Intents
   ├─ Entitlements/          the App Group of the app and the extension
@@ -98,12 +98,12 @@ the clock (`AppClock`), the boot ledger and every singleton's process state
 `AppSettings` and starts each `AppFeature` (the common ones and
 `platformFeatures()`: on iOS the notifications delegate and reminders, and the
 widget sync). Android calls it from every component the system may start the
-process for; iOS from `LollopApp.start()`. Host tests start each scenario from
+process for; iOS from `LolloApp.start()`. Host tests start each scenario from
 `AppRuntime.resetForTest()`.
 
-`:lollop` depends on `:core-bridge` on every target: its Android code runs on
+`:lollo` depends on `:core-bridge` on every target: its Android code runs on
 `JniCore`, its iOS code on `NativeCore`. Kotlin compiles the iOS klibs,
-cinterop included, on Linux; linking an iOS binary (the tests, `:lollop-ios`'s
+cinterop included, on Linux; linking an iOS binary (the tests, `:lollo-ios`'s
 framework) needs macOS and the core's staticlib.
 
 The other seams (`expect` in commonMain, actual per platform):
@@ -136,13 +136,13 @@ degraded log, stale view), and the maps' route framing, layout and dark tile
 filter (`RouteGeometryTest`, `MapTilesTest`, `FrameLongitudesTest`). It runs
 in the host tests and, in the `bridge-macos`
 CI job, in an iOS simulator, where the engine runs on the POSIX file seam.
-`:lollop`'s iOS `CoreEngineTest` runs the engine on the real Rust core in the
+`:lollo`'s iOS `CoreEngineTest` runs the engine on the real Rust core in the
 simulator (restart replay, torn tail, the core's compaction, a real
 `panic_reset`).
 
 Every bridge op is declared once, in `shared/src/ffi/ops.rs` (`Op`), and
 answered by `shared/src/ffi/bridge.rs` on the core's own thread
-(`lollop-core`), so the core's view memos stay on one thread and any shell
+(`lollo-core`), so the core's view memos stay on one thread and any shell
 thread may call. The two bindings take an op's code with its input and have no
 logic of their own: they convert pointers or JNI arrays to bytes and back.
 `shared/wiregen` generates the Kotlin `CoreBridge` (one method per op) and
@@ -157,12 +157,12 @@ The C ABI:
 
 | C function | Android JNI equivalent | Answer |
 |---|---|---|
-| `lollop_call(op, input, len)` | `JniCore.call(op, input)` | op `op`'s answer to the input bytes (none for `view` and `reset`): its payload, no bytes, or the error envelope |
-| `lollop_call_lines(op, lines, count)` | `JniCore.callLines(op, lines)` | the same for an op that takes lines (`compactLog`, the event log); a line that is not UTF-8 fails the op |
-| `lollop_bytes_free(bytes)` | (JVM GC) | releases any buffer above |
-| `lollop_panic_for_test(reset)` | — | test builds only (feature `test-hooks`) |
+| `lollo_call(op, input, len)` | `JniCore.call(op, input)` | op `op`'s answer to the input bytes (none for `view` and `reset`): its payload, no bytes, or the error envelope |
+| `lollo_call_lines(op, lines, count)` | `JniCore.callLines(op, lines)` | the same for an op that takes lines (`compactLog`, the event log); a line that is not UTF-8 fails the op |
+| `lollo_bytes_free(bytes)` | (JVM GC) | releases any buffer above |
+| `lollo_panic_for_test(reset)` | — | test builds only (feature `test-hooks`) |
 
-Every answer is a `LollopBytes {data, len}` the caller owns and frees once;
+Every answer is a `LolloBytes {data, len}` the caller owns and frees once;
 `{NULL, 0}` is the empty answer. All calls are safe from any thread.
 
 ### Why a C ABI and not UniFFI
@@ -184,7 +184,7 @@ Every answer is a `LollopBytes {data, len}` the caller owns and frees once;
 ```sh
 scripts/build-ios-core.sh             # release libshared.a for device + arm64 simulator
 cd android && ./gradlew :core-bridge:linuxX64Test   # bridge tests on the host core
-cd android && ./gradlew :lollop:compileKotlinIosArm64 :lollop:compileKotlinIosSimulatorArm64
+cd android && ./gradlew :lollo:compileKotlinIosArm64 :lollo:compileKotlinIosSimulatorArm64
 ```
 
 `build-ios-core.sh` runs `cargo rustc -p shared --lib --crate-type staticlib
@@ -200,17 +200,17 @@ needs a Mac and is not measured yet. For comparison, the Android arm64
 Regenerate the header after changing `shared/src/ffi/c_abi.rs`:
 
 ```sh
-cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/include/lollop.h
+cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/include/lollo.h
 ```
 
 CI (`.github/workflows/ios.yml`) checks the header with `--verify`.
 
 Kotlin/Native compiles and links Apple targets only on a macOS host; on Linux
 those tasks are skipped (`kotlin.native.ignoreDisabledTargets=true`), including
-`:lollop`'s `compileKotlinIos*`, because `:lollop` depends on `:core-bridge`,
+`:lollo`'s `compileKotlinIos*`, because `:lollo` depends on `:core-bridge`,
 whose cinterop can't be cross-compiled. Every iOS compile and test therefore
 runs in `ios.yml`'s macOS job. The engine can't get a `linuxX64` target of its
-own: `:lollop`'s commonMain depends on Compose UI, which publishes no Linux
+own: `:lollo`'s commonMain depends on Compose UI, which publishes no Linux
 native artifacts.
 xtool (https://github.com/xtool-org/xtool) builds Swift packages for iOS on
 Linux, but it can't run the Kotlin/Native compiler for Apple targets, so it
@@ -220,32 +220,32 @@ can't build this app.
 
 ```sh
 cd android
-./gradlew :lollop-ios:linkReleaseFrameworkIosArm64   # Lollop.framework, device
-./gradlew :core-bridge:iosSimulatorArm64Test :lollop:iosSimulatorArm64Test
+./gradlew :lollo-ios:linkReleaseFrameworkIosArm64    # Lollo.framework, device
+./gradlew :core-bridge:iosSimulatorArm64Test :lollo:iosSimulatorArm64Test
 cd .. && brew install xcodegen && xcodegen generate --spec iosApp/project.yml
-open iosApp/lollop.xcodeproj                         # run the `lollop` scheme
+open iosApp/lollo.xcodeproj                          # run the `lollo` scheme
 ```
 
 rustup installs the toolchain and the iOS targets from `rust-toolchain.toml`.
 The Gradle build calls `scripts/build-ios-core.sh` itself: test binaries link a
 debug core with the test hooks, frameworks link the release core without them
 (`RustCore.link` in `android/build-logic`, used by `:core-bridge` and
-`:lollop-ios`). `-Plollop.iosSimulator=<udid>` picks the simulator.
-`Lollop.framework` is dynamic and contains the Rust core. The app version
+`:lollo-ios`). `-Plollo.iosSimulator=<udid>` picks the simulator.
+`Lollo.framework` is dynamic and contains the Rust core. The app version
 (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`) comes from
 `app-version.xcconfig`, which the Android build reads too.
 
 The Xcode project is generated from `iosApp/project.yml` and not committed. Its
-build phase runs `./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode`,
-which builds `Lollop.framework` for the configuration and SDK Xcode is building
+build phase runs `./gradlew :lollo-ios:embedAndSignAppleFrameworkForXcode`,
+which builds `Lollo.framework` for the configuration and SDK Xcode is building
 (Debug/Release, device/simulator) and copies it into the app. The Swift host
-(`iosApp/iosApp/LollopIosApp.swift`) starts the app once at launch
-(`LollopApp.start()`: the core engine and `AppRuntime.start`), then shows
-`MainViewController()`, which composes the app's root (`LollopIosRoot()`, which
+(`iosApp/iosApp/LolloIosApp.swift`) starts the app once at launch
+(`LolloApp.start()`: the core engine and `AppRuntime.start`), then shows
+`MainViewController()`, which composes the app's root (`LolloIosRoot()`, which
 restores the event log and sends SetToday), and hands
 URLs the app is opened with (a GPX, TCX or FIT file from Files or the share
-sheet) to `openUrl` (`LollopIosOpen`). Before that it hands the widgets and
-activities to `Surfaces.swift` (`LollopSurfaces.install`). The icon, launch logo
+sheet) to `openUrl` (`LolloIosOpen`). Before that it hands the widgets and
+activities to `Surfaces.swift` (`LolloSurfaces.install`). The icon, launch logo
 and widget icon PNGs are rendered from the Android drawables by
 `iosApp/make-assets.py` (rsvg-convert + Pillow, runs on Linux); rerun it after
 changing those drawables.
@@ -257,15 +257,15 @@ public repo) on every push to `main` that touches the app, and by hand
 (`gh workflow run ios-app.yml`). Three jobs:
 
 - `.ipa`: `xcodegen generate`, `xcodebuild -configuration Release
-  -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, checks that `PlugIns/LollopWidgets.appex`
+  -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, checks that `PlugIns/LolloWidgets.appex`
   is embedded with a widget extension Info.plist, signs the framework, the
   extension and the app ad hoc (`codesign -s -`) with the App Group entitlement
-  (`iosApp/Entitlements/`), then `Payload/lollop.app` zipped into
-  `lollop-unsigned.ipa`, uploaded as the artifact `lollop-unsigned-ipa` (kept
+  (`iosApp/Entitlements/`), then `Payload/lollo.app` zipped into
+  `lollo-unsigned.ipa`, uploaded as the artifact `lollo-unsigned-ipa` (kept
   30 days). The ad-hoc signature only carries the entitlement: SideStore reads an
   app's App Groups from the signed binaries and re-signs everything with the
   Apple Account (see below).
-- Widget extension tests: `LollopWidgetsTests` in an iPhone simulator,
+- Widget extension tests: `LolloWidgetsTests` in an iPhone simulator,
   without the Kotlin framework: the day rule and the midnight roll-over, the
   line fitting, the App Group lookup, the activity content, and renders of every
   widget family and state and of the activities (artifact `widget-renders`).
@@ -289,12 +289,12 @@ Installing on an iPhone with SideStore and a free Apple Account (the
    the App Store and connect it, open SideStore, sign in, and in My Apps tap
    the "7 DAYS" counter next to SideStore to finish its setup.
 2. Download the app: on the phone, open the latest release
-   (https://github.com/tuschla/lollop/releases) and download
-   `lollop-<version>-unsigned.ipa`. Between releases, the latest successful
+   (https://github.com/tuschla/lollo/releases) and download
+   `lollo-<version>-unsigned.ipa`. Between releases, the latest successful
    "iOS app" run under the repo's Actions tab has the current build as the
-   artifact `lollop-unsigned-ipa` (signed in to GitHub: artifact downloads need
+   artifact `lollo-unsigned-ipa` (signed in to GitHub: artifact downloads need
    an account even on a public repo; Files unzips it when tapped). From a
-   computer: `gh release download --repo tuschla/lollop --pattern '*.ipa'`,
+   computer: `gh release download --repo tuschla/lollo --pattern '*.ipa'`,
    then copy the `.ipa` to the phone (or install it with iloader).
 3. With LocalDevVPN connected and on Wi-Fi, SideStore → My Apps → `+` → pick
    the `.ipa`. SideStore asks what to do with the app extension:
@@ -313,11 +313,11 @@ Installing on an iPhone with SideStore and a free Apple Account (the
 
 Limits of a free Apple Account:
 
-- 3 sideloaded apps installed at once, SideStore included: lollop leaves one
+- 3 sideloaded apps installed at once, SideStore included: lollo leaves one
   slot free.
 - 10 app IDs per 7 days. The app and its extension each register one
   (SideStore asks per extension; the prompt names the 10-per-week limit), so
-  every fresh install of lollop costs two. One extension holds the widget, the
+  every fresh install of lollo costs two. One extension holds the widget, the
   Live Activities and the control, so they cost one app ID together.
 - App Groups work on a free account: SideStore registers the groups the signed
   binaries ask for (SideSign `Feature.freeFeatures` = App Groups and Inter-App
@@ -325,9 +325,9 @@ Limits of a free Apple Account:
   https://github.com/SideStore/SideSign/blob/752d1ef602aa792a432ffa1e71646dc1ecf7363c/Sources/Models/Feature.swift#L78-L81;
   groups read from the Mach-O signature, none from an unsigned binary,
   https://github.com/SideStore/SideStore/blob/6032424a0e56c1c319762e786099bdd9186a238b/SideStore/Core/Operations/PipelineOperations/FetchProvisioningProfilesOperation.swift#L297-L301).
-  It renames them for the account: `group.app.milestone.lollop` becomes
-  `group.app.milestone.lollop.<TEAMID>` (same file, L428), and the bundle ids
-  become `app.milestone.lollop.<TEAMID>` and `app.milestone.lollop.<TEAMID>.widgets`
+  It renames them for the account: `group.app.milestone.lollo` becomes
+  `group.app.milestone.lollo.<TEAMID>` (same file, L428), and the bundle ids
+  become `app.milestone.lollo.<TEAMID>` and `app.milestone.lollo.<TEAMID>.widgets`
   (L143-L150). The app and the extension find the group at runtime
   (`Shared/SharedContainer.swift`): `ALTAppGroups` in Info.plist (SideStore 0.6
   and 0.7 releases write it), else the groups in `embedded.mobileprovision`
@@ -344,7 +344,7 @@ permission: the run is active while it records.
 
 ## Widgets, control and Live Activities
 
-One extension, `iosApp/LollopWidgets` (Swift, no Kotlin), draws what the app
+One extension, `iosApp/LolloWidgets` (Swift, no Kotlin), draws what the app
 hands it; the text and the decisions come from the same common Kotlin as
 Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 `countdownText`, the notification strings).
@@ -353,7 +353,7 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
   widget inputs (published model, distance unit, theme, dark mode, recording,
   time zone or clock change) to `IosWidgetSurface` (iosMain), which builds the
   payload of commonMain `widget/IosSurfacePayload.kt`: the widget faces for the
-  snapshot's day and for any other day ("Open lollop to update"), each with its
+  snapshot's day and for any other day ("Open lollo to update"), each with its
   body lines already cut for every slot count, the short form of a long lead
   line with its width in em, the week strip's glyphs and color roles, the
   buttons' icons; the control's faces with their SF Symbols; the day the faces
@@ -361,15 +361,15 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
   appearance. `Surfaces.swift` writes it to `widget-today.json` in the App Group
   container and reloads the widgets and controls (`WidgetCenter`,
   `ControlCenter`). Without a group container (the extension dropped at install)
-  the widgets show the bundled `fallback.json` ("Open lollop to update").
+  the widgets show the bundled `fallback.json` ("Open lollo to update").
 - Generated contract: the Swift payload types and payload version
   (`Shared/SurfacePayload.swift`), the type and spacing tokens
-  (`LollopWidgets/WidgetTheme.swift`), the English `Shared/en.lproj/Localizable.strings`
+  (`LolloWidgets/WidgetTheme.swift`), the English `Shared/en.lproj/Localizable.strings`
   the widget, control and App Intents name by resource key, `fallback.json`, the
   Swift tests' `fixtures.json`, the launch background and `widget-icons.json`
-  (make-assets.py's icon list) are written from the Kotlin by android/lollop's
+  (make-assets.py's icon list) are written from the Kotlin by android/lollo's
   `GeneratedSourcesTest`, which fails when a committed file differs. Regenerate:
-  `LOLLOP_WRITE_GENERATED=1 ./gradlew :lollop:testAndroidHostTest --tests app.milestone.GeneratedSourcesTest --rerun`.
+  `LOLLO_WRITE_GENERATED=1 ./gradlew :lollo:testAndroidHostTest --tests app.milestone.GeneratedSourcesTest --rerun`.
 - Day rule: as Android's. The timeline shows the snapshot's face while the
   reader's clock is within its day and in its time zone, and the stale face
   after (an entry at the day's end); a snapshot marked stale holds no day. The
@@ -377,9 +377,9 @@ Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 
 | Surface | Families / parts | Taps |
 |---|---|---|
-| Home screen widget (Android's widget) | small (Android's 2×2: date overline, full-width primary), medium and large (Android's 4×2 and 4×3: "Today · date", week strip, Log beside the primary); the richest layout whose parts fit at the reader's text size, in Android's order (`ViewThatFits` over `CardLayout.candidates`); the theme's palette, light/dark per the app's dark mode | the widget opens Today, a button its screen (`Link`; a small widget's button runs `OpenLollopIntent` from iOS 17, before that the small widget opens the primary's screen) |
+| Home screen widget (Android's widget) | small (Android's 2×2: date overline, full-width primary), medium and large (Android's 4×2 and 4×3: "Today · date", week strip, Log beside the primary); the richest layout whose parts fit at the reader's text size, in Android's order (`ViewThatFits` over `CardLayout.candidates`); the theme's palette, light/dark per the app's dark mode | the widget opens Today, a button its screen (`Link`; a small widget's button runs `OpenLolloIntent` from iOS 17, before that the small widget opens the primary's screen) |
 | Lock screen widgets | rectangular: the title over the status line (Android's one-row widget without buttons); circular: the week's sessions done of planned, else the primary's icon; inline: title · short line | Today |
-| Control Center control (iOS 18, the Quick Settings tile) | the tile's face and the widget's title under it (`ControlValueProvider` reads the payload); SF Symbols, as controls show symbols only | `OpenLollopIntent` (an `OpenIntent`, run in the app) opens the tile's screen |
+| Control Center control (iOS 18, the Quick Settings tile) | the tile's face and the widget's title under it (`ControlValueProvider` reads the payload); SF Symbols, as controls show symbols only | `OpenLolloIntent` (an `OpenIntent`, run in the app) opens the tile's screen |
 | Run Live Activity (the run Live Update) | lock screen: title, chip word, moving time (a timer text from the moving time's anchor while recording), distance, pace now, or Android's fixed line; a guided run's step; Pause/Resume and Stop. Dynamic Island: route mark + moving time or chip (compact, minimal), the figures and buttons (expanded) | the tracker; Pause/Resume runs `SetRunPausedIntent` (a `LiveActivityIntent`, iOS 17+, in the app) → `RunActivity.setPaused`; Stop opens the tracker |
 | Rest Live Activity (the rest countdown) | "Resting · <exercise>", the next set, the countdown to the end; ended at the rest end while the app runs, else it reads "Rest done" from its stale date and ends when the app comes to the front | the set editor |
 
@@ -406,9 +406,9 @@ Apple offers no other API (extensions).
 | Session reminder, boot receiver (`SessionReminder.kt`) | Done: a dated calendar-trigger local notification (`UNCalendarNotificationTrigger`) per upcoming session day; iOS keeps them across reboots, no boot hook |
 | Home screen widget (`widget/`, Glance) | Done: WidgetKit widget, home and lock screen (see above) |
 | Quick Settings tile (`QuickTileService.kt`) | Done: Control Center control (`ControlWidget`, iOS 18) in the widget extension |
-| Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | Done: URL scheme `lollop://open/<dest>` (widget links, activities) and `OpenLollopIntent` (control, small widget's button) |
-| Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LollopIosOpen` |
-| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`AppRuntime.requestReboot`; the boot turn resets the core through the `reset` op), as on Android; a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
+| Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | Done: URL scheme `lollo://open/<dest>` (widget links, activities) and `OpenLolloIntent` (control, small widget's button) |
+| Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LolloIosOpen` |
+| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollo-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`AppRuntime.requestReboot`; the boot turn resets the core through the `reset` op), as on Android; a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
 | Battery optimization exemption prompt | None needed |
 | Paper theme with the system (Material You) accent | iOS has no wallpaper palette: Paper uses its own accent (`platformAccent` is null) and Profile hides the "Use system accent" row (`platformHasDynamicAccent` = false, `ProfilePlatform.kt`), as on Android < 12. Profile's Live Updates notice is hidden too. |
 | Per-app language (`AppLocale.kt`) | Per-app language in iOS Settings (`CFBundleLocalizations`) |
